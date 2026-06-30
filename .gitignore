@@ -1,0 +1,22 @@
+.next/
+node_modules/
+
+# Environment and deployment state
+.env
+.env*.local
+.vercel/
+
+# Local caches and generated output
+.npm-cache/
+*.tsbuildinfo
+playwright-report/
+test-results/
+coverage/
+dist/
+out/
+
+# Local agent/runtime files
+.claude/
+.git-alt/
+memory.md
+*.log
