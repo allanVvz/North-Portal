@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guia estratégico de stories · Karpinski × north</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+
+  :root{
+    --petrol-deep:#0C2A2C;
+    --petrol:#102E30;
+    --petrol-mid:#143638;
+    --petrol-card:#0F3032;
+    --cream:#DDD0B5;
+    --cream-soft:#E5D9BF;
+    --aqua:#7AAEAB;
+    --aqua-bright:#92C2BF;
+    --aqua-soft:#A9CDCB;
+    --mint:#5FA09C;
+    --check-green:#2E5F55;
+    --text-on-petrol:#ECE0C7;
+    --text-on-cream:#0E2D2F;
+    --muted-on-petrol:#9EB7B4;
+    --muted-on-cream:#4A5E5B;
+    --rule-on-petrol:rgba(236,224,199,.14);
+    --rule-on-cream:rgba(14,45,47,.16);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;background:#000;overflow:hidden;font-family:'Inter',system-ui,sans-serif;}
+  .stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;}
+  .deck{
+    position:relative;
+    width:min(100vw, calc(100vh * 16 / 9));
+    height:min(100vh, calc(100vw * 9 / 16));
+    aspect-ratio:16/9;
+    background:var(--petrol-deep);
+    overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.6);
+  }
+  .slide{
+    position:absolute;inset:0;
+    opacity:0;
+    transform:translateX(60px);
+    transition:opacity .7s cubic-bezier(.22,.7,.2,1), transform .8s cubic-bezier(.22,.7,.2,1);
+    pointer-events:none;
+    display:flex;flex-direction:column;
+    padding:5.5% 6.25%;
+  }
+  .slide.exit{ transform:translateX(-60px); opacity:0; }
+  .slide.active{ opacity:1; transform:translateX(0); pointer-events:auto; z-index:5; }
+  .slide.dark{ background:var(--petrol-deep); color:var(--text-on-petrol); }
+  .slide.light{ background:var(--cream); color:var(--text-on-cream); }
+  .slide.dark::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 70% 30%, rgba(124,174,171,.06), transparent 55%);
+  }
+  .pagemark{
+    position:absolute;top:3.5%;right:6.25%;
+    font-size:clamp(10px,.85vw,13px);font-weight:500;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--muted-on-petrol);
+  }
+  .slide.light .pagemark{ color:var(--muted-on-cream); }
+  .eyebrow{
+    font-size:clamp(10px,.85vw,13px);font-weight:500;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--aqua);margin-bottom:18px;
+  }
+  .slide.light .eyebrow{ color:var(--check-green); }
+  h1.display{
+    font-family:'Fraunces',serif;font-weight:400;font-optical-sizing:auto;
+    font-size:clamp(32px,4.6vw,68px);
+    line-height:1.05;letter-spacing:-.012em;
+    color:var(--text-on-petrol);
+  }
+  .slide.light h1.display{ color:var(--text-on-cream); }
+  h1.display em{ font-style:italic;font-weight:300;color:var(--aqua); }
+  .slide.light h1.display em{ color:var(--mint); }
+  .subhead{
+    font-family:'Fraunces',serif;font-style:italic;font-weight:300;
+    font-size:clamp(15px,1.5vw,22px);
+    color:var(--aqua);margin-top:8px;
+  }
+  .slide.light .subhead{ color:var(--mint); }
+  .body p{
+    font-size:clamp(12.5px,1vw,15px);line-height:1.65;
+    color:var(--muted-on-petrol);max-width:62ch;margin-bottom:12px;
+  }
+  .slide.light .body p{ color:var(--muted-on-cream); }
+  .body p strong{ color:var(--text-on-petrol);font-weight:500; }
+  .slide.light .body p strong{ color:var(--text-on-cream); }
+
+  ul.dots{ list-style:none;display:flex;flex-direction:column;gap:10px; }
+  ul.dots li{
+    display:flex;gap:12px;align-items:flex-start;
+    font-size:clamp(12px,.95vw,14.5px);line-height:1.55;
+    color:var(--text-on-petrol);
+  }
+  .slide.light ul.dots li{ color:var(--text-on-cream); }
+  ul.dots li::before{
+    content:"";display:block;
+    width:6px;height:6px;background:var(--aqua);transform:rotate(45deg);
+    margin-top:8px;flex-shrink:0;
+  }
+  .slide.light ul.dots li::before{ background:var(--mint); }
+
+  .cols-3{ display:grid;gap:20px;flex:1;align-content:start;padding-top:8px; }
+  .col-num .n{
+    font-family:'Fraunces',serif;font-weight:400;
+    font-size:clamp(26px,2.8vw,42px);color:var(--aqua);line-height:1;
+    margin-bottom:12px;
+  }
+  .slide.light .col-num .n{ color:var(--mint); }
+  .col-num h3{
+    font-family:'Fraunces',serif;font-weight:500;font-size:clamp(14px,1.25vw,19px);
+    color:var(--text-on-petrol);margin-bottom:8px;letter-spacing:-.005em;
+  }
+  .slide.light .col-num h3{ color:var(--text-on-cream); }
+  .col-num p{
+    font-size:clamp(11px,.88vw,13px);line-height:1.55;color:var(--muted-on-petrol);
+  }
+  .slide.light .col-num p{ color:var(--muted-on-cream); }
+  .col-num ul{list-style:none;display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+  .col-num ul li{
+    font-size:clamp(11px,.85vw,12.5px);line-height:1.5;color:var(--muted-on-petrol);
+    padding-left:10px;position:relative;
+  }
+  .slide.light .col-num ul li{ color:var(--muted-on-cream); }
+  .col-num ul li::before{
+    content:"";position:absolute;left:0;top:7px;
+    width:3px;height:3px;background:var(--aqua);transform:rotate(45deg);
+  }
+  .slide.light .col-num ul li::before{ background:var(--mint); }
+
+  .footband{
+    position:absolute;bottom:5.5%;left:6.25%;right:6.25%;
+    padding-top:18px;border-top:1px solid var(--rule-on-petrol);
+    display:flex;align-items:center;gap:24px;
+    font-size:clamp(10px,.78vw,12px);letter-spacing:.18em;text-transform:uppercase;
+    color:var(--muted-on-petrol);
+  }
+  .slide.light .footband{ border-top-color:var(--rule-on-cream);color:var(--muted-on-cream); }
+  .footband .tag{ color:var(--aqua); }
+  .slide.light .footband .tag{ color:var(--mint); }
+
+  .compass{
+    position:absolute;top:50%;right:6.25%;transform:translateY(-50%);
+    width:38%;max-width:480px;aspect-ratio:1;opacity:.95;
+  }
+  .compass svg{ width:100%;height:100%;display:block; }
+  .compass.spin svg{ animation: spin 120s linear infinite; }
+  @keyframes spin { from {transform:rotate(0)} to {transform:rotate(360deg)} }
+
+  .two-col{ display:grid;grid-template-columns:5fr 6fr;gap:5%;flex:1;align-items:start;padding-top:1%; }
+  .two-col-rev{ display:grid;grid-template-columns:6fr 5fr;gap:5%;flex:1;align-items:start;padding-top:1%; }
+  .two-col-equal{ display:grid;grid-template-columns:1fr 1fr;gap:6%;flex:1;align-items:center; }
+  .left-col{ display:flex;flex-direction:column;justify-content:center;height:100%; }
+  .right-col{ display:flex;flex-direction:column;justify-content:center;height:100%;align-items:center; }
+
+  .check-list{ list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:10px 22px;margin-top:14px; }
+  .check-list li{
+    display:flex;gap:12px;align-items:flex-start;
+    font-size:clamp(12px,.95vw,14px);line-height:1.5;color:var(--text-on-petrol);
+  }
+  .slide.light .check-list li{ color:var(--text-on-cream); }
+  .check-list li::before{
+    content:"✓";display:flex;align-items:center;justify-content:center;
+    width:18px;height:18px;border-radius:50%;background:var(--check-green);color:#fff;
+    font-size:11px;font-weight:700;flex-shrink:0;margin-top:1px;
+  }
+
+  .nav{ position:absolute;inset:0;display:flex;z-index:50; }
+  .nav > div{ flex:1;cursor:pointer; }
+  .progress{position:absolute;top:0;left:0;right:0;height:2px;background:transparent;z-index:60;}
+  .progress .fill{height:100%;background:var(--aqua);width:0%;transition:width .55s cubic-bezier(.22,.7,.2,1);}
+  .counter{
+    position:absolute;bottom:3%;left:6.25%;
+    font-size:clamp(10px,.78vw,12px);letter-spacing:.22em;color:var(--muted-on-petrol);z-index:55;
+  }
+
+  .slide .stagger > * { opacity:0;transform:translateY(12px);transition:opacity .6s ease, transform .6s ease; }
+  .slide.active .stagger > * { opacity:1;transform:translateY(0); }
+  .slide.active .stagger > *:nth-child(1){ transition-delay:.15s; }
+  .slide.active .stagger > *:nth-child(2){ transition-delay:.25s; }
+  .slide.active .stagger > *:nth-child(3){ transition-delay:.35s; }
+  .slide.active .stagger > *:nth-child(4){ transition-delay:.45s; }
+  .slide.active .stagger > *:nth-child(5){ transition-delay:.55s; }
+  .slide.active .stagger > *:nth-child(6){ transition-delay:.65s; }
+  .slide.active .stagger > *:nth-child(7){ transition-delay:.75s; }
+  .slide.active .stagger > *:nth-child(8){ transition-delay:.85s; }
+
+  .illus{ width:100%;max-width:520px;display:block;margin:0 auto; }
+  .illus svg{ width:100%;height:auto;display:block; }
+
+  .quote-block{
+    padding:14px 18px;border-left:2px solid var(--aqua);
+    font-family:'Fraunces',serif;font-style:italic;font-weight:300;
+    font-size:clamp(13px,1.05vw,16px);line-height:1.5;color:var(--text-on-petrol);
+    margin-top:12px;max-width:54ch;
+  }
+  .slide.light .quote-block{border-left-color:var(--mint);color:var(--text-on-cream);}
+
+  .examples{
+    margin-top:14px;padding:14px 16px;border:1px solid var(--rule-on-petrol);border-radius:6px;
+    background:rgba(124,174,171,.04);
+  }
+  .slide.light .examples{ border-color:var(--rule-on-cream);background:rgba(46,95,85,.04); }
+  .examples-title{
+    font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--aqua);
+    margin-bottom:10px;font-weight:500;
+  }
+  .slide.light .examples-title{ color:var(--check-green); }
+  .examples-list{list-style:none;display:flex;flex-direction:column;gap:8px;}
+  .examples-list li{
+    font-size:clamp(11.5px,.92vw,14px);line-height:1.5;
+    color:var(--muted-on-petrol);font-style:italic;
+    padding-left:14px;position:relative;
+  }
+  .slide.light .examples-list li{ color:var(--muted-on-cream); }
+  .examples-list li::before{
+    content:"›";position:absolute;left:0;top:0;color:var(--aqua);font-style:normal;font-weight:500;
+  }
+  .slide.light .examples-list li::before{ color:var(--mint); }
+
+
+  /* ===== Extras para a versão revisada ===== */
+  .journey-step{
+    display:flex;gap:16px;align-items:flex-start;padding:11px 0;
+    border-bottom:1px solid var(--rule-on-petrol);
+  }
+  .slide.light .journey-step{ border-bottom-color:var(--rule-on-cream); }
+  .journey-step:last-child{ border-bottom:none; }
+  .journey-step .jn{
+    font-family:'Fraunces',serif;font-weight:400;font-style:italic;
+    font-size:clamp(20px,2vw,30px);color:var(--aqua);min-width:42px;line-height:1;
+  }
+  .slide.light .journey-step .jn{ color:var(--mint); }
+  .journey-step .jc h4{
+    font-family:'Fraunces',serif;font-weight:500;font-size:clamp(14px,1.25vw,19px);
+    color:var(--text-on-petrol);margin-bottom:3px;
+  }
+  .slide.light .journey-step .jc h4{ color:var(--text-on-cream); }
+  .journey-step .jc .q{
+    font-style:italic;font-size:clamp(11.5px,.92vw,13.5px);color:var(--aqua-soft);margin-bottom:4px;
+  }
+  .slide.light .journey-step .jc .q{ color:var(--mint); }
+  .journey-step .jc p{
+    font-size:clamp(11px,.9vw,13px);line-height:1.5;color:var(--muted-on-petrol);
+  }
+  .slide.light .journey-step .jc p{ color:var(--muted-on-cream); }
+
+  .transition-note{
+    margin-top:12px;font-style:italic;font-family:'Fraunces',serif;font-weight:300;
+    font-size:clamp(12px,1vw,15px);color:var(--aqua);line-height:1.45;
+  }
+  .slide.light .transition-note{ color:var(--mint); }
+
+  .tool-chip{
+    display:inline-block;margin-top:8px;padding:4px 11px;border:1px solid var(--rule-on-petrol);
+    border-radius:99px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--aqua);font-weight:500;
+  }
+  .slide.light .tool-chip{ border-color:var(--rule-on-cream);color:var(--check-green); }
+
+  /* Section divider ("O Pulo do Gato") */
+  .divider-slide{ align-items:flex-start;justify-content:center; }
+  .divider-kicker{
+    font-size:clamp(11px,.95vw,14px);letter-spacing:.32em;text-transform:uppercase;
+    color:var(--aqua);font-weight:500;margin-bottom:22px;
+  }
+  .divider-num{
+    font-family:'Fraunces',serif;font-weight:300;font-size:clamp(60px,9vw,150px);
+    color:var(--aqua);line-height:.9;opacity:.18;position:absolute;
+    right:6.25%;bottom:8%;
+  }
+  .badge-bonus{
+    position:absolute;top:3.5%;left:6.25%;
+    display:inline-flex;align-items:center;gap:7px;
+    padding:5px 13px;border:1px solid var(--aqua);border-radius:99px;
+    font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--aqua);font-weight:500;
+  }
+  .badge-bonus::before{ content:"★";font-size:10px; }
+  .slide.light .badge-bonus{ border-color:var(--mint);color:var(--mint); }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="deck" id="deck">
+    <div class="progress"><div class="fill" id="progFill"></div></div>
+    <div class="counter" id="counter">01 / 17</div>
+    <div class="nav"><div id="navPrev"></div><div id="navNext"></div></div>
+  </div>
+</div>
+
+<script>
+// ===== BÚSSOLA (north star) — assinatura =====
+const COMPASS_SVG = `
+<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <radialGradient id="compassGlow" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#7AAEAB" stop-opacity=".18"/>
+      <stop offset="60%" stop-color="#7AAEAB" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="200" cy="200" r="180" fill="url(#compassGlow)"/>
+  <circle cx="200" cy="200" r="170" fill="none" stroke="#7AAEAB" stroke-width="1" opacity=".55"/>
+  <circle cx="200" cy="200" r="155" fill="none" stroke="#7AAEAB" stroke-width="1" opacity=".25"/>
+  <g stroke="#ECE0C7" stroke-width="1" opacity=".6">
+    <line x1="200" y1="20" x2="200" y2="40"/>
+    <line x1="200" y1="360" x2="200" y2="380"/>
+    <line x1="20" y1="200" x2="40" y2="200"/>
+    <line x1="360" y1="200" x2="380" y2="200"/>
+  </g>
+  <g stroke="#7AAEAB" stroke-width="1" opacity=".35">
+    ${Array.from({length: 24}).map((_,i)=>{
+      const a = (i*15) * Math.PI/180;
+      const r1 = 165, r2 = 172;
+      const x1 = 200 + r1*Math.sin(a), y1 = 200 - r1*Math.cos(a);
+      const x2 = 200 + r2*Math.sin(a), y2 = 200 - r2*Math.cos(a);
+      return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+    }).join('')}
+  </g>
+  <polygon points="200,40 208,200 200,210 192,200" fill="#ECE0C7" opacity=".85"/>
+  <polygon points="200,360 208,200 200,190 192,200" fill="#7AAEAB" opacity=".7"/>
+  <circle cx="200" cy="200" r="6" fill="#ECE0C7"/>
+  <circle cx="200" cy="200" r="2.5" fill="#0C2A2C"/>
+  <text x="200" y="14" text-anchor="middle" font-family="Fraunces, serif" font-size="14" font-style="italic" fill="#7AAEAB" opacity=".75">N</text>
+</svg>`;
+
+// ===== Comparação Feed × Stories =====
+const SVG_COMPARISON = `
+<svg viewBox="0 0 520 320" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <g transform="translate(20,30)">
+    <text x="110" y="0" text-anchor="middle" font-family="Inter" font-size="11" letter-spacing="2.4" font-weight="500" fill="#2E5F55">FEED + REELS</text>
+    <text x="110" y="36" text-anchor="middle" font-family="Fraunces" font-size="28" font-style="italic" font-weight="300" fill="#0E2D2F">alcance</text>
+    <g stroke="#0E2D2F" fill="none" opacity=".7">
+      <circle cx="110" cy="155" r="30" stroke-width="1.5"/>
+      <circle cx="110" cy="155" r="55" stroke-width="1" opacity=".5"/>
+      <circle cx="110" cy="155" r="80" stroke-width="1" opacity=".3"/>
+      <circle cx="110" cy="155" r="105" stroke-width="1" opacity=".15"/>
+    </g>
+    <circle cx="110" cy="155" r="6" fill="#2E5F55"/>
+    <text x="110" y="280" text-anchor="middle" font-family="Inter" font-size="11" fill="#4A5E5B">Chega em pessoas novas.</text>
+    <text x="110" y="295" text-anchor="middle" font-family="Inter" font-size="11" fill="#4A5E5B">Topo de funil.</text>
+  </g>
+  <line x1="260" y1="50" x2="260" y2="290" stroke="#4A5E5B" stroke-width=".5" opacity=".25"/>
+  <g transform="translate(300,30)">
+    <text x="110" y="0" text-anchor="middle" font-family="Inter" font-size="11" letter-spacing="2.4" font-weight="500" fill="#2E5F55">STORIES</text>
+    <text x="110" y="36" text-anchor="middle" font-family="Fraunces" font-size="28" font-style="italic" font-weight="300" fill="#0E2D2F">relacionamento</text>
+    <g stroke="#5FA09C" stroke-width="1" fill="#5FA09C">
+      <circle cx="110" cy="155" r="9"/>
+      <circle cx="55" cy="120" r="5" opacity=".7"/>
+      <circle cx="165" cy="120" r="5" opacity=".7"/>
+      <circle cx="50" cy="190" r="5" opacity=".7"/>
+      <circle cx="170" cy="190" r="5" opacity=".7"/>
+      <circle cx="110" cy="90" r="4" opacity=".5"/>
+      <circle cx="110" cy="220" r="4" opacity=".5"/>
+      <line x1="110" y1="155" x2="55" y2="120" stroke-width="1" opacity=".6"/>
+      <line x1="110" y1="155" x2="165" y2="120" stroke-width="1" opacity=".6"/>
+      <line x1="110" y1="155" x2="50" y2="190" stroke-width="1" opacity=".6"/>
+      <line x1="110" y1="155" x2="170" y2="190" stroke-width="1" opacity=".6"/>
+      <line x1="110" y1="155" x2="110" y2="90" stroke-width="1" opacity=".4"/>
+      <line x1="110" y1="155" x2="110" y2="220" stroke-width="1" opacity=".4"/>
+    </g>
+    <text x="110" y="280" text-anchor="middle" font-family="Inter" font-size="11" fill="#4A5E5B">Aprofunda com quem já conhece.</text>
+    <text x="110" y="295" text-anchor="middle" font-family="Inter" font-size="11" fill="#4A5E5B">Fundo de funil.</text>
+  </g>
+</svg>`;
+
+// ===== Algoritmo (radial) =====
+const SVG_ALGORITHM = `
+<svg viewBox="0 0 520 380" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <circle cx="260" cy="190" r="55" fill="none" stroke="#7AAEAB" stroke-width="1.2" opacity=".4"/>
+  <circle cx="260" cy="190" r="40" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+  <text x="260" y="186" text-anchor="middle" font-family="Inter" font-size="9" letter-spacing="2" font-weight="500" fill="#7AAEAB">SINAIS</text>
+  <text x="260" y="200" text-anchor="middle" font-family="Fraunces" font-size="13" font-style="italic" fill="#ECE0C7">para</text>
+  <text x="260" y="215" text-anchor="middle" font-family="Inter" font-size="9" letter-spacing="2" font-weight="500" fill="#7AAEAB">PRIORIZAR</text>
+  <line x1="260" y1="150" x2="260" y2="70" stroke="#7AAEAB" stroke-width="1" opacity=".5" stroke-dasharray="3 3"/>
+  <circle cx="260" cy="50" r="22" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+  <text x="260" y="46" text-anchor="middle" font-family="Fraunces" font-size="14" fill="#ECE0C7">01</text>
+  <text x="260" y="92" text-anchor="middle" font-family="Inter" font-size="11" font-weight="500" fill="#ECE0C7">Relacionamento</text>
+  <line x1="300" y1="190" x2="430" y2="190" stroke="#7AAEAB" stroke-width="1" opacity=".5" stroke-dasharray="3 3"/>
+  <circle cx="450" cy="190" r="22" fill="#0F3032" stroke="#92C2BF" stroke-width="1.5"/>
+  <text x="450" y="186" text-anchor="middle" font-family="Fraunces" font-size="14" fill="#ECE0C7">02</text>
+  <text x="450" y="222" text-anchor="middle" font-family="Inter" font-size="11" font-weight="500" fill="#ECE0C7">DM</text>
+  <text x="450" y="236" text-anchor="middle" font-family="Inter" font-size="8.5" font-style="italic" fill="#92C2BF">sinal mais forte</text>
+  <line x1="260" y1="230" x2="260" y2="310" stroke="#7AAEAB" stroke-width="1" opacity=".5" stroke-dasharray="3 3"/>
+  <circle cx="260" cy="330" r="22" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+  <text x="260" y="326" text-anchor="middle" font-family="Fraunces" font-size="14" fill="#ECE0C7">03</text>
+  <text x="260" y="362" text-anchor="middle" font-family="Inter" font-size="11" font-weight="500" fill="#ECE0C7">Retenção</text>
+  <line x1="220" y1="190" x2="90" y2="190" stroke="#7AAEAB" stroke-width="1" opacity=".5" stroke-dasharray="3 3"/>
+  <circle cx="70" cy="190" r="22" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+  <text x="70" y="186" text-anchor="middle" font-family="Fraunces" font-size="14" fill="#ECE0C7">04</text>
+  <text x="70" y="222" text-anchor="middle" font-family="Inter" font-size="11" font-weight="500" fill="#ECE0C7">Interação</text>
+</svg>`;
+
+// ===== NOVO: Jornada do cliente (fio de storytelling) — vertical em arco =====
+const SVG_JOURNEY = `
+<svg viewBox="0 0 520 460" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- connecting path -->
+  <path d="M70,40 C 200,70 200,120 110,150 C 30,178 30,228 160,250 C 290,272 290,322 120,345 C 20,360 40,410 260,420"
+        fill="none" stroke="#7AAEAB" stroke-width="1.4" opacity=".55" stroke-dasharray="4 4"/>
+  <!-- node 1 -->
+  <circle cx="70" cy="40" r="16" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.3"/>
+  <text x="70" y="45" text-anchor="middle" font-family="Fraunces" font-size="12" fill="#ECE0C7">1</text>
+  <text x="98" y="38" font-family="Inter" font-size="11.5" font-weight="500" fill="#ECE0C7">Abre o Instagram</text>
+  <text x="98" y="53" font-family="Inter" font-size="9.5" fill="#9EB7B4">o dia começa com interação</text>
+  <!-- node 2 -->
+  <circle cx="110" cy="150" r="16" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.3"/>
+  <text x="110" y="155" text-anchor="middle" font-family="Fraunces" font-size="12" fill="#ECE0C7">2</text>
+  <text x="138" y="148" font-family="Inter" font-size="11.5" font-weight="500" fill="#ECE0C7">Reconhece o problema</text>
+  <text x="138" y="163" font-family="Inter" font-size="9.5" fill="#9EB7B4">"isso acontece comigo também"</text>
+  <!-- node 3 -->
+  <circle cx="160" cy="250" r="16" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.3"/>
+  <text x="160" y="255" text-anchor="middle" font-family="Fraunces" font-size="12" fill="#ECE0C7">3</text>
+  <text x="188" y="248" font-family="Inter" font-size="11.5" font-weight="500" fill="#ECE0C7">Vê o processo</text>
+  <text x="188" y="263" font-family="Inter" font-size="9.5" fill="#9EB7B4">curiosidade pelos bastidores</text>
+  <!-- node 4 -->
+  <circle cx="120" cy="345" r="16" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.3"/>
+  <text x="120" y="350" text-anchor="middle" font-family="Fraunces" font-size="12" fill="#ECE0C7">4</text>
+  <text x="148" y="343" font-family="Inter" font-size="11.5" font-weight="500" fill="#ECE0C7">Entende o valor</text>
+  <text x="148" y="358" font-family="Inter" font-size="9.5" fill="#9EB7B4">"por que isso importa pra mim"</text>
+  <!-- node 5 (destacado) -->
+  <circle cx="260" cy="420" r="19" fill="#0F3032" stroke="#92C2BF" stroke-width="1.6"/>
+  <text x="260" y="425" text-anchor="middle" font-family="Fraunces" font-size="13" fill="#ECE0C7">5</text>
+  <text x="288" y="418" font-family="Inter" font-size="11.5" font-weight="500" fill="#ECE0C7">Abre o Direct</text>
+  <text x="288" y="433" font-family="Inter" font-size="9.5" font-style="italic" fill="#92C2BF">a conversa que vira orçamento</text>
+</svg>`;
+
+// ===== 3 perguntas =====
+const SVG_3PERGUNTAS = `
+<svg viewBox="0 0 520 360" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <circle cx="180" cy="120" r="85" fill="none" stroke="#7AAEAB" stroke-width="1.2"/>
+  <text x="180" y="115" text-anchor="middle" font-family="Inter" font-size="10" letter-spacing="2.4" fill="#92C2BF" font-weight="500">PERGUNTA 01</text>
+  <text x="180" y="145" text-anchor="middle" font-family="Fraunces" font-size="32" font-style="italic" font-weight="300" fill="#ECE0C7">o quê?</text>
+  <circle cx="350" cy="120" r="85" fill="none" stroke="#7AAEAB" stroke-width="1.2"/>
+  <text x="350" y="115" text-anchor="middle" font-family="Inter" font-size="10" letter-spacing="2.4" fill="#92C2BF" font-weight="500">PERGUNTA 02</text>
+  <text x="350" y="145" text-anchor="middle" font-family="Fraunces" font-size="32" font-style="italic" font-weight="300" fill="#ECE0C7">como?</text>
+  <circle cx="265" cy="270" r="85" fill="none" stroke="#92C2BF" stroke-width="1.5"/>
+  <text x="265" y="265" text-anchor="middle" font-family="Inter" font-size="10" letter-spacing="2.4" fill="#92C2BF" font-weight="500">PERGUNTA 03</text>
+  <text x="265" y="295" text-anchor="middle" font-family="Fraunces" font-size="32" font-style="italic" font-weight="500" fill="#92C2BF">por quê?</text>
+</svg>`;
+
+// ===== PSI flow =====
+const SVG_PSI = `
+<svg viewBox="0 0 520 220" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <rect x="20" y="60" width="140" height="100" rx="4" fill="none" stroke="#2E5F55" stroke-width="1.2"/>
+  <text x="90" y="100" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#5FA09C">P</text>
+  <text x="90" y="125" text-anchor="middle" font-family="Fraunces" font-size="20" font-style="italic" font-weight="400" fill="#0E2D2F">problema</text>
+  <text x="90" y="145" text-anchor="middle" font-family="Inter" font-size="9" fill="#4A5E5B">apresenta</text>
+  <line x1="170" y1="110" x2="195" y2="110" stroke="#0E2D2F" stroke-width="1.2"/>
+  <polygon points="190,106 200,110 190,114" fill="#0E2D2F"/>
+  <rect x="205" y="60" width="140" height="100" rx="4" fill="#5FA09C" fill-opacity=".10" stroke="#2E5F55" stroke-width="1.2"/>
+  <text x="275" y="100" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#5FA09C">S</text>
+  <text x="275" y="125" text-anchor="middle" font-family="Fraunces" font-size="20" font-style="italic" font-weight="400" fill="#0E2D2F">solução</text>
+  <text x="275" y="145" text-anchor="middle" font-family="Inter" font-size="9" fill="#4A5E5B">resolve</text>
+  <line x1="355" y1="110" x2="380" y2="110" stroke="#0E2D2F" stroke-width="1.2"/>
+  <polygon points="375,106 385,110 375,114" fill="#0E2D2F"/>
+  <rect x="390" y="60" width="140" height="100" rx="4" fill="#5FA09C" fill-opacity=".20" stroke="#2E5F55" stroke-width="1.5"/>
+  <text x="460" y="100" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#5FA09C">I</text>
+  <text x="460" y="125" text-anchor="middle" font-family="Fraunces" font-size="20" font-style="italic" font-weight="500" fill="#0E2D2F">impacto</text>
+  <text x="460" y="145" text-anchor="middle" font-family="Inter" font-size="9" fill="#4A5E5B">prova o valor</text>
+</svg>`;
+
+// ===== Timeline 5 passos =====
+const SVG_TIMELINE = `
+<svg viewBox="0 0 920 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <line x1="80" y1="100" x2="840" y2="100" stroke="#7AAEAB" stroke-width="1" opacity=".6"/>
+  <circle cx="100" cy="100" r="9" fill="#7AAEAB"/>
+  <text x="100" y="70" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#92C2BF">PASSO 0</text>
+  <text x="100" y="135" text-anchor="middle" font-family="Fraunces" font-size="15" font-style="italic" fill="#ECE0C7">abertura</text>
+  <text x="100" y="155" text-anchor="middle" font-family="Inter" font-size="10" fill="#9EB7B4">com interação</text>
+  <circle cx="280" cy="100" r="9" fill="#7AAEAB"/>
+  <text x="280" y="70" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#92C2BF">PASSO 1</text>
+  <text x="280" y="135" text-anchor="middle" font-family="Fraunces" font-size="15" font-style="italic" fill="#ECE0C7">problema</text>
+  <text x="280" y="155" text-anchor="middle" font-family="Inter" font-size="10" fill="#9EB7B4">o que será resolvido</text>
+  <circle cx="460" cy="100" r="9" fill="#7AAEAB"/>
+  <text x="460" y="70" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#92C2BF">PASSO 2</text>
+  <text x="460" y="135" text-anchor="middle" font-family="Fraunces" font-size="15" font-style="italic" fill="#ECE0C7">processo</text>
+  <text x="460" y="155" text-anchor="middle" font-family="Inter" font-size="10" fill="#9EB7B4">como é feito</text>
+  <circle cx="640" cy="100" r="9" fill="#7AAEAB"/>
+  <text x="640" y="70" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#92C2BF">PASSO 3</text>
+  <text x="640" y="135" text-anchor="middle" font-family="Fraunces" font-size="15" font-style="italic" fill="#ECE0C7">valor</text>
+  <text x="640" y="155" text-anchor="middle" font-family="Inter" font-size="10" fill="#9EB7B4">por que importa</text>
+  <circle cx="820" cy="100" r="13" fill="#92C2BF"/>
+  <circle cx="820" cy="100" r="20" fill="none" stroke="#92C2BF" stroke-width="1" opacity=".5"/>
+  <text x="820" y="70" text-anchor="middle" font-family="Inter" font-size="9.5" letter-spacing="2" font-weight="500" fill="#92C2BF">PASSO 4</text>
+  <text x="820" y="135" text-anchor="middle" font-family="Fraunces" font-size="15" font-style="italic" fill="#ECE0C7">resultado + CTA</text>
+  <text x="820" y="155" text-anchor="middle" font-family="Inter" font-size="10" fill="#9EB7B4">convite ao DM</text>
+</svg>`;
+
+// ===== Phone com enquete =====
+const SVG_PHONE = `
+<svg viewBox="0 0 280 460" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <rect x="10" y="10" width="260" height="440" rx="34" fill="#0F3032" stroke="#5FA09C" stroke-width="1.2"/>
+  <rect x="20" y="20" width="240" height="420" rx="26" fill="#0E2D2F"/>
+  <rect x="30" y="32" width="220" height="2.5" rx="1" fill="#ECE0C7" opacity=".25"/>
+  <rect x="30" y="32" width="80" height="2.5" rx="1" fill="#ECE0C7"/>
+  <circle cx="44" cy="58" r="11" fill="none" stroke="#5FA09C" stroke-width="1"/>
+  <text x="44" y="62" text-anchor="middle" font-family="Fraunces" font-size="10" font-style="italic" fill="#5FA09C">K</text>
+  <text x="62" y="55" font-family="Inter" font-size="9" font-weight="500" fill="#ECE0C7">karpinski</text>
+  <text x="62" y="66" font-family="Inter" font-size="7.5" fill="#9EB7B4">há 2 min</text>
+  <rect x="30" y="90" width="220" height="160" rx="6" fill="#143638"/>
+  <text x="140" y="135" text-anchor="middle" font-family="Inter" font-size="9" letter-spacing="1.6" fill="#92C2BF">CARRO DE HOJE</text>
+  <text x="140" y="170" text-anchor="middle" font-family="Fraunces" font-size="13" font-style="italic" fill="#ECE0C7">o que vai</text>
+  <text x="140" y="190" text-anchor="middle" font-family="Fraunces" font-size="13" font-style="italic" fill="#ECE0C7">precisar?</text>
+  <rect x="40" y="270" width="200" height="32" rx="16" fill="#0E2D2F" stroke="#5FA09C" stroke-width="1"/>
+  <text x="140" y="290" text-anchor="middle" font-family="Inter" font-size="9.5" fill="#ECE0C7">polimento</text>
+  <rect x="40" y="312" width="200" height="32" rx="16" fill="#0E2D2F" stroke="#5FA09C" stroke-width="1"/>
+  <text x="140" y="332" text-anchor="middle" font-family="Inter" font-size="9.5" fill="#ECE0C7">higienização</text>
+  <rect x="40" y="354" width="200" height="32" rx="16" fill="#0E2D2F" stroke="#5FA09C" stroke-width="1"/>
+  <text x="140" y="374" text-anchor="middle" font-family="Inter" font-size="9.5" fill="#ECE0C7">restauração de farol</text>
+  <rect x="30" y="408" width="170" height="22" rx="11" fill="none" stroke="#5FA09C" stroke-width=".8" opacity=".6"/>
+  <text x="40" y="423" font-family="Inter" font-size="9" fill="#9EB7B4">responder...</text>
+  <circle cx="220" cy="419" r="11" fill="#7AAEAB"/>
+  <polygon points="216,415 226,419 216,423 218,419" fill="#0E2D2F"/>
+</svg>`;
+
+// ===== Lupa / problema =====
+const SVG_PROBLEMA = `
+<svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <g opacity=".25" fill="none" stroke="#ECE0C7" stroke-width="1.2">
+    <path d="M40,210 Q40,180 80,170 L100,140 Q110,125 130,123 L210,123 Q230,125 240,140 L260,170 Q295,180 295,210 L295,235 L40,235 Z"/>
+    <circle cx="95" cy="235" r="20"/>
+    <circle cx="245" cy="235" r="20"/>
+  </g>
+  <circle cx="190" cy="160" r="55" fill="none" stroke="#7AAEAB" stroke-width="2.5"/>
+  <circle cx="190" cy="160" r="55" fill="#0E2D2F" fill-opacity=".4"/>
+  <line x1="230" y1="200" x2="270" y2="240" stroke="#7AAEAB" stroke-width="3.5" stroke-linecap="round"/>
+  <g stroke="#92C2BF" stroke-width="1.2" stroke-linecap="round" opacity=".9">
+    <line x1="165" y1="150" x2="195" y2="160"/>
+    <line x1="200" y1="145" x2="220" y2="165"/>
+    <line x1="170" y1="170" x2="200" y2="175"/>
+    <line x1="180" y1="180" x2="210" y2="165"/>
+  </g>
+  <text x="40" y="60" font-family="Inter" font-size="11" letter-spacing="2.4" font-weight="500" fill="#7AAEAB">DIAGNÓSTICO</text>
+  <text x="40" y="90" font-family="Fraunces" font-size="26" font-style="italic" font-weight="300" fill="#ECE0C7">o que está</text>
+  <text x="40" y="118" font-family="Fraunces" font-size="26" font-style="italic" font-weight="300" fill="#ECE0C7">errado?</text>
+</svg>`;
+
+// ===== Processo / engrenagens =====
+const SVG_PROCESSO = `
+<svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <g transform="translate(170,160)">
+    <g fill="none" stroke="#2E5F55" stroke-width="1.8">
+      <circle r="60"/>
+      <circle r="28"/>
+    </g>
+    <g fill="#2E5F55">
+      ${Array.from({length:8}).map((_,i)=>{
+        const a = i * 45 * Math.PI/180;
+        const x = Math.cos(a) * 70, y = Math.sin(a) * 70;
+        return `<rect x="${(x-6).toFixed(1)}" y="${(y-6).toFixed(1)}" width="12" height="12" transform="rotate(${i*45} ${x.toFixed(1)} ${y.toFixed(1)})"/>`;
+      }).join('')}
+    </g>
+  </g>
+  <g transform="translate(85,90)">
+    <g fill="none" stroke="#2E5F55" stroke-width="1.5" opacity=".7">
+      <circle r="35"/>
+      <circle r="16"/>
+    </g>
+    <g fill="#2E5F55" opacity=".7">
+      ${Array.from({length:6}).map((_,i)=>{
+        const a = i * 60 * Math.PI/180;
+        const x = Math.cos(a) * 42, y = Math.sin(a) * 42;
+        return `<rect x="${(x-4).toFixed(1)}" y="${(y-4).toFixed(1)}" width="8" height="8" transform="rotate(${i*60} ${x.toFixed(1)} ${y.toFixed(1)})"/>`;
+      }).join('')}
+    </g>
+  </g>
+  <text x="20" y="280" font-family="Inter" font-size="11" letter-spacing="2.4" font-weight="500" fill="#2E5F55">BASTIDOR</text>
+  <text x="20" y="305" font-family="Fraunces" font-size="22" font-style="italic" font-weight="300" fill="#0E2D2F">como é feito</text>
+</svg>`;
+
+// ===== Escudo / valor =====
+const SVG_VALOR = `
+<svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M160,40 L240,75 L240,170 Q240,230 160,275 Q80,230 80,170 L80,75 Z" fill="#0F3032" stroke="#7AAEAB" stroke-width="2"/>
+  <path d="M160,60 L222,87 L222,170 Q222,218 160,255 Q98,218 98,170 L98,87 Z" fill="none" stroke="#7AAEAB" stroke-width=".8" opacity=".5"/>
+  <polyline points="125,160 152,187 200,140" fill="none" stroke="#92C2BF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="20" y="40" font-family="Inter" font-size="11" letter-spacing="2.4" font-weight="500" fill="#7AAEAB">BENEFÍCIO</text>
+  <text x="20" y="70" font-family="Fraunces" font-size="22" font-style="italic" font-weight="300" fill="#ECE0C7">por que isso</text>
+  <text x="20" y="95" font-family="Fraunces" font-size="22" font-style="italic" font-weight="300" fill="#ECE0C7">importa?</text>
+</svg>`;
+
+// ===== DM / chat =====
+const SVG_DM = `
+<svg viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M40,80 Q40,60 60,60 L210,60 Q230,60 230,80 L230,115 Q230,135 210,135 L80,135 L60,150 L65,135 Q40,135 40,115 Z" fill="#0F3032" stroke="#5FA09C" stroke-width="1.2"/>
+  <text x="60" y="90" font-family="Inter" font-size="10.5" fill="#ECE0C7">Resultado entregue.</text>
+  <text x="60" y="108" font-family="Inter" font-size="10.5" fill="#ECE0C7">Você faria no seu carro?</text>
+  <text x="60" y="123" font-family="Inter" font-size="8.5" fill="#9EB7B4" font-style="italic">karpinski · agora</text>
+  <path d="M90,175 Q90,158 105,158 L280,158 Q295,158 295,175 L295,225 Q295,242 280,242 L130,242 L115,257 L118,242 Q90,242 90,225 Z" fill="#5FA09C" fill-opacity=".25" stroke="#92C2BF" stroke-width="1.2"/>
+  <text x="108" y="190" font-family="Inter" font-size="11" font-weight="500" fill="#ECE0C7">Tenho um Onix 2019,</text>
+  <text x="108" y="210" font-family="Inter" font-size="11" font-weight="500" fill="#ECE0C7">quanto fica polimento?</text>
+  <text x="20" y="290" font-family="Inter" font-size="11" letter-spacing="2.4" font-weight="500" fill="#7AAEAB">CONVERSA</text>
+  <text x="20" y="312" font-family="Fraunces" font-size="20" font-style="italic" font-weight="300" fill="#ECE0C7">o story virou DM</text>
+</svg>`;
+
+// ===== Calendário semanal =====
+const SVG_CALENDARIO = `
+<svg viewBox="0 0 920 280" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  ${['SEG','TER','QUA','QUI','SEX','SÁB'].map((dia, i) => {
+    const x = 30 + i * 148;
+    const cores = ['Problemas','Bastidores','Educação','Prova social','Oferta','Conexão'];
+    const accent = i === 4 ? '#92C2BF' : '#7AAEAB';
+    return `
+      <g transform="translate(${x},20)">
+        <rect width="130" height="220" rx="6" fill="#0F3032" stroke="${accent}" stroke-width="${i===4?'1.5':'1'}"/>
+        <text x="65" y="30" text-anchor="middle" font-family="Inter" font-size="10" letter-spacing="2" font-weight="500" fill="${accent}">${dia}</text>
+        <line x1="20" y1="50" x2="110" y2="50" stroke="${accent}" stroke-width=".5" opacity=".5"/>
+        <text x="65" y="115" text-anchor="middle" font-family="Fraunces" font-size="14" font-style="italic" font-weight="${i===4?'500':'400'}" fill="#ECE0C7">${cores[i]}</text>
+        <circle cx="65" cy="180" r="14" fill="none" stroke="${accent}" stroke-width="1" opacity=".6"/>
+        <text x="65" y="184" text-anchor="middle" font-family="Fraunces" font-size="13" fill="${accent}">0${i+1}</text>
+      </g>
+    `;
+  }).join('')}
+</svg>`;
+
+// ===== Funil de conversão =====
+const SVG_CONVERSAO = `
+<svg viewBox="0 0 520 360" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <polygon points="60,30 460,30 415,90 105,90" fill="#2E5F55" fill-opacity=".1" stroke="#2E5F55" stroke-width="1.2"/>
+  <text x="260" y="68" text-anchor="middle" font-family="Fraunces" font-size="18" font-style="italic" font-weight="400" fill="#0E2D2F">story publicado</text>
+  <text x="478" y="68" font-family="Inter" font-size="10" letter-spacing="1.6" fill="#5FA09C">01</text>
+  <line x1="260" y1="92" x2="260" y2="105" stroke="#0E2D2F" stroke-width="1"/>
+  <polygon points="256,102 260,112 264,102" fill="#0E2D2F"/>
+  <polygon points="105,115 415,115 375,175 145,175" fill="#5FA09C" fill-opacity=".18" stroke="#2E5F55" stroke-width="1.2"/>
+  <text x="260" y="152" text-anchor="middle" font-family="Fraunces" font-size="18" font-style="italic" font-weight="400" fill="#0E2D2F">engajamento</text>
+  <text x="478" y="152" font-family="Inter" font-size="10" letter-spacing="1.6" fill="#5FA09C">02</text>
+  <line x1="260" y1="178" x2="260" y2="190" stroke="#0E2D2F" stroke-width="1"/>
+  <polygon points="256,187 260,197 264,187" fill="#0E2D2F"/>
+  <polygon points="145,200 375,200 335,260 185,260" fill="#5FA09C" fill-opacity=".30" stroke="#2E5F55" stroke-width="1.2"/>
+  <text x="260" y="236" text-anchor="middle" font-family="Fraunces" font-size="18" font-style="italic" font-weight="400" fill="#0E2D2F">DM aberto</text>
+  <text x="478" y="236" font-family="Inter" font-size="10" letter-spacing="1.6" fill="#5FA09C">03</text>
+  <line x1="260" y1="263" x2="260" y2="275" stroke="#0E2D2F" stroke-width="1"/>
+  <polygon points="256,272 260,282 264,272" fill="#0E2D2F"/>
+  <polygon points="185,285 335,285 295,340 225,340" fill="#2E5F55" fill-opacity=".6" stroke="#0E2D2F" stroke-width="1.5"/>
+  <text x="260" y="320" text-anchor="middle" font-family="Fraunces" font-size="18" font-style="italic" font-weight="500" fill="#ECE0C7">cliente</text>
+  <text x="478" y="320" font-family="Inter" font-size="10" letter-spacing="1.6" fill="#5FA09C">04</text>
+</svg>`;
+
+// ===== NOVO: Ativação de base (ciclo de retorno) =====
+const SVG_REATIVACAO = `
+<svg viewBox="0 0 460 360" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <!-- circular retention loop -->
+  <circle cx="230" cy="180" r="120" fill="none" stroke="#7AAEAB" stroke-width="1.2" opacity=".5" stroke-dasharray="5 5"/>
+  <!-- arrow head on the loop -->
+  <polygon points="345,165 352,185 332,182" fill="#7AAEAB" opacity=".7"/>
+  <!-- center -->
+  <circle cx="230" cy="180" r="46" fill="#0F3032" stroke="#92C2BF" stroke-width="1.4"/>
+  <text x="230" y="174" text-anchor="middle" font-family="Inter" font-size="9" letter-spacing="1.6" font-weight="500" fill="#92C2BF">BASE DE</text>
+  <text x="230" y="190" text-anchor="middle" font-family="Fraunces" font-size="15" font-style="italic" fill="#ECE0C7">clientes</text>
+  <!-- 4 nodes around -->
+  <g font-family="Inter" font-size="10.5" font-weight="500" fill="#ECE0C7" text-anchor="middle">
+    <circle cx="230" cy="40" r="20" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+    <text x="230" y="44" font-family="Fraunces" font-size="12">1</text>
+    <text x="230" y="22" >Follow-up</text>
+    <circle cx="370" cy="180" r="20" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+    <text x="370" y="184" font-family="Fraunces" font-size="12">2</text>
+    <text x="370" y="222">Avaliações</text>
+    <circle cx="230" cy="320" r="20" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+    <text x="230" y="324" font-family="Fraunces" font-size="12">3</text>
+    <text x="230" y="352">Manutenção</text>
+    <circle cx="90" cy="180" r="20" fill="#0F3032" stroke="#7AAEAB" stroke-width="1.2"/>
+    <text x="90" y="184" font-family="Fraunces" font-size="12">4</text>
+    <text x="90" y="222">Reativação</text>
+  </g>
+</svg>`;
+
+
+const slides = [];
+function S(opts, body){ slides.push({ ...opts, body }); }
+
+// ============ 01 — Capa (mantida) ============
+S({theme:'dark', mark:'KARPINSKI · GUIA DE STORIES'},`
+  <div class="left-col" style="width:55%;">
+    <div class="stagger" style="display:flex;flex-direction:column;gap:0;">
+      <div class="eyebrow">guia estratégico · 2026</div>
+      <h1 class="display">Stories que viram <em>orçamento</em></h1>
+      <p style="font-size:clamp(14px,1.1vw,17px);line-height:1.6;color:var(--muted-on-petrol);max-width:38ch;margin-top:24px;">
+        Um material consultivo para a <strong>Karpinski Detalhamento Automotivo</strong> transformar o stories em canal de relacionamento, autoridade e captação de clientes.
+      </p>
+    </div>
+  </div>
+  <div class="compass spin">__COMPASS__</div>
+  <div class="footband"><span class="tag">north</span><span>agência de marketing &amp; tráfego</span><span style="margin-left:auto">guia entregue ao cliente</span></div>
+`);
+
+// ============ 02 — Por que stories importam (mantida) ============
+S({theme:'light', mark:'POR QUE STORIES IMPORTAM · 02'},`
+  <div class="two-col">
+    <div class="left-col">
+      <div class="eyebrow">o ponto de partida</div>
+      <h1 class="display">Feed alcança.<br><em>Stories constrói relacionamento.</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-cream);max-width:42ch;margin-top:18px;">
+        Os Stories são uma das ferramentas que mais geram orçamentos para uma estética automotiva. Enquanto <strong>feed e Reels alcançam pessoas novas</strong>, os Stories <strong>criam relacionamento, confiança e conversa</strong> com quem já conhece.
+      </p>
+      <div class="quote-block" style="margin-top:18px;">A venda mora no relacionamento. E o relacionamento mora no stories.</div>
+    </div>
+    <div class="right-col">
+      <div class="illus">${SVG_COMPARISON}</div>
+    </div>
+  </div>
+`);
+
+// ============ 03 — Algoritmo (mantida) ============
+S({theme:'dark', mark:'ALGORITMO DOS STORIES · 03'},`
+  <div class="two-col-rev">
+    <div class="right-col">
+      <div class="illus" style="max-width:560px;">${SVG_ALGORITHM}</div>
+    </div>
+    <div class="left-col">
+      <div class="eyebrow">como o instagram decide</div>
+      <h1 class="display">Quatro sinais que <em>o algoritmo prioriza</em></h1>
+      <ul class="dots stagger" style="margin-top:20px;">
+        <li><strong>01 Relacionamento</strong> — o Instagram entrega seus stories primeiro para quem já responde, já interage e já assiste com frequência.</li>
+        <li><strong>02 Conversas no Direct</strong> — o sinal mais forte de todos. Uma resposta de story coloca a Karpinski como "próxima" da pessoa.</li>
+        <li><strong>03 Retenção</strong> — assistir até o fim do story aumenta a entrega para perfis parecidos.</li>
+        <li><strong>04 Interação ativa</strong> — clique, reação, enquete, caixinha de pergunta. Tudo conta.</li>
+      </ul>
+    </div>
+  </div>
+`);
+
+// ============ 04 — NOVA: A jornada (intro do fio narrativo) ============
+S({theme:'dark', mark:'A JORNADA · 04'},`
+  <div class="two-col-rev">
+    <div class="right-col">
+      <div class="illus" style="max-width:520px;">${SVG_JOURNEY}</div>
+    </div>
+    <div class="left-col">
+      <div class="eyebrow">não são frameworks soltos · é uma jornada</div>
+      <h1 class="display">Todo story conduz <em>uma conversa</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-petrol);max-width:44ch;margin-top:16px;">
+        Antes de qualquer técnica, entenda a lógica. O cliente <strong>abre o Instagram, reconhece um problema no próprio carro, fica curioso, vê os bastidores, entende o porquê e abre o Direct.</strong>
+      </p>
+      <div class="quote-block">As ferramentas das próximas páginas existem para conduzir essa jornada — não para serem decoradas isoladamente.</div>
+    </div>
+  </div>
+`);
+
+// ============ 05 — Etapa 1 Conexão + Etapa 2 Problema ============
+S({theme:'light', mark:'A JORNADA · ETAPAS 1 E 2'},`
+  <div class="eyebrow">construindo o raciocínio · começo</div>
+  <h1 class="display">Primeiro conecte. <em>Depois, mostre o problema.</em></h1>
+  <div class="two-col" style="margin-top:3%;">
+    <div class="left-col">
+      <div class="journey-step">
+        <div class="jn">1</div>
+        <div class="jc">
+          <h4>Conexão</h4>
+          <div class="q">"Por que eu deveria continuar assistindo isso?"</div>
+          <p>Capture a atenção e gere identificação logo no primeiro quadro. Sem conexão, ninguém chega no resto.</p>
+        </div>
+      </div>
+      <div class="journey-step">
+        <div class="jn">2</div>
+        <div class="jc">
+          <h4>Problema</h4>
+          <div class="q">"Isso acontece comigo também?"</div>
+          <p>Apresente uma situação que o cliente reconhece no próprio carro. Quem se identifica, presta atenção.</p>
+        </div>
+      </div>
+      <div class="transition-note">Agora que o cliente parou e se reconheceu no problema, ele quer entender como aquilo se resolve.</div>
+    </div>
+    <div class="right-col" style="align-items:flex-start;justify-content:flex-start;">
+      <div class="examples" style="width:100%;">
+        <div class="examples-title">ferramenta de apoio · 3 perguntas</div>
+        <ul class="examples-list">
+          <li>O quê — o que está sendo mostrado neste story?</li>
+          <li>Como — como esse problema aconteceu / será resolvido?</li>
+          <li>Por quê — por que isso importa para quem assiste?</li>
+        </ul>
+        <span class="tool-chip">use para estruturar cada quadro</span>
+      </div>
+    </div>
+  </div>
+`);
+
+// ============ 06 — Etapa 3 Processo + Etapa 4 Valor ============
+S({theme:'dark', mark:'A JORNADA · ETAPAS 3 E 4'},`
+  <div class="eyebrow">construindo o raciocínio · meio</div>
+  <h1 class="display">Mostre o processo. <em>Depois, revele o valor.</em></h1>
+  <div class="two-col" style="margin-top:3%;">
+    <div class="left-col">
+      <div class="journey-step">
+        <div class="jn">3</div>
+        <div class="jc">
+          <h4>Processo</h4>
+          <div class="q">"Como isso é resolvido?"</div>
+          <p>Mostre os bastidores. Depois de gerar curiosidade, é o processo que prende até o resultado.</p>
+        </div>
+      </div>
+      <div class="journey-step">
+        <div class="jn">4</div>
+        <div class="jc">
+          <h4>Valor</h4>
+          <div class="q">"Por que isso importa para mim?"</div>
+          <p>Explique o benefício real. Sem explicar o benefício, o cliente compara preço — com ele, compara resultado.</p>
+        </div>
+      </div>
+      <div class="transition-note">Quando ele entende o impacto, a conversa acontece naturalmente.</div>
+    </div>
+    <div class="right-col" style="align-items:flex-start;justify-content:flex-start;">
+      <div class="examples" style="width:100%;">
+        <div class="examples-title">ferramenta de apoio · psi</div>
+        <ul class="examples-list">
+          <li>Problema — o que está errado no carro.</li>
+          <li>Solução — como a Karpinski resolve (produto, técnica, etapa).</li>
+          <li>Impacto — o que o serviço gera: brilho, proteção, valorização.</li>
+        </ul>
+        <span class="tool-chip">use para dar profundidade ao processo</span>
+      </div>
+    </div>
+  </div>
+`);
+
+// ============ 07 — Etapa 5 Conversão (fecho da jornada) ============
+S({theme:'light', mark:'A JORNADA · ETAPA 5'},`
+  <div class="two-col-rev">
+    <div class="right-col">
+      <div class="illus" style="max-width:320px;">${SVG_DM}</div>
+    </div>
+    <div class="left-col">
+      <div class="eyebrow">construindo o raciocínio · fecho</div>
+      <h1 class="display">A jornada termina <em>numa conversa</em></h1>
+      <div class="journey-step" style="border-bottom:none;">
+        <div class="jn">5</div>
+        <div class="jc">
+          <h4>Conversão</h4>
+          <div class="q">"Como eu faço isso no meu carro?"</div>
+          <p>Convide para a interação e a conversa. Esse é o momento em que toda a jornada se transforma em orçamento.</p>
+        </div>
+      </div>
+      <div class="quote-block" style="margin-top:14px;">
+        Mais do que ensinar estruturas, o objetivo é entender como uma conversa é construída dentro dos Stories.
+      </div>
+    </div>
+  </div>
+`);
+
+// ============ 08 — Sequência do dia (mantida) ============
+S({theme:'dark', mark:'ESTRUTURA DO DIA · 08'},`
+  <div class="eyebrow">a sequência ideal em um dia</div>
+  <h1 class="display">Um dia, <em>uma narrativa em cinco passos</em></h1>
+  <div style="margin-top:5%;">
+    <div class="illus" style="max-width:920px;">${SVG_TIMELINE}</div>
+  </div>
+  <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-petrol);max-width:80ch;margin-top:5%;">
+    A jornada que você acabou de ver acontece, na prática, <strong>ao longo de um dia</strong>. O passo 0 abre o ciclo (interação inicial). Do 1 ao 4, conduzimos do problema ao orçamento.
+  </p>
+  <div class="quote-block">A qualidade da sequência conta mais que a quantidade de stories.</div>
+`);
+
+// ============ 09 — Passo 0 Abertura (mantida) ============
+S({theme:'light', mark:'PASSO 0 · ABERTURA · 09'},`
+  <div class="two-col">
+    <div class="left-col">
+      <div class="eyebrow">passo 0 · o primeiro story</div>
+      <h1 class="display">Nunca comece com "Bom dia".<br><em>Comece com interação.</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-cream);max-width:42ch;margin-top:18px;">
+        O primeiro story conta <strong>mais que a quantidade</strong>. É ele que treina o algoritmo a entregar os próximos para mais gente — e abre a janela de DM do dia.
+      </p>
+      <div class="examples">
+        <div class="examples-title">ganchos de abertura</div>
+        <ul class="examples-list">
+          <li>☕ Cafezinho pronto. Quem quer acompanhar a transformação de hoje?</li>
+          <li>🚗 Que serviço esse carro está precisando: polimento, higienização ou farol?</li>
+          <li>🌧️ Semana de chuva: qual sua maior dificuldade com o carro nessa época?</li>
+          <li>❓ O que mais te incomoda no teu carro hoje?</li>
+          <li>👀 Esse carro vai passar por uma transformação. Quer ver o resultado?</li>
+        </ul>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="illus" style="max-width:240px;">${SVG_PHONE}</div>
+    </div>
+  </div>
+`);
+
+// ============ 10 — Passo 1 Problema (mantida) ============
+S({theme:'dark', mark:'PASSO 1 · PROBLEMA · 10'},`
+  <div class="two-col-rev">
+    <div class="right-col">
+      <div class="illus" style="max-width:340px;">${SVG_PROBLEMA}</div>
+    </div>
+    <div class="left-col">
+      <div class="eyebrow">passo 1 · apresente o problema</div>
+      <h1 class="display">Quem se identifica <em>para de scrollar</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-petrol);max-width:44ch;margin-top:18px;">
+        Mostre o problema antes da solução. Quem está com o mesmo problema no próprio carro <strong>presta atenção na hora</strong>. Explique também a causa — assim quem vive a mesma situação também se reconhece.
+      </p>
+      <div class="examples">
+        <div class="examples-title">exemplos prontos</div>
+        <ul class="examples-list">
+          <li>Quem aí está andando com o farol assim? Será que ainda tem solução?</li>
+          <li>Olha a quantidade de riscos nessa pintura. Você acha que isso sai?</li>
+          <li>Esse banco está encardido. Será que conseguimos recuperar?</li>
+          <li>Esse carro perdeu o brilho original. Hoje mostramos como devolvemos.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+`);
+
+// ============ 11 — Passo 2 Processo (mantida) ============
+S({theme:'light', mark:'PASSO 2 · PROCESSO · 11'},`
+  <div class="two-col">
+    <div class="left-col">
+      <div class="eyebrow">passo 2 · mostre o processo</div>
+      <h1 class="display">Bastidor que <em>desperta curiosidade</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-cream);max-width:44ch;margin-top:18px;">
+        Mostre os bastidores e explique rapidamente o que está sendo feito. Use <strong>impacto visual</strong> — meio a meio, antes e depois parcial, espuma cobrindo a pintura — para criar <em>expectativa pelo resultado final</em>.
+      </p>
+      <div class="examples">
+        <div class="examples-title">exemplos prontos</div>
+        <ul class="examples-list">
+          <li>Iniciamos a lavagem técnica e a descontaminação da pintura.</li>
+          <li>Olha esse meio a meio: de um lado a pintura original, do outro a corrigida.</li>
+          <li>Higienização completa dos bancos para remover sujeira impregnada e bactérias.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="illus" style="max-width:300px;">${SVG_PROCESSO}</div>
+    </div>
+  </div>
+`);
+
+// ============ 12 — Passo 3 Valor (mantida) ============
+S({theme:'dark', mark:'PASSO 3 · VALOR · 12'},`
+  <div class="two-col-rev">
+    <div class="right-col">
+      <div class="illus" style="max-width:300px;">${SVG_VALOR}</div>
+    </div>
+    <div class="left-col">
+      <div class="eyebrow">passo 3 · gere valor</div>
+      <h1 class="display">Explique <em>o porquê do serviço</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-petrol);max-width:44ch;margin-top:18px;">
+        Esse é o passo que <strong>justifica o preço</strong>. Quando o cliente entende o benefício real, ele para de discutir valor e começa a comparar resultado.
+      </p>
+      <div class="examples">
+        <div class="examples-title">exemplos prontos</div>
+        <ul class="examples-list">
+          <li>Além do brilho, esse processo protege a pintura por até 1 ano.</li>
+          <li>A hidratação do couro evita ressecamento e rachaduras futuras.</li>
+          <li>A cristalização melhora muito a visibilidade em dias de chuva.</li>
+          <li>Lavar o carro da forma errada gera todos os riscos que você vê aqui.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+`);
+
+// ============ 13 — Passo 4 Resultado + CTA (mantida) ============
+S({theme:'light', mark:'PASSO 4 · RESULTADO + CTA · 13'},`
+  <div class="two-col">
+    <div class="left-col">
+      <div class="eyebrow">passo 4 · resultado e convite</div>
+      <h1 class="display">Não termine <em>sem pedir a conversa</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-cream);max-width:44ch;margin-top:18px;">
+        O resultado final é a hora de pedir o <strong>modelo e o ano do carro no Direct</strong>. Não basta mostrar — peça a interação que abre a conversa. É esse pedido que transforma story em orçamento.
+      </p>
+      <div class="examples">
+        <div class="examples-title">ctas que funcionam</div>
+        <ul class="examples-list">
+          <li>Resultado entregue. Me conta: você faria esse serviço no seu carro?</li>
+          <li>Olha esse reflexo. Parece outro carro.</li>
+          <li>Quer saber quanto fica no teu? Responde aqui com modelo e ano.</li>
+          <li>Se o teu carro está assim, manda o modelo e ano que te explico as opções.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="illus" style="max-width:320px;">${SVG_DM}</div>
+    </div>
+  </div>
+`);
+
+// ============ 14 — Do story ao orçamento (mantida) ============
+S({theme:'dark', mark:'DO STORY AO ORÇAMENTO · 14'},`
+  <div class="two-col">
+    <div class="left-col">
+      <div class="eyebrow">a conversão acontece no direct</div>
+      <h1 class="display">Story atrai.<br><em>DM converte.</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-petrol);max-width:42ch;margin-top:18px;">
+        Toda sequência de stories existe para <strong>levar o seguidor a abrir o Direct</strong>. Lá começa a conversa que vira o orçamento. Sem CTA explícito, o story é só conteúdo. Com CTA, vira venda.
+      </p>
+      <ul class="dots stagger" style="margin-top:14px;">
+        <li>Finalize sempre com convite para conversa no DM.</li>
+        <li>Quando responder, peça <strong>modelo e ano do carro</strong> ainda no Direct.</li>
+        <li>Transfira para o WhatsApp só depois que entender a necessidade.</li>
+        <li>Cada DM aberto é um lead — trate como tal.</li>
+      </ul>
+    </div>
+    <div class="right-col">
+      <div class="illus" style="max-width:460px;">${SVG_CONVERSAO}</div>
+    </div>
+  </div>
+`);
+
+// ============ 15 — DIVISÓRIA "O Pulo do Gato" ============
+S({theme:'dark', mark:'SEÇÃO BÔNUS'},`
+  <div class="badge-bonus">nível avançado</div>
+  <div class="left-col" style="width:62%;">
+    <div class="divider-kicker">o pulo do gato</div>
+    <h1 class="display">Quando o básico já roda,<br><em>é aqui que você acelera</em></h1>
+    <p style="font-size:clamp(13px,1.05vw,16px);line-height:1.65;color:var(--muted-on-petrol);max-width:46ch;margin-top:18px;">
+      A jornada das páginas anteriores é a base. As próximas duas páginas são <strong>camadas avançadas</strong> — ritmo editorial e ativação de base. Aplique depois que a rotina diária estiver girando.
+    </p>
+    <ul class="dots stagger" style="margin-top:16px;max-width:46ch;">
+      <li><strong>Desafio 1</strong> — dar ritmo à semana com um tema por dia.</li>
+      <li><strong>Desafio 2</strong> — transformar clientes antigos em nova receita.</li>
+    </ul>
+  </div>
+  <div class="compass spin" style="opacity:.5;">__COMPASS__</div>
+  <div class="divider-num">★</div>
+`);
+
+// ============ 16 — Bônus A: Calendário semanal (ex-13) ============
+S({theme:'light', mark:'PULO DO GATO · DESAFIO 1'},`
+  <div class="badge-bonus">bônus · ritmo semanal</div>
+  <div class="eyebrow">um tema por dia da semana</div>
+  <h1 class="display">Um eixo claro <em>de segunda a sábado</em></h1>
+  <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-cream);max-width:80ch;margin-top:14px;">
+    Camada avançada: depois que a sequência diária já roda, dê <strong>ritmo à semana</strong> com um foco editorial por dia. Sexta é o dia mais comercial — capriche na oferta.
+  </p>
+  <div style="margin-top:3%;">
+    <div class="illus" style="max-width:920px;">${SVG_CALENDARIO}</div>
+  </div>
+  <div class="quote-block" style="margin-top:3%;max-width:80ch;">
+    Segunda mostra a dor. Sábado mostra o humano. No meio do caminho, autoridade e venda.
+  </div>
+`);
+
+// ============ 17 — Bônus B: Ativação de base (ex-15) ============
+S({theme:'dark', mark:'PULO DO GATO · DESAFIO 2'},`
+  <div class="badge-bonus">bônus · ativação de base</div>
+  <div class="two-col-rev">
+    <div class="right-col">
+      <div class="illus" style="max-width:420px;">${SVG_REATIVACAO}</div>
+    </div>
+    <div class="left-col">
+      <div class="eyebrow">um turno por semana · a engrenagem comercial</div>
+      <h1 class="display">Sua base de clientes <em>é receita esperando</em></h1>
+      <p style="font-size:clamp(13px,1.05vw,15.5px);line-height:1.65;color:var(--muted-on-petrol);max-width:44ch;margin-top:16px;">
+        Camada avançada e complementar — pertence ao mundo de pós-venda e CRM. Reserve <strong>um turno fixo por semana</strong> para girar este ciclo. Story atrai; este turno <strong>recupera e retém</strong>.
+      </p>
+      <ul class="check-list stagger" style="grid-template-columns:1fr;gap:8px;margin-top:14px;">
+        <li>Responder todas as mensagens do Direct</li>
+        <li>Follow-up de quem pediu orçamento e não fechou</li>
+        <li>Pedir avaliações no Google de quem foi atendido na semana</li>
+        <li>Reativar clientes antigos com manutenção ou novos serviços</li>
+        <li>Oferecer manutenção a quem fez vitrificação, higienização ou lavagem detalhada</li>
+      </ul>
+    </div>
+  </div>
+  <div class="footband">
+    <span class="tag">north × karpinski</span>
+    <span>guia estratégico de stories · 2026</span>
+    <span style="margin-left:auto">vamos crescer?</span>
+  </div>
+`);
+
+
+// ---- render ----
+const deck = document.getElementById('deck');
+const counter = document.getElementById('counter');
+const progFill = document.getElementById('progFill');
+const total = slides.length;
+let current = 0;
+
+slides.forEach((s, i) => {
+  const el = document.createElement('div');
+  el.className = `slide ${s.theme}`;
+  let body = s.body.replace(/__COMPASS__/g, COMPASS_SVG);
+  el.innerHTML = `<div class="pagemark">${s.mark || ''}</div>${body}`;
+  deck.insertBefore(el, document.getElementById('counter'));
+});
+
+const slideEls = Array.from(deck.querySelectorAll('.slide'));
+function pad(n){ return n < 10 ? '0'+n : ''+n; }
+function render(){
+  slideEls.forEach((el, i) => {
+    el.classList.remove('active','exit');
+    if(i === current) el.classList.add('active');
+    else if(i < current) el.classList.add('exit');
+  });
+  counter.textContent = pad(current+1) + ' / ' + pad(total);
+  progFill.style.width = ((current+1)/total*100) + '%';
+}
+function go(d){
+  const n = current + d;
+  if(n<0 || n>=total) return;
+  current = n;
+  render();
+}
+document.getElementById('navPrev').addEventListener('click', () => go(-1));
+document.getElementById('navNext').addEventListener('click', () => go(1));
+document.addEventListener('keydown', e => {
+  if(e.key==='ArrowRight' || e.key===' ') go(1);
+  if(e.key==='ArrowLeft') go(-1);
+});
+let tx=null;
+deck.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, {passive:true});
+deck.addEventListener('touchend', e => {
+  if(tx===null) return;
+  const dx = e.changedTouches[0].clientX - tx;
+  if(Math.abs(dx) > 40) go(dx<0?1:-1);
+  tx=null;
+}, {passive:true});
+render();
+</script>
+</body>
+</html>

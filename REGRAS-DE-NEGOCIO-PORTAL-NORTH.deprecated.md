@@ -1,4 +1,10 @@
-# Regras de Negócio — Portal North
+> # ⚠️ DOCUMENTO DEPRECIADO
+>
+> Este arquivo foi **substituído** por [`docs/REQUISITOS-PORTAL-NORTH.md`](docs/REQUISITOS-PORTAL-NORTH.md), o documento **definitivo** de requisitos do projeto (v2, 2026-07-02).
+>
+> Mantido apenas como referência histórica das regras da v1. **Não usar para decisões de deploy ou implementação** — o conteúdo aqui não cobre o gap de autenticação do briefing, o modelo de custo do Supabase free tier, o caminho de escala em Docker, nem as divergências design↔código mapeadas na v2.
+
+# Regras de Negócio — Portal North (v1 — DEPRECIADO)
 
 ## 1. Objetivo do sistema
 

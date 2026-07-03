@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { apiError, safeTokenEquals } from "@/lib/api";
+import { apiError } from "@/lib/api";
 import { getClient, supabaseRest } from "@/lib/supabase";
+import { requireAdmin } from "@/lib/supabase/auth";
 import {
   HttpError,
   adminPatchSchema,
@@ -12,15 +13,9 @@ import {
   validateSlug,
 } from "@/lib/validation";
 
-export const runtime = "edge";
-
 export async function PATCH(request: Request, context: { params: Promise<{ slug: string }> }) {
   try {
-    const expectedToken = process.env.NORTH_ADMIN_TOKEN;
-    const receivedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-    if (!expectedToken || !(await safeTokenEquals(expectedToken, receivedToken))) {
-      return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
-    }
+    await requireAdmin();
 
     const { slug } = await context.params;
     const client = await getClient(validateSlug(slug), true);

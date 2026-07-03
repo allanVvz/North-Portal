@@ -17,6 +17,7 @@ out/
 
 # Local agent/runtime files
 .claude/
+.codex-run/
 .git-alt/
 memory.md
 *.log
