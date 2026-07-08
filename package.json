@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
     "seed:client": "node scripts/seed-client.mjs",
     "update:client": "node scripts/update-client.mjs",
     "create:user": "node scripts/create-user.mjs"
@@ -21,11 +23,13 @@
     "zod": "3.24.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "22.15.30",
     "@types/react": "19.1.6",
     "@types/react-dom": "19.1.5",
     "eslint": "^9.30.0",
     "eslint-config-next": "15.5.7",
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "vitest": "^4.1.9"
   }
 }

@@ -1,11 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-// Routes reachable without a session.
-const PUBLIC_PREFIXES = ["/login", "/logout", "/api/auth", "/auth"];
+// Routes reachable without a session (the public marketing site + auth).
+const PUBLIC_PREFIXES = [
+  "/",
+  "/login",
+  "/logout",
+  "/api/auth",
+  "/auth",
+  "/planos",
+  "/como-funciona",
+  "/quem-somos",
+  "/politica-de-privacidade",
+  "/termos-de-uso",
+  "/politica-de-cookies",
+  "/recuperar-senha",
+];
 
 function isPublic(pathname: string) {
-  return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/") || pathname === p);
+  return PUBLIC_PREFIXES.some((p) => pathname === p || (p !== "/" && pathname.startsWith(p + "/")));
 }
 
 export async function middleware(request: NextRequest) {
@@ -21,9 +34,11 @@ export async function middleware(request: NextRequest) {
   const homeFor = (r?: string, slug?: string) =>
     r === "admin" ? "/admin" : slug ? `/${slug}` : "/login";
 
-  // Public pages: send logged-in users to their home.
+  // Public pages: "/" always shows the landing page, even for logged-in users
+  // (they can navigate to their area via the header). Only /login redirects
+  // away when already authenticated, since the form is moot at that point.
   if (isPublic(pathname)) {
-    if (user && (pathname === "/login" || pathname === "/")) {
+    if (user && pathname === "/login") {
       return NextResponse.redirect(new URL(homeFor(role, clientSlug), request.url));
     }
     return response;
@@ -32,13 +47,8 @@ export async function middleware(request: NextRequest) {
   // Everything below requires a session.
   if (!user) {
     const url = new URL("/login", request.url);
-    if (pathname !== "/") url.searchParams.set("next", pathname);
+    url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
-  }
-
-  // Root → role home.
-  if (pathname === "/") {
-    return NextResponse.redirect(new URL(homeFor(role, clientSlug), request.url));
   }
 
   // Admin area requires admin role.

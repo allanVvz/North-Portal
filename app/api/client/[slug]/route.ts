@@ -8,8 +8,9 @@ export async function GET(_: Request, context: { params: Promise<{ slug: string 
   try {
     const { slug } = await context.params;
     const safeSlug = validateSlug(slug);
-    await requireClientAccess(safeSlug);
-    return NextResponse.json(await getPortalPayload(safeSlug));
+    const session = await requireClientAccess(safeSlug);
+    const payload = await getPortalPayload(safeSlug);
+    return NextResponse.json({ ...payload, sessionUserId: session.userId, sessionLevel: session.level });
   } catch (error) {
     return apiError(error);
   }

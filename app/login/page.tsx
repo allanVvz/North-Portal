@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useSiteTheme } from "../useSiteTheme";
 
 function LoginInner() {
   const router = useRouter();
@@ -13,6 +14,7 @@ function LoginInner() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [theme, toggleTheme] = useSiteTheme();
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -34,24 +36,32 @@ function LoginInner() {
   }
 
   return (
-    <main className="auth-screen">
+    <main className="auth-screen" data-theme={theme} suppressHydrationWarning>
+      <span className="auth-ring" aria-hidden />
       <div className="auth-blob a" aria-hidden />
       <div className="auth-blob b" aria-hidden />
+      <button
+        type="button"
+        className="auth-theme-toggle"
+        onClick={toggleTheme}
+        aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
+        title={theme === "light" ? "Tema escuro" : "Tema claro"}
+      >
+        {theme === "light" ? "☾" : "☀"}
+      </button>
       <form className="auth-card" onSubmit={onSubmit}>
         <div className="auth-brand">
-          <span className="auth-mark">n</span>
-          <span>
-            <strong className="wordmark">north</strong>
-            <em>Portal</em>
-          </span>
+          <span className="auth-mark" aria-hidden />
+          <strong className="wordmark">north</strong>
+          <em>Portal</em>
         </div>
-        <h1 className="serif auth-title">
-          Bem-vindo <span className="accent">de volta</span>
+        <h1 className="auth-title">
+          Entrar no <span className="accent">portal</span>
         </h1>
-        <p className="auth-lead">Acesse o portal para acompanhar briefing, materiais e resultados.</p>
+        <p className="auth-lead">Acesse sua área North com clareza.</p>
 
         <label className="auth-field">
-          <span>Email</span>
+          <span>E-mail</span>
           <input
             type="email"
             autoComplete="email"
@@ -76,10 +86,16 @@ function LoginInner() {
         {error ? <p className="auth-error">{error}</p> : null}
 
         <button className="auth-submit" type="submit" disabled={busy}>
-          {busy ? "Entrando..." : "Entrar"}
+          {busy ? "Entrando..." : "Entrar →"}
         </button>
-        <p className="auth-help">Esqueceu a senha? Fale com a North para redefinir.</p>
+        <div className="auth-foot">
+          <a className="auth-help" href="/recuperar-senha" style={{ margin: 0 }}>
+            Esqueceu a senha?
+          </a>
+          <span className="auth-secure">Acesso seguro · RLS</span>
+        </div>
       </form>
+      <span className="auth-pagefoot">North Portal — agência de marketing &amp; tráfego</span>
     </main>
   );
 }

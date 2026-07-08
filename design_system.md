@@ -1,7 +1,7 @@
 # North Portal — Design System
 
 > Fonte da verdade do design. Estética **v4 validada**: editorial, sofisticada, petróleo + sand/cream + sage-teal, tipografia Fraunces (serif) + Inter. **Glassmorphism é pilar de marca.** Tema **claro é o principal**; o **escuro** (a própria v4) fica preparado.
-> Implementação no Figma `Plataforma North` (fileKey `dqw8Ddrdfi6D8xjdkWwVo8`). Referência viva da bússola/estética: página `Front atual · v4 - codex` (capa `148:3`). Tokens-base: página `North DS · Tokens & Components` (`220:3`).
+> Implementação no Figma **`Plataforma North · prod`** (fileKey **`I1nVg0mJH169Mv7IdVC67M`**). O arquivo antigo `dqw8Ddrdfi6D8xjdkWwVo8` está DESATUALIZADO — não usar. Páginas atuais do protótipo: **Público/Login** `288:2` (login `288:3`), **Cliente (Bússola)** `269:2`, **Admin (Operacional)** `295:2` (Clientes `295:3`, Cadastro `297:2`); espelhos L↔D `365:2` (Admin) · `365:3` (Cliente) · `365:4` (Landing). **O tema CLARO "Névoa Sage" é o principal** (o front local ainda em petróleo escuro é a versão legada a ser migrada).
 
 ---
 
@@ -90,5 +90,8 @@ Botões (Solid/Outline/Ghost), Inputs, Pills de status/prioridade, Tags, Avatare
 ## 8. Regra de visibilidade Admin × Cliente
 O Kanban é a fonte da operação no **Admin**. O **Cliente nunca vê o board** — apenas os cards liberados (`clientVisible`) e seu estado, refletidos nas páginas editoriais (ex.: card de criativo aguardando → aparece em Feedbacks; card de plano → Plano de Ação).
 
-## 9. Páginas no Figma (atual)
-- `North SaaS · Design System` (240:2) · `North SaaS · Telas` (248:2) · `North · Cliente (Bússola)` (269:2). Referência v4: `148:2/148:3`. Tokens v4: `220:3`.
+## 9. Páginas no Figma (atual — arquivo prod `I1nVg0mJH169Mv7IdVC67M`)
+- **Público/Auth** `288:2` — Login liquid glass `288:3`, Landing `293:2`, Políticas/Termos.
+- **Cliente (Bússola)** `269:2` — Home/bússola `269:3`, Briefing `270:2`, Manual (deck), Central Comercial, Acessos & Pastas, Feedbacks, Documentos, Agenda, Time North, Plano de Ação, Dashboard.
+- **Admin (Operacional)** `295:2` — Clientes `295:3`, Cadastro `297:2`, Tarefas/Kanban (`358:2` Quadro · `358:72` Tabela · `358:142` Detalhe · `374:2` Calendário + modais `462:189/263/337/411`), Aprovações `299:2`, Documentos `311:2`, Configurações `299:133`/`323:2`.
+- **Espelhos L↔D:** Admin `365:2` · Cliente `365:3` · Landing `365:4`.

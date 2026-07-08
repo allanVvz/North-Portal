@@ -56,8 +56,11 @@ select c.id, t.type::public.task_type, t.title, t.status::public.task_status, t.
 from public.clients c
 cross join (values
   ('criativo','Capas de Reels - Lancamento delivery','revisao','alta','Ana', '2026-07-08', true, 'Serie de 3 capas para o lancamento.'),
-  ('agendamento','Campanha de delivery - Junho','aprovacao','media','Marcos', '2026-07-03', true, 'Aprovar copy e segmentacao.'),
-  ('desempenho','Relatorio mensal','em_producao','media','North', '2026-07-15', false, 'Consolidar metricas do mes.')
+  ('agendamento','Campanha de delivery - Junho','aprovacao','media','Marcos', '2026-07-03', false, 'Aprovar copy e segmentacao internamente antes de mandar ao cliente.'),
+  ('criativo','Estruturar pastas no Google Drive','aprovacao','baixa','Ana', '2026-07-04', true, 'Aguardando aprovacao do cliente.'),
+  ('desempenho','Relatorio mensal','em_producao','media','North', '2026-07-15', false, 'Consolidar metricas do mes.'),
+  ('criativo','Reels de bastidor - vitrificacao','revisao','media','Ana', '2026-07-10', true, 'Revisor validando corte e legenda antes de mandar para aprovacao.'),
+  ('agendamento','Post de aniversario da loja','aprovado','baixa','Marcos', '2026-07-05', true, 'Aprovado pelo cliente, aguardando data de publicacao.')
 ) as t(type, title, status, priority, assignee, due_date, client_visible, description)
 where c.slug = 'karpinski'
 on conflict do nothing;
