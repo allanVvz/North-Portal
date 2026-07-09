@@ -10,23 +10,21 @@ type FlowDef = {
   label: string;
   adminKey: keyof ClientFlowFlags;
   clienteKey: keyof ClientFlowFlags;
-  kanbanKey: keyof ClientFlowFlags;
   tabKey: keyof AdminTabsVisibility;
 };
 
 const FLOWS: FlowDef[] = [
-  { key: "revisao", label: "Revisão", adminKey: "revisaoAdmin", clienteKey: "revisaoCliente", kanbanKey: "revisaoKanban", tabKey: "revisoesTabVisible" },
-  { key: "aprovacao", label: "Aprovação", adminKey: "aprovacaoAdmin", clienteKey: "aprovacaoCliente", kanbanKey: "aprovacaoKanban", tabKey: "aprovacoesTabVisible" },
+  { key: "revisao", label: "Revisão", adminKey: "revisaoAdmin", clienteKey: "revisaoCliente", tabKey: "revisoesTabVisible" },
+  { key: "aprovacao", label: "Aprovação", adminKey: "aprovacaoAdmin", clienteKey: "aprovacaoCliente", tabKey: "aprovacoesTabVisible" },
 ];
 
-// Safe hide flow for Revisão/Aprovação. Admin/Cliente/Kanban are per-client
-// (Admin-off cascades Cliente-off, clears any assigned revisor/aprovador;
-// Kanban alone decides whether the board shows the column, moving stranded
-// cards back to "Em produção" when turned off). "Aba no menu" is the odd one
-// out — it's a single global switch (not per-client), since the admin nav is
-// shared across every client; it's shown here, in the same row, purely so
-// the two Revisão/Aprovação controls read as one block, but it applies to
-// every client at once, not just the one selected below.
+// Safe hide flow for Revisão/Aprovação — just 2 toggles per client (Admin,
+// Cliente; admin-off cascades cliente-off, clears any assigned
+// revisor/aprovador, and moves stranded cards back to "Em produção") plus 2
+// global toggles shown once below (not per client) for whether the
+// Revisões/Aprovações tabs even exist in the admin nav. The Kanban column
+// itself has no toggle at all — it's automatic, visible only while at least
+// one card actually sits in that stage.
 export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
   const [slug, setSlug] = useState(clients[0]?.slug ?? "");
   const [flags, setFlags] = useState<ClientFlowFlags | null>(null);
@@ -86,7 +84,19 @@ export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
   return (
     <div className="set-card">
       <h2 className="set-h">Etapas</h2>
-      <p className="admin-sub">Ative ou desative Revisão e Aprovação — por cliente (Admin/Cliente/Coluna) e no menu do admin (global).</p>
+      <p className="admin-sub">Ative ou desative Revisão e Aprovação — por cliente (Admin/Cliente) e no menu do admin (global). A coluna do Kanban é automática: some sozinha quando não há mais cards nela.</p>
+
+      {tabs ? (
+        <div className="set-etapas-global">
+          <strong className="set-etapas-label">Abas no menu (todo o admin)</strong>
+          {FLOWS.map((flow) => (
+            <label className="admin-toggle" key={flow.key}>
+              <input type="checkbox" checked={tabs[flow.tabKey]} onChange={(e) => saveTab({ [flow.tabKey]: e.target.checked })} />
+              <span className="sw" /><span>{flow.label}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
 
       <label className="admin-field set-etapas-client">
         <span>Cliente</span>
@@ -95,9 +105,9 @@ export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
         </select>
       </label>
 
-      {loading || !tabs ? <p className="admin-sub">Carregando…</p> : null}
+      {loading ? <p className="admin-sub">Carregando…</p> : null}
 
-      {flags && tabs && !loading ? (
+      {flags && !loading ? (
         <div className="set-etapas-list">
           {FLOWS.map((flow) => (
             <div className="set-etapas-row" key={flow.key}>
@@ -119,22 +129,8 @@ export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
                 />
                 <span className="sw" /><span>Ativo para Cliente</span>
               </label>
-              <label className="admin-toggle">
-                <input
-                  type="checkbox"
-                  checked={flags[flow.kanbanKey]}
-                  onChange={(e) => save({ [flow.kanbanKey]: e.target.checked })}
-                />
-                <span className="sw" /><span>Coluna do Kanban</span>
-              </label>
-              <label className="admin-toggle set-etapas-tabtoggle">
-                <input type="checkbox" checked={tabs[flow.tabKey]} onChange={(e) => saveTab({ [flow.tabKey]: e.target.checked })} />
-                <span className="sw" /><span>Aba no menu (global)</span>
-              </label>
               <p className="admin-sub set-etapas-note">
-                Desativar para Admin remove o {flow.key === "revisao" ? "revisor" : "aprovador"} atribuído e desativa também para o Cliente.
-                Desativar a Coluna do Kanban esconde a coluna de {flow.label} do quadro e move os cards que estiverem nela para Em produção — funciona independente dos outros.
-                "Aba no menu" não é por cliente: vale para todo mundo que acessa o admin.
+                Desativar para Admin remove o {flow.key === "revisao" ? "revisor" : "aprovador"} atribuído, desativa também para o Cliente, e move os cards que estiverem em {flow.label} para Em produção.
               </p>
             </div>
           ))}

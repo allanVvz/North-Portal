@@ -41,7 +41,7 @@ type Draft = {
   plataforma: string;
 };
 
-function draftFrom(task: TaskRecord | null, initialStatus: TaskStatus | undefined, initialSlug: string): Draft {
+function draftFrom(task: TaskRecord | null, initialStatus: TaskStatus | undefined, initialSlug: string, initialAssignee?: string): Draft {
   const p = (task?.payload ?? {}) as Record<string, unknown>;
   const str = (k: string) => (typeof p[k] === "string" ? (p[k] as string) : "");
   return {
@@ -51,7 +51,7 @@ function draftFrom(task: TaskRecord | null, initialStatus: TaskStatus | undefine
     subtype: task?.subtype ?? "",
     status: task?.status ?? initialStatus ?? "backlog",
     priority: task?.priority ?? "media",
-    assignee: task?.assignee ?? "",
+    assignee: task?.assignee ?? initialAssignee ?? "",
     reviewer_id: task?.reviewer_id ?? "",
     approver_id: task?.approver_id ?? "",
     plan_id: task?.plan_id ?? "",
@@ -152,6 +152,7 @@ export default function TaskModal({
   clients,
   clientName,
   initialStatus,
+  initialAssignee,
   adminReviewers,
   clientReviewers,
   planCandidates = [],
@@ -169,6 +170,7 @@ export default function TaskModal({
   clients: { slug: string; name: string }[];
   clientName: string;
   initialStatus?: TaskStatus;
+  initialAssignee?: string;
   adminReviewers: ReviewerCandidate[];
   clientReviewers: ReviewerCandidate[];
   planCandidates?: { id: string; title: string }[];
@@ -180,7 +182,7 @@ export default function TaskModal({
   onSaved: (task: TaskRecord, isNew: boolean) => void;
   onDeleted: (id: string) => void;
 }) {
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug));
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee));
   const [liveTask, setLiveTask] = useState<TaskRecord | null>(task);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);

@@ -1707,7 +1707,7 @@ body.menu-open {
 .admin-main { flex: 1 1 auto; min-width: 0; overflow-x: hidden; }
 .admin-page { max-width: 1180px; margin: 0 auto; padding: clamp(24px, 4vw, 44px) clamp(20px, 4vw, 44px); }
 .admin-narrow { max-width: 1180px; }
-.admin-page.kb-wide { max-width: 1900px; }
+.admin-page.kb-wide { max-width: none; }
 .admin-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
 .admin-head-actions { display: inline-flex; gap: 8px; }
 .admin-crumb { font-size: 13px; color: var(--a-muted); margin: 0 0 6px; }
@@ -2060,29 +2060,46 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 
 /* ---- Kanban board ---- */
 .kb { display: flex; flex-direction: column; gap: 16px; }
-.kb-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.kb-clientpick { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--a-muted); }
-.kb-clientpick select { width: auto; min-width: 200px; }
-.kb-visible-count { font-size: 12.5px; color: var(--a-teal-text); background: var(--a-teal-soft); padding: 5px 11px; border-radius: 999px; }
+/* Single toolbar row: view tabs, composite filter, loading spinner, the
+   contextual Kanban/Responsável ↔ Mês/Semana toggle, + Tarefa, attributes. */
+.kb-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .kb-spacer { flex: 1; }
-.kb-viewtabs { display: inline-flex; background: var(--a-surface2); border: 1px solid var(--a-border); border-radius: 999px; padding: 3px; }
+.kb-viewtabs { display: inline-flex; flex-shrink: 0; background: var(--a-surface2); border: 1px solid var(--a-border); border-radius: 999px; padding: 3px; }
 .kb-viewtabs button { background: none; border: none; cursor: pointer; font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 999px; color: var(--a-muted); }
 .kb-viewtabs button.on { background: var(--a-surface); color: var(--a-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(12,44,44,.08); }
 
-.kb-board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; align-items: start; }
+/* Spinning ring that always reserves its space (opacity/visibility toggle,
+   never display:none) so the toolbar/cards never resize when loading starts
+   or ends — that was the layout-shift bug being fixed. */
+.kb-loadspin {
+  flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid var(--a-border); border-top-color: var(--a-teal);
+  opacity: 0; visibility: hidden; transition: opacity .2s ease;
+}
+.kb-loadspin.on { opacity: 1; visibility: visible; animation: kb-spin .7s linear infinite; }
+@keyframes kb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .kb-loadspin.on { animation-duration: 1.4s; }
+}
+
+.kb-modetoggle { display: inline-flex; flex-shrink: 0; gap: 2px; background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 999px; padding: 2px; }
+.kb-modetoggle button { border: none; background: none; font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; color: var(--a-muted); }
+.kb-modetoggle button.on { background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 600; }
+
+.kb-board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; align-items: start; overflow-x: auto; padding-bottom: 4px; }
 .kb-col { background: var(--a-surface2); border: 1px solid var(--a-border); border-radius: 14px; padding: 14px; min-height: 120px; }
 .kb-col-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--a-sec); }
 .kb-col-head em { font-style: normal; font-size: 11px; color: var(--a-muted); background: var(--a-inset); padding: 1px 7px; border-radius: 999px; }
 .kb-col-body { display: flex; flex-direction: column; gap: 8px; }
 .kb-card { background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 11px; padding: 14px; cursor: pointer; box-shadow: 0 1px 2px rgba(12,44,44,.04); position: relative; }
 .kb-card:hover { border-color: var(--a-teal); }
-.kb-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.kb-card-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; row-gap: 6px; margin-bottom: 8px; }
 .kb-type { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; text-transform: uppercase; }
 .kb-type.t-criativo { background: var(--a-teal-soft); color: var(--a-teal-text); }
 .kb-type.t-agendamento { background: var(--a-purple-soft); color: var(--a-purple-text); }
 .kb-type.t-desempenho { background: var(--a-blue-soft); color: var(--a-blue-text); }
 .kb-eye { color: var(--a-teal); font-size: 13px; }
-.kb-card-client { font-size: 10.5px; color: var(--a-muted); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; }
+.kb-card-client { font-size: 10.5px; color: var(--a-muted); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; white-space: nowrap; flex-shrink: 0; }
 .kb-card-title { margin: 0 0 10px; font-size: 14px; color: var(--a-ink); line-height: 1.3; }
 .kb-card-progress { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
 .kb-card-progress-track { flex: 1; height: 5px; border-radius: 999px; background: var(--a-inset); overflow: hidden; }
@@ -2133,11 +2150,6 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .admin-btn.ghost.danger { color: var(--a-danger); }
 .admin-btn.ghost.danger:hover { background: rgba(194,96,78,.1); }
 
-/* filter bar */
-.kb-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-select.kb-filter { width: auto; min-width: 150px; }
-.kb-search { width: min(280px, 100%); }
-
 /* calendar view */
 .kb-cal { display: flex; flex-direction: column; gap: 12px; }
 .kb-cal-bar { display: flex; align-items: center; gap: 10px; }
@@ -2176,7 +2188,6 @@ select.kb-filter { width: auto; min-width: 150px; }
 .tone-neutral { background: var(--a-inset); color: var(--a-sec); }
 
 @media (max-width: 900px) {
-  .kb-board { grid-template-columns: repeat(2, 1fr); }
   .kb-modal-row { grid-template-columns: 1fr 1fr; }
   .kb-cal-cell { min-height: 76px; }
   .kb-cal-wd { font-size: 10px; }
@@ -2298,7 +2309,6 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .set-appearance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .set-h3 { margin: 0 0 2px; font-size: 14.5px; font-weight: 600; color: var(--a-ink); }
 .set-visibility-divider { height: 1px; background: var(--a-border); margin: 18px 0; }
-.set-etapas-tabtoggle { border-top: 1px dashed var(--a-border); padding-top: 10px; margin-top: 2px; flex-basis: 100%; }
 .set-theme-toggle { display: inline-flex; background: var(--a-surface2); border: 1px solid var(--a-border); border-radius: 999px; padding: 3px; flex-shrink: 0; }
 .set-theme-toggle button { background: none; border: none; cursor: pointer; font: inherit; font-size: 13px; padding: 7px 18px; border-radius: 999px; color: var(--a-muted); }
 .set-theme-toggle button.on { background: var(--a-surface); color: var(--a-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(12,44,44,.08); }
@@ -2312,7 +2322,17 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 
 /* ==== Kanban: layout with right-side detail panel ==== */
 .kb-layout { display: flex; align-items: flex-start; gap: 18px; }
-.kb-main { flex: 1; min-width: 0; }
+.kb-main { position: relative; flex: 1; min-width: 0; }
+/* Soft ambient wash behind the board — subtle, theme-aware (uses the same
+   teal tokens that already flip for dark mode), sits behind everything. */
+.kb-main::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  inset: -28px -28px 0 -28px;
+  background:
+    radial-gradient(900px 340px at 12% -8%, var(--a-teal-soft) 0%, transparent 65%),
+    radial-gradient(700px 300px at 92% 10%, var(--a-teal-soft) 0%, transparent 60%);
+  opacity: .55;
+}
 .kb-card.sel, .kb-table tbody tr.sel { outline: 2px solid var(--a-teal); outline-offset: -2px; }
 .kb-table tbody tr.sel { background: var(--a-teal-soft); }
 
@@ -2662,9 +2682,6 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .tm-member-add { width: 100%; }
 
 /* Calendar: month/week toggle + week view (plan bars + timed events) */
-.kb-calmode { display: inline-flex; gap: 2px; background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 999px; padding: 2px; }
-.kb-calmode button { border: none; background: none; font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; color: var(--a-muted); }
-.kb-calmode button.on { background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 600; }
 
 .kb-week { display: flex; flex-direction: column; gap: 8px; }
 .kb-week-head { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
@@ -2691,13 +2708,41 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 
 /* ===== Kanban/task epic additions (search bar, card pills, task modal v2, visibility, etapas) ===== */
 
-/* ---- Kanban search bar (replaces the old Tipo/Prioridade <select> filters) ---- */
-.kb-searchbar { position: relative; flex: 1; min-width: 220px; max-width: 420px; }
-.kb-searchbar-input {
-  width: 100%; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface);
-  padding: 9px 30px 9px 16px; font: inherit; font-size: 13.5px; color: var(--a-ink);
+/* ---- Kanban composite filter (attribute → value, AND-composable chips) ---- */
+.kb-searchbar { position: relative; flex: 1 1 320px; min-width: 260px; max-width: 640px; }
+.kb-searchbar-box {
+  position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%;
+  border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface);
+  padding: 6px 14px; cursor: text;
 }
-.kb-searchbar-input:focus { outline: none; border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
+.kb-searchbar-box:focus-within { border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
+.kb-searchbar-input {
+  flex: 1 1 120px; min-width: 100px; border: none; background: none; font: inherit;
+  font-size: 13.5px; color: var(--a-ink); padding: 3px 2px;
+}
+.kb-searchbar-input:focus { outline: none; }
+.kb-filterchip {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  background: var(--a-teal-soft); color: var(--a-teal-text); font-size: 12px; font-weight: 600;
+  padding: 4px 5px 4px 10px; border-radius: 999px;
+}
+.kb-filterchip b { font-weight: 700; }
+.kb-filterchip button {
+  border: none; background: rgba(0,0,0,.08); color: inherit; width: 16px; height: 16px;
+  border-radius: 50%; font-size: 10px; line-height: 1; cursor: pointer; display: inline-grid; place-items: center;
+}
+.kb-filterchip button:hover { background: rgba(0,0,0,.18); }
+.kb-searchbar-panelhead {
+  display: flex; align-items: center; gap: 8px; margin: 0; font-size: 11px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted);
+}
+.kb-searchbar-back { border: none; background: none; color: var(--a-teal-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; }
+.kb-searchbar-attrlist { display: flex; flex-direction: column; gap: 2px; }
+.kb-searchbar-attr {
+  display: flex; align-items: center; gap: 10px; text-align: left; border: none; background: none;
+  padding: 8px 10px; border-radius: 10px; cursor: pointer; font: inherit; font-size: 13px; color: var(--a-ink);
+}
+.kb-searchbar-attr:hover { background: var(--a-hover); }
 .kb-searchbar-clear {
   position: absolute; top: 50%; right: 6px; transform: translateY(-50%); z-index: 1;
   width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--a-inset); color: var(--a-muted);
@@ -2839,7 +2884,8 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .attrcfg-prefs-hint { margin: 2px 4px 0; }
 
 /* ---- Configurações · Etapas (per-client Revisão/Aprovação safe-hide) ---- */
-.set-etapas-client { max-width: 320px; }
+.set-etapas-global { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 14px 16px; margin: 14px 0 4px; border: 1px solid var(--a-border); background: var(--a-inset); border-radius: 12px; }
+.set-etapas-client { max-width: 320px; margin-top: 4px; }
 .set-etapas-list { display: flex; flex-direction: column; gap: 16px; margin-top: 18px; }
 .set-etapas-row { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 12px; }
 .set-etapas-label { flex-basis: 100%; font-size: 15px; color: var(--a-ink); }

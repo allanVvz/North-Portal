@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AttributesConfigModal from "./AttributesConfigModal";
-import KanbanSearchBar from "./KanbanSearchBar";
+import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
 import { useAttrVisibility } from "./kanbanAttrs";
@@ -10,18 +10,20 @@ import { useSidebarEnabledPref } from "./kanbanPrefs";
 import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone } from "./kanbanShared";
 import { kindDef, kindLabel, kindTone, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
-import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
+import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 
 type ClientLite = { slug: string; name: string };
 type View = "quadro" | "tabela" | "calendario";
-type ModalState = { mode: "new"; initialStatus?: TaskStatus } | { mode: "edit"; taskId: string } | null;
-// clientName/clientSlug are only populated when "Todos" (slug === "") is selected.
+type BoardMode = "status" | "responsavel";
+type ModalState =
+  | { mode: "new"; initialStatus?: TaskStatus; initialAssignee?: string }
+  | { mode: "edit"; taskId: string }
+  | null;
+// clientName/clientSlug are attached by the API for every task now that the
+// board always loads the full cross-client feed.
 type BoardRow = TaskRecord & { clientName?: string; clientSlug?: string };
 
-// Sentinel for the "Outros" filter (tasks with no client) — not a real slug,
-// never sent to the API as-is (translated to the ?unassigned=1 query / a
-// null client_id on create).
-const NO_CLIENT = "__none__";
+const SEM_RESPONSAVEL = "Sem responsável";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MES_SHORT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -79,20 +81,19 @@ function fmtDue(value: string | null): string {
 }
 
 export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
-  const [slug, setSlug] = useState("");
   const [tasks, setTasks] = useState<BoardRow[]>([]);
   const [adminReviewers, setAdminReviewers] = useState<ReviewerCandidate[]>([]);
   const [flowFlags, setFlowFlags] = useState<ClientFlowFlags | null>(null);
   const [clientReviewers, setClientReviewers] = useState<ReviewerCandidate[]>([]);
   const [view, setView] = useState<View>("quadro");
+  const [boardMode, setBoardMode] = useState<BoardMode>("status");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalState, setModalState] = useState<ModalState>(null);
   const [attrCfgOpen, setAttrCfgOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [fKind, setFKind] = useState<string>("");
-  const [fPrio, setFPrio] = useState<TaskPriority | "">("");
+  const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
   const today = useMemo(() => new Date(), []);
   const [cal, setCal] = useState(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
   const [calMode, setCalMode] = useState<"mes" | "semana">("mes");
@@ -109,21 +110,13 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
       .catch(() => {});
   }, []);
 
-  const clientName = slug === NO_CLIENT ? "Outros" : clients.find((c) => c.slug === slug)?.name ?? "";
-  // The real client slug for API purposes — "" both for "Todos" and "Outros"
-  // (neither is a real client to fetch/attach a task to).
-  const effectiveSlug = slug === NO_CLIENT ? "" : slug;
-
-  // s === "" means "Todos os clientes" — a cross-client board feed.
-  // s === NO_CLIENT means "Outros" — tasks with no client at all.
-  const load = useCallback(async (s: string) => {
+  // The board always loads the full cross-client feed now — Cliente is just
+  // another composable filter (see KanbanSearchBar), not a fetch scope.
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const url = s === NO_CLIENT
-        ? "/api/admin/tasks?unassigned=1"
-        : s ? `/api/admin/tasks?slug=${encodeURIComponent(s)}` : "/api/admin/tasks";
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetch("/api/admin/tasks", { cache: "no-store" });
       if (!res.ok) throw new Error();
       const data = await res.json();
       setTasks(data.tasks ?? []);
@@ -153,27 +146,42 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     } catch { setFlowFlags(null); }
   }, []);
 
-  useEffect(() => {
-    void load(slug); setSelectedId(null); setModalState(null);
-  }, [slug, load]);
+  useEffect(() => { void load(); }, [load]);
 
   // Keeps the board in sync when a client approves/requests adjustments from
   // the portal (or another admin tab moves a card), without a manual refresh.
-  useTaskRealtime(useCallback(() => { void load(slug); }, [load, slug]));
+  useTaskRealtime(useCallback(() => { void load(); }, [load]));
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return tasks.filter((t) => {
-      if (fKind && t.kind !== fKind) return false;
-      if (fPrio && t.priority !== fPrio) return false;
+      if (!taskMatchesFilters(t, activeFilters)) return false;
       if (needle && !(`${t.title} ${t.assignee ?? ""} ${t.description ?? ""}`.toLowerCase().includes(needle))) return false;
       return true;
     });
-  }, [tasks, q, fKind, fPrio]);
+  }, [tasks, activeFilters, q]);
 
   const byStatus = useMemo(() => {
     const map: Record<string, BoardRow[]> = Object.fromEntries(COLUMNS.map((c) => [c.status, []]));
     for (const t of filtered) map[t.status].push(t);
+    return map;
+  }, [filtered]);
+
+  // Responsável mode: one column per distinct assignee among the filtered
+  // tasks — brand new names show up as a new column automatically the moment
+  // a task using them is created/saved, since this is just derived from state.
+  const responsavelColumns = useMemo(() => {
+    const names = new Set<string>();
+    for (const t of filtered) names.add(t.assignee?.trim() || SEM_RESPONSAVEL);
+    return Array.from(names).sort((a, b) => (a === SEM_RESPONSAVEL ? 1 : b === SEM_RESPONSAVEL ? -1 : a.localeCompare(b)));
+  }, [filtered]);
+  const byAssignee = useMemo(() => {
+    const map = new Map<string, BoardRow[]>();
+    for (const t of filtered) {
+      const key = t.assignee?.trim() || SEM_RESPONSAVEL;
+      const list = map.get(key);
+      if (list) list.push(t); else map.set(key, [t]);
+    }
     return map;
   }, [filtered]);
 
@@ -255,26 +263,25 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
 
   const selectedTask = selectedId ? tasks.find((t) => t.id === selectedId) ?? null : null;
   const editingTask = modalState?.mode === "edit" ? tasks.find((t) => t.id === modalState.taskId) ?? null : null;
-  // In "Todos"/"Outros" mode there's no single selected client — fall back to
-  // the task's own client (attached by listAllTasks) for the panel/modal labels.
-  const panelClientName = effectiveSlug ? clientName : (selectedTask?.clientName ?? "Outros");
-  const modalClientName = effectiveSlug ? clientName : (editingTask?.clientName ?? "Outros");
-  const modalSlug = effectiveSlug || editingTask?.clientSlug || "";
+  const panelClientName = selectedTask?.clientName ?? "Outros";
+  const modalClientName = editingTask?.clientName ?? "Outros";
+  const modalSlug = editingTask?.clientSlug ?? "";
 
-  // Reviewer candidates are per-client — in "Todos"/"Outros" mode, resolve
-  // them from whichever task is currently open (panel or modal) instead of `slug`.
-  const reviewerSlug = effectiveSlug || selectedTask?.clientSlug || editingTask?.clientSlug || "";
+  // Reviewer candidates are per-client — resolved from whichever task is
+  // currently open (panel or modal); there's no board-level client scope anymore.
+  const reviewerSlug = selectedTask?.clientSlug || editingTask?.clientSlug || "";
   useEffect(() => { void loadReviewers(reviewerSlug); void loadFlowFlags(reviewerSlug); }, [reviewerSlug, loadReviewers, loadFlowFlags]);
 
-  // Column hiding is a board-level (per selected client) concern — only
-  // meaningful when one specific client is selected, never in "Todos" mode
-  // where the shared board spans every client's cards.
+  // Revisão/Aprovação are the only columns that can disappear, and it's fully
+  // automatic (no flag, no async fetch to wait on): a column exists iff at
+  // least one already-loaded card currently sits in that status.
   const visibleColumns = useMemo(() => {
-    if (!slug || !flowFlags) return COLUMNS;
-    return COLUMNS.filter(
-      (c) => (c.status !== "revisao" || flowFlags.revisaoKanban) && (c.status !== "aprovacao" || flowFlags.aprovacaoKanban),
-    );
-  }, [slug, flowFlags]);
+    const hasRevisao = tasks.some((t) => t.status === "revisao");
+    const hasAprovacao = tasks.some((t) => t.status === "aprovacao");
+    return COLUMNS.filter((c) => (c.status !== "revisao" || hasRevisao) && (c.status !== "aprovacao" || hasAprovacao));
+  }, [tasks]);
+
+  const gridColCount = boardMode === "status" ? visibleColumns.length : responsavelColumns.length;
 
   // ---- Drag and drop (replaces the old ‹ › move buttons — Figma has no such
   // affordance, cards are meant to be dragged between/within columns). ----
@@ -320,8 +327,28 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           body: JSON.stringify({ status: t.status, position: t.position }),
         }),
       ));
-    } catch { void load(slug); }
-  }, [dragId, tasks, byStatus, load, slug]);
+    } catch { void load(); }
+  }, [dragId, tasks, byStatus, load]);
+
+  // Responsável mode: dropping a card onto a person's column just reassigns
+  // it — no reordering/position touch, so it can't disturb the status-based
+  // ordering used when the user flips back to Kanban mode.
+  const dropInAssigneeColumn = useCallback(async (assigneeName: string) => {
+    const draggedId = dragId;
+    setDragId(null);
+    if (!draggedId) return;
+    const dragged = tasks.find((t) => t.id === draggedId);
+    if (!dragged) return;
+    const nextAssignee = assigneeName === SEM_RESPONSAVEL ? null : assigneeName;
+    if ((dragged.assignee ?? null) === nextAssignee) return;
+    setTasks((rows) => rows.map((r) => (r.id === draggedId ? { ...r, assignee: nextAssignee } : r)));
+    try {
+      await fetch(`/api/admin/tasks/${draggedId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignee: nextAssignee }),
+      });
+    } catch { void load(); }
+  }, [dragId, tasks, load]);
 
   // Same drag pattern, applied to the Calendário: dropping a pill on a day
   // cell just PATCHes that task's due_date to the dropped-on day.
@@ -341,8 +368,8 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ due_date: due }),
       });
-    } catch { void load(slug); }
-  }, [dragId, tasks, load, slug]);
+    } catch { void load(); }
+  }, [dragId, tasks, load]);
 
   // Opening the modal directly is the default; when the "painel lateral"
   // preference is on, the sidebar (TaskDetailPanel) becomes the intermediate
@@ -366,17 +393,84 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     if (selectedId === id) setSelectedId(null);
   }
 
+  // Shared card renderer for both column schemes (status and responsável) —
+  // only the drop target differs.
+  function renderCard(t: BoardRow, onDropBefore: () => void) {
+    const formato = payloadStr(t, "formato");
+    const plataforma = payloadStr(t, "plataforma");
+    const showFormato = visible("formato") && Boolean(formato);
+    const showPlataforma = visible("plataforma") && Boolean(plataforma);
+    return (
+      <article
+        className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
+        key={t.id}
+        draggable
+        onDragStart={(e) => onCardDragStart(e, t.id)}
+        onDragEnd={onCardDragEnd}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDropBefore(); }}
+        onClick={() => openTask(t.id)}
+      >
+        <div className="kb-card-top">
+          <span className={`kb-type t-tone-${kindTone(t.kind)}`}>{kindLabel(t.kind)}</span>
+          {t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
+          {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
+          {visible("plan_link") && t.plan_id ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
+        </div>
+        <p className="kb-card-title">{t.title}</p>
+        {showFormato || showPlataforma ? (
+          <div className="kb-card-meta">
+            {showFormato ? <span className="kb-card-pill">{formato}</span> : null}
+            {showPlataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
+          </div>
+        ) : null}
+        {visible("progress") ? (
+          <div className="kb-card-progress">
+            <div className="kb-card-progress-track"><div className="kb-card-progress-fill" style={{ width: `${progressOf(t)}%` }} /></div>
+            <span>{progressOf(t)}%</span>
+          </div>
+        ) : null}
+        <div className="kb-card-foot">
+          {t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : <span />}
+          <span className="kb-card-foot-right">
+            {commentsOf(t).length > 0 ? (
+              <span className="kb-comments" title="Comentários no card">💬 {commentsOf(t).length}</span>
+            ) : null}
+            {visible("priority") ? <span className={`kb-prio p-${t.priority}`}>{PRIORITY_LABEL[t.priority]}</span> : null}
+          </span>
+        </div>
+      </article>
+    );
+  }
+
   return (
     <div className="kb">
       <div className="kb-toolbar">
-        <label className="kb-clientpick">
-          <span>Cliente</span>
-          <select value={slug} onChange={(e) => setSlug(e.target.value)}>
-            <option value="">Todos os clientes</option>
-            <option value={NO_CLIENT}>Outros</option>
-            {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-          </select>
-        </label>
+        <div className="kb-viewtabs">
+          <button className={view === "quadro" ? "on" : ""} onClick={() => setView("quadro")}>Quadro</button>
+          <button className={view === "tabela" ? "on" : ""} onClick={() => setView("tabela")}>Tabela</button>
+          <button className={view === "calendario" ? "on" : ""} onClick={() => setView("calendario")}>Calendário</button>
+        </div>
+        <KanbanSearchBar
+          q={q}
+          onQChange={setQ}
+          filters={activeFilters}
+          onFiltersChange={setActiveFilters}
+          tasks={tasks}
+          onPickTask={openTask}
+        />
+        <span className={`kb-loadspin ${loading ? "on" : ""}`} role="status" aria-label={loading ? "Carregando" : undefined} aria-hidden={!loading} />
+        {view === "quadro" ? (
+          <div className="kb-modetoggle">
+            <button className={boardMode === "status" ? "on" : ""} onClick={() => setBoardMode("status")}>Kanban</button>
+            <button className={boardMode === "responsavel" ? "on" : ""} onClick={() => setBoardMode("responsavel")}>Responsável</button>
+          </div>
+        ) : view === "calendario" ? (
+          <div className="kb-modetoggle">
+            <button className={calMode === "mes" ? "on" : ""} onClick={() => setCalMode("mes")}>Mês</button>
+            <button className={calMode === "semana" ? "on" : ""} onClick={() => setCalMode("semana")}>Semana</button>
+          </div>
+        ) : null}
         <div className="kb-spacer" />
         <button
           className="admin-btn primary kb-newtask-btn"
@@ -387,27 +481,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
         <button className="admin-btn ghost kb-attrs-gear" onClick={() => setAttrCfgOpen(true)} aria-label="Atributos" title="Atributos">⚙</button>
       </div>
 
-      <div className="kb-filters">
-        <div className="kb-viewtabs">
-          <button className={view === "quadro" ? "on" : ""} onClick={() => setView("quadro")}>Quadro</button>
-          <button className={view === "tabela" ? "on" : ""} onClick={() => setView("tabela")}>Tabela</button>
-          <button className={view === "calendario" ? "on" : ""} onClick={() => setView("calendario")}>Calendário</button>
-        </div>
-        <KanbanSearchBar
-          q={q}
-          onQChange={setQ}
-          fKind={fKind}
-          onFKindChange={setFKind}
-          fPrio={fPrio}
-          onFPrioChange={setFPrio}
-          tasks={tasks}
-          crossClient={!slug}
-          onPickTask={openTask}
-        />
-      </div>
-
       {error ? <p className="admin-error">{error}</p> : null}
-      {loading ? <p className="admin-sub">Carregando…</p> : null}
 
       <div className={`kb-layout ${selectedTask ? "with-panel" : ""}`}>
         <div className="kb-main">
@@ -429,11 +503,6 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                     <button className="kb-cal-today" onClick={() => setWeekStart(startOfWeek(new Date()))}>Hoje</button>
                   </>
                 )}
-                <div className="kb-spacer" />
-                <div className="kb-calmode">
-                  <button className={calMode === "mes" ? "on" : ""} onClick={() => setCalMode("mes")}>Mês</button>
-                  <button className={calMode === "semana" ? "on" : ""} onClick={() => setCalMode("semana")}>Semana</button>
-                </div>
               </div>
 
               {calMode === "mes" ? (
@@ -557,77 +626,58 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
               )}
             </div>
           ) : view === "quadro" ? (
-            <div className="kb-board">
-              {visibleColumns.map((col) => (
-                <div
-                  className={`kb-col ${dragId ? "drop-target" : ""}`}
-                  key={col.status}
-                  onDragOver={allowDrop}
-                  onDrop={(e) => { e.preventDefault(); void dropInColumn(col.status); }}
-                >
-                  <div className="kb-col-head">
-                    <span>{col.label}</span>
-                    <em>{byStatus[col.status].length}</em>
-                  </div>
-                  <div className="kb-col-body">
-                    {byStatus[col.status].map((t) => {
-                      const formato = payloadStr(t, "formato");
-                      const plataforma = payloadStr(t, "plataforma");
-                      const showFormato = visible("formato") && Boolean(formato);
-                      const showPlataforma = visible("plataforma") && Boolean(plataforma);
-                      return (
-                        <article
-                          className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
-                          key={t.id}
-                          draggable
-                          onDragStart={(e) => onCardDragStart(e, t.id)}
-                          onDragEnd={onCardDragEnd}
-                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void dropInColumn(col.status, t.id); }}
-                          onClick={() => openTask(t.id)}
-                        >
-                          <div className="kb-card-top">
-                            <span className={`kb-type t-tone-${kindTone(t.kind)}`}>{kindLabel(t.kind)}</span>
-                            {!slug && t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
-                            {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
-                            {visible("plan_link") && t.plan_id ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
-                          </div>
-                          <p className="kb-card-title">{t.title}</p>
-                          {showFormato || showPlataforma ? (
-                            <div className="kb-card-meta">
-                              {showFormato ? <span className="kb-card-pill">{formato}</span> : null}
-                              {showPlataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
-                            </div>
-                          ) : null}
-                          {visible("progress") ? (
-                            <div className="kb-card-progress">
-                              <div className="kb-card-progress-track"><div className="kb-card-progress-fill" style={{ width: `${progressOf(t)}%` }} /></div>
-                              <span>{progressOf(t)}%</span>
-                            </div>
-                          ) : null}
-                          <div className="kb-card-foot">
-                            {t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : <span />}
-                            <span className="kb-card-foot-right">
-                              {commentsOf(t).length > 0 ? (
-                                <span className="kb-comments" title="Comentários no card">💬 {commentsOf(t).length}</span>
-                              ) : null}
-                              {visible("priority") ? <span className={`kb-prio p-${t.priority}`}>{PRIORITY_LABEL[t.priority]}</span> : null}
-                            </span>
-                          </div>
-                        </article>
-                      );
-                    })}
-                    {byStatus[col.status].length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
-                  </div>
-                  <button
-                    type="button"
-                    className="kb-col-add"
-                    onClick={() => { setSelectedId(null); setModalState({ mode: "new", initialStatus: col.status }); }}
+            <div className="kb-board" style={{ gridTemplateColumns: `repeat(${Math.max(gridColCount, 1)}, minmax(240px, 1fr))` }}>
+              {boardMode === "status" ? (
+                visibleColumns.map((col) => (
+                  <div
+                    className={`kb-col ${dragId ? "drop-target" : ""}`}
+                    key={col.status}
+                    onDragOver={allowDrop}
+                    onDrop={(e) => { e.preventDefault(); void dropInColumn(col.status); }}
                   >
-                    + Adicionar tarefa
-                  </button>
-                </div>
-              ))}
+                    <div className="kb-col-head">
+                      <span>{col.label}</span>
+                      <em>{byStatus[col.status].length}</em>
+                    </div>
+                    <div className="kb-col-body">
+                      {byStatus[col.status].map((t) => renderCard(t, () => void dropInColumn(col.status, t.id)))}
+                      {byStatus[col.status].length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="kb-col-add"
+                      onClick={() => { setSelectedId(null); setModalState({ mode: "new", initialStatus: col.status }); }}
+                    >
+                      + Adicionar tarefa
+                    </button>
+                  </div>
+                ))
+              ) : (
+                responsavelColumns.map((who) => (
+                  <div
+                    className={`kb-col ${dragId ? "drop-target" : ""}`}
+                    key={who}
+                    onDragOver={allowDrop}
+                    onDrop={(e) => { e.preventDefault(); void dropInAssigneeColumn(who); }}
+                  >
+                    <div className="kb-col-head">
+                      <span>{who}</span>
+                      <em>{(byAssignee.get(who) ?? []).length}</em>
+                    </div>
+                    <div className="kb-col-body">
+                      {(byAssignee.get(who) ?? []).map((t) => renderCard(t, () => void dropInAssigneeColumn(who)))}
+                      {(byAssignee.get(who) ?? []).length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="kb-col-add"
+                      onClick={() => { setSelectedId(null); setModalState({ mode: "new", initialAssignee: who === SEM_RESPONSAVEL ? undefined : who }); }}
+                    >
+                      + Adicionar tarefa
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           ) : (
             <div className="kb-table-wrap">
@@ -649,7 +699,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                     <tr key={t.id} className={selectedId === t.id ? "sel" : ""} onClick={() => openTask(t.id)}>
                       <td>
                         {t.title}
-                        {!slug && t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
+                        {t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
                         {commentsOf(t).length > 0 ? <span className="kb-comments" title="Comentários no card"> 💬 {commentsOf(t).length}</span> : null}
                       </td>
                       <td>{kindLabel(t.kind)}</td>
@@ -701,6 +751,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           clients={clients}
           clientName={modalClientName}
           initialStatus={modalState.mode === "new" ? modalState.initialStatus : undefined}
+          initialAssignee={modalState.mode === "new" ? modalState.initialAssignee : undefined}
           adminReviewers={adminReviewers}
           clientReviewers={clientReviewers}
           planCandidates={planCandidates}

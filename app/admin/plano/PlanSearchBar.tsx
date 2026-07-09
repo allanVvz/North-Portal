@@ -45,16 +45,18 @@ export default function PlanSearchBar({
 
   return (
     <div className="kb-searchbar" ref={ref}>
-      <input
-        className="kb-searchbar-input"
-        value={q}
-        onChange={(e) => onQChange(e.target.value)}
-        onFocus={() => setOpen(true)}
-        placeholder="Todos os clientes · buscar por cliente, responsável, prazo…"
-      />
-      {q ? (
-        <button type="button" className="kb-searchbar-clear" aria-label="Limpar busca" onClick={() => onQChange("")}>✕</button>
-      ) : null}
+      <div className="kb-searchbar-box" onClick={() => setOpen(true)}>
+        <input
+          className="kb-searchbar-input"
+          value={q}
+          onChange={(e) => onQChange(e.target.value)}
+          onFocus={() => setOpen(true)}
+          placeholder="Todos os clientes · buscar por cliente, responsável, prazo…"
+        />
+        {q ? (
+          <button type="button" className="kb-searchbar-clear" aria-label="Limpar busca" onClick={(e) => { e.stopPropagation(); onQChange(""); }}>✕</button>
+        ) : null}
+      </div>
       {open ? (
         <div className="kb-searchbar-panel">
           {clientNames.length ? (

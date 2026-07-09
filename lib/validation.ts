@@ -229,24 +229,20 @@ export const agencyProfileSchema = z.object({
 });
 
 // ---- Client flow flags (Revisão/Aprovação safe-hide) ---------------------------
-// admin/cliente gate the reviewer/approver assignment + client-facing visibility;
-// kanban is fully independent — it only controls whether the board shows the
-// Revisão/Aprovação column at all.
+// admin/cliente gate the reviewer/approver assignment + client-facing visibility.
+// The Kanban column itself has no flag anymore — it's automatic (visible iff at
+// least one card currently sits in that status).
 export type ClientFlowFlags = {
   revisaoAdmin: boolean;
   revisaoCliente: boolean;
-  revisaoKanban: boolean;
   aprovacaoAdmin: boolean;
   aprovacaoCliente: boolean;
-  aprovacaoKanban: boolean;
 };
 export const clientFlowFlagsPatchSchema = z.object({
   revisaoAdmin: z.boolean().optional(),
   revisaoCliente: z.boolean().optional(),
-  revisaoKanban: z.boolean().optional(),
   aprovacaoAdmin: z.boolean().optional(),
   aprovacaoCliente: z.boolean().optional(),
-  aprovacaoKanban: z.boolean().optional(),
 });
 
 // ---- Plano de Ação visibility master switch -------------------------------------

@@ -365,29 +365,23 @@ export async function listClients(): Promise<AdminClientSummary[]> {
 // Absence of a row means every flag is on (today's behavior for a client that
 // was never explicitly configured).
 
-const FLOW_FLAGS_COLUMNS = "revisao_admin,revisao_cliente,revisao_kanban,aprovacao_admin,aprovacao_cliente,aprovacao_kanban";
+const FLOW_FLAGS_COLUMNS = "revisao_admin,revisao_cliente,aprovacao_admin,aprovacao_cliente";
 
 type ClientFlowFlagsRow = {
   revisao_admin: boolean;
   revisao_cliente: boolean;
-  revisao_kanban: boolean;
   aprovacao_admin: boolean;
   aprovacao_cliente: boolean;
-  aprovacao_kanban: boolean;
 };
 
-// Absence of a row (or of a specific column, for accounts created before the
-// kanban toggle existed) is the "natural" state: admin/cliente off (Revisão and
-// Aprovação are dormant everywhere by default) but the Kanban column itself
-// stays available.
+// Absence of a row is the "natural" state: admin/cliente off (Revisão and
+// Aprovação are dormant everywhere by default).
 function toFlowFlags(row: ClientFlowFlagsRow | undefined): ClientFlowFlags {
   return {
     revisaoAdmin: row?.revisao_admin ?? false,
     revisaoCliente: row?.revisao_cliente ?? false,
-    revisaoKanban: row?.revisao_kanban ?? true,
     aprovacaoAdmin: row?.aprovacao_admin ?? false,
     aprovacaoCliente: row?.aprovacao_cliente ?? false,
-    aprovacaoKanban: row?.aprovacao_kanban ?? true,
   };
 }
 
@@ -417,12 +411,11 @@ export async function listAllClientFlowFlags(): Promise<Map<string, ClientFlowFl
 }
 
 // Saves a client's flow flags. admin-off ⇒ cliente-off is still cascaded (the
-// client can never see/act on a stage the admin side doesn't run). The kanban
-// toggle is fully independent — it alone decides whether the board shows the
-// column, and toggling it off is what moves any stranded card back to
-// "em_producao". Toggling admin off separately clears any assigned
-// revisor/aprovador (that capability stops being available for the client),
-// regardless of whether the column itself stays visible.
+// client can never see/act on a stage the admin side doesn't run). Turning
+// admin off also clears any assigned revisor/aprovador and moves any of that
+// client's cards sitting in that stage back to "em_producao" — the Kanban
+// column itself has no flag; it just disappears on its own once nothing sits
+// in it (see KanbanBoard's visibleColumns).
 export async function saveClientFlowFlags(
   clientId: string,
   patch: Partial<ClientFlowFlags>,
@@ -440,10 +433,8 @@ export async function saveClientFlowFlags(
         client_id: clientId,
         revisao_admin: next.revisaoAdmin,
         revisao_cliente: next.revisaoCliente,
-        revisao_kanban: next.revisaoKanban,
         aprovacao_admin: next.aprovacaoAdmin,
         aprovacao_cliente: next.aprovacaoCliente,
-        aprovacao_kanban: next.aprovacaoKanban,
       },
       { onConflict: "client_id" },
     )
@@ -452,18 +443,14 @@ export async function saveClientFlowFlags(
   if (error) fail(error);
 
   const moves: PromiseLike<unknown>[] = [];
-  if (current.revisaoKanban && !next.revisaoKanban) {
-    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "revisao"));
-  }
-  if (current.aprovacaoKanban && !next.aprovacaoKanban) {
-    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "aprovacao"));
-  }
   if (current.revisaoAdmin && !next.revisaoAdmin) {
     // "Sem revisor" from the moment the flow is disabled, not lazily on next save.
     moves.push(supabase.from("tasks").update({ reviewer_id: null, requires_review: false }).eq("client_id", clientId).not("reviewer_id", "is", null));
+    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "revisao"));
   }
   if (current.aprovacaoAdmin && !next.aprovacaoAdmin) {
     moves.push(supabase.from("tasks").update({ approver_id: null, requires_approval: false }).eq("client_id", clientId).not("approver_id", "is", null));
+    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "aprovacao"));
   }
   if (moves.length) await Promise.all(moves);
 
