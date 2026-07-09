@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AgencyProfile, CheckpointTemplate, LegalDoc, TeamMember } from "@/lib/supabase";
 import CheckpointTemplates from "./CheckpointTemplates";
+import EtapasPanel from "./EtapasPanel";
+import { useSidebarEnabledPref } from "../kanbanPrefs";
 
-type Tab = "perfil" | "equipe" | "politicas" | "checkpoints" | "faturamento" | "integracoes";
+type Tab = "perfil" | "equipe" | "politicas" | "etapas" | "checkpoints" | "faturamento" | "integracoes";
 const TABS: { key: Tab; label: string }[] = [
   { key: "perfil", label: "Perfil da agência" },
   { key: "equipe", label: "Equipe & papéis" },
   { key: "politicas", label: "Políticas" },
+  { key: "etapas", label: "Etapas" },
   { key: "checkpoints", label: "Checkpoints comerciais" },
   { key: "faturamento", label: "Faturamento" },
   { key: "integracoes", label: "Integrações" },
@@ -27,11 +30,13 @@ export default function SettingsPanel({
   agency,
   team,
   checkpointTemplates,
+  clients,
 }: {
   legalDocs: LegalDoc[];
   agency: AgencyProfile;
   team: TeamMember[];
   checkpointTemplates: CheckpointTemplate[];
+  clients: { slug: string; name: string }[];
 }) {
   const [tab, setTab] = useState<Tab>("perfil");
 
@@ -51,9 +56,11 @@ export default function SettingsPanel({
         {tab === "politicas" ? (
           <>
             <LegalDocs initial={legalDocs} />
+            <PlanoVisibilitySwitch />
             <Appearance />
           </>
         ) : null}
+        {tab === "etapas" ? <EtapasPanel clients={clients} /> : null}
         {tab === "checkpoints" ? <CheckpointTemplates initial={checkpointTemplates} /> : null}
         {tab === "faturamento" ? (
           <div className="set-card set-empty">
@@ -198,6 +205,67 @@ function LegalDocs({ initial }: { initial: LegalDoc[] }) {
             )}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Platform-wide master switch: when off, every "Visível para o cliente"
+// toggle across the app (TaskModal, TaskDetailPanel) is force-disabled and
+// no client_visible content reaches the portal (enforced in getPortalPayload).
+function PlanoVisibilitySwitch() {
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    fetch("/api/admin/settings/plano-visibility")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setEnabled(Boolean(data.enabled)); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function toggle(next: boolean) {
+    setEnabled(next);
+    setMsg("");
+    try {
+      const res = await fetch("/api/admin/settings/plano-visibility", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) setMsg("Não foi possível salvar.");
+    } catch {
+      setMsg("Não foi possível salvar.");
+    }
+  }
+
+  const { sidebarEnabled, setSidebarEnabled } = useSidebarEnabledPref();
+
+  return (
+    <div className="set-card">
+      <div className="set-appearance-head">
+        <div>
+          <h2 className="set-h">Visibilidade</h2>
+          <p className="admin-sub">Botão mestre do "Visível para o cliente" — desativado, some de toda a plataforma.</p>
+        </div>
+        <label className="admin-toggle">
+          <input type="checkbox" checked={enabled} disabled={loading} onChange={(e) => toggle(e.target.checked)} />
+          <span className="sw" /><span>{enabled ? "Ativo" : "Desativado"}</span>
+        </label>
+      </div>
+      {msg ? <span className="set-msg">{msg}</span> : null}
+
+      <div className="set-visibility-divider" />
+
+      <div className="set-appearance-head">
+        <div>
+          <h3 className="set-h3">Painel lateral do card</h3>
+          <p className="admin-sub">Ao abrir uma tarefa no Kanban, mostra o painel lateral como etapa intermediária antes do modal completo. Desligado por padrão — a tarefa abre direto no modal.</p>
+        </div>
+        <label className="admin-toggle">
+          <input type="checkbox" checked={sidebarEnabled} onChange={(e) => setSidebarEnabled(e.target.checked)} />
+          <span className="sw" /><span>{sidebarEnabled ? "Ativo" : "Desativado"}</span>
+        </label>
       </div>
     </div>
   );

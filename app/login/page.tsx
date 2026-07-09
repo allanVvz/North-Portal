@@ -30,7 +30,7 @@ function LoginInner() {
     const meta = data.user.app_metadata ?? {};
     const role = meta.role as string | undefined;
     const slug = meta.client_slug as string | undefined;
-    const dest = nextParam ?? (role === "admin" ? "/admin" : slug ? `/${slug}` : "/");
+    const dest = nextParam ?? (role === "admin" ? "/admin/plano" : slug ? `/${slug}` : "/");
     router.replace(dest);
     router.refresh();
   }

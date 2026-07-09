@@ -5,6 +5,8 @@ import {
   normalizeMetrics,
   ACCESS_PLATFORMS,
   type AccessPlatformKey,
+  type AdminTabsVisibility,
+  type ClientFlowFlags,
   type ClientTask,
   type CredentialSummary,
   type DocumentRecord,
@@ -189,7 +191,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const client = await getClient(slug);
   if (!client) throw new HttpError(404, "Cliente nao encontrado.");
 
-  const [briefing, links, results, content, prefs, tasks, documents, credentials] = await Promise.all([
+  const [briefing, links, results, content, prefs, tasks, documents, credentials, planoVisibility, flowFlags] = await Promise.all([
     supabase.from("briefing_answers").select("answers,submitted,updated_at").eq("client_id", client.id).limit(1),
     supabase.from("client_drive_links").select("brand_url,products_url,uploads_url").eq("client_id", client.id).limit(1),
     supabase.from("client_results").select("insights,top_metrics,report_url,feedback_url").eq("client_id", client.id).limit(1),
@@ -206,6 +208,8 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
       .order("position"),
     supabase.from("documents").select(DOC_COLUMNS).eq("client_id", client.id).order("doc_date", { ascending: false, nullsFirst: false }),
     listClientCredentials(client.id),
+    getPlanoVisibility(),
+    getClientFlowFlags(client.id),
   ]);
   if (briefing.error) fail(briefing.error);
   if (links.error) fail(links.error);
@@ -223,17 +227,26 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const taskRows = (tasks.data as ClientTask[] | null) ?? [];
   const documentRows = (documents.data as DocumentRecord[] | null) ?? [];
 
+  // Platform-wide master switch: while off, every client_visible flag is
+  // treated as false for content built from it (Plano de Ação, Agenda),
+  // regardless of the task's own DB value — a data-layer guarantee, not just
+  // a UI toggle. Approval-pipeline/checkpoint content is untouched — those
+  // are never gated by client_visible in the first place.
+  const visibleRows: ClientTask[] = planoVisibility
+    ? taskRows
+    : taskRows.map((t) => (t.client_visible ? { ...t, client_visible: false } : t));
+
   // Plano de Ação is now a real card kind: client-visible `plano_acao` cards,
   // each showing the rolled-up progress of its member tasks (plan_id).
-  const planoRows = taskRows.filter((t) => t.client_visible && t.kind === "plano_acao");
+  const planoRows = visibleRows.filter((t) => t.client_visible && t.kind === "plano_acao");
   const checkpointRows = taskRows
     .filter((t) => t.kind === "checkpoint_comercial")
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const mergedContent = mergeContent(c?.data);
-  const agenda = agendaFromTasks(taskRows);
+  const agenda = agendaFromTasks(visibleRows);
   const content_ = {
     ...mergedContent,
-    ...(planoRows.length ? { plano: planoFromTasks(planoRows, taskRows) } : {}),
+    ...(planoRows.length ? { plano: planoFromTasks(planoRows, visibleRows) } : {}),
     ...(agenda ? { agenda } : {}),
   };
 
@@ -266,6 +279,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
       .filter((t) => t.status === "aprovado" || t.status === "concluido")
       .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
     checkpoints: checkpointRows,
+    flowFlags: { revisaoCliente: flowFlags.revisaoCliente, aprovacaoCliente: flowFlags.aprovacaoCliente },
   };
 }
 
@@ -345,6 +359,140 @@ export async function listClients(): Promise<AdminClientSummary[]> {
     updated_at: row.updated_at,
     briefing_submitted: Boolean(row.briefing_answers?.[0]?.submitted),
   }));
+}
+
+// ---- Client flow flags (Revisão/Aprovação safe-hide, per client) --------------
+// Absence of a row means every flag is on (today's behavior for a client that
+// was never explicitly configured).
+
+const FLOW_FLAGS_COLUMNS = "revisao_admin,revisao_cliente,revisao_kanban,aprovacao_admin,aprovacao_cliente,aprovacao_kanban";
+
+type ClientFlowFlagsRow = {
+  revisao_admin: boolean;
+  revisao_cliente: boolean;
+  revisao_kanban: boolean;
+  aprovacao_admin: boolean;
+  aprovacao_cliente: boolean;
+  aprovacao_kanban: boolean;
+};
+
+// Absence of a row (or of a specific column, for accounts created before the
+// kanban toggle existed) is the "natural" state: admin/cliente off (Revisão and
+// Aprovação are dormant everywhere by default) but the Kanban column itself
+// stays available.
+function toFlowFlags(row: ClientFlowFlagsRow | undefined): ClientFlowFlags {
+  return {
+    revisaoAdmin: row?.revisao_admin ?? false,
+    revisaoCliente: row?.revisao_cliente ?? false,
+    revisaoKanban: row?.revisao_kanban ?? true,
+    aprovacaoAdmin: row?.aprovacao_admin ?? false,
+    aprovacaoCliente: row?.aprovacao_cliente ?? false,
+    aprovacaoKanban: row?.aprovacao_kanban ?? true,
+  };
+}
+
+export async function getClientFlowFlags(clientId: string): Promise<ClientFlowFlags> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("client_flow_flags")
+    .select(FLOW_FLAGS_COLUMNS)
+    .eq("client_id", clientId)
+    .limit(1);
+  if (error) fail(error);
+  return toFlowFlags(data?.[0] as ClientFlowFlagsRow | undefined);
+}
+
+// Cross-client map used to filter the Revisões/Aprovações queues — a client
+// admin-disabled for a stage never appears there, even though the nav tab
+// itself stays (it's a legitimate cross-client utility view).
+export async function listAllClientFlowFlags(): Promise<Map<string, ClientFlowFlags>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("client_flow_flags").select(`client_id,${FLOW_FLAGS_COLUMNS}`);
+  if (error) fail(error);
+  const map = new Map<string, ClientFlowFlags>();
+  for (const row of (data as (ClientFlowFlagsRow & { client_id: string })[] | null) ?? []) {
+    map.set(row.client_id, toFlowFlags(row));
+  }
+  return map;
+}
+
+// Saves a client's flow flags. admin-off ⇒ cliente-off is still cascaded (the
+// client can never see/act on a stage the admin side doesn't run). The kanban
+// toggle is fully independent — it alone decides whether the board shows the
+// column, and toggling it off is what moves any stranded card back to
+// "em_producao". Toggling admin off separately clears any assigned
+// revisor/aprovador (that capability stops being available for the client),
+// regardless of whether the column itself stays visible.
+export async function saveClientFlowFlags(
+  clientId: string,
+  patch: Partial<ClientFlowFlags>,
+): Promise<ClientFlowFlags> {
+  const supabase = await createClient();
+  const current = await getClientFlowFlags(clientId);
+  const next: ClientFlowFlags = { ...current, ...patch };
+  if (!next.revisaoAdmin) next.revisaoCliente = false;
+  if (!next.aprovacaoAdmin) next.aprovacaoCliente = false;
+
+  const { data, error } = await supabase
+    .from("client_flow_flags")
+    .upsert(
+      {
+        client_id: clientId,
+        revisao_admin: next.revisaoAdmin,
+        revisao_cliente: next.revisaoCliente,
+        revisao_kanban: next.revisaoKanban,
+        aprovacao_admin: next.aprovacaoAdmin,
+        aprovacao_cliente: next.aprovacaoCliente,
+        aprovacao_kanban: next.aprovacaoKanban,
+      },
+      { onConflict: "client_id" },
+    )
+    .select(FLOW_FLAGS_COLUMNS)
+    .limit(1);
+  if (error) fail(error);
+
+  const moves: PromiseLike<unknown>[] = [];
+  if (current.revisaoKanban && !next.revisaoKanban) {
+    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "revisao"));
+  }
+  if (current.aprovacaoKanban && !next.aprovacaoKanban) {
+    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "aprovacao"));
+  }
+  if (current.revisaoAdmin && !next.revisaoAdmin) {
+    // "Sem revisor" from the moment the flow is disabled, not lazily on next save.
+    moves.push(supabase.from("tasks").update({ reviewer_id: null, requires_review: false }).eq("client_id", clientId).not("reviewer_id", "is", null));
+  }
+  if (current.aprovacaoAdmin && !next.aprovacaoAdmin) {
+    moves.push(supabase.from("tasks").update({ approver_id: null, requires_approval: false }).eq("client_id", clientId).not("approver_id", "is", null));
+  }
+  if (moves.length) await Promise.all(moves);
+
+  return toFlowFlags(data?.[0] as ClientFlowFlagsRow | undefined);
+}
+
+// ---- Admin nav tabs visibility (Revisões / Aprovações, global switches) -------
+// Purely controls whether AdminShell's sidebar renders these two nav items —
+// unrelated to the per-client flags above, which gate data/assignment.
+export async function getAdminTabsVisibility(): Promise<AdminTabsVisibility> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("site_settings").select("value").eq("key", "admin_tabs_visibility").limit(1);
+  if (error) fail(error);
+  const value = (data?.[0] as { value: Partial<AdminTabsVisibility> } | undefined)?.value;
+  return {
+    revisoesTabVisible: value?.revisoesTabVisible ?? false,
+    aprovacoesTabVisible: value?.aprovacoesTabVisible ?? false,
+  };
+}
+
+export async function saveAdminTabsVisibility(patch: Partial<AdminTabsVisibility>): Promise<AdminTabsVisibility> {
+  const current = await getAdminTabsVisibility();
+  const next = { ...current, ...patch };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("site_settings")
+    .upsert({ key: "admin_tabs_visibility", value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) fail(error);
+  return next;
 }
 
 // Cross-client overview used by the Onboarding / Performance / Plano admin pages.
@@ -568,6 +716,22 @@ export async function listTasks(clientId: string): Promise<TaskRecord[]> {
   return (data as TaskRecord[] | null) ?? [];
 }
 
+// Unassigned board — tasks created without a client ("Outros" filter). client_id
+// IS NULL never satisfies a client-role RLS policy's `client_id = current_client_id()`
+// check, so these rows are naturally invisible to every client session already;
+// only admins (the "tasks admin all" policy) can ever see them.
+export async function listUnassignedTasks(): Promise<TaskRecord[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(TASK_COLUMNS)
+    .is("client_id", null)
+    .order("position")
+    .order("created_at");
+  if (error) fail(error);
+  return (data as TaskRecord[] | null) ?? [];
+}
+
 export type BoardTask = TaskRecord & { clientName: string; clientSlug: string };
 
 /** Cross-client Kanban feed — powers the "Todos" option in the client filter. */
@@ -583,7 +747,7 @@ export async function listAllTasks(): Promise<BoardTask[]> {
   type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
   return ((data as unknown as Row[] | null) ?? []).map(({ clients, ...task }) => {
     const c = Array.isArray(clients) ? clients[0] : clients;
-    return { ...task, clientName: c?.name ?? "—", clientSlug: c?.slug ?? "" };
+    return { ...task, clientName: c?.name ?? "Outros", clientSlug: c?.slug ?? "" };
   });
 }
 
@@ -592,7 +756,7 @@ export async function listAllTasks(): Promise<BoardTask[]> {
 // with its own workflow progress, plus the plan's rolled-up progress. Powers the
 // /admin/plano accordion.
 
-export type PlanActivity = { id: string; title: string; kind: string; status: TaskStatus; progress: number };
+export type PlanActivity = { id: string; title: string; kind: string; status: TaskStatus; progress: number; assignee: string | null; due_date: string | null };
 export type ActionPlan = TaskRecord & { clientName: string; clientSlug: string; progress: number; activities: PlanActivity[] };
 
 export async function listActionPlans(): Promise<ActionPlan[]> {
@@ -622,7 +786,10 @@ export async function listActionPlans(): Promise<ActionPlan[]> {
         clientName: c?.name ?? "—",
         clientSlug: c?.slug ?? "",
         progress: taskProgress(task, members),
-        activities: members.map((m) => ({ id: m.id, title: m.title, kind: m.kind, status: m.status, progress: taskProgress(m) })),
+        activities: members.map((m) => ({
+          id: m.id, title: m.title, kind: m.kind, status: m.status, progress: taskProgress(m),
+          assignee: m.assignee, due_date: m.due_date,
+        })),
       };
     });
 }
@@ -638,7 +805,7 @@ export async function getTaskById(id: string): Promise<TaskRecord | null> {
   return (data?.[0] as TaskRecord | undefined) ?? null;
 }
 
-export async function createTask(clientId: string, input: Record<string, unknown>): Promise<TaskRecord> {
+export async function createTask(clientId: string | null, input: Record<string, unknown>): Promise<TaskRecord> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
@@ -714,14 +881,19 @@ async function selectApprovalRows(statuses: TaskStatus[]): Promise<ApprovalRow[]
   return data as unknown as ApprovalRow[] | null;
 }
 
-/** Tela Revisões: cards atualmente na coluna "Revisão" do Kanban. */
+/** Tela Revisões: cards atualmente na coluna "Revisão" do Kanban. Um cliente
+ *  com Revisão admin-desligada nunca aparece aqui, ainda que a aba (cross-client,
+ *  não pode "sumir" por causa de um único cliente) continue no menu. */
 export async function listReviewQueue(): Promise<ApprovalRecord[]> {
-  return toApprovalRecords(await selectApprovalRows(["revisao"]));
+  const [rows, flagsMap] = await Promise.all([selectApprovalRows(["revisao"]), listAllClientFlowFlags()]);
+  return toApprovalRecords(rows).filter((r) => (r.client_id ? flagsMap.get(r.client_id)?.revisaoAdmin ?? true : true));
 }
 
-/** Tela Aprovações: cards nas colunas "Aprovação" e "Concluído" do Kanban. */
+/** Tela Aprovações: cards nas colunas "Aprovação" e "Concluído" do Kanban. Mesmo
+ *  filtro por cliente que listReviewQueue, para a etapa de Aprovação. */
 export async function listApprovalQueue(): Promise<ApprovalRecord[]> {
-  return toApprovalRecords(await selectApprovalRows(["aprovacao", "aprovado"]));
+  const [rows, flagsMap] = await Promise.all([selectApprovalRows(["aprovacao", "aprovado"]), listAllClientFlowFlags()]);
+  return toApprovalRecords(rows).filter((r) => (r.client_id ? flagsMap.get(r.client_id)?.aprovacaoAdmin ?? true : true));
 }
 
 // ---- Performance / métricas (admin) -----------------------------------------
@@ -1029,6 +1201,26 @@ export async function updateLegalDoc(slug: string, patch: Record<string, unknown
   const row = data?.[0] as LegalDoc | undefined;
   if (!row) throw new HttpError(404, "Documento legal nao encontrado.");
   return row;
+}
+
+// Platform-wide master switch for "Visível para o cliente" — when off, every
+// client_visible flag is treated as false regardless of its DB value
+// (enforced in getPortalPayload, not just the UI toggle).
+export async function getPlanoVisibility(): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("site_settings").select("value").eq("key", "plano_acao_visibility").limit(1);
+  if (error) fail(error);
+  const value = (data?.[0] as { value: { enabled?: boolean } } | undefined)?.value;
+  return value?.enabled ?? false;
+}
+
+export async function savePlanoVisibility(enabled: boolean): Promise<boolean> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("site_settings")
+    .upsert({ key: "plano_acao_visibility", value: { enabled }, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) fail(error);
+  return enabled;
 }
 
 export type AgencyProfile = { name: string; email: string; site: string; note: string };

@@ -55,6 +55,7 @@ export default function CardModalLauncher({
       mode="edit"
       task={task}
       slug={clientSlug}
+      clients={[]}
       clientName={clientName}
       adminReviewers={adminReviewers}
       clientReviewers={clientReviewers}

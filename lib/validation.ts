@@ -78,7 +78,6 @@ export const taskPayloadSchema = z
     plataforma: z.string().max(80).optional(),
     // Agendamento (plataforma is shared with Criativo)
     hora: z.string().max(20).optional(),
-    legenda: z.string().max(400).optional(),
     // Atividade (comentários do card, mais recente por último)
     comments: z.array(taskCommentSchema).max(200).optional(),
   })
@@ -86,7 +85,8 @@ export const taskPayloadSchema = z
 export type TaskComment = z.infer<typeof taskCommentSchema>;
 
 export const taskCreateSchema = z.object({
-  slug: slugSchema,
+  // Omitted/empty = "sem cliente" (unassigned) — the "Outros" filter.
+  slug: slugSchema.optional(),
   title: z.string().min(1).max(MAX_TEXT_BYTES),
   kind: kindSchema.optional(),
   subtype: subtypeSchema.nullable().optional(),
@@ -119,7 +119,8 @@ export const taskMetricsPatchSchema = z.object({
 
 export type TaskRecord = {
   id: string;
-  client_id: string;
+  // null = unassigned ("Outros") — a task with no client.
+  client_id: string | null;
   kind: string;
   subtype: string | null;
   title: string;
@@ -227,6 +228,37 @@ export const agencyProfileSchema = z.object({
   note: z.string().max(MAX_TEXT_BYTES),
 });
 
+// ---- Client flow flags (Revisão/Aprovação safe-hide) ---------------------------
+// admin/cliente gate the reviewer/approver assignment + client-facing visibility;
+// kanban is fully independent — it only controls whether the board shows the
+// Revisão/Aprovação column at all.
+export type ClientFlowFlags = {
+  revisaoAdmin: boolean;
+  revisaoCliente: boolean;
+  revisaoKanban: boolean;
+  aprovacaoAdmin: boolean;
+  aprovacaoCliente: boolean;
+  aprovacaoKanban: boolean;
+};
+export const clientFlowFlagsPatchSchema = z.object({
+  revisaoAdmin: z.boolean().optional(),
+  revisaoCliente: z.boolean().optional(),
+  revisaoKanban: z.boolean().optional(),
+  aprovacaoAdmin: z.boolean().optional(),
+  aprovacaoCliente: z.boolean().optional(),
+  aprovacaoKanban: z.boolean().optional(),
+});
+
+// ---- Plano de Ação visibility master switch -------------------------------------
+export const planoVisibilitySchema = z.object({ enabled: z.boolean() });
+
+// ---- Admin nav tabs visibility (Revisões / Aprovações, global) -----------------
+export type AdminTabsVisibility = { revisoesTabVisible: boolean; aprovacoesTabVisible: boolean };
+export const adminTabsVisibilitySchema = z.object({
+  revisoesTabVisible: z.boolean().optional(),
+  aprovacoesTabVisible: z.boolean().optional(),
+});
+
 export type Metric = {
   label: string;
   value: string;
@@ -291,6 +323,10 @@ export type PortalPayload = {
   // any card of this client, not just their own).
   sessionUserId?: string | null;
   sessionLevel?: "editor" | "gerente" | "usuario" | null;
+  // Client-facing half of client_flow_flags — gates the "Feedbacks" nav page.
+  // revisaoCliente is currently unused by the UI (no client-facing Revisão
+  // page exists), kept for schema symmetry / future-proofing.
+  flowFlags: { revisaoCliente: boolean; aprovacaoCliente: boolean };
 };
 
 export const clientApprovalActionSchema = z

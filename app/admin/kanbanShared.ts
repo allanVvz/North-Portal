@@ -1,6 +1,6 @@
 import { commentsOf as commentsOfPayload, type TaskComment } from "@/lib/comments";
 import type { TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
-import { kindTone } from "@/lib/taskCatalog";
+import { kindLabel, kindTone } from "@/lib/taskCatalog";
 
 export type { TaskComment };
 
@@ -57,4 +57,29 @@ export function commentsOf(task: TaskRecord): TaskComment[] {
 // card is client-facing — this decides which reviewer list applies.
 export function reviewerStageFor(status: TaskStatus): "admin" | "client" {
   return status === "aprovacao" || status === "aprovado" || status === "concluido" ? "client" : "admin";
+}
+
+// Flattened, lowercased haystack for the Kanban search bar — title, tipo,
+// prioridade, formato/plataforma, responsável, descrição, prazo and (in
+// "Todos os clientes" mode) o nome do cliente.
+export function taskSearchText(t: TaskRecord, clientName = ""): string {
+  const p = (t.payload ?? {}) as Record<string, unknown>;
+  const parts = [
+    t.title,
+    kindLabel(t.kind),
+    PRIORITY_LABEL[t.priority],
+    typeof p.formato === "string" ? p.formato : "",
+    typeof p.plataforma === "string" ? p.plataforma : "",
+    t.assignee ?? "",
+    t.description ?? "",
+    t.due_date ?? "",
+    clientName,
+  ];
+  return parts.join(" ").toLowerCase();
+}
+
+export function matchesQuery(t: TaskRecord, needle: string, clientName = ""): boolean {
+  const q = needle.trim().toLowerCase();
+  if (!q) return true;
+  return taskSearchText(t, clientName).includes(q);
 }

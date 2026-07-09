@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ATTR_DEFS, KIND_ICON } from "./kanbanAttrs";
+import { ATTR_DEFS, KIND_ICON, isAttrVisible } from "./kanbanAttrs";
 
 export default function AttributesConfigModal({
   initial,
@@ -15,10 +15,10 @@ export default function AttributesConfigModal({
   const [map, setMap] = useState<Record<string, boolean>>(initial);
 
   function toggle(key: string) {
-    setMap((m) => ({ ...m, [key]: m[key] === false ? true : false }));
+    setMap((m) => ({ ...m, [key]: !isAttrVisible(m, key) }));
   }
-  function isOn(key: string, locked?: boolean) {
-    return locked ? true : map[key] !== false;
+  function isOn(key: string) {
+    return isAttrVisible(map, key);
   }
 
   return (
@@ -48,7 +48,7 @@ export default function AttributesConfigModal({
               <label className="admin-toggle attrcfg-toggle" title={a.locked ? "Sempre visível" : undefined}>
                 <input
                   type="checkbox"
-                  checked={isOn(a.key, a.locked)}
+                  checked={isOn(a.key)}
                   disabled={a.locked}
                   onChange={() => toggle(a.key)}
                 />

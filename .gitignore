@@ -22,3 +22,4 @@ out/
 .git-alt/
 memory.md
 *.log
+.vercel

@@ -6,49 +6,44 @@ import { usePathname } from "next/navigation";
 
 type Theme = "light" | "dark";
 
-const NAV_GROUPS: { head: string; items: { href: string; ico: string; label: string }[] }[] = [
+const NAV_GROUPS: { head: string; items: { href: string; ico: string; label: string; hidden?: boolean }[] }[] = [
   {
     head: "Operação",
     items: [
-      { href: "/admin", ico: "◔", label: "Clientes" },
+      { href: "/admin/plano", ico: "◈", label: "Plano de Ação" },
       { href: "/admin/kanban", ico: "▤", label: "Tarefas" },
       { href: "/admin/revisoes", ico: "◑", label: "Revisões" },
       { href: "/admin/aprovacoes", ico: "✓", label: "Aprovações" },
     ],
   },
   {
-    head: "Conteúdo",
+    head: "Dados",
     items: [
-      { href: "/admin/documentos", ico: "▦", label: "Documentos" },
-      { href: "/admin/onboarding", ico: "◇", label: "Onboarding" },
-    ],
-  },
-  {
-    head: "Resultados",
-    items: [
+      { href: "/admin", ico: "◔", label: "Clientes" },
       { href: "/admin/performance", ico: "▤", label: "Performance" },
-      { href: "/admin/plano", ico: "◈", label: "Plano de Ação" },
+      { href: "/admin/documentos", ico: "▦", label: "Informações" },
     ],
-  },
-  {
-    head: "Sistema",
-    items: [{ href: "/admin/configuracoes", ico: "⚙", label: "Configurações" }],
   },
 ];
 
 // Every /admin/* section route; used so the "Clientes" (/admin) item does not
 // stay highlighted when a more specific section is active.
-const SECTION_HREFS = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href)).filter((h) => h !== "/admin");
+const ALL_HREFS = [...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href)), "/admin/configuracoes"];
+const SECTION_HREFS = ALL_HREFS.filter((h) => h !== "/admin");
 
 export default function AdminShell({
   email,
   name,
   initials,
+  revisoesTabVisible,
+  aprovacoesTabVisible,
   children,
 }: {
   email: string;
   name: string;
   initials: string;
+  revisoesTabVisible: boolean;
+  aprovacoesTabVisible: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -59,11 +54,13 @@ export default function AdminShell({
   // worse than the brief flash it aimed to avoid. See docs/DIVERGENCIAS-FIGMA.md.
   const [theme, setTheme] = useState<Theme>("light");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("admin-theme");
     if (saved === "dark" || saved === "light") setTheme(saved);
+    setCollapsed(window.localStorage.getItem("admin-sidebar-collapsed") === "1");
   }, []);
   useEffect(() => {
     window.localStorage.setItem("admin-theme", theme);
@@ -98,6 +95,14 @@ export default function AdminShell({
     };
   }, [accountOpen]);
 
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c;
+      window.localStorage.setItem("admin-sidebar-collapsed", next ? "1" : "0");
+      return next;
+    });
+  }
+
   function isActive(href: string): boolean {
     if (href === "/admin") {
       // Clientes: also covers /admin/novo and /admin/<slug> editor, but not other sections
@@ -108,84 +113,111 @@ export default function AdminShell({
   }
 
   return (
-    <div className="admin-shell" data-theme={theme} suppressHydrationWarning>
-      <aside className="admin-sidebar">
-        <div className="admin-topline">
-          <Link href="/admin" className="admin-brand">
-            <span className="admin-mark">N</span>
-            <span className="admin-word">NORTH</span>
-            <span className="admin-role">admin</span>
-          </Link>
-          <button
-            type="button"
-            className="admin-theme-toggle"
-            onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-            aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
-            title={theme === "light" ? "Tema escuro" : "Tema claro"}
-          >
-            {theme === "light" ? "☾" : "☀"}
-          </button>
-        </div>
+    <div className={`admin-shell ${collapsed ? "sidebar-collapsed" : ""}`} data-theme={theme} suppressHydrationWarning>
+      {collapsed ? (
+        <button type="button" className="admin-sidebar-expand" onClick={toggleCollapsed} aria-label="Mostrar menu" title="Mostrar menu">
+          ▸
+        </button>
+      ) : null}
 
-        {NAV_GROUPS.map((group) => (
-          <div className="admin-nav-group" key={group.head}>
-            <p className="admin-nav-head">{group.head}</p>
-            {group.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`admin-nav-item ${isActive(item.href) ? "active" : ""}`}
+      {!collapsed ? (
+        <aside className="admin-sidebar">
+          <div className="admin-topline">
+            <Link href="/admin/plano" className="admin-brand">
+              <span className="admin-mark">N</span>
+              <span className="admin-word">NORTH</span>
+              <span className="admin-role">admin</span>
+            </Link>
+            <div className="admin-topline-actions">
+              <button
+                type="button"
+                className="admin-theme-toggle"
+                onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+                aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
+                title={theme === "light" ? "Tema escuro" : "Tema claro"}
               >
-                <span className="admin-nav-ico">{item.ico}</span>
-                {item.label}
-              </Link>
-            ))}
+                {theme === "light" ? "☾" : "☀"}
+              </button>
+              <button type="button" className="admin-theme-toggle" onClick={toggleCollapsed} aria-label="Esconder menu" title="Esconder menu">
+                ◂
+              </button>
+            </div>
           </div>
-        ))}
 
-        <div className="admin-side-foot">
-          <div className="admin-account" ref={accountRef}>
-            {accountOpen ? (
-              <div className="admin-account-panel" role="menu">
-                <div className="admin-account-head">
-                  <span className="admin-avatar">{initials}</span>
-                  <span className="admin-usermeta">
-                    <span className="admin-username">{name}</span>
-                    <span className="admin-useremail" title={email}>
-                      {email}
-                    </span>
-                  </span>
-                </div>
-                <a className="admin-account-item" href="/logout" role="menuitem">
-                  <span className="admin-account-ico" aria-hidden>
-                    ⎋
-                  </span>
-                  Sair
-                </a>
+          {NAV_GROUPS.map((group) => {
+            const items = group.items.filter((item) => {
+              if (item.href === "/admin/revisoes") return revisoesTabVisible;
+              if (item.href === "/admin/aprovacoes") return aprovacoesTabVisible;
+              return true;
+            });
+            if (items.length === 0) return null;
+            return (
+              <div className="admin-nav-group" key={group.head}>
+                <p className="admin-nav-head">{group.head}</p>
+                {items.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`admin-nav-item ${isActive(item.href) ? "active" : ""}`}
+                  >
+                    <span className="admin-nav-ico">{item.ico}</span>
+                    {item.label}
+                  </Link>
+                ))}
               </div>
-            ) : null}
+            );
+          })}
 
-            <button
-              type="button"
-              className="admin-usercard"
-              onClick={() => setAccountOpen((open) => !open)}
-              aria-haspopup="menu"
-              aria-expanded={accountOpen}
-            >
-              <span className="admin-avatar">{initials}</span>
-              <span className="admin-usermeta">
-                <span className="admin-username">{name}</span>
-                <span className="admin-useremail" title={email}>
-                  {email}
+          <div className="admin-side-foot">
+            <div className="admin-account" ref={accountRef}>
+              {accountOpen ? (
+                <div className="admin-account-panel" role="menu">
+                  <div className="admin-account-head">
+                    <span className="admin-avatar">{initials}</span>
+                    <span className="admin-usermeta">
+                      <span className="admin-username">{name}</span>
+                      <span className="admin-useremail" title={email}>
+                        {email}
+                      </span>
+                    </span>
+                  </div>
+                  <Link className="admin-account-item" href="/admin/configuracoes" role="menuitem" onClick={() => setAccountOpen(false)}>
+                    <span className="admin-account-ico" aria-hidden>
+                      ⚙
+                    </span>
+                    Configurações
+                  </Link>
+                  <a className="admin-account-item" href="/logout" role="menuitem">
+                    <span className="admin-account-ico" aria-hidden>
+                      ⎋
+                    </span>
+                    Sair
+                  </a>
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                className="admin-usercard"
+                onClick={() => setAccountOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={accountOpen}
+              >
+                <span className="admin-avatar">{initials}</span>
+                <span className="admin-usermeta">
+                  <span className="admin-username">{name}</span>
+                  <span className="admin-useremail" title={email}>
+                    {email}
+                  </span>
                 </span>
-              </span>
-              <span className="admin-usercard-caret" aria-hidden>
-                ⌄
-              </span>
-            </button>
+                <span className="admin-usercard-caret" aria-hidden>
+                  ⌄
+                </span>
+              </button>
+            </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      ) : null}
 
       <main className="admin-main">{children}</main>
     </div>

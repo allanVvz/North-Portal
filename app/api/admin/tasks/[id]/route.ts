@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getTaskById, updateTask } from "@/lib/supabase";
+import { deleteTask, getClientFlowFlags, getTaskById, updateTask } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, taskPatchSchema } from "@/lib/validation";
 
@@ -13,8 +13,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (!idPattern.test(id)) throw new HttpError(400, "ID invalido.");
     const patch = taskPatchSchema.parse(await request.json());
 
-    let current: Awaited<ReturnType<typeof getTaskById>> = null;
-    if (patch.status) current = await getTaskById(id);
+    const current = await getTaskById(id);
 
     // Only gerente-level admins decide the approval gate either way — approve
     // (aprovado) or reopen a resolved card back to aprovacao — enforced here
@@ -29,6 +28,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (patch.status && patch.status !== "revisao") {
       if (current?.status === "revisao" && current.reviewer_id !== session.userId) {
         throw new HttpError(403, "Apenas o revisor designado pode mover este card para fora da Revisão.");
+      }
+    }
+
+    // Defense-in-depth: a client with a stage admin-disabled never carries a
+    // reviewer/approver, even if a stale client tab (open before the flag
+    // flipped) tries to send one back. Unassigned ("Outros") tasks have no
+    // client flags to check.
+    if (current?.client_id) {
+      const flags = await getClientFlowFlags(current.client_id);
+      if (!flags.revisaoAdmin) {
+        patch.reviewer_id = null;
+        patch.requires_review = false;
+      }
+      if (!flags.aprovacaoAdmin) {
+        patch.approver_id = null;
+        patch.requires_approval = false;
       }
     }
 

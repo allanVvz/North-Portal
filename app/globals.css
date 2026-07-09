@@ -1726,6 +1726,10 @@ body.menu-open {
 .admin-btn.ghost:hover { background: var(--a-hover); }
 .admin-btn:disabled { opacity: 0.5; cursor: default; }
 
+/* Kanban toolbar: primary CTA gets extra presence, gear becomes icon-only */
+.kb-newtask-btn { padding: 12px 24px; font-size: 14.5px; border-radius: 999px; justify-content: center; box-shadow: 0 2px 8px rgba(94,156,147,.28); }
+.kb-attrs-gear { width: 38px; height: 38px; padding: 0; border-radius: 50%; justify-content: center; font-size: 16px; }
+
 /* ---- filter chips ---- */
 .admin-filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
 .admin-chip { padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500; border: 1px solid var(--a-border-strong); background: var(--a-surface); color: var(--a-sec); cursor: pointer; }
@@ -1920,6 +1924,20 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   transition: background 0.16s, color 0.16s, border-color 0.16s;
 }
 .admin-theme-toggle:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
+
+/* sidebar collapse */
+.admin-topline-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.admin-topline-actions .admin-theme-toggle { margin-left: 0; }
+.admin-sidebar-expand {
+  position: fixed; top: 18px; left: 16px; z-index: 40;
+  width: 34px; height: 34px; border-radius: 10px;
+  display: grid; place-items: center; font-size: 15px; line-height: 1;
+  border: 1px solid var(--a-border); background: var(--a-surface); color: var(--a-sec);
+  box-shadow: 0 4px 14px rgba(12,44,44,.12);
+  transition: background 0.16s, color 0.16s, border-color 0.16s;
+}
+.admin-sidebar-expand:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
+.admin-shell.sidebar-collapsed .admin-main { width: 100%; }
 
 /* account: user card is a button; panel opens above it */
 .admin-account { position: relative; }
@@ -2190,7 +2208,6 @@ select.kb-filter { width: auto; min-width: 150px; }
 .ap-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
 .ap-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--a-ink); color: var(--a-surface); font-size: 13.5px; padding: 11px 20px; border-radius: 999px; box-shadow: 0 10px 30px rgba(0,0,0,.25); z-index: 300; }
 .ap-filters { display: flex; gap: 10px; flex-wrap: wrap; }
-select.ap-clientfilter { width: auto; min-width: 200px; }
 .ap-history { margin-top: 28px; display: flex; flex-direction: column; gap: 12px; }
 .ap-comment-modal { width: min(560px, 92vw); }
 .tone-red { background: rgba(194,96,78,.14); color: var(--a-danger); }
@@ -2228,6 +2245,23 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .ob-progress-fill { height: 100%; border-radius: 999px; background: var(--a-teal-text); transition: width .25s ease; }
 .ob-progress span { font-size: 12px; font-weight: 600; color: var(--a-sec); white-space: nowrap; }
 
+/* Informações (Documentos + Briefing) — two sections on one page. The first
+   (Documentos) sits flush with the page like any other admin table; a
+   generous divider then a centered, elevated "panel" introduces Briefing as
+   its own distinct module without reading as an abrupt second page. */
+.info-section-head { margin-bottom: 14px; }
+.info-section-head h2 { font-size: 19px; font-weight: 700; color: var(--a-ink); margin: 2px 0 4px; }
+.info-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--a-teal-text); margin: 0; }
+.info-divider { height: 1px; background: var(--a-border); margin: 44px 0 36px; }
+.info-section-centered { display: flex; justify-content: center; }
+.info-panel {
+  width: 100%; max-width: 920px; background: var(--a-surface); border: 1px solid var(--a-border);
+  border-radius: 18px; padding: 26px 28px 30px; box-shadow: 0 20px 50px rgba(0,0,0,.14);
+}
+@media (max-width: 640px) {
+  .info-panel { padding: 20px 16px 24px; }
+}
+
 /* ---- Configurações ---- */
 .set { display: grid; grid-template-columns: 220px 1fr; gap: 28px; align-items: start; }
 .set-nav { display: flex; flex-direction: column; gap: 2px; }
@@ -2262,6 +2296,9 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .set-legal-editor { flex: 1; }
 /* appearance */
 .set-appearance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.set-h3 { margin: 0 0 2px; font-size: 14.5px; font-weight: 600; color: var(--a-ink); }
+.set-visibility-divider { height: 1px; background: var(--a-border); margin: 18px 0; }
+.set-etapas-tabtoggle { border-top: 1px dashed var(--a-border); padding-top: 10px; margin-top: 2px; flex-basis: 100%; }
 .set-theme-toggle { display: inline-flex; background: var(--a-surface2); border: 1px solid var(--a-border); border-radius: 999px; padding: 3px; flex-shrink: 0; }
 .set-theme-toggle button { background: none; border: none; cursor: pointer; font: inherit; font-size: 13px; padding: 7px 18px; border-radius: 999px; color: var(--a-muted); }
 .set-theme-toggle button.on { background: var(--a-surface); color: var(--a-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(12,44,44,.08); }
@@ -2567,6 +2604,54 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .plan-acc-status { font-size: 12px; color: var(--a-muted); }
 .plan-acc-actpct { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--a-sec); min-width: 38px; text-align: right; }
 
+/* Plano de Ação — view estratégica: um card por plano, atividades em raias por
+   Responsável (quem), cada raia com o que/quando. Quebra de linha em vez de
+   scroll horizontal, então continua responsivo até telas pequenas. */
+.plan-strat { display: flex; flex-direction: column; gap: 14px; }
+.plan-strat-card { border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-surface); padding: 16px 18px; }
+.plan-strat-headrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.plan-strat-headtext { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 180px; }
+.plan-strat-headtext strong { font-size: 15.5px; color: var(--a-ink); }
+.plan-strat-headtext em { font-style: normal; font-size: 12.5px; color: var(--a-muted); }
+.plan-strat-owner { font-weight: 700; color: var(--a-teal-text); }
+.plan-strat-progress { display: flex; align-items: center; gap: 10px; min-width: 150px; }
+.plan-strat-bar { flex: 1; height: 6px; min-width: 70px; border-radius: 999px; background: var(--a-border); overflow: hidden; }
+.plan-strat-fill { display: block; height: 100%; background: var(--a-teal); border-radius: 999px; }
+.plan-strat-progress b { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--a-sec); min-width: 34px; text-align: right; }
+.plan-strat-empty { margin: 12px 0 0; }
+
+.plan-strat-lanes { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.plan-strat-lane { flex: 1 1 220px; min-width: 220px; background: var(--a-inset); border: 1px solid var(--a-border); border-top: 3px solid var(--a-border-strong); border-radius: 12px; padding: 12px 10px 10px; }
+.plan-strat-lane-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.plan-strat-avatar { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--a-teal-text); background: var(--a-teal-soft); width: 34px; height: 34px; border-radius: 50%; display: inline-grid; place-items: center; }
+.plan-strat-lane-who { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.plan-strat-lane-eyebrow { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--a-muted); }
+.plan-strat-lane-name { font-size: 14.5px; font-weight: 700; color: var(--a-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-strat-lane-count { font-size: 11px; color: var(--a-muted); background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 999px; padding: 1px 7px; }
+
+.plan-strat-lane-tone-green  { border-top-color: var(--a-teal); }
+.plan-strat-lane-tone-purple { border-top-color: var(--a-purple-text); }
+.plan-strat-lane-tone-blue   { border-top-color: var(--a-blue-text); }
+.plan-strat-lane-tone-gold   { border-top-color: #8a6d2f; }
+.plan-strat-lane-tone-neutral { border-top-color: var(--a-border-strong); }
+.plan-strat-lane-tone-green  .plan-strat-avatar { color: var(--a-teal-text); background: var(--a-teal-soft); }
+.plan-strat-lane-tone-purple .plan-strat-avatar { color: var(--a-purple-text); background: var(--a-purple-soft); }
+.plan-strat-lane-tone-blue   .plan-strat-avatar { color: var(--a-blue-text); background: var(--a-blue-soft); }
+.plan-strat-lane-tone-gold   .plan-strat-avatar { color: #8a6d2f; background: rgba(212,163,60,.16); }
+.plan-strat-lane-tone-neutral .plan-strat-avatar { color: var(--a-muted); background: rgba(120,120,120,.12); }
+
+.plan-strat-chips { display: flex; flex-direction: column; gap: 6px; }
+.plan-strat-chip { display: flex; flex-direction: column; gap: 5px; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-surface); padding: 8px 9px; }
+.plan-strat-chip .kb-type { align-self: flex-start; }
+.plan-strat-chiptitle { font-size: 12.5px; color: var(--a-ink); line-height: 1.35; }
+.plan-strat-chipmeta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--a-muted); }
+.plan-strat-chipdue { font-variant-numeric: tabular-nums; }
+.plan-strat-chipstatus { color: var(--a-sec); font-weight: 600; }
+
+@media (max-width: 640px) {
+  .plan-strat-lane { flex: 1 1 100%; }
+}
+
 /* Plan ↔ activities (member management inside the plan modal) */
 .tm-planmembers .tm-member-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .tm-member { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--a-surface-2, rgba(0,0,0,.03)); border-radius: 10px; }
@@ -2603,3 +2688,176 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .kb-week-plan.tone-blue, .kb-week-event.tone-blue { background: var(--a-blue-soft); color: var(--a-blue-text); }
 .kb-week-plan.tone-green, .kb-week-event.tone-green { background: var(--a-teal-soft); color: var(--a-teal-text); }
 .kb-week-plan.tone-neutral, .kb-week-event.tone-neutral { background: rgba(120,120,120,.12); color: var(--a-sec); }
+
+/* ===== Kanban/task epic additions (search bar, card pills, task modal v2, visibility, etapas) ===== */
+
+/* ---- Kanban search bar (replaces the old Tipo/Prioridade <select> filters) ---- */
+.kb-searchbar { position: relative; flex: 1; min-width: 220px; max-width: 420px; }
+.kb-searchbar-input {
+  width: 100%; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface);
+  padding: 9px 30px 9px 16px; font: inherit; font-size: 13.5px; color: var(--a-ink);
+}
+.kb-searchbar-input:focus { outline: none; border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
+.kb-searchbar-clear {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%); z-index: 1;
+  width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--a-inset); color: var(--a-muted);
+  font-size: 11px; line-height: 1; cursor: pointer; display: inline-grid; place-items: center;
+}
+.kb-searchbar-clear:hover { background: var(--a-hover); color: var(--a-ink); }
+.kb-searchbar-panel {
+  position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 60;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.16); padding: 14px; display: flex; flex-direction: column; gap: 12px;
+  animation: kb-searchbar-in .16s ease-out;
+}
+@keyframes kb-searchbar-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.kb-searchbar-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-chip {
+  border: 1px solid var(--a-border); background: var(--a-surface2); color: var(--a-sec);
+  font: inherit; font-size: 12px; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+}
+.kb-chip:hover { background: var(--a-hover); }
+.kb-chip.on { background: var(--a-teal); color: #fff; border-color: var(--a-teal); font-weight: 600; }
+.kb-chip-prio.on.p-alta { background: var(--a-danger); border-color: var(--a-danger); }
+.kb-chip-prio.on.p-media { background: var(--a-warn); border-color: var(--a-warn); }
+.kb-searchbar-results { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--a-border); padding-top: 10px; }
+.kb-searchbar-result {
+  display: flex; align-items: center; gap: 10px; text-align: left; border: none; background: none;
+  padding: 8px 10px; border-radius: 10px; cursor: pointer; font: inherit;
+}
+.kb-searchbar-result:hover { background: var(--a-hover); }
+.kb-searchbar-result-title { flex: 1; min-width: 0; font-size: 13px; color: var(--a-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-searchbar-result-client { font-size: 11px; color: var(--a-muted); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; flex-shrink: 0; }
+.kb-searchbar-empty { margin: 0; padding: 6px 10px; }
+
+/* ---- Card attribute pills (formato/plataforma/plano de ação link) ---- */
+.kb-plan-link { color: var(--a-teal); font-size: 12px; }
+.kb-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.kb-card-pill { font-size: 10.5px; color: var(--a-sec); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; }
+
+/* ---- Visible-to-client toggle (shared TaskModal/TaskDetailPanel component) ---- */
+.vtf { display: flex; flex-direction: column; gap: 6px; }
+.vtf-note { margin: 0; font-size: 12px; color: var(--a-muted); }
+.tdp-visible { padding: 10px 0 2px; border-top: 1px solid var(--a-border); margin-top: 4px; }
+
+/* ---- Attribute visibility popover (gear icon, replaces the old inline panel) ---- */
+.tm-head-actions { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.attrvis { position: relative; }
+.attrvis-gear {
+  width: 34px; height: 34px; border-radius: 10px; border: 1px solid transparent; background: var(--a-surface);
+  color: var(--a-sec); font-size: 15px; cursor: pointer; display: inline-grid; place-items: center;
+}
+.attrvis-gear:hover { background: var(--a-hover); }
+.attrvis-popover {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; width: 260px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.18); padding: 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.attrvis-head { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--a-muted); }
+.attrvis-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-radius: 8px; cursor: pointer; }
+.attrvis-row:hover { background: var(--a-hover); }
+.attrvis-ico { width: 22px; height: 22px; border-radius: 6px; background: var(--a-inset); display: inline-grid; place-items: center; font-size: 10.5px; font-weight: 700; color: var(--a-sec); flex-shrink: 0; }
+.attrvis-label { flex: 1; font-size: 13px; color: var(--a-ink); }
+.attrvis-toggle { flex-shrink: 0; }
+
+/* ---- Task modal v2: larger, two-column edit layout ---- */
+.tm-lg { width: min(1040px, 96vw); overflow-x: hidden; }
+.tm-layout { display: grid; grid-template-columns: 1fr; min-width: 0; }
+.tm-layout:has(.tm-side) { grid-template-columns: minmax(0,1fr) minmax(260px, 320px); }
+.tm-main { display: flex; flex-direction: column; min-width: 0; }
+/* Internal, elegant panel (inset card) instead of a bordered "external" column */
+.tm-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 20px 24px 24px 8px; padding: 18px 18px 16px; background: var(--a-inset); border-radius: 16px; }
+.tm-side .tm-commentsbox { flex: 1; display: flex; flex-direction: column; min-height: 0; margin: 0; background: none; padding: 0; }
+.tm-side .tm-box-label { margin: 0 0 12px; }
+.tm-side .tm-comments { flex: 1; max-height: none; }
+
+/* Elegant comment composer — used both in TaskModal's side panel and TaskDetailPanel */
+.tm-comment-input, .tdp-comment-input {
+  display: flex; align-items: flex-end; gap: 8px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+  padding: 6px 6px 6px 14px; transition: border-color .16s, box-shadow .16s;
+}
+.tm-comment-input:focus-within, .tdp-comment-input:focus-within {
+  border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft);
+}
+.tm-comment-input input, .tdp-comment-input input {
+  flex: 1; min-width: 0; border: none; background: none; padding: 8px 0; font: inherit; font-size: 13.5px; color: var(--a-ink);
+}
+.tm-comment-input input:focus, .tdp-comment-input input:focus { outline: none; }
+.tm-comment-input button, .tdp-comment-input button { border-radius: 10px; flex-shrink: 0; }
+
+/* Prevent the modal's own grid content from ever forcing a horizontal
+   scrollbar — grid/flex items default to min-width:auto, which stops them
+   shrinking below their content's natural width; min-width:0 lets the
+   1fr/flex tracks actually shrink to fit the viewport. */
+.tm-cell, .tm-step, .tm-typecard { min-width: 0; }
+
+.tm-titlebox { display: flex; flex-direction: column; gap: 2px; }
+.tm-newtitle-lg { font-size: 26px; }
+.tm-titlebox .tm-desc-input { margin-top: 10px; background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 10px; padding: 10px 12px; }
+
+.tm-typepicker-groups { display: flex; flex-direction: column; }
+.tm-typepicker-heading { margin: 20px 30px 0; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
+.tm-typecard-blurb { margin: 8px 0 0; font-size: 12px; color: var(--a-muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ---- New-task type dropdown (replaces the old 8-card grid — 4 curated kinds) ---- */
+.tm-typeselect { margin: 20px 30px 0; position: relative; }
+.tm-typeselect-label { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
+.tm-typeselect-trigger {
+  width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;
+  border: 1.5px solid var(--a-border); border-radius: 14px; padding: 12px 16px;
+  background: var(--a-surface); cursor: pointer; transition: border-color .16s, background .16s;
+}
+.tm-typeselect-trigger:hover { border-color: var(--a-border-strong); }
+.tm-typeselect-ico { width: 34px; height: 34px; border-radius: 10px; background: var(--a-inset); display: inline-grid; place-items: center; font-size: 15px; flex-shrink: 0; }
+.tm-typeselect-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tm-typeselect-text strong { font-size: 14px; color: var(--a-ink); }
+.tm-typeselect-text small { font-size: 12px; color: var(--a-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-typeselect-caret { color: var(--a-muted); font-size: 13px; transition: transform .16s ease; flex-shrink: 0; }
+.tm-typeselect-caret.on { transform: rotate(180deg); }
+.tm-typeselect-panel {
+  position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 40;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.16); padding: 8px; display: flex; flex-direction: column; gap: 2px;
+  animation: kb-searchbar-in .16s ease-out;
+}
+.tm-typeselect-option {
+  display: flex; align-items: center; gap: 12px; text-align: left; border: none; background: none;
+  padding: 10px; border-radius: 10px; cursor: pointer; font: inherit;
+}
+.tm-typeselect-option:hover { background: var(--a-hover); }
+.tm-typeselect-option.on { background: var(--a-teal-soft); }
+.tm-typeselect-option.on .tm-typeselect-text strong { color: var(--a-teal-text); }
+
+.tm-visibility-box { background: var(--a-teal-soft); }
+.tm-visibility-box .kb-visible-fields { margin: 14px 0 0; background: var(--a-surface); }
+
+/* ---- Board preferences section inside AttributesConfigModal ---- */
+.attrcfg-prefs { padding: 14px 10px 4px; border-top: 1px solid var(--a-border); margin-top: 6px; }
+.attrcfg-prefs-head { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--a-muted); }
+.attrcfg-prefs-row { padding: 6px 4px; }
+.attrcfg-prefs-hint { margin: 2px 4px 0; }
+
+/* ---- Configurações · Etapas (per-client Revisão/Aprovação safe-hide) ---- */
+.set-etapas-client { max-width: 320px; }
+.set-etapas-list { display: flex; flex-direction: column; gap: 16px; margin-top: 18px; }
+.set-etapas-row { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 12px; }
+.set-etapas-label { flex-basis: 100%; font-size: 15px; color: var(--a-ink); }
+.set-etapas-note { flex-basis: 100%; margin: 0; }
+
+@media (max-width: 900px) {
+  .tm-layout:has(.tm-side) { grid-template-columns: 1fr; }
+  .tm-side { margin: 4px 30px 20px; }
+  .tm-grid { grid-template-columns: repeat(2, 1fr); }
+  .tm-typepicker { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .tm-lg { width: 100vw; max-height: 100dvh; border-radius: 0; }
+  .tm-grid { grid-template-columns: 1fr; margin-left: 16px; margin-right: 16px; }
+  .tm-typepicker { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
+  .tm-box { margin-left: 16px; margin-right: 16px; }
+  .tm-side { margin-left: 16px; margin-right: 16px; }
+  .tm-stepper { padding-left: 16px; padding-right: 16px; flex-wrap: wrap; row-gap: 10px; }
+  .kb-modal-actions { padding-left: 16px; padding-right: 16px; }
+}

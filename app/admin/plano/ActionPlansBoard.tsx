@@ -4,22 +4,42 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import CardModalLauncher from "../CardModalLauncher";
 import { STATUS_LABEL } from "../kanbanShared";
+import PlanSearchBar from "./PlanSearchBar";
+import StrategicView, { fmtDate } from "./StrategicView";
 import { kindLabel, kindTone } from "@/lib/taskCatalog";
 import type { ActionPlan } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
-type ClientLite = { slug: string; name: string };
+type View = "lista" | "estrategica";
 
-export default function ActionPlansBoard({ initial, clients }: { initial: ActionPlan[]; clients: ClientLite[] }) {
+// Matches the free-text query against every attribute the user might filter
+// by here — cliente, responsável (per-activity assignee) and prazo (plano ou
+// atividade) — "Todos os clientes" is simply an empty query.
+function planMatches(p: ActionPlan, needle: string): boolean {
+  const n = needle.toLowerCase();
+  if (p.title.toLowerCase().includes(n)) return true;
+  if (p.clientName.toLowerCase().includes(n)) return true;
+  if ((p.assignee ?? "").toLowerCase().includes(n)) return true;
+  if (fmtDate(p.start_date).toLowerCase().includes(n) || fmtDate(p.end_date).toLowerCase().includes(n)) return true;
+  return p.activities.some(
+    (a) =>
+      (a.assignee ?? "").toLowerCase().includes(n) ||
+      a.title.toLowerCase().includes(n) ||
+      fmtDate(a.due_date).toLowerCase().includes(n),
+  );
+}
+
+export default function ActionPlansBoard({ initial }: { initial: ActionPlan[] }) {
   const router = useRouter();
-  const [clientFilter, setClientFilter] = useState("");
+  const [view, setView] = useState<View>("estrategica");
+  const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<ActionPlan | null>(null);
 
-  const plans = useMemo(
-    () => (clientFilter ? initial.filter((p) => p.clientSlug === clientFilter) : initial),
-    [initial, clientFilter],
-  );
+  const plans = useMemo(() => {
+    const needle = q.trim();
+    return needle ? initial.filter((p) => planMatches(p, needle)) : initial;
+  }, [initial, q]);
 
   // The plan card as a TaskRecord for the editor modal.
   const asTask = (p: ActionPlan): TaskRecord => {
@@ -32,13 +52,16 @@ export default function ActionPlansBoard({ initial, clients }: { initial: Action
   return (
     <div className="ap">
       <div className="ap-filters">
-        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="ap-clientfilter">
-          <option value="">Todos os clientes</option>
-          {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-        </select>
+        <div className="kb-viewtabs">
+          <button className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
+          <button className={view === "lista" ? "on" : ""} onClick={() => setView("lista")}>Lista</button>
+        </div>
+        <PlanSearchBar q={q} onQChange={setQ} plans={initial} />
       </div>
 
-      {plans.length === 0 ? (
+      {view === "estrategica" ? (
+        <StrategicView plans={plans} onOpenPlan={setEditing} />
+      ) : plans.length === 0 ? (
         <p className="admin-empty">Nenhum plano de ação ainda. Crie um card do tipo “Plano de Ação” no Kanban.</p>
       ) : (
         <div className="plan-acc">

@@ -17,6 +17,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const { metrics } = taskMetricsPatchSchema.parse(await request.json());
     const task = await getTaskById(id);
     if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
+    if (!task.client_id) throw new HttpError(400, "Tarefa sem cliente nao pode ter metricas.");
     const saved = await upsertTaskMetrics(id, task.client_id, metrics);
     return NextResponse.json(saved);
   } catch (error) {

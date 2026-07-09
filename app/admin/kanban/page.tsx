@@ -10,7 +10,6 @@ export default async function KanbanPage() {
       <header className="admin-head">
         <div>
           <h1 className="admin-title">Quadro de tarefas</h1>
-          <p className="admin-sub">Kanban interno · cards marcados como visíveis alimentam o Plano de Ação do cliente</p>
         </div>
       </header>
       {clients.length === 0 ? (

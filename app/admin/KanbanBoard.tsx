@@ -2,19 +2,26 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AttributesConfigModal from "./AttributesConfigModal";
+import KanbanSearchBar from "./KanbanSearchBar";
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
 import { useAttrVisibility } from "./kanbanAttrs";
+import { useSidebarEnabledPref } from "./kanbanPrefs";
 import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone } from "./kanbanShared";
-import { TASK_KIND_KEYS, kindDef, kindLabel, kindTone, taskProgress } from "@/lib/taskCatalog";
+import { kindDef, kindLabel, kindTone, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
-import type { ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
+import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
 type ClientLite = { slug: string; name: string };
 type View = "quadro" | "tabela" | "calendario";
 type ModalState = { mode: "new"; initialStatus?: TaskStatus } | { mode: "edit"; taskId: string } | null;
 // clientName/clientSlug are only populated when "Todos" (slug === "") is selected.
 type BoardRow = TaskRecord & { clientName?: string; clientSlug?: string };
+
+// Sentinel for the "Outros" filter (tasks with no client) — not a real slug,
+// never sent to the API as-is (translated to the ?unassigned=1 query / a
+// null client_id on create).
+const NO_CLIENT = "__none__";
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MES_SHORT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -44,6 +51,10 @@ function horaOf(t: TaskRecord): string {
   const p = (t.payload ?? {}) as Record<string, unknown>;
   return typeof p.hora === "string" ? p.hora : "";
 }
+function payloadStr(t: TaskRecord, key: string): string {
+  const p = (t.payload ?? {}) as Record<string, unknown>;
+  return typeof p[key] === "string" ? (p[key] as string) : "";
+}
 
 // Plan bars overlapping the 7-day window starting at `weekStartDate`, each with
 // the grid columns (0–6) it should span. Shared by the week view and each row
@@ -68,9 +79,10 @@ function fmtDue(value: string | null): string {
 }
 
 export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
-  const [slug, setSlug] = useState(clients[0]?.slug ?? "");
+  const [slug, setSlug] = useState("");
   const [tasks, setTasks] = useState<BoardRow[]>([]);
   const [adminReviewers, setAdminReviewers] = useState<ReviewerCandidate[]>([]);
+  const [flowFlags, setFlowFlags] = useState<ClientFlowFlags | null>(null);
   const [clientReviewers, setClientReviewers] = useState<ReviewerCandidate[]>([]);
   const [view, setView] = useState<View>("quadro");
   const [loading, setLoading] = useState(false);
@@ -85,16 +97,33 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   const [cal, setCal] = useState(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
   const [calMode, setCalMode] = useState<"mes" | "semana">("mes");
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
-  const { map: attrMap, save: saveAttrMap } = useAttrVisibility();
+  const { map: attrMap, save: saveAttrMap, visible } = useAttrVisibility();
+  const tableColCount = 3 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
+  const { sidebarEnabled, setSidebarEnabled } = useSidebarEnabledPref();
+  const [planoVisibilityOn, setPlanoVisibilityOn] = useState(true);
 
-  const clientName = clients.find((c) => c.slug === slug)?.name ?? "";
+  useEffect(() => {
+    fetch("/api/admin/settings/plano-visibility")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setPlanoVisibilityOn(Boolean(data.enabled)); })
+      .catch(() => {});
+  }, []);
+
+  const clientName = slug === NO_CLIENT ? "Outros" : clients.find((c) => c.slug === slug)?.name ?? "";
+  // The real client slug for API purposes — "" both for "Todos" and "Outros"
+  // (neither is a real client to fetch/attach a task to).
+  const effectiveSlug = slug === NO_CLIENT ? "" : slug;
 
   // s === "" means "Todos os clientes" — a cross-client board feed.
+  // s === NO_CLIENT means "Outros" — tasks with no client at all.
   const load = useCallback(async (s: string) => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(s ? `/api/admin/tasks?slug=${encodeURIComponent(s)}` : "/api/admin/tasks", { cache: "no-store" });
+      const url = s === NO_CLIENT
+        ? "/api/admin/tasks?unassigned=1"
+        : s ? `/api/admin/tasks?slug=${encodeURIComponent(s)}` : "/api/admin/tasks";
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error();
       const data = await res.json();
       setTasks(data.tasks ?? []);
@@ -113,6 +142,15 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
       setAdminReviewers(data.adminReviewers ?? []);
       setClientReviewers(data.clientReviewers ?? []);
     } catch { setAdminReviewers([]); setClientReviewers([]); }
+  }, []);
+
+  const loadFlowFlags = useCallback(async (s: string) => {
+    if (!s) { setFlowFlags(null); return; }
+    try {
+      const res = await fetch(`/api/admin/client/${encodeURIComponent(s)}/flow-flags`);
+      if (!res.ok) throw new Error();
+      setFlowFlags(await res.json());
+    } catch { setFlowFlags(null); }
   }, []);
 
   useEffect(() => {
@@ -215,19 +253,28 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     return { y: d.getFullYear(), m: d.getMonth() };
   });
 
-  const visibleCount = tasks.filter((t) => t.client_visible).length;
   const selectedTask = selectedId ? tasks.find((t) => t.id === selectedId) ?? null : null;
   const editingTask = modalState?.mode === "edit" ? tasks.find((t) => t.id === modalState.taskId) ?? null : null;
-  // In "Todos" mode there's no single selected client — fall back to the
-  // task's own client (attached by listAllTasks) for the panel/modal labels.
-  const panelClientName = slug ? clientName : (selectedTask?.clientName ?? "");
-  const modalClientName = slug ? clientName : (editingTask?.clientName ?? "");
-  const modalSlug = slug || editingTask?.clientSlug || "";
+  // In "Todos"/"Outros" mode there's no single selected client — fall back to
+  // the task's own client (attached by listAllTasks) for the panel/modal labels.
+  const panelClientName = effectiveSlug ? clientName : (selectedTask?.clientName ?? "Outros");
+  const modalClientName = effectiveSlug ? clientName : (editingTask?.clientName ?? "Outros");
+  const modalSlug = effectiveSlug || editingTask?.clientSlug || "";
 
-  // Reviewer candidates are per-client — in "Todos" mode, resolve them from
-  // whichever task is currently open (panel or modal) instead of `slug`.
-  const reviewerSlug = slug || selectedTask?.clientSlug || editingTask?.clientSlug || "";
-  useEffect(() => { void loadReviewers(reviewerSlug); }, [reviewerSlug, loadReviewers]);
+  // Reviewer candidates are per-client — in "Todos"/"Outros" mode, resolve
+  // them from whichever task is currently open (panel or modal) instead of `slug`.
+  const reviewerSlug = effectiveSlug || selectedTask?.clientSlug || editingTask?.clientSlug || "";
+  useEffect(() => { void loadReviewers(reviewerSlug); void loadFlowFlags(reviewerSlug); }, [reviewerSlug, loadReviewers, loadFlowFlags]);
+
+  // Column hiding is a board-level (per selected client) concern — only
+  // meaningful when one specific client is selected, never in "Todos" mode
+  // where the shared board spans every client's cards.
+  const visibleColumns = useMemo(() => {
+    if (!slug || !flowFlags) return COLUMNS;
+    return COLUMNS.filter(
+      (c) => (c.status !== "revisao" || flowFlags.revisaoKanban) && (c.status !== "aprovacao" || flowFlags.aprovacaoKanban),
+    );
+  }, [slug, flowFlags]);
 
   // ---- Drag and drop (replaces the old ‹ › move buttons — Figma has no such
   // affordance, cards are meant to be dragged between/within columns). ----
@@ -297,13 +344,21 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     } catch { void load(slug); }
   }, [dragId, tasks, load, slug]);
 
+  // Opening the modal directly is the default; when the "painel lateral"
+  // preference is on, the sidebar (TaskDetailPanel) becomes the intermediate
+  // step before the full modal.
+  function openTask(id: string) {
+    if (sidebarEnabled) setSelectedId(id);
+    else { setSelectedId(null); setModalState({ mode: "edit", taskId: id }); }
+  }
+
   function applyChanged(updated: TaskRecord) {
     setTasks((rows) => rows.map((r) => (r.id === updated.id ? updated : r)));
   }
   function applySaved(updated: TaskRecord, isNew: boolean) {
     setTasks((rows) => (isNew ? [...rows, updated] : rows.map((r) => (r.id === updated.id ? updated : r))));
     setModalState(null);
-    setSelectedId(updated.id);
+    if (sidebarEnabled) setSelectedId(updated.id);
   }
   function applyDeleted(id: string) {
     setTasks((rows) => rows.filter((r) => r.id !== id));
@@ -318,40 +373,37 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           <span>Cliente</span>
           <select value={slug} onChange={(e) => setSlug(e.target.value)}>
             <option value="">Todos os clientes</option>
+            <option value={NO_CLIENT}>Outros</option>
             {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
           </select>
         </label>
-        {slug ? (
-          <span className="kb-visible-count">{visibleCount} visível{visibleCount === 1 ? "" : "eis"} ao cliente</span>
-        ) : null}
         <div className="kb-spacer" />
+        <button
+          className="admin-btn primary kb-newtask-btn"
+          onClick={() => { setSelectedId(null); setModalState({ mode: "new" }); }}
+        >
+          + Tarefa
+        </button>
+        <button className="admin-btn ghost kb-attrs-gear" onClick={() => setAttrCfgOpen(true)} aria-label="Atributos" title="Atributos">⚙</button>
+      </div>
+
+      <div className="kb-filters">
         <div className="kb-viewtabs">
           <button className={view === "quadro" ? "on" : ""} onClick={() => setView("quadro")}>Quadro</button>
           <button className={view === "tabela" ? "on" : ""} onClick={() => setView("tabela")}>Tabela</button>
           <button className={view === "calendario" ? "on" : ""} onClick={() => setView("calendario")}>Calendário</button>
         </div>
-        {view === "tabela" ? <button className="admin-btn ghost" onClick={() => setAttrCfgOpen(true)}>⚙ Atributos</button> : null}
-        <button
-          className="admin-btn primary"
-          disabled={!slug}
-          title={slug ? undefined : "Selecione um cliente específico para criar uma tarefa"}
-          onClick={() => { setSelectedId(null); setModalState({ mode: "new" }); }}
-        >
-          + Tarefa
-        </button>
-      </div>
-
-      <div className="kb-filters">
-        <select className="kb-filter" value={fKind} onChange={(e) => setFKind(e.target.value)}>
-          <option value="">Tipo · todos</option>
-          {TASK_KIND_KEYS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
-        </select>
-        <select className="kb-filter" value={fPrio} onChange={(e) => setFPrio(e.target.value as TaskPriority | "")}>
-          <option value="">Prioridade · todas</option>
-          {Object.entries(PRIORITY_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <div className="kb-spacer" />
-        <input className="kb-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar tarefa…" />
+        <KanbanSearchBar
+          q={q}
+          onQChange={setQ}
+          fKind={fKind}
+          onFKindChange={setFKind}
+          fPrio={fPrio}
+          onFPrioChange={setFPrio}
+          tasks={tasks}
+          crossClient={!slug}
+          onPickTask={openTask}
+        />
       </div>
 
       {error ? <p className="admin-error">{error}</p> : null}
@@ -399,10 +451,10 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                                 <button
                                   className={`kb-week-plan tone-${taskTone(t)}`}
                                   style={{ gridColumn: `${startCol + 1} / ${endCol + 2}` }}
-                                  onClick={() => setSelectedId(t.id)}
+                                  onClick={() => openTask(t.id)}
                                   title={t.title}
                                 >
-                                  ◆ {t.title} · {progressOf(t)}%
+                                  ◆ {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                                 </button>
                               </div>
                             ))}
@@ -432,7 +484,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                                       draggable
                                       onDragStart={(e) => onCardDragStart(e, t.id)}
                                       onDragEnd={onCardDragEnd}
-                                      onClick={() => setSelectedId(t.id)}
+                                      onClick={() => openTask(t.id)}
                                       title={t.title}
                                     >
                                       {t.title}
@@ -464,10 +516,10 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                           <button
                             className={`kb-week-plan tone-${taskTone(t)}`}
                             style={{ gridColumn: `${startCol + 1} / ${endCol + 2}` }}
-                            onClick={() => setSelectedId(t.id)}
+                            onClick={() => openTask(t.id)}
                             title={t.title}
                           >
-                            ◆ {t.title} · {progressOf(t)}%
+                            ◆ {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                           </button>
                         </div>
                       ))}
@@ -490,7 +542,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                             draggable
                             onDragStart={(e) => onCardDragStart(e, t.id)}
                             onDragEnd={onCardDragEnd}
-                            onClick={() => setSelectedId(t.id)}
+                            onClick={() => openTask(t.id)}
                             title={t.title}
                           >
                             {horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
@@ -506,7 +558,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
             </div>
           ) : view === "quadro" ? (
             <div className="kb-board">
-              {COLUMNS.map((col) => (
+              {visibleColumns.map((col) => (
                 <div
                   className={`kb-col ${dragId ? "drop-target" : ""}`}
                   key={col.status}
@@ -518,45 +570,58 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                     <em>{byStatus[col.status].length}</em>
                   </div>
                   <div className="kb-col-body">
-                    {byStatus[col.status].map((t) => (
-                      <article
-                        className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
-                        key={t.id}
-                        draggable
-                        onDragStart={(e) => onCardDragStart(e, t.id)}
-                        onDragEnd={onCardDragEnd}
-                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void dropInColumn(col.status, t.id); }}
-                        onClick={() => setSelectedId(t.id)}
-                      >
-                        <div className="kb-card-top">
-                          <span className={`kb-type t-tone-${kindTone(t.kind)}`}>{kindLabel(t.kind)}</span>
-                          {!slug && t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
-                          {t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
-                        </div>
-                        <p className="kb-card-title">{t.title}</p>
-                        <div className="kb-card-progress">
-                          <div className="kb-card-progress-track"><div className="kb-card-progress-fill" style={{ width: `${progressOf(t)}%` }} /></div>
-                          <span>{progressOf(t)}%</span>
-                        </div>
-                        <div className="kb-card-foot">
-                          {t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : <span />}
-                          <span className="kb-card-foot-right">
-                            {commentsOf(t).length > 0 ? (
-                              <span className="kb-comments" title="Comentários no card">💬 {commentsOf(t).length}</span>
-                            ) : null}
-                            <span className={`kb-prio p-${t.priority}`}>{PRIORITY_LABEL[t.priority]}</span>
-                          </span>
-                        </div>
-                      </article>
-                    ))}
+                    {byStatus[col.status].map((t) => {
+                      const formato = payloadStr(t, "formato");
+                      const plataforma = payloadStr(t, "plataforma");
+                      const showFormato = visible("formato") && Boolean(formato);
+                      const showPlataforma = visible("plataforma") && Boolean(plataforma);
+                      return (
+                        <article
+                          className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
+                          key={t.id}
+                          draggable
+                          onDragStart={(e) => onCardDragStart(e, t.id)}
+                          onDragEnd={onCardDragEnd}
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void dropInColumn(col.status, t.id); }}
+                          onClick={() => openTask(t.id)}
+                        >
+                          <div className="kb-card-top">
+                            <span className={`kb-type t-tone-${kindTone(t.kind)}`}>{kindLabel(t.kind)}</span>
+                            {!slug && t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
+                            {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
+                            {visible("plan_link") && t.plan_id ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
+                          </div>
+                          <p className="kb-card-title">{t.title}</p>
+                          {showFormato || showPlataforma ? (
+                            <div className="kb-card-meta">
+                              {showFormato ? <span className="kb-card-pill">{formato}</span> : null}
+                              {showPlataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
+                            </div>
+                          ) : null}
+                          {visible("progress") ? (
+                            <div className="kb-card-progress">
+                              <div className="kb-card-progress-track"><div className="kb-card-progress-fill" style={{ width: `${progressOf(t)}%` }} /></div>
+                              <span>{progressOf(t)}%</span>
+                            </div>
+                          ) : null}
+                          <div className="kb-card-foot">
+                            {t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : <span />}
+                            <span className="kb-card-foot-right">
+                              {commentsOf(t).length > 0 ? (
+                                <span className="kb-comments" title="Comentários no card">💬 {commentsOf(t).length}</span>
+                              ) : null}
+                              {visible("priority") ? <span className={`kb-prio p-${t.priority}`}>{PRIORITY_LABEL[t.priority]}</span> : null}
+                            </span>
+                          </div>
+                        </article>
+                      );
+                    })}
                     {byStatus[col.status].length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
                   </div>
                   <button
                     type="button"
                     className="kb-col-add"
-                    disabled={!slug}
-                    title={slug ? undefined : "Selecione um cliente específico para criar uma tarefa"}
                     onClick={() => { setSelectedId(null); setModalState({ mode: "new", initialStatus: col.status }); }}
                   >
                     + Adicionar tarefa
@@ -567,30 +632,45 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           ) : (
             <div className="kb-table-wrap">
               <table className="kb-table">
-                <thead><tr><th>Tarefa</th><th>Tipo</th><th>Etapa</th><th>Resp.</th><th>Prazo</th><th>Progresso</th><th>Prioridade</th><th>Cliente</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Tarefa</th>
+                    <th>Tipo</th>
+                    {visible("status") ? <th>Etapa</th> : null}
+                    {visible("assignee") ? <th>Resp.</th> : null}
+                    <th>Prazo</th>
+                    {visible("progress") ? <th>Progresso</th> : null}
+                    {visible("priority") ? <th>Prioridade</th> : null}
+                    {visible("client_visible") ? <th>Cliente</th> : null}
+                  </tr>
+                </thead>
                 <tbody>
                   {filtered.map((t) => (
-                    <tr key={t.id} className={selectedId === t.id ? "sel" : ""} onClick={() => setSelectedId(t.id)}>
+                    <tr key={t.id} className={selectedId === t.id ? "sel" : ""} onClick={() => openTask(t.id)}>
                       <td>
                         {t.title}
                         {!slug && t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
                         {commentsOf(t).length > 0 ? <span className="kb-comments" title="Comentários no card"> 💬 {commentsOf(t).length}</span> : null}
                       </td>
                       <td>{kindLabel(t.kind)}</td>
-                      <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td>
-                      <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : "—"}</td>
+                      {visible("status") ? <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td> : null}
+                      {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : "—"}</td> : null}
                       <td>{fmtDue(t.due_date)}</td>
-                      <td>
-                        <div className="kb-card-progress" style={{ margin: 0 }}>
-                          <div className="kb-card-progress-track"><div className="kb-card-progress-fill" style={{ width: `${progressOf(t)}%` }} /></div>
-                          <span>{progressOf(t)}%</span>
-                        </div>
-                      </td>
-                      <td><span className={`kb-prio p-${t.priority}`}>{PRIORITY_LABEL[t.priority]}</span></td>
-                      <td>{t.client_visible ? "◉ visível" : "—"}</td>
+                      {visible("progress") ? (
+                        <td>
+                          <div className="kb-card-progress" style={{ margin: 0 }}>
+                            <div className="kb-card-progress-track"><div className="kb-card-progress-fill" style={{ width: `${progressOf(t)}%` }} /></div>
+                            <span>{progressOf(t)}%</span>
+                          </div>
+                        </td>
+                      ) : null}
+                      {visible("priority") ? <td><span className={`kb-prio p-${t.priority}`}>{PRIORITY_LABEL[t.priority]}</span></td> : null}
+                      {visible("client_visible") ? <td>{t.client_visible ? "◉ visível" : "—"}</td> : null}
                     </tr>
                   ))}
-                  {filtered.length === 0 && !loading ? <tr><td colSpan={8} className="kb-empty">Nenhuma tarefa encontrada.</td></tr> : null}
+                  {filtered.length === 0 && !loading ? (
+                    <tr><td colSpan={tableColCount} className="kb-empty">Nenhuma tarefa encontrada.</td></tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
@@ -604,6 +684,8 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
             adminReviewers={adminReviewers}
             clientReviewers={clientReviewers}
             planCandidates={planCandidates}
+            planoVisibilityOn={planoVisibilityOn}
+            flowFlags={flowFlags}
             onClose={() => setSelectedId(null)}
             onExpand={() => setModalState({ mode: "edit", taskId: selectedTask.id })}
             onChanged={applyChanged}
@@ -616,12 +698,15 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           mode={modalState.mode}
           task={editingTask}
           slug={modalSlug}
+          clients={clients}
           clientName={modalClientName}
           initialStatus={modalState.mode === "new" ? modalState.initialStatus : undefined}
           adminReviewers={adminReviewers}
           clientReviewers={clientReviewers}
           planCandidates={planCandidates}
           clientTasks={tasks}
+          planoVisibilityOn={planoVisibilityOn}
+          flowFlags={flowFlags}
           onTaskPatched={applyChanged}
           onClose={() => setModalState(null)}
           onSaved={applySaved}

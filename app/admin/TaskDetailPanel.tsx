@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import CalendarPicker from "./CalendarPicker";
+import VisibleToggleField from "./VisibleToggleField";
 import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials, relTime } from "./kanbanShared";
 import { TASK_KIND_KEYS, kindDef, kindLabel, kindTone } from "@/lib/taskCatalog";
-import type { ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
+import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
 export default function TaskDetailPanel({
   task,
@@ -12,6 +13,8 @@ export default function TaskDetailPanel({
   adminReviewers,
   clientReviewers,
   planCandidates = [],
+  planoVisibilityOn = true,
+  flowFlags = null,
   onClose,
   onExpand,
   onChanged,
@@ -21,6 +24,8 @@ export default function TaskDetailPanel({
   adminReviewers: ReviewerCandidate[];
   clientReviewers: ReviewerCandidate[];
   planCandidates?: { id: string; title: string }[];
+  planoVisibilityOn?: boolean;
+  flowFlags?: ClientFlowFlags | null;
   onClose: () => void;
   onExpand: () => void;
   onChanged: (updated: TaskRecord) => void;
@@ -96,26 +101,33 @@ export default function TaskDetailPanel({
             onBlur={(e) => { if (e.target.value !== (task.assignee ?? "")) patch({ assignee: e.target.value.trim() || null }); }}
           />
         </div>
-        <div className="tdp-attr">
-          <span>Revisor</span>
-          <select
-            value={task.reviewer_id ?? ""} disabled={busy}
-            onChange={(e) => patch({ reviewer_id: e.target.value || null, requires_review: Boolean(e.target.value) })}
-          >
-            <option value="">— Sem revisor —</option>
-            {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
-        </div>
-        <div className="tdp-attr">
-          <span>Aprovador</span>
-          <select
-            value={task.approver_id ?? ""} disabled={busy}
-            onChange={(e) => patch({ approver_id: e.target.value || null, requires_approval: Boolean(e.target.value) })}
-          >
-            <option value="">— Sem aprovação —</option>
-            {clientReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
-        </div>
+        {/* flowFlags starts null while its fetch is in flight — treat that as
+            "off" (hidden), not "on", so the field loads already hidden instead
+            of flashing visible then disappearing once the real value arrives. */}
+        {flowFlags?.revisaoAdmin === true ? (
+          <div className="tdp-attr">
+            <span>Revisor</span>
+            <select
+              value={task.reviewer_id ?? ""} disabled={busy}
+              onChange={(e) => patch({ reviewer_id: e.target.value || null, requires_review: Boolean(e.target.value) })}
+            >
+              <option value="">— Sem revisor —</option>
+              {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            </select>
+          </div>
+        ) : null}
+        {flowFlags?.aprovacaoAdmin === true ? (
+          <div className="tdp-attr">
+            <span>Aprovador</span>
+            <select
+              value={task.approver_id ?? ""} disabled={busy}
+              onChange={(e) => patch({ approver_id: e.target.value || null, requires_approval: Boolean(e.target.value) })}
+            >
+              <option value="">— Sem aprovação —</option>
+              {clientReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            </select>
+          </div>
+        ) : null}
         {!isPlan ? (
           <div className="tdp-attr">
             <span>Plano de Ação</span>
@@ -148,6 +160,16 @@ export default function TaskDetailPanel({
             {TASK_KIND_KEYS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
           </select>
         </div>
+        {planoVisibilityOn ? (
+          <div className="tdp-visible">
+            <VisibleToggleField
+              label={isPlan ? "Plano visível para o cliente" : "Visível no Plano de Ação do cliente"}
+              checked={task.client_visible}
+              onChange={(v) => patch({ client_visible: v })}
+              disabled={busy}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="tdp-section">

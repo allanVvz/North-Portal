@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getProfileName } from "@/lib/supabase";
+import { getAdminTabsVisibility, getProfileName } from "@/lib/supabase";
 import { getSession } from "@/lib/supabase/auth";
 import AdminShell from "./AdminShell";
 
@@ -10,14 +10,23 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!session || session.role !== "admin") redirect("/login");
 
   const email = session.email ?? "";
-  const profileName = await getProfileName(session.userId);
+  const [profileName, tabsVisibility] = await Promise.all([
+    getProfileName(session.userId),
+    getAdminTabsVisibility(),
+  ]);
   const name = profileName ?? "Administrador";
   const initials = profileName
     ? profileName.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
     : (email.split("@")[0] || "AD").slice(0, 2).toUpperCase();
 
   return (
-    <AdminShell email={email} name={name} initials={initials}>
+    <AdminShell
+      email={email}
+      name={name}
+      initials={initials}
+      revisoesTabVisible={tabsVisibility.revisoesTabVisible}
+      aprovacoesTabVisible={tabsVisibility.aprovacoesTabVisible}
+    >
       {children}
     </AdminShell>
   );
