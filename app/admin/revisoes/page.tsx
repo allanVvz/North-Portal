@@ -12,7 +12,6 @@ export default async function RevisoesPage() {
         <div>
           <p className="admin-kicker">Fila de revisão · interno North</p>
           <h1 className="admin-title">Revisões</h1>
-          <p className="admin-sub">Cards do Kanban na etapa de Revisão. Só o revisor atribuído no card pode agir nele.</p>
         </div>
       </header>
       <ReviewQueue

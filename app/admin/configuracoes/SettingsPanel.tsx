@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { AgencyProfile, CheckpointTemplate, LegalDoc, TeamMember } from "@/lib/supabase";
 import CheckpointTemplates from "./CheckpointTemplates";
 import EtapasPanel from "./EtapasPanel";
+import WindsorIntegration from "./WindsorIntegration";
 import { useSidebarEnabledPref } from "../kanbanPrefs";
 
 type Tab = "perfil" | "equipe" | "politicas" | "etapas" | "checkpoints" | "faturamento" | "integracoes";
@@ -68,12 +69,7 @@ export default function SettingsPanel({
             <p className="admin-sub">Planos, faturas e método de pagamento. <span className="admin-soon">em breve</span></p>
           </div>
         ) : null}
-        {tab === "integracoes" ? (
-          <div className="set-card set-empty">
-            <h2 className="set-h">Integrações</h2>
-            <p className="admin-sub">Meta Business, Google Drive e webhooks. <span className="admin-soon">em breve</span></p>
-          </div>
-        ) : null}
+        {tab === "integracoes" ? <WindsorIntegration clients={clients} /> : null}
       </div>
     </div>
   );

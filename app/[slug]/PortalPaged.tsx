@@ -104,19 +104,34 @@ const LOCKED_IN_PROD: PageId[] = ["acessos", "dashboard", "time-north"];
 function isPageLocked(page: PageId): boolean {
   return !IS_DEV_BUILD && LOCKED_IN_PROD.includes(page);
 }
+
+// Per-client Revisão/Aprovação flags (client_flow_flags) hide "feedbacks" —
+// unlike LOCKED_IN_PROD this is per-client server data, not a build-time
+// constant, so it's updated whenever a fresh payload loads rather than
+// computed inline. `revisaoCliente` has no client-facing page to hide today
+// (there is no client "Revisão" screen), kept for schema symmetry.
+let hiddenPagesForClient = new Set<PageId>();
+function updateHiddenPagesForClient(flowFlags: PortalPayload["flowFlags"] | undefined) {
+  const next = new Set<PageId>();
+  if (flowFlags && !flowFlags.aprovacaoCliente) next.add("feedbacks");
+  hiddenPagesForClient = next;
+}
+function isPageHiddenForClient(page: PageId): boolean {
+  return hiddenPagesForClient.has(page);
+}
 // A cluster's own top-nav destination may itself be locked (e.g. "North" ->
 // time-north) while the cluster still has other open items (Trilhas,
 // Documentos...) — route the top-level click to the first open item instead
 // of silently no-oping. Only a cluster with *no* open items stays locked.
 function firstOpenPage(cluster: NavCluster): PageId {
-  if (!isPageLocked(cluster.page)) return cluster.page;
-  return cluster.items.find((it) => !isPageLocked(it.page))?.page ?? cluster.page;
+  if (!isPageLocked(cluster.page) && !isPageHiddenForClient(cluster.page)) return cluster.page;
+  return cluster.items.find((it) => !isPageLocked(it.page) && !isPageHiddenForClient(it.page))?.page ?? cluster.page;
 }
 
 function pageFromHash(): PageId {
   if (typeof window === "undefined") return "inicio";
   const h = window.location.hash.replace("#", "") as PageId;
-  return PAGE_IDS.has(h) && !isPageLocked(h) ? h : "inicio";
+  return PAGE_IDS.has(h) && !isPageLocked(h) && !isPageHiddenForClient(h) ? h : "inicio";
 }
 const hrefFor = (p: PageId) => (p === "inicio" ? "#" : `#${p}`);
 const initials = (name: string) =>
@@ -229,6 +244,7 @@ export default function ClientPortalPaged() {
       setPageError("");
       setPayload(null);
       setChip("");
+      updateHiddenPagesForClient(undefined);
     }
     return fetch(`/api/client/${slug}`, { cache: "no-store" })
       .then(async (res) => {
@@ -241,6 +257,7 @@ export default function ClientPortalPaged() {
       .then((data) => {
         if (!data) { loaded.current = true; return; }
         setPayload(data);
+        updateHiddenPagesForClient(data.flowFlags);
         setAnswers(data.briefing.answers ?? {});
         setChip(data.briefing.submitted ? "Concluido" : "");
         setPrefs(data.prefs);
@@ -296,7 +313,7 @@ export default function ClientPortalPaged() {
     // Single choke point — every nav path (top bar, dropdown, overlay, the
     // compass wheel itself) routes through here, so this is what actually
     // makes a locked page unreachable, not just visually hidden.
-    if (isPageLocked(page)) return;
+    if (isPageLocked(page) || isPageHiddenForClient(page)) return;
     setTransitioning(true);
     setActiveDir(PAGE_DIR[page]);
     setOpenMenu(null);
@@ -593,7 +610,7 @@ function MegaDropdown(props: { open: boolean; cluster: NavCluster; onGo: (p: Pag
             {c.label} <em>· direção {cardinalName(c.cardinal)}</em>
           </span>
           <p className="np-dd-blurb">{c.blurb}</p>
-          {c.items.map((it) => {
+          {c.items.filter((it) => !isPageHiddenForClient(it.page)).map((it) => {
             const locked = isPageLocked(it.page);
             return (
               <button
@@ -700,7 +717,7 @@ function Overlay(props: {
               </div>
             </div>
             <p className="np-ov-blurb">{c.blurb}</p>
-            {c.items.map((it) => {
+            {c.items.filter((it) => !isPageHiddenForClient(it.page)).map((it) => {
               const locked = isPageLocked(it.page);
               return (
                 <button

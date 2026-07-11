@@ -7,13 +7,11 @@ export default async function KanbanPage() {
   const clients = await listClients();
   return (
     <section className="admin-page kb-wide">
-      <header className="admin-head">
-        <div>
-          <h1 className="admin-title">Quadro de tarefas</h1>
-        </div>
-      </header>
       {clients.length === 0 ? (
-        <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
+        <>
+          <header className="admin-head"><div><h1 className="admin-title">Quadro de tarefas</h1></div></header>
+          <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
+        </>
       ) : (
         <KanbanBoard clients={clients.map((c) => ({ slug: c.slug, name: c.name }))} />
       )}

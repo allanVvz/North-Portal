@@ -1,21 +1,26 @@
 import Link from "next/link";
-import { listClients } from "@/lib/supabase";
-import ClientsTable from "./ClientsTable";
+import { listAllBriefings, listClients } from "@/lib/supabase";
+import ClientsTable, { type ClientRow } from "./ClientsTable";
+import { clientStageFor } from "./clientPipeline";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminClientsPage() {
-  const clients = await listClients();
-  const activeCount = clients.filter((c) => c.is_active).length;
-
+  const [summaries, briefings] = await Promise.all([
+    listClients({ includeDisabled: true }),
+    listAllBriefings(),
+  ]);
+  const checkpointsBySlug = new Map(briefings.map((b) => [b.slug, b.checkpointsPct]));
+  const clients: ClientRow[] = summaries.map((c) => {
+    const checkpointsPct = checkpointsBySlug.get(c.slug) ?? 0;
+    return { ...c, checkpointsPct, stage: clientStageFor(c.briefing_submitted, checkpointsPct) };
+  });
   return (
     <section className="admin-page">
       <header className="admin-head">
         <div>
+          <p className="admin-kicker">Dados</p>
           <h1 className="admin-title">Clientes</h1>
-          <p className="admin-sub">
-            Carteira da North · {activeCount} ativo{activeCount === 1 ? "" : "s"}
-          </p>
         </div>
         <Link href="/admin/novo" className="admin-btn primary">
           + Novo cliente

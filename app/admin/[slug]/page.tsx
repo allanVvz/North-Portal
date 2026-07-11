@@ -14,11 +14,8 @@ export default async function EditClientPage({ params }: { params: Promise<{ slu
     <section className="admin-page admin-narrow">
       <header className="admin-head">
         <div>
-          <p className="admin-eyebrow">Editar cliente</p>
+          <p className="admin-eyebrow">Editar cliente · <code className="admin-slug">/{detail.slug}</code></p>
           <h1 className="serif admin-title">{detail.name}</h1>
-          <p className="admin-sub">
-            <code className="admin-slug">/{detail.slug}</code>
-          </p>
         </div>
         <div className="admin-head-actions">
           <Link href={`/${detail.slug}`} target="_blank" className="admin-btn ghost">

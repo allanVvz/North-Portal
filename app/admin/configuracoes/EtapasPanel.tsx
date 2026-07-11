@@ -84,7 +84,7 @@ export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
   return (
     <div className="set-card">
       <h2 className="set-h">Etapas</h2>
-      <p className="admin-sub">Ative ou desative Revisão e Aprovação — por cliente (Admin/Cliente) e no menu do admin (global). A coluna do Kanban é automática: some sozinha quando não há mais cards nela.</p>
+      <p className="admin-sub">Ative ou desative Revisão e Aprovação — por cliente (Admin/Cliente) e no menu do admin (global). Ligar "Ativo para Admin" já deixa a coluna do Kanban disponível (mesmo vazia); desligar move os cards dela para Em produção e some com a coluna assim que nenhum outro cliente tiver a etapa ligada.</p>
 
       {tabs ? (
         <div className="set-etapas-global">

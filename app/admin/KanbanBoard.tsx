@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AttributesConfigModal from "./AttributesConfigModal";
+import HScrollRail from "./HScrollRail";
 import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
-import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone } from "./kanbanShared";
+import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone, visibleColumnsFor } from "./kanbanShared";
 import { kindDef, kindLabel, kindTone, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
@@ -24,6 +25,11 @@ type ModalState =
 type BoardRow = TaskRecord & { clientName?: string; clientSlug?: string };
 
 const SEM_RESPONSAVEL = "Sem responsável";
+const VIEW_TITLE: Record<View, string> = {
+  quadro: "Quadro de tarefas",
+  tabela: "Tabela de tarefas",
+  calendario: "Calendário de tarefas",
+};
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MES_SHORT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -102,11 +108,18 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   const tableColCount = 3 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
   const { sidebarEnabled, setSidebarEnabled } = useSidebarEnabledPref();
   const [planoVisibilityOn, setPlanoVisibilityOn] = useState(true);
+  // Whether ANY client currently has Revisão/Aprovação admin-enabled — drives
+  // whether those Kanban columns show at all (see visibleColumns below).
+  const [flowSummary, setFlowSummary] = useState({ anyRevisaoAdmin: false, anyAprovacaoAdmin: false });
 
   useEffect(() => {
     fetch("/api/admin/settings/plano-visibility")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data) setPlanoVisibilityOn(Boolean(data.enabled)); })
+      .catch(() => {});
+    fetch("/api/admin/settings/flow-flags-summary")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setFlowSummary(data); })
       .catch(() => {});
   }, []);
 
@@ -272,16 +285,14 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   const reviewerSlug = selectedTask?.clientSlug || editingTask?.clientSlug || "";
   useEffect(() => { void loadReviewers(reviewerSlug); void loadFlowFlags(reviewerSlug); }, [reviewerSlug, loadReviewers, loadFlowFlags]);
 
-  // Revisão/Aprovação are the only columns that can disappear, and it's fully
-  // automatic (no flag, no async fetch to wait on): a column exists iff at
-  // least one already-loaded card currently sits in that status.
-  const visibleColumns = useMemo(() => {
-    const hasRevisao = tasks.some((t) => t.status === "revisao");
-    const hasAprovacao = tasks.some((t) => t.status === "aprovacao");
-    return COLUMNS.filter((c) => (c.status !== "revisao" || hasRevisao) && (c.status !== "aprovacao" || hasAprovacao));
-  }, [tasks]);
+  const visibleColumns = useMemo(
+    () => visibleColumnsFor(tasks, flowSummary.anyRevisaoAdmin, flowSummary.anyAprovacaoAdmin),
+    [tasks, flowSummary],
+  );
 
   const gridColCount = boardMode === "status" ? visibleColumns.length : responsavelColumns.length;
+
+  const boardRef = useRef<HTMLDivElement>(null);
 
   // ---- Drag and drop (replaces the old ‹ › move buttons — Figma has no such
   // affordance, cards are meant to be dragged between/within columns). ----
@@ -294,6 +305,20 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   const onCardDragEnd = useCallback(() => setDragId(null), []);
   const allowDrop = useCallback((e: React.DragEvent) => e.preventDefault(), []);
 
+  // A rejected PATCH (permission denied, stale flag, whatever) must never be
+  // silently swallowed — fetch() only rejects on a network failure, a 4xx/5xx
+  // still resolves "successfully", so every drag handler below explicitly
+  // checks res.ok, reverts the optimistic update, and surfaces the server's
+  // own message instead of leaving the board showing a move that never
+  // actually persisted.
+  async function serverErrorMessage(res: Response): Promise<string> {
+    try {
+      const body = await res.json();
+      if (body && typeof body.error === "string") return body.error;
+    } catch { /* non-JSON error body */ }
+    return "Não foi possível salvar a alteração.";
+  }
+
   // Drops the dragged card into `status`, inserted just before `beforeTaskId`
   // (or appended to the end when omitted). Renumbers that column with clean
   // integer gaps and PATCHes only the tasks whose status/position actually changed.
@@ -303,6 +328,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     if (!draggedId) return;
     const dragged = tasks.find((t) => t.id === draggedId);
     if (!dragged) return;
+    const before = tasks;
 
     const columnTasks = byStatus[status].filter((t) => t.id !== draggedId);
     const insertAt = beforeTaskId ? columnTasks.findIndex((t) => t.id === beforeTaskId) : -1;
@@ -311,24 +337,30 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     const withPositions = reordered.map((t, i) => ({ ...t, status, position: i * 10 }));
 
     const changed = withPositions.filter((t) => {
-      const before = tasks.find((r) => r.id === t.id);
-      return !before || before.status !== t.status || before.position !== t.position;
+      const prior = tasks.find((r) => r.id === t.id);
+      return !prior || prior.status !== t.status || prior.position !== t.position;
     });
     if (changed.length === 0) return;
 
+    setError("");
     setTasks((rows) => {
       const byId = new Map(withPositions.map((t) => [t.id, t]));
       return rows.map((r) => byId.get(r.id) ?? r);
     });
     try {
-      await Promise.all(changed.map((t) =>
+      const results = await Promise.all(changed.map((t) =>
         fetch(`/api/admin/tasks/${t.id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: t.status, position: t.position }),
         }),
       ));
-    } catch { void load(); }
-  }, [dragId, tasks, byStatus, load]);
+      const failed = results.find((r) => !r.ok);
+      if (failed) { setTasks(before); setError(await serverErrorMessage(failed)); }
+    } catch {
+      setTasks(before);
+      setError("Não foi possível mover o card — verifique sua conexão.");
+    }
+  }, [dragId, tasks, byStatus]);
 
   // Responsável mode: dropping a card onto a person's column just reassigns
   // it — no reordering/position touch, so it can't disturb the status-based
@@ -341,14 +373,20 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     if (!dragged) return;
     const nextAssignee = assigneeName === SEM_RESPONSAVEL ? null : assigneeName;
     if ((dragged.assignee ?? null) === nextAssignee) return;
+    const before = tasks;
+    setError("");
     setTasks((rows) => rows.map((r) => (r.id === draggedId ? { ...r, assignee: nextAssignee } : r)));
     try {
-      await fetch(`/api/admin/tasks/${draggedId}`, {
+      const res = await fetch(`/api/admin/tasks/${draggedId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assignee: nextAssignee }),
       });
-    } catch { void load(); }
-  }, [dragId, tasks, load]);
+      if (!res.ok) { setTasks(before); setError(await serverErrorMessage(res)); }
+    } catch {
+      setTasks(before);
+      setError("Não foi possível mover o card — verifique sua conexão.");
+    }
+  }, [dragId, tasks]);
 
   // Same drag pattern, applied to the Calendário: dropping a pill on a day
   // cell just PATCHes that task's due_date to the dropped-on day.
@@ -362,14 +400,20 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     if (!dragged) return;
     const due = isoDate(date);
     if (dragged.due_date === due) return;
+    const before = tasks;
+    setError("");
     setTasks((rows) => rows.map((r) => (r.id === draggedId ? { ...r, due_date: due } : r)));
     try {
-      await fetch(`/api/admin/tasks/${draggedId}`, {
+      const res = await fetch(`/api/admin/tasks/${draggedId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ due_date: due }),
       });
-    } catch { void load(); }
-  }, [dragId, tasks, load]);
+      if (!res.ok) { setTasks(before); setError(await serverErrorMessage(res)); }
+    } catch {
+      setTasks(before);
+      setError("Não foi possível mover o card — verifique sua conexão.");
+    }
+  }, [dragId, tasks]);
 
   // Opening the modal directly is the default; when the "painel lateral"
   // preference is on, the sidebar (TaskDetailPanel) becomes the intermediate
@@ -445,6 +489,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
 
   return (
     <div className="kb">
+      <header className="admin-head"><div><h1 className="admin-title">{VIEW_TITLE[view]}</h1></div></header>
       <div className="kb-toolbar">
         <div className="kb-viewtabs">
           <button className={view === "quadro" ? "on" : ""} onClick={() => setView("quadro")}>Quadro</button>
@@ -481,30 +526,45 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
         <button className="admin-btn ghost kb-attrs-gear" onClick={() => setAttrCfgOpen(true)} aria-label="Atributos" title="Atributos">⚙</button>
       </div>
 
+      {/* One fixed-height slot, shared by all three views, so switching
+          between them never shifts anything below it. Quadro puts the
+          horizontal scroll rail here; Calendário puts its month/week nav bar
+          here (moved out of .kb-cal so it shares this same slot instead of
+          having its own separate space); Tabela has nothing to put here, but
+          the slot still holds the line so the table starts at the same y as
+          the board/calendar do. When a view's content doesn't need anything
+          visual (e.g. the rail with nothing to scroll), it renders nothing
+          at all — not even a faint placeholder — the fixed height alone is
+          what keeps everything from moving. */}
+      <div className="kb-toparea">
+        {view === "quadro" ? <HScrollRail targetRef={boardRef} /> : null}
+        {view === "calendario" ? (
+          <div className="kb-cal-bar">
+            {calMode === "mes" ? (
+              <>
+                <strong className="kb-cal-title">{MONTHS[cal.m]} {cal.y}</strong>
+                <button className="kb-cal-nav" onClick={() => stepMonth(-1)} aria-label="Mês anterior">‹</button>
+                <button className="kb-cal-nav" onClick={() => stepMonth(1)} aria-label="Próximo mês">›</button>
+                <button className="kb-cal-today" onClick={() => setCal({ y: today.getFullYear(), m: today.getMonth() })}>Hoje</button>
+              </>
+            ) : (
+              <>
+                <strong className="kb-cal-title">{weekStart.getDate()} {MES_SHORT[weekStart.getMonth()]} – {weekEnd.getDate()} {MES_SHORT[weekEnd.getMonth()]}</strong>
+                <button className="kb-cal-nav" onClick={() => stepWeek(-1)} aria-label="Semana anterior">‹</button>
+                <button className="kb-cal-nav" onClick={() => stepWeek(1)} aria-label="Próxima semana">›</button>
+                <button className="kb-cal-today" onClick={() => setWeekStart(startOfWeek(new Date()))}>Hoje</button>
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+
       {error ? <p className="admin-error">{error}</p> : null}
 
       <div className={`kb-layout ${selectedTask ? "with-panel" : ""}`}>
         <div className="kb-main">
           {view === "calendario" ? (
             <div className="kb-cal">
-              <div className="kb-cal-bar">
-                {calMode === "mes" ? (
-                  <>
-                    <strong className="kb-cal-title">{MONTHS[cal.m]} {cal.y}</strong>
-                    <button className="kb-cal-nav" onClick={() => stepMonth(-1)} aria-label="Mês anterior">‹</button>
-                    <button className="kb-cal-nav" onClick={() => stepMonth(1)} aria-label="Próximo mês">›</button>
-                    <button className="kb-cal-today" onClick={() => setCal({ y: today.getFullYear(), m: today.getMonth() })}>Hoje</button>
-                  </>
-                ) : (
-                  <>
-                    <strong className="kb-cal-title">{weekStart.getDate()} {MES_SHORT[weekStart.getMonth()]} – {weekEnd.getDate()} {MES_SHORT[weekEnd.getMonth()]}</strong>
-                    <button className="kb-cal-nav" onClick={() => stepWeek(-1)} aria-label="Semana anterior">‹</button>
-                    <button className="kb-cal-nav" onClick={() => stepWeek(1)} aria-label="Próxima semana">›</button>
-                    <button className="kb-cal-today" onClick={() => setWeekStart(startOfWeek(new Date()))}>Hoje</button>
-                  </>
-                )}
-              </div>
-
               {calMode === "mes" ? (
                 <>
                   <div className="kb-cal-wds">
@@ -626,7 +686,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
               )}
             </div>
           ) : view === "quadro" ? (
-            <div className="kb-board" style={{ gridTemplateColumns: `repeat(${Math.max(gridColCount, 1)}, minmax(240px, 1fr))` }}>
+            <div className="kb-board" ref={boardRef} style={{ gridTemplateColumns: `repeat(${Math.max(gridColCount, 1)}, minmax(240px, 1fr))` }}>
               {boardMode === "status" ? (
                 visibleColumns.map((col) => (
                   <div

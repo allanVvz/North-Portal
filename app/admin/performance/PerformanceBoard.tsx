@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { METRIC_DEFS } from "../metricDefs";
 import { filterByClient } from "../approvalGroups";
 import type { PublishedTask } from "@/lib/supabase";
 import { kindDef, kindLabel, kindTone } from "@/lib/taskCatalog";
+import type { MetaPost } from "@/lib/windsor";
 
 type ClientLite = { slug: string; name: string };
 
@@ -78,6 +79,31 @@ export default function PerformanceBoard({
     setBusy("");
   }
 
+  // Pull the linked Meta post's metrics into the card via the sync route
+  // (gerente-only server-side; source becomes 'windsor').
+  async function syncFromPost(task: PublishedTask, postId: string) {
+    setBusy(task.id);
+    try {
+      const res = await fetch("/api/admin/performance/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ links: [{ taskId: task.id, postId }] }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "");
+      const result = body.results?.[0];
+      if (!result?.ok) throw new Error(result?.error ?? "");
+      // Refresh the row from the server-truth metrics.
+      const refreshed = await fetch("/api/admin/metrics", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null));
+      if (refreshed?.tasks) setTasks(refreshed.tasks);
+      flash("Métricas puxadas do post.");
+      setEditing(null);
+    } catch (e) {
+      flash(e instanceof Error && e.message ? e.message : "Não foi possível puxar as métricas.");
+    }
+    setBusy("");
+  }
+
   return (
     <div className="ap">
       <div className="ap-filters">
@@ -105,6 +131,7 @@ export default function PerformanceBoard({
                   <p className="ap-sub">
                     Publicado{relTime(t.updated_at) ? ` · ${relTime(t.updated_at)}` : ""}
                     {t.metricsUpdatedAt ? ` · métricas atualizadas ${relTime(t.metricsUpdatedAt)}` : ""}
+                    {t.metricsSource === "windsor" ? <span className="perf-windsor-badge"> via Windsor</span> : null}
                   </p>
                   {filled.length > 0 ? (
                     <p className="perf-metrics-line">
@@ -132,6 +159,7 @@ export default function PerformanceBoard({
           canEdit={canEdit}
           onClose={() => setEditing(null)}
           onSave={(values) => void saveMetrics(editing, values)}
+          onSyncPost={(postId) => void syncFromPost(editing, postId)}
         />
       ) : null}
 
@@ -146,9 +174,38 @@ function MetricsModal(props: {
   canEdit: boolean;
   onClose: () => void;
   onSave: (values: Record<string, string>) => void;
+  onSyncPost: (postId: string) => void;
 }) {
-  const { task, busy, canEdit, onClose, onSave } = props;
+  const { task, busy, canEdit, onClose, onSave, onSyncPost } = props;
   const [values, setValues] = useState<Record<string, string>>(task.metrics);
+  const linkedPostId = typeof (task.payload as Record<string, unknown> | null)?.metaPostId === "string"
+    ? String((task.payload as Record<string, unknown>).metaPostId)
+    : "";
+  const [selectedPost, setSelectedPost] = useState(linkedPostId);
+  const [posts, setPosts] = useState<MetaPost[]>([]);
+  const [postsDemo, setPostsDemo] = useState(false);
+
+  // Lazily load the client's cached Meta posts to populate the link picker —
+  // 90 days, same window the dashboard caches.
+  useEffect(() => {
+    if (!canEdit || !task.clientSlug) return;
+    const today = new Date();
+    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const from = iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 90));
+    fetch(`/api/admin/performance/insights?from=${from}&to=${iso(today)}&client=${encodeURIComponent(task.clientSlug)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setPostsDemo(Boolean(data.demo));
+        setPosts((data.posts as MetaPost[]).filter((p) => p.source === "organic"));
+      })
+      .catch(() => {});
+  }, [canEdit, task.clientSlug]);
+
+  const fmtDate = (isoStr: string) => {
+    const [, m, d] = isoStr.split("-");
+    return `${Number(d)}/${Number(m)}`;
+  };
 
   return (
     <div className="kb-modal-backdrop" onClick={() => !busy && onClose()}>
@@ -160,6 +217,31 @@ function MetricsModal(props: {
           </div>
           <button className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
         </div>
+
+        {canEdit && posts.length > 0 ? (
+          <div className="perf-linkrow">
+            <label className="admin-field perf-linkfield">
+              <span>Vincular post do Instagram/Facebook</span>
+              <select value={selectedPost} onChange={(e) => setSelectedPost(e.target.value)}>
+                <option value="">— Sem vínculo —</option>
+                {posts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {fmtDate(p.date)} · {p.platform === "instagram" ? "IG" : "FB"} · {p.caption ? p.caption.slice(0, 48) : p.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="admin-btn ghost"
+              disabled={busy || !selectedPost || postsDemo}
+              title={postsDemo ? "Configure a integração com a Windsor para sincronizar métricas reais." : undefined}
+              onClick={() => onSyncPost(selectedPost)}
+            >
+              Puxar métricas
+            </button>
+          </div>
+        ) : null}
+
         <div className="tm-grid">
           {METRIC_DEFS.map((m) => (
             <label className="admin-field" key={m.key}>
@@ -175,7 +257,7 @@ function MetricsModal(props: {
         </div>
         <p className="admin-sub perf-hint">
           {canEdit
-            ? "Preenchimento manual por enquanto — integração automática com APIs de anúncios (Meta) fica para uma próxima fase."
+            ? "Vincule um post e use “Puxar métricas” para preencher com dados reais da Meta, ou ajuste manualmente."
             : "Modo visualização — apenas gerentes registram métricas."}
         </p>
         <div className="kb-modal-actions">

@@ -1,6 +1,6 @@
 import { listClients, listPublishedTasks } from "@/lib/supabase";
 import { getSession } from "@/lib/supabase/auth";
-import PerformanceBoard from "./PerformanceBoard";
+import PerformanceScreen from "./PerformanceScreen";
 
 export const dynamic = "force-dynamic";
 
@@ -13,13 +13,13 @@ export default async function PerformancePage() {
         <div>
           <p className="admin-kicker">Dados</p>
           <h1 className="admin-title">Performance</h1>
-          <p className="admin-sub">
-            Cards publicados no Kanban ganham métricas reais aqui — a fonte dos resultados de cada cliente.
-            {canEdit ? "" : " Modo visualização — só gerentes registram métricas."}
-          </p>
         </div>
       </header>
-      <PerformanceBoard initial={tasks} clients={clients.map((c) => ({ slug: c.slug, name: c.name }))} canEdit={canEdit} />
+      <PerformanceScreen
+        initialTasks={tasks}
+        clients={clients.map((c) => ({ slug: c.slug, name: c.name }))}
+        canEdit={canEdit}
+      />
     </section>
   );
 }

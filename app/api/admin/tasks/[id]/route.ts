@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { deleteTask, getClientFlowFlags, getTaskById, updateTask } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
-import { HttpError, taskPatchSchema } from "@/lib/validation";
+import { HttpError, canLeaveRevisao, requiresManagerApproval, taskPatchSchema } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -18,17 +18,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // Only gerente-level admins decide the approval gate either way — approve
     // (aprovado) or reopen a resolved card back to aprovacao — enforced here
     // so it holds regardless of surface (Kanban drag, TaskModal, Aprovações).
-    const isApprovalDecision = patch.status === "aprovado" || (current?.status === "aprovado" && patch.status === "aprovacao");
-    if (isApprovalDecision && session.level !== "gerente") {
+    // Every other transition (including moving a card OUT of aprovacao to
+    // anything other than aprovado) is unrestricted.
+    if (requiresManagerApproval(current?.status, patch.status) && session.level !== "gerente") {
       throw new HttpError(403, "Apenas gerentes podem aprovar ou reabrir um card.");
     }
 
     // Only the reviewer assigned on the card can move it out of Revisão —
     // internal review is never a free-for-all across the whole admin team.
-    if (patch.status && patch.status !== "revisao") {
-      if (current?.status === "revisao" && current.reviewer_id !== session.userId) {
-        throw new HttpError(403, "Apenas o revisor designado pode mover este card para fora da Revisão.");
-      }
+    // An unclaimed card (no reviewer yet) has no exclusive owner to protect,
+    // so it doesn't lock everyone out.
+    if (patch.status && patch.status !== "revisao" && !canLeaveRevisao(current?.status, current?.reviewer_id, session.userId)) {
+      throw new HttpError(403, "Apenas o revisor designado pode mover este card para fora da Revisão.");
     }
 
     // Defense-in-depth: a client with a stage admin-disabled never carries a

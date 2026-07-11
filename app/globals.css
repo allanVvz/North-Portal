@@ -1705,16 +1705,23 @@ body.menu-open {
 
 /* ---- main / page ---- */
 .admin-main { flex: 1 1 auto; min-width: 0; overflow-x: hidden; }
-.admin-page { max-width: 1180px; margin: 0 auto; padding: clamp(24px, 4vw, 44px) clamp(20px, 4vw, 44px); }
+/* Top padding trimmed on its own (was the same clamp() as the bottom) — that,
+   plus dropping the header subtitles page by page, is what actually grows
+   the visible content area; sides/bottom untouched. */
+.admin-page { max-width: 1180px; margin: 0 auto; padding: clamp(14px, 2vw, 24px) clamp(20px, 4vw, 44px) clamp(24px, 4vw, 44px); }
 .admin-narrow { max-width: 1180px; }
 .admin-page.kb-wide { max-width: none; }
-.admin-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+.admin-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .admin-head-actions { display: inline-flex; gap: 8px; }
 .admin-crumb { font-size: 13px; color: var(--a-muted); margin: 0 0 6px; }
 .admin-eyebrow { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--a-muted); }
 .admin-title { margin: 0; font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: clamp(28px, 3.4vw, 40px); color: var(--a-ink); letter-spacing: -0.01em; }
 .admin-sub { margin: 6px 0 0; color: var(--a-muted); font-size: 14px; }
 .admin-slug { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--a-teal-text); background: var(--a-teal-soft); padding: 2px 7px; border-radius: 6px; }
+/* Nested inside .admin-eyebrow (see app/admin/[slug]/page.tsx) — override
+   the uppercase/letter-spacing it would otherwise inherit, which mangled a
+   lowercase slug into awkwardly tracked-out caps. */
+.admin-eyebrow .admin-slug { text-transform: none; letter-spacing: normal; }
 .admin-empty { color: var(--a-muted); padding: 40px; text-align: center; border: 1px dashed var(--a-border-strong); border-radius: 16px; background: var(--a-surface); }
 
 /* ---- buttons ---- */
@@ -1748,6 +1755,23 @@ body.menu-open {
 .admin-cell-name { font-weight: 600; color: var(--a-ink); }
 .admin-cell-muted { color: var(--a-muted); white-space: nowrap; }
 .admin-cell-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* ---- Clientes: Lista/Pipeline toggle + soft-delete state ---- */
+.cli-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.cli-row-disabled { opacity: .55; }
+.cli-disabled-badge { margin-left: 6px; }
+.cli-pipeline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
+.cli-pipeline-col { background: var(--a-surface2); border: 1px solid var(--a-border); border-radius: 14px; padding: 14px; min-height: 120px; }
+.cli-pipeline-body { display: flex; flex-direction: column; gap: 8px; }
+.cli-card { background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 11px; padding: 14px; box-shadow: 0 1px 2px rgba(12,44,44,.04); display: flex; flex-direction: column; gap: 8px; }
+.cli-card-top { display: flex; align-items: center; gap: 10px; }
+.cli-card-name { font-weight: 600; color: var(--a-ink); }
+.cli-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cli-card-pct { font-size: 12px; font-weight: 700; color: var(--a-teal-text); }
+.cli-card-actions { display: flex; gap: 6px; }
+@media (max-width: 900px) {
+  .cli-pipeline { grid-template-columns: 1fr; }
+}
 
 .admin-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 500; }
 .admin-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -2086,7 +2110,34 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-modetoggle button { border: none; background: none; font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; color: var(--a-muted); }
 .kb-modetoggle button.on { background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 600; }
 
-.kb-board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; align-items: start; overflow-x: auto; padding-bottom: 4px; }
+/* One fixed-height slot, shared by Quadro/Tabela/Calendário (see
+   .kb-toparea in KanbanBoard.tsx), sits between the toolbar and whatever the
+   view renders — its height never changes, so switching views never shifts
+   anything below it. Quadro puts the scroll rail here (nothing at all when
+   there's no overflow to scroll — the slot itself, not the rail, is what
+   holds the space open); Calendário puts its month/week nav bar here;
+   Tabela leaves it empty. */
+/* A hard height, not a floor — every view's content (rail, calendar nav,
+   nothing) is sized to fit inside it, so it's identical across
+   Quadro/Tabela/Calendário. Shrinking the calendar's own font/buttons to
+   force this shorter was the wrong lever (previous pass) — text is back to
+   a normal readable size below; what actually shrank here is the margin
+   around the row (~60% tighter than the original 4px/16px), not the
+   content. */
+.kb-toparea { display: flex; align-items: center; height: 30px; margin: 2px 0 6px; }
+.kb-hrail { position: relative; width: 100%; height: 6px; border-radius: 999px; background: var(--a-inset); cursor: pointer; }
+.kb-hrail-thumb { position: absolute; top: 0; height: 100%; border-radius: 999px; background: var(--a-teal); opacity: .5; cursor: grab; touch-action: none; }
+.kb-hrail-thumb:hover { opacity: .75; }
+.kb-hrail-thumb:active { opacity: .95; cursor: grabbing; }
+
+/* The page keeps growing tall as normal — no height cap on the board. The
+   only thing that can overflow is width, when there are more columns than
+   fit (mainly Responsável mode with many people). The native scrollbar for
+   that is hidden — HScrollRail.tsx renders the custom rail above instead.
+   Two prior attempts (a height cap, then a scaleY(-1) mirror to relocate the
+   native scrollbar) both still caused layout shift — this is the real fix. */
+.kb-board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px; align-items: start; overflow-x: auto; scrollbar-width: none; }
+.kb-board::-webkit-scrollbar { display: none; }
 .kb-col { background: var(--a-surface2); border: 1px solid var(--a-border); border-radius: 14px; padding: 14px; min-height: 120px; }
 .kb-col-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--a-sec); }
 .kb-col-head em { font-style: normal; font-size: 11px; color: var(--a-muted); background: var(--a-inset); padding: 1px 7px; border-radius: 999px; }
@@ -2119,7 +2170,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-card.dragging { opacity: .4; cursor: grabbing; }
 .kb-col.drop-target { background: var(--a-teal-soft); }
 .kb-col-add {
-  width: 100%; margin-top: 8px; padding: 9px; border: 1px dashed var(--a-border-strong); border-radius: 10px;
+  flex-shrink: 0; width: 100%; margin-top: 8px; padding: 9px; border: 1px dashed var(--a-border-strong); border-radius: 10px;
   background: none; color: var(--a-muted); font: inherit; font-size: 12.5px; cursor: pointer;
 }
 .kb-col-add:hover { background: var(--a-surface); color: var(--a-teal-text); border-color: var(--a-teal); }
@@ -2152,11 +2203,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 
 /* calendar view */
 .kb-cal { display: flex; flex-direction: column; gap: 12px; }
-.kb-cal-bar { display: flex; align-items: center; gap: 10px; }
-.kb-cal-title { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 20px; color: var(--a-ink); margin-right: 4px; }
-.kb-cal-nav { width: 32px; height: 32px; border: 1px solid var(--a-border); background: var(--a-surface); border-radius: 9px; cursor: pointer; color: var(--a-sec); font-size: 16px; line-height: 1; }
+/* Text/buttons back to a normal readable size (sized inside .kb-toparea's
+   30px, not by shrinking fonts) — the row got shorter by trimming the
+   margin around it, not the content. */
+.kb-cal-bar { display: flex; align-items: center; gap: 8px; height: 100%; }
+.kb-cal-title { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 19px; color: var(--a-ink); margin-right: 4px; line-height: 1; }
+.kb-cal-nav { width: 28px; height: 28px; border: 1px solid var(--a-border); background: var(--a-surface); border-radius: 8px; cursor: pointer; color: var(--a-sec); font-size: 14px; line-height: 1; flex-shrink: 0; }
 .kb-cal-nav:hover { background: var(--a-hover); }
-.kb-cal-today { margin-left: 4px; border: 1px solid var(--a-border); background: var(--a-surface); border-radius: 9px; cursor: pointer; color: var(--a-sec); font: inherit; font-size: 13px; padding: 6px 14px; }
+.kb-cal-today { margin-left: 2px; border: 1px solid var(--a-border); background: var(--a-surface); border-radius: 8px; cursor: pointer; color: var(--a-sec); font: inherit; font-size: 12.5px; line-height: 1; padding: 5px 12px; flex-shrink: 0; }
 .kb-cal-today:hover { background: var(--a-hover); }
 .kb-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--a-border); border: 1px solid var(--a-border); border-radius: 14px; overflow: hidden; }
 .kb-cal-wd { background: var(--a-surface2); text-align: center; padding: 9px 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--a-muted); }
@@ -2907,3 +2961,78 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
   .tm-stepper { padding-left: 16px; padding-right: 16px; flex-wrap: wrap; row-gap: 10px; }
   .kb-modal-actions { padding-left: 16px; padding-right: 16px; }
 }
+
+/* ---- Performance dashboard (Meta via Windsor) ---- */
+.perf-screen { display: flex; flex-direction: column; gap: 16px; }
+.perf-viewtabs { align-self: flex-start; }
+.perf-dash { display: flex; flex-direction: column; gap: 16px; }
+.perf-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* select.<class> (tag+class) so it wins over the base `.admin-shell select`
+   width:100% — same specificity gotcha as select.kb-filter. */
+select.perf-select { width: auto; min-width: 170px; }
+.perf-demo-chip {
+  font-size: 12px; font-weight: 600; color: var(--a-gold-text); background: var(--a-gold-soft);
+  padding: 5px 12px; border-radius: 999px; white-space: nowrap;
+}
+.perf-stale-chip { color: var(--a-pill-off-text); background: var(--a-pill-off-bg); }
+
+.perf-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.perf-kpi {
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 16px;
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 4px;
+}
+.perf-kpi-label { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
+.perf-kpi-value { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 30px; color: var(--a-ink); line-height: 1.1; }
+.perf-kpi-delta { font-size: 12px; font-weight: 600; }
+.perf-kpi-delta.up { color: var(--a-teal-text); }
+.perf-kpi-delta.down { color: var(--a-danger); }
+.perf-kpi-delta.muted { color: var(--a-muted); font-weight: 500; }
+
+.perf-card {
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 16px;
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.perf-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.perf-card-head h3 { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--a-ink); }
+.perf-metric-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.perf-chart-body { min-width: 0; }
+.perf-two-up { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.perf-empty { margin: 0; padding: 24px 0; text-align: center; font-size: 13px; color: var(--a-muted); }
+
+.perf-donut { display: flex; align-items: center; gap: 18px; }
+.perf-donut-chart { position: relative; flex: 1; min-width: 0; }
+.perf-donut-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.perf-donut-center strong { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 24px; color: var(--a-ink); }
+.perf-donut-center span { font-size: 11px; color: var(--a-muted); }
+.perf-donut-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 170px; }
+.perf-donut-legend li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--a-sec); }
+.perf-donut-legend b { margin-left: auto; color: var(--a-ink); font-weight: 600; }
+.perf-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.perf-legend-label { min-width: 0; }
+
+.perf-table-wrap { box-shadow: none; border: none; border-radius: 0; }
+.perf-table { min-width: 640px; }
+.perf-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.perf-th-sort:hover { color: var(--a-teal-text); }
+.perf-td-caption { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--a-ink); }
+.perf-row-link { cursor: pointer; }
+
+@media (max-width: 900px) {
+  .perf-kpis { grid-template-columns: repeat(2, 1fr); }
+  .perf-two-up { grid-template-columns: 1fr; }
+  .perf-donut { flex-direction: column; align-items: stretch; }
+}
+@media (max-width: 640px) {
+  .perf-kpis { grid-template-columns: 1fr; }
+}
+
+/* Integrações · Windsor */
+.wi-datasources { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 14px 16px; margin-top: 14px; border: 1px solid var(--a-border); border-radius: 12px; }
+.wi-mapping { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 12px; }
+.wi-maprow { max-width: 420px; }
+.perf-windsor-badge { font-size: 11px; font-weight: 700; color: var(--a-teal-text); background: var(--a-teal-soft); padding: 2px 8px; border-radius: 999px; margin-left: 6px; }
+.perf-linkrow { display: flex; align-items: flex-end; gap: 10px; margin: 0 30px; padding: 12px 14px; border: 1px dashed var(--a-border-strong); border-radius: 12px; }
+.perf-linkfield { flex: 1; min-width: 0; }

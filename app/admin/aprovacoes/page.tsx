@@ -13,10 +13,6 @@ export default async function AprovacoesPage() {
         <div>
           <p className="admin-kicker">Fila de aprovação</p>
           <h1 className="admin-title">Aprovações</h1>
-          <p className="admin-sub">
-            Todo card na etapa de Aprovação pode ser visto pelo cliente. Concluídos ficam no histórico.
-            {canApprove ? "" : " Editores podem comentar; só gerentes aprovam."}
-          </p>
         </div>
       </header>
       <ApprovalsQueue

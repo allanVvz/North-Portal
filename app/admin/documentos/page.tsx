@@ -20,7 +20,6 @@ export default async function DocumentosPage() {
         <div>
           <p className="admin-kicker">Dados</p>
           <h1 className="admin-title">Informações</h1>
-          <p className="admin-sub">Documentos do cliente e o andamento do onboarding, num só lugar.</p>
         </div>
       </header>
 

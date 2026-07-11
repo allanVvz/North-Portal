@@ -25,6 +25,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     const clientPatch: Record<string, unknown> = {};
     if (body.name !== undefined) clientPatch.name = asOptionalString(body.name);
     if (body.is_active !== undefined) clientPatch.is_active = normalizeBoolean(body.is_active, client.is_active);
+    if (body.disabled !== undefined) clientPatch.disabled = body.disabled;
 
     const linksPatch: Record<string, unknown> = {};
     if (body.brandUrl !== undefined) linksPatch.brand_url = asStringOrNull(body.brandUrl);

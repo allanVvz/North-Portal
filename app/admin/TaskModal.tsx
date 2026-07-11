@@ -220,6 +220,15 @@ export default function TaskModal({
   // rollup shown only for plans — regular cards derive it from their workflow
   // status silently, so it isn't a per-card attribute.
 
+  // The stepper (progress bar below) must mirror the same gate: with the
+  // stage off for this client, Revisão/Aprovação aren't a reachable option at
+  // all — the ONLY way back in is the manual override above (attribute made
+  // visible + an actual revisor/aprovador already assigned on THIS card).
+  // A card already sitting in the gated stage still shows its own step, so
+  // the current position never becomes literally invisible.
+  const revisaoStepHidden = revisaoOff && !(revisaoVisual && draft.reviewer_id) && draft.status !== "revisao";
+  const aprovacaoStepHidden = aprovacaoOff && !(aprovacaoVisual && draft.approver_id) && draft.status !== "aprovacao";
+
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const comments = liveTask ? commentsOf(liveTask) : [];
 
@@ -396,18 +405,22 @@ export default function TaskModal({
               <TypeSelect kind={draft.kind} onPick={pickKind} />
             ) : (
               <div className="tm-stepper">
-                {COLUMNS.map((c, i) => (
-                  <button
-                    type="button"
-                    key={c.status}
-                    className={`tm-step ${i <= stepIdx ? "done" : ""} ${draft.status === c.status ? "current" : ""}`}
-                    onClick={() => set("status", c.status)}
-                  >
-                    <span className="tm-step-dot" />
-                    <span className="tm-step-label">{c.label}</span>
-                    {i < COLUMNS.length - 1 ? <span className="tm-step-line" /> : null}
-                  </button>
-                ))}
+                {COLUMNS.map((c, i) => {
+                  if (c.status === "revisao" && revisaoStepHidden) return null;
+                  if (c.status === "aprovacao" && aprovacaoStepHidden) return null;
+                  return (
+                    <button
+                      type="button"
+                      key={c.status}
+                      className={`tm-step ${i <= stepIdx ? "done" : ""} ${draft.status === c.status ? "current" : ""}`}
+                      onClick={() => set("status", c.status)}
+                    >
+                      <span className="tm-step-dot" />
+                      <span className="tm-step-label">{c.label}</span>
+                      {i < COLUMNS.length - 1 ? <span className="tm-step-line" /> : null}
+                    </button>
+                  );
+                })}
               </div>
             )}
 

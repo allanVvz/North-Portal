@@ -3,6 +3,7 @@ import {
   HttpError,
   normalizeInsights,
   normalizeMetrics,
+  flowFlagsCascadeEffects,
   ACCESS_PLATFORMS,
   type AccessPlatformKey,
   type AdminTabsVisibility,
@@ -17,6 +18,7 @@ import {
   type TaskStatus,
 } from "./validation";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
+import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
 import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
 
 type ContentRow = { data: Record<string, unknown> | null };
@@ -331,6 +333,7 @@ export type AdminClientSummary = {
   slug: string;
   name: string;
   is_active: boolean;
+  disabled: boolean;
   updated_at: string | null;
   briefing_submitted: boolean;
 };
@@ -340,22 +343,32 @@ type ListClientRow = {
   slug: string;
   name: string;
   is_active: boolean;
+  disabled: boolean;
   updated_at: string | null;
   briefing_answers: { submitted: boolean | null }[] | null;
 };
 
-export async function listClients(): Promise<AdminClientSummary[]> {
+// Every picker/dropdown across the app (Kanban's Cliente filter, TaskModal's
+// Cliente select, Etapas, PlanSearchBar, Performance...) goes through this
+// function, so excluding disabled=true here by default is what makes "Remover
+// do sistema" (soft-delete) actually hide a client platform-wide. The
+// Clientes admin screen itself passes includeDisabled so it can still find
+// and re-enable them.
+export async function listClients(opts?: { includeDisabled?: boolean }): Promise<AdminClientSummary[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("clients")
-    .select("id,slug,name,is_active,updated_at,briefing_answers(submitted)")
+    .select("id,slug,name,is_active,disabled,updated_at,briefing_answers(submitted)")
     .order("name");
+  if (!opts?.includeDisabled) query = query.eq("disabled", false);
+  const { data, error } = await query;
   if (error) fail(error);
   return ((data as ListClientRow[] | null) ?? []).map((row) => ({
     id: row.id,
     slug: row.slug,
     name: row.name,
     is_active: row.is_active,
+    disabled: row.disabled,
     updated_at: row.updated_at,
     briefing_submitted: Boolean(row.briefing_answers?.[0]?.submitted),
   }));
@@ -442,15 +455,18 @@ export async function saveClientFlowFlags(
     .limit(1);
   if (error) fail(error);
 
+  // "Sem revisor"/"sem aprovador" from the moment the flow is disabled, not
+  // lazily on next save — see flowFlagsCascadeEffects for the (unit-tested)
+  // decision of when this fires.
   const moves: PromiseLike<unknown>[] = [];
-  if (current.revisaoAdmin && !next.revisaoAdmin) {
-    // "Sem revisor" from the moment the flow is disabled, not lazily on next save.
-    moves.push(supabase.from("tasks").update({ reviewer_id: null, requires_review: false }).eq("client_id", clientId).not("reviewer_id", "is", null));
-    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "revisao"));
-  }
-  if (current.aprovacaoAdmin && !next.aprovacaoAdmin) {
-    moves.push(supabase.from("tasks").update({ approver_id: null, requires_approval: false }).eq("client_id", clientId).not("approver_id", "is", null));
-    moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "aprovacao"));
+  for (const effect of flowFlagsCascadeEffects(current, next)) {
+    if (effect === "clear_reviewer_and_move_revisao_to_em_producao") {
+      moves.push(supabase.from("tasks").update({ reviewer_id: null, requires_review: false }).eq("client_id", clientId).not("reviewer_id", "is", null));
+      moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "revisao"));
+    } else {
+      moves.push(supabase.from("tasks").update({ approver_id: null, requires_approval: false }).eq("client_id", clientId).not("approver_id", "is", null));
+      moves.push(supabase.from("tasks").update({ status: "em_producao" }).eq("client_id", clientId).eq("status", "aprovacao"));
+    }
   }
   if (moves.length) await Promise.all(moves);
 
@@ -726,16 +742,20 @@ export async function listAllTasks(): Promise<BoardTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},clients(name,slug)`)
+    .select(`${TASK_COLUMNS},clients(name,slug,disabled)`)
     .order("position")
     .order("created_at");
   if (error) fail(error);
-  type JoinedClient = { name: string; slug: string };
+  type JoinedClient = { name: string; slug: string; disabled: boolean };
   type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
-  return ((data as unknown as Row[] | null) ?? []).map(({ clients, ...task }) => {
-    const c = Array.isArray(clients) ? clients[0] : clients;
-    return { ...task, clientName: c?.name ?? "Outros", clientSlug: c?.slug ?? "" };
-  });
+  return ((data as unknown as Row[] | null) ?? [])
+    // A disabled client's cards disappear from the shared board entirely —
+    // unassigned tasks (clients null) are never affected by this.
+    .filter(({ clients }) => !(Array.isArray(clients) ? clients[0] : clients)?.disabled)
+    .map(({ clients, ...task }) => {
+      const c = Array.isArray(clients) ? clients[0] : clients;
+      return { ...task, clientName: c?.name ?? "Outros", clientSlug: c?.slug ?? "" };
+    });
 }
 
 // ---- Planos de Ação (admin) --------------------------------------------------
@@ -925,15 +945,23 @@ export async function listPublishedTasks(): Promise<PublishedTask[]> {
   });
 }
 
+export async function getTaskMetrics(taskId: string): Promise<Record<string, string>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("task_metrics").select("metrics").eq("task_id", taskId).limit(1);
+  if (error) fail(error);
+  return ((data?.[0] as { metrics: Record<string, string> } | undefined)?.metrics) ?? {};
+}
+
 export async function upsertTaskMetrics(
   taskId: string,
   clientId: string,
   metrics: Record<string, unknown>,
+  source: "manual" | "windsor" = "manual",
 ): Promise<{ metrics: Record<string, string>; source: string; updated_at: string | null }> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("task_metrics")
-    .upsert({ task_id: taskId, client_id: clientId, metrics }, { onConflict: "task_id" })
+    .upsert({ task_id: taskId, client_id: clientId, metrics, source }, { onConflict: "task_id" })
     .select("metrics,source,updated_at")
     .limit(1);
   if (error) fail(error);
@@ -1208,6 +1236,92 @@ export async function savePlanoVisibility(enabled: boolean): Promise<boolean> {
     .upsert({ key: "plano_acao_visibility", value: { enabled }, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) fail(error);
   return enabled;
+}
+
+// ---- Windsor.ai integration (Performance × Meta) --------------------------------
+// One site_settings row holds the whole config. The raw apiKey lives ONLY in
+// this jsonb value — every GET response goes through maskWindsorSettings so
+// the key never reaches the browser.
+
+const WINDSOR_KEY = "windsor_integration";
+
+export async function getWindsorSettings(): Promise<WindsorSettings> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("site_settings").select("value").eq("key", WINDSOR_KEY).limit(1);
+  if (error) fail(error);
+  const value = (data?.[0] as { value: Record<string, unknown> } | undefined)?.value ?? {};
+  const stored = value as Partial<WindsorSettings>;
+  return {
+    ...WINDSOR_SETTINGS_DEFAULT,
+    ...stored,
+    datasources: { ...WINDSOR_SETTINGS_DEFAULT.datasources, ...(stored.datasources ?? {}) },
+    accountMap: stored.accountMap ?? {},
+  };
+}
+
+export async function saveWindsorSettings(patch: {
+  apiKey?: string;
+  clearApiKey?: boolean;
+  datasources?: Partial<WindsorSettings["datasources"]>;
+  accountMap?: WindsorSettings["accountMap"];
+}): Promise<WindsorSettings> {
+  const supabase = await createClient();
+  const current = await getWindsorSettings();
+  const next: WindsorSettings = {
+    apiKey: patch.clearApiKey ? "" : patch.apiKey ?? current.apiKey,
+    datasources: { ...current.datasources, ...(patch.datasources ?? {}) },
+    accountMap: patch.accountMap ?? current.accountMap,
+  };
+  const { error } = await supabase
+    .from("site_settings")
+    .upsert({ key: WINDSOR_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) fail(error);
+  return next;
+}
+
+export type MaskedWindsorSettings = {
+  configured: boolean;
+  apiKeyLast4: string;
+  datasources: WindsorSettings["datasources"];
+  accountMap: WindsorSettings["accountMap"];
+};
+
+export function maskWindsorSettings(s: WindsorSettings): MaskedWindsorSettings {
+  return {
+    configured: Boolean(s.apiKey),
+    apiKeyLast4: s.apiKey.slice(-4),
+    datasources: s.datasources,
+    accountMap: s.accountMap,
+  };
+}
+
+// Cached Windsor payloads — one row per (account, datasource), always covering
+// a ~90-day window so the dashboard slices periods in memory.
+export type InsightsCacheRow = {
+  client_id: string | null;
+  account_id: string;
+  datasource: WindsorDatasource;
+  date_from: string;
+  date_to: string;
+  payload: MetaPost[];
+  fetched_at: string;
+};
+
+export async function getCachedInsights(): Promise<InsightsCacheRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("meta_insights_cache")
+    .select("client_id,account_id,datasource,date_from,date_to,payload,fetched_at");
+  if (error) fail(error);
+  return (data as InsightsCacheRow[] | null) ?? [];
+}
+
+export async function upsertInsightsCache(row: Omit<InsightsCacheRow, "fetched_at">): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("meta_insights_cache")
+    .upsert({ ...row, fetched_at: new Date().toISOString() }, { onConflict: "account_id,datasource" });
+  if (error) fail(error);
 }
 
 export type AgencyProfile = { name: string; email: string; site: string; note: string };

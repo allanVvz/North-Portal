@@ -39,6 +39,7 @@ export const contentSchema = z
 export const adminPatchSchema = z.object({
   name: z.string().min(1).max(MAX_TEXT_BYTES).optional(),
   is_active: z.boolean().optional(),
+  disabled: z.boolean().optional(),
   brandUrl: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
   productsUrl: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
   uploadsUrl: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
@@ -54,6 +55,32 @@ export const TASK_STATUSES = ["backlog", "em_producao", "revisao", "aprovacao", 
 export const TASK_PRIORITIES = ["baixa", "media", "alta"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+// A status transition into "aprovado" (approving) or back out of it to
+// "aprovacao" (reopening) is a manager-only decision, enforced in
+// PATCH /api/admin/tasks/[id] regardless of surface (Kanban drag, TaskModal,
+// Aprovações). Extracted as a pure function so the gate itself — and, just as
+// important, that it does NOT fire for ordinary moves between any other two
+// columns — can be unit-tested without a live session/DB.
+export function requiresManagerApproval(currentStatus: TaskStatus | undefined, nextStatus: TaskStatus | undefined): boolean {
+  return nextStatus === "aprovado" || (currentStatus === "aprovado" && nextStatus === "aprovacao");
+}
+
+// Only the assigned reviewer may move a card out of Revisão — but when
+// nobody has been assigned yet (reviewer_id null), there's no exclusive
+// owner to protect, so any admin may act on it. Live-reproduced bug this
+// guards against: a null reviewer_id used to fail `reviewer_id !== userId`
+// for every single admin (managers included), permanently locking any
+// unclaimed card in Revisão.
+export function canLeaveRevisao(
+  currentStatus: TaskStatus | undefined,
+  reviewerId: string | null | undefined,
+  actingUserId: string,
+): boolean {
+  if (currentStatus !== "revisao") return true;
+  if (!reviewerId) return true;
+  return reviewerId === actingUserId;
+}
 
 // `kind`/`subtype` are free TEXT validated only for length here — the real
 // vocabulary lives in the in-code catalog (lib/taskCatalog.ts), which is a
@@ -115,6 +142,33 @@ export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true });
 // catalog (app/admin/metricDefs.ts) can grow without a schema change.
 export const taskMetricsPatchSchema = z.object({
   metrics: z.record(z.string().max(200)),
+});
+
+// ---- Windsor.ai integration (Performance × Meta) --------------------------------
+export const windsorDatasourceSchema = z.enum(["instagram_organic", "facebook_organic", "facebook"]);
+const windsorAccountRefSchema = z.object({
+  accountId: z.string().min(1).max(120),
+  accountName: z.string().max(200),
+});
+// PATCH semantics: apiKey omitted = keep the stored key; clearApiKey wipes it.
+export const windsorSettingsPatchSchema = z.object({
+  apiKey: z.string().trim().min(8).max(200).optional(),
+  clearApiKey: z.boolean().optional(),
+  datasources: z.record(windsorDatasourceSchema, z.boolean()).optional(),
+  accountMap: z.record(slugSchema, windsorAccountRefSchema.nullable()).optional(),
+});
+// Test route: explicit key tests a pre-save value; omitted tests the stored one.
+export const windsorTestSchema = z.object({
+  apiKey: z.string().trim().min(8).max(200).optional(),
+});
+export const performanceInsightsQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  client: slugSchema.optional(),
+  refresh: z.coerce.boolean().optional(),
+});
+export const performanceSyncSchema = z.object({
+  links: z.array(z.object({ taskId: z.string().uuid(), postId: z.string().min(1).max(200) })).min(1).max(100),
 });
 
 export type TaskRecord = {
@@ -229,9 +283,11 @@ export const agencyProfileSchema = z.object({
 });
 
 // ---- Client flow flags (Revisão/Aprovação safe-hide) ---------------------------
-// admin/cliente gate the reviewer/approver assignment + client-facing visibility.
-// The Kanban column itself has no flag anymore — it's automatic (visible iff at
-// least one card currently sits in that status).
+// admin/cliente gate the reviewer/approver assignment + client-facing
+// visibility. The Kanban column itself is driven by "Ativo para Admin" too
+// (see visibleColumnsFor in app/admin/kanbanShared.ts) — ON shows the column
+// for every client sharing the board even with zero cards in it, OFF hides it
+// once the cascade below has moved any of that client's cards out.
 export type ClientFlowFlags = {
   revisaoAdmin: boolean;
   revisaoCliente: boolean;
@@ -244,6 +300,39 @@ export const clientFlowFlagsPatchSchema = z.object({
   aprovacaoAdmin: z.boolean().optional(),
   aprovacaoCliente: z.boolean().optional(),
 });
+
+// Cross-client summary of whether ANY client currently has each stage
+// admin-enabled — drives the Kanban column visibility described above.
+export function anyClientHasFlowEnabled(flags: Iterable<ClientFlowFlags>): {
+  anyRevisaoAdmin: boolean;
+  anyAprovacaoAdmin: boolean;
+} {
+  let anyRevisaoAdmin = false;
+  let anyAprovacaoAdmin = false;
+  for (const f of flags) {
+    if (f.revisaoAdmin) anyRevisaoAdmin = true;
+    if (f.aprovacaoAdmin) anyAprovacaoAdmin = true;
+  }
+  return { anyRevisaoAdmin, anyAprovacaoAdmin };
+}
+
+// Pure decision for what saveClientFlowFlags must do when a client's flags
+// change — separated from the actual Supabase calls so this critical
+// cascade (turning a stage off must ALWAYS flush its cards back to
+// "em_producao" and strip the reviewer/approver) can be unit-tested without
+// a database. Turning a stage ON never produces an effect — there's no
+// history of which cards used to live there, so existing cards stay wherever
+// they already are.
+export type FlowFlagsCascadeEffect =
+  | "clear_reviewer_and_move_revisao_to_em_producao"
+  | "clear_approver_and_move_aprovacao_to_em_producao";
+
+export function flowFlagsCascadeEffects(current: ClientFlowFlags, next: ClientFlowFlags): FlowFlagsCascadeEffect[] {
+  const effects: FlowFlagsCascadeEffect[] = [];
+  if (current.revisaoAdmin && !next.revisaoAdmin) effects.push("clear_reviewer_and_move_revisao_to_em_producao");
+  if (current.aprovacaoAdmin && !next.aprovacaoAdmin) effects.push("clear_approver_and_move_aprovacao_to_em_producao");
+  return effects;
+}
 
 // ---- Plano de Ação visibility master switch -------------------------------------
 export const planoVisibilitySchema = z.object({ enabled: z.boolean() });

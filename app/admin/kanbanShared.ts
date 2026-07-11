@@ -17,6 +17,25 @@ export const STATUS_LABEL: Record<TaskStatus, string> = Object.fromEntries(
   COLUMNS.map((c) => [c.status, c.label]),
 ) as Record<TaskStatus, string>;
 
+// Revisão/Aprovação are the only columns that can disappear. Primarily
+// toggle-driven: as soon as ANY client has that stage's "Ativo para Admin"
+// switched on, the column is ALWAYS shown on the shared cross-client board —
+// even with zero cards in it — so an admin can immediately drag cards into
+// it. Turning the toggle off hides the column again (its cards get cascaded
+// to "em_producao" by saveClientFlowFlags, see lib/supabase.ts). The
+// `tasks.some(...)` half is a pure safety net — a column that somehow still
+// has a card sitting in it (stale flag, migration gap, whatever) must never
+// disappear out from under that card.
+export function visibleColumnsFor(
+  tasks: { status: TaskStatus }[],
+  anyClientRevisaoAdmin: boolean,
+  anyClientAprovacaoAdmin: boolean,
+): typeof COLUMNS {
+  const hasRevisao = anyClientRevisaoAdmin || tasks.some((t) => t.status === "revisao");
+  const hasAprovacao = anyClientAprovacaoAdmin || tasks.some((t) => t.status === "aprovacao");
+  return COLUMNS.filter((c) => (c.status !== "revisao" || hasRevisao) && (c.status !== "aprovacao" || hasAprovacao));
+}
+
 // Kind vocabulary/labels/icons/tones now live in the in-code catalog
 // (lib/taskCatalog.ts). Re-exported here for the few call sites still importing
 // them from this module.
