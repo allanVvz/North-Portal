@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import CalendarPicker from "./CalendarPicker";
 import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
+import TaskKindIcon from "./TaskKindIcon";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials, relTime } from "./kanbanShared";
-import { TASK_KIND_KEYS, kindDef, kindLabel, kindTone } from "@/lib/taskCatalog";
+import { TASK_KIND_KEYS, kindDef, kindLabel } from "@/lib/taskCatalog";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
 export default function TaskDetailPanel({
@@ -69,14 +70,16 @@ export default function TaskDetailPanel({
   return (
     <aside className="tdp">
       <div className="tdp-top">
-        <span className={`kb-type t-tone-${kindTone(task.kind)}`}>{kindLabel(task.kind)}</span>
         <div className="tdp-top-actions">
           <button className="tdp-icon-btn" onClick={onExpand} aria-label="Expandir">↗</button>
           <button className="tdp-icon-btn" onClick={onClose} aria-label="Fechar">✕</button>
         </div>
       </div>
 
-      <h2 className="tdp-title">{task.title}</h2>
+      <div className="tdp-titleline">
+        <TaskKindIcon kind={task.kind} size="lg" />
+        <h2 className="tdp-title">{task.title}</h2>
+      </div>
 
       <div className="tdp-section">
         <p className="tdp-head">Atributos</p>

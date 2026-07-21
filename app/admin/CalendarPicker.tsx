@@ -54,6 +54,7 @@ export default function CalendarPicker({
   recurrence,
   onRecurrenceChange,
   recurrenceFeatureEnabled = true,
+  recurrenceRequired = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -65,6 +66,7 @@ export default function CalendarPicker({
   recurrence?: CalendarRecurrence;
   onRecurrenceChange?: (value: CalendarRecurrence) => void;
   recurrenceFeatureEnabled?: boolean;
+  recurrenceRequired?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selected = parse(value);
@@ -181,7 +183,7 @@ export default function CalendarPicker({
                   const cadence = (event.target.value || null) as CalendarRecurrence["cadence"];
                   onRecurrenceChange({ cadence, weekdays: cadence === "semanal" ? recurrence.weekdays : [], dayOfMonth: cadence === "mensal" ? (recurrence.dayOfMonth ?? selected?.getDate() ?? 1) : null });
                 }}>
-                  <option value="">Nenhuma</option><option value="semanal">Semanal</option><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option>
+                  {!recurrenceRequired ? <option value="">Nenhuma</option> : null}<option value="semanal">Semanal</option><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option>
                 </select>
               </label>
               {recurrence.cadence === "semanal" ? <div className="cal-recurrence-days">{WEEKDAYS.map((label, day) => <button type="button" className={recurrence.weekdays.includes(day) ? "on" : ""} key={day} onClick={() => onRecurrenceChange({ ...recurrence, weekdays: recurrence.weekdays.includes(day) ? recurrence.weekdays.filter((item) => item !== day) : [...recurrence.weekdays, day] })}>{label}</button>)}</div> : null}

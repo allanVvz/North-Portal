@@ -1,8 +1,9 @@
 "use client";
 
-import { STATUS_LABEL, TONES, initials, kindLabel, kindTone } from "../kanbanShared";
+import { STATUS_LABEL, TONES, initials } from "../kanbanShared";
 import type { ActionPlan, PlanActivity } from "@/lib/supabase";
 import { parseAssignees } from "@/lib/assignees";
+import TaskKindIcon from "../TaskKindIcon";
 
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 export function fmtDate(value: string | null): string {
@@ -86,7 +87,7 @@ export default function StrategicView({
                 <div className="plan-strat-card" key={p.id}>
                   <button type="button" className="plan-strat-headrow" onClick={() => onOpenPlan(p)}>
                     <div className="plan-strat-headtext">
-                      <strong>{p.title}</strong>
+                      <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} size="lg" /><strong>{p.title}</strong></span>
                       <span className="plan-strat-description">{p.description || "Descreva o motivo, o resultado esperado e como saberemos que o plano funcionou."}</span>
                     </div>
                     <span className="plan-strat-progress">
@@ -124,8 +125,7 @@ export default function StrategicView({
                                 title={a.title}
                                 onClick={() => onOpenActivity(p, a.id)}
                               >
-                                <span className={`kb-type t-tone-${kindTone(a.kind)}`}>{kindLabel(a.kind)}</span>
-                                <span className="plan-strat-chiptitle"><small>O quê</small>{a.title}</span>
+                                <span className="plan-strat-chiptitle"><TaskKindIcon kind={a.kind} /><span><small>O quê</small>{a.title}</span></span>
                                 <span className="plan-strat-chipmeta">
                                   <span className="plan-strat-chipdue"><small>Quando</small>{fmtDate(a.due_date)}</span>
                                   <span className="plan-strat-chipstatus">{STATUS_LABEL[a.status]}</span>

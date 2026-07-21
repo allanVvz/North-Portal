@@ -39,11 +39,28 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     await requireAdmin();
+    const scope = new URL(request.url).searchParams.get("scope");
+    if (scope && !["task", "plan", "routine"].includes(scope)) throw new HttpError(400, "Contexto de criacao invalido.");
     const body = taskCreateSchema.parse(await request.json());
     const client = body.slug ? await getClient(body.slug, true) : null;
     if (body.slug && !client) throw new HttpError(404, "Cliente nao encontrado.");
     const { slug: _slug, ...fields } = body;
     void _slug;
+
+    if (scope === "plan") {
+      fields.kind = "plano_acao";
+      fields.recurrence_cadence = null;
+      fields.recurrence_weekdays = [];
+      fields.recurrence_day_of_month = null;
+    } else if (scope === "task") {
+      if (fields.kind === "plano_acao") throw new HttpError(400, "A tela Tarefas nao cria Planos de Acao.");
+      fields.recurrence_cadence = null;
+      fields.recurrence_weekdays = [];
+      fields.recurrence_day_of_month = null;
+    } else if (scope === "routine") {
+      if (fields.kind === "plano_acao") throw new HttpError(400, "A tela Rotinas nao cria Planos de Acao.");
+      if (!fields.recurrence_cadence) throw new HttpError(400, "Uma Rotina precisa ter recorrencia.");
+    }
 
     if (fields.status === "concluido" && (fields.kind ?? "criativo") !== "criativo") {
       throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");

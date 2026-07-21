@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RecurringTask } from "@/lib/supabase";
-import { kindIcon, kindLabel, kindTone } from "@/lib/taskCatalog";
 import ClientsTable, { type ClientRow } from "./ClientsTable";
 import HScrollRail from "./HScrollRail";
 import RecurringSearchBar from "./RecurringSearchBar";
@@ -16,6 +15,7 @@ import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, todayInTim
 import { recurringOccurrences } from "./recurringOccurrences";
 import { RECURRING_GROUP_BY_LABEL, compareByUrgency, groupRecurring, type RecurringGroupBy } from "./recurringGrouping";
 import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "./calendarUtils";
+import TaskKindIcon from "./TaskKindIcon";
 
 type Section = "recorrencias" | "cadastro";
 type RecurrenceView = "colunas" | "lista" | "calendario";
@@ -73,10 +73,9 @@ function RecurrenceCard({
     <article className={`rec-card ${compact ? "compact" : ""}`}>
       <button type="button" className="rec-card-open" onClick={onOpen} aria-label={`Abrir rotina ${task.title}`}>
       <span className="rec-card-topline">
-        <span className={`kb-type t-tone-${kindTone(task.kind)}`}>{kindIcon(task.kind)} {kindLabel(task.kind)}</span>
         <span className={`rec-state ${tone}`}>{RECURRING_STATE_LABEL[state]}</span>
       </span>
-      <strong>{task.title}</strong>
+      <span className="rec-card-titleline"><TaskKindIcon kind={task.kind} /><strong>{task.title}</strong></span>
       {/* In the calendar the meta row is hidden, so without this two clients
           running the same routine render as one title twice. */}
       {compact ? <span className="rec-card-client">{task.clientName}</span> : null}
@@ -300,8 +299,8 @@ export default function ClientsWorkspace({
                   <div className="rec-list-row-wrap" key={task.id}>
                     <button type="button" className="rec-list-row" onClick={() => setSelected(task)}>
                     <span className="rec-list-title">
-                      <span className={`tone-${kindTone(task.kind)}`}>{kindIcon(task.kind)}</span>
-                      <span><strong>{task.title}</strong><small>{kindLabel(task.kind)}</small></span>
+                      <TaskKindIcon kind={task.kind} />
+                      <span><strong>{task.title}</strong></span>
                     </span>
                     <span>{task.clientName}</span>
                     <span>{CADENCE_LABEL[task.cadence]}</span>
@@ -360,6 +359,7 @@ export default function ClientsWorkspace({
           clientName=""
           initialKind="operacional"
           initialRecurrence
+          creationScope="routine"
           adminReviewers={[]}
           clientReviewers={[]}
           planoVisibilityOn={planoVisibilityOn}

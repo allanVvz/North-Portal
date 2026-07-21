@@ -6,13 +6,14 @@ import HScrollRail from "./HScrollRail";
 import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
+import TaskKindIcon from "./TaskKindIcon";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
 import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone, visibleColumnsFor } from "./kanbanShared";
-import { kindDef, kindLabel, kindTone, taskProgress } from "@/lib/taskCatalog";
+import { kindDef, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
-import { visibleOnTaskBoard } from "@/lib/taskRelations";
+import { belongsToTaskScreen } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 import { calendarMonthDates } from "./calendarUtils";
 
@@ -175,15 +176,15 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // the portal (or another admin tab moves a card), without a manual refresh.
   useTaskRealtime(useCallback(() => { void load(); }, [load]));
 
+  const taskScreenTasks = useMemo(() => tasks.filter(belongsToTaskScreen), [tasks]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return tasks.filter((t) => {
-      if (!visibleOnTaskBoard(t)) return false;
+    return taskScreenTasks.filter((t) => {
       if (!taskMatchesFilters(t, activeFilters)) return false;
       if (needle && !(`${t.title} ${t.assignee ?? ""} ${t.description ?? ""}`.toLowerCase().includes(needle))) return false;
       return true;
     });
-  }, [tasks, activeFilters, q]);
+  }, [taskScreenTasks, activeFilters, q]);
 
   const byStatus = useMemo(() => {
     const map: Record<string, BoardRow[]> = Object.fromEntries(COLUMNS.map((c) => [c.status, []]));
@@ -471,13 +472,12 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         onClick={() => openTask(t.id)}
       >
         <div className="kb-card-top">
-          <span className={`kb-type t-tone-${kindTone(t.kind)}`}>{kindLabel(t.kind)}</span>
           {t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
           {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
           {visible("plan_link") && t.plan_id ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
           {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
         </div>
-        <p className="kb-card-title">{t.title}</p>
+        <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} /><p className="kb-card-title">{t.title}</p></div>
         {showFormato || showPlataforma ? (
           <div className="kb-card-meta">
             {showFormato ? <span className="kb-card-pill">{formato}</span> : null}
@@ -517,7 +517,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           onQChange={setQ}
           filters={activeFilters}
           onFiltersChange={setActiveFilters}
-          tasks={tasks}
+          tasks={taskScreenTasks}
           onPickTask={openTask}
         />
         <span className={`kb-loadspin ${loading ? "on" : ""}`} role="status" aria-label={loading ? "Carregando" : undefined} aria-hidden={!loading} />
@@ -599,7 +599,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                                   onClick={() => openTask(t.id)}
                                   title={t.title}
                                 >
-                                  ◆ {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
+                                  <TaskKindIcon kind={t.kind} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                                 </button>
                               </div>
                             ))}
@@ -632,7 +632,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                                       onClick={() => openTask(t.id)}
                                       title={t.title}
                                     >
-                                      {t.title}
+                                      <TaskKindIcon kind={t.kind} size="sm" />{t.title}
                                     </button>
                                   ))}
                                 </div>
@@ -664,7 +664,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                             onClick={() => openTask(t.id)}
                             title={t.title}
                           >
-                            ◆ {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
+                            <TaskKindIcon kind={t.kind} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                           </button>
                         </div>
                       ))}
@@ -690,7 +690,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                             onClick={() => openTask(t.id)}
                             title={t.title}
                           >
-                            {horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
+                            <TaskKindIcon kind={t.kind} size="sm" />{horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
                           </button>
                         ))}
                         {weekEventsByDay[i].length === 0 ? <span className="kb-week-empty">—</span> : null}
@@ -778,7 +778,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                         {t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
                         {commentsOf(t).length > 0 ? <span className="kb-comments" title="Comentários no card"> 💬 {commentsOf(t).length}</span> : null}
                       </td>
-                      <td>{kindLabel(t.kind)}</td>
+                      <td><TaskKindIcon kind={t.kind} /></td>
                       {visible("status") ? <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td> : null}
                       {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : "—"}</td> : null}
                       <td>{fmtDue(t.due_date)}</td>
@@ -830,6 +830,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           clientName={modalClientName}
           initialStatus={modalState.mode === "new" ? modalState.initialStatus : undefined}
           initialAssignee={modalState.mode === "new" ? modalState.initialAssignee : undefined}
+          creationScope="task"
           adminReviewers={adminReviewers}
           clientReviewers={clientReviewers}
           planCandidates={planCandidates}

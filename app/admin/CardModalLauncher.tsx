@@ -18,6 +18,7 @@ export default function CardModalLauncher({
   onDeleted,
   onChanged,
   initialRelatedTasks = EMPTY_RELATED_TASKS,
+  parentTask,
 }: {
   task: TaskRecord;
   clientName: string;
@@ -27,8 +28,10 @@ export default function CardModalLauncher({
   onDeleted: (id: string) => void;
   onChanged?: (task: TaskRecord) => void;
   initialRelatedTasks?: TaskRecord[];
+  parentTask?: TaskRecord;
 }) {
   const [activeTask, setActiveTask] = useState(task);
+  const [history, setHistory] = useState<TaskRecord[]>(() => parentTask ? [parentTask] : []);
   const [adminReviewers, setAdminReviewers] = useState<ReviewerCandidate[]>([]);
   const [clientReviewers, setClientReviewers] = useState<ReviewerCandidate[]>([]);
   const [clientTasks, setClientTasks] = useState<TaskRecord[]>(() => [task, ...initialRelatedTasks.filter((related) => related.id !== task.id)]);
@@ -51,8 +54,9 @@ export default function CardModalLauncher({
 
   useEffect(() => {
     setActiveTask(task);
+    setHistory(parentTask ? [parentTask] : []);
     setClientTasks([task, ...initialRelatedTasks.filter((related) => related.id !== task.id)]);
-  }, [task, initialRelatedTasks]);
+  }, [task, initialRelatedTasks, parentTask]);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,7 +132,12 @@ export default function CardModalLauncher({
       planoVisibilityOn={planoVisibilityOn}
       flowFlags={flowFlags}
       onTaskPatched={patchLocal}
-      onOpenRelatedTask={(related) => { patchLocal(related); setActiveTask(related); }}
+      onOpenRelatedTask={(related) => { patchLocal(related); setHistory((items) => [...items, activeTask]); setActiveTask(related); }}
+      onBack={history.length ? () => {
+        const previous = history[history.length - 1];
+        setHistory((items) => items.slice(0, -1));
+        setActiveTask(previous);
+      } : undefined}
       onClose={onClose}
       onSaved={(updated) => onSaved(updated)}
       onDeleted={onDeleted}

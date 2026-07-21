@@ -7,12 +7,12 @@ import TaskModal from "../TaskModal";
 import { STATUS_LABEL } from "../kanbanShared";
 import PlanSearchBar from "./PlanSearchBar";
 import StrategicView, { fmtDate } from "./StrategicView";
-import { kindLabel, kindTone } from "@/lib/taskCatalog";
+import TaskKindIcon from "../TaskKindIcon";
 import type { ActionPlan } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
 type View = "lista" | "estrategica";
-type EditingTarget = { task: TaskRecord; clientName: string; clientSlug: string; relatedTasks: TaskRecord[] };
+type EditingTarget = { task: TaskRecord; clientName: string; clientSlug: string; relatedTasks: TaskRecord[]; parentTask?: TaskRecord };
 
 // Matches the free-text query against every attribute the user might filter
 // by here — cliente, responsável (per-activity assignee) and prazo (plano ou
@@ -79,7 +79,7 @@ export default function ActionPlansBoard({
 
   function openActivity(p: ActionPlan, activityId: string) {
     const task = p.activities.find((activity) => activity.id === activityId);
-    if (task) setEditing({ task, clientName: p.clientName, clientSlug: p.clientSlug, relatedTasks: [] });
+    if (task) setEditing({ task, clientName: p.clientName, clientSlug: p.clientSlug, relatedTasks: [], parentTask: asTask(p) });
   }
 
   return (
@@ -119,7 +119,7 @@ export default function ActionPlansBoard({
                     <span className={`plan-acc-caret ${open ? "on" : ""}`}>▸</span>
                   </button>
                   <button type="button" className="plan-acc-title" onClick={() => openPlan(p)}>
-                    <strong>{p.title}</strong>
+                    <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} size="lg" /><strong>{p.title}</strong></span>
                     <em>{p.clientName} · {p.activities.length} atividade{p.activities.length === 1 ? "" : "s"}</em>
                     <span className="plan-acc-description">{p.description || "Adicione à descrição o porquê e o resultado esperado deste plano."}</span>
                   </button>
@@ -138,7 +138,7 @@ export default function ActionPlansBoard({
                         {p.activities.map((a) => (
                           <li key={a.id}>
                             <button type="button" className="plan-acc-actrow" onClick={() => openActivity(p, a.id)}>
-                              <span className={`kb-type t-tone-${kindTone(a.kind)}`}>{kindLabel(a.kind)}</span>
+                              <TaskKindIcon kind={a.kind} />
                               <span className="plan-acc-actitle">{a.title}</span>
                               <span className="plan-acc-status">{STATUS_LABEL[a.status]}</span>
                               <span className="plan-acc-actpct">{a.progress}%</span>
@@ -161,6 +161,7 @@ export default function ActionPlansBoard({
           clientName={editing.clientName}
           clientSlug={editing.clientSlug}
           initialRelatedTasks={editing.relatedTasks}
+          parentTask={editing.parentTask}
           onClose={() => { setEditing(null); router.refresh(); }}
           onSaved={() => { setEditing(null); router.refresh(); }}
           onDeleted={() => { setEditing(null); router.refresh(); }}
@@ -177,6 +178,7 @@ export default function ActionPlansBoard({
           assignees={assignees}
           clientName=""
           initialKind="plano_acao"
+          creationScope="plan"
           adminReviewers={[]}
           clientReviewers={[]}
           planoVisibilityOn={planoVisibilityOn}
