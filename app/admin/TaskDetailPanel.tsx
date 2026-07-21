@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import CalendarPicker from "./CalendarPicker";
 import VisibleToggleField from "./VisibleToggleField";
+import AssigneePicker from "./AssigneePicker";
+import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials, relTime } from "./kanbanShared";
 import { TASK_KIND_KEYS, kindDef, kindLabel, kindTone } from "@/lib/taskCatalog";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
@@ -10,10 +12,11 @@ import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, Task
 export default function TaskDetailPanel({
   task,
   clientName,
+  assignees,
   adminReviewers,
   clientReviewers,
   planCandidates = [],
-  planoVisibilityOn = true,
+  planoVisibilityOn = false,
   flowFlags = null,
   onClose,
   onExpand,
@@ -21,6 +24,7 @@ export default function TaskDetailPanel({
 }: {
   task: TaskRecord;
   clientName: string;
+  assignees: string[];
   adminReviewers: ReviewerCandidate[];
   clientReviewers: ReviewerCandidate[];
   planCandidates?: { id: string; title: string }[];
@@ -94,11 +98,11 @@ export default function TaskDetailPanel({
         </div>
         <div className="tdp-attr">
           <span>Responsável</span>
-          <input
-            defaultValue={task.assignee ?? ""}
-            placeholder="—"
+          <AssigneePicker
+            value={task.assignee ?? ""}
+            options={assignees}
             disabled={busy}
-            onBlur={(e) => { if (e.target.value !== (task.assignee ?? "")) patch({ assignee: e.target.value.trim() || null }); }}
+            onChange={(value) => void patch({ assignee: value || null })}
           />
         </div>
         {/* flowFlags starts null while its fetch is in flight — treat that as
@@ -142,7 +146,7 @@ export default function TaskDetailPanel({
         ) : null}
         <div className="tdp-attr">
           <span>Prazo</span>
-          <CalendarPicker value={task.due_date ?? ""} onChange={(v) => patch({ due_date: v || null })} placeholder="Sem prazo" />
+          <CalendarPicker value={task.due_date ?? ""} onChange={(v) => patch({ due_date: v || null })} placeholder="Sem prazo" recurrence={{ cadence: task.recurrence_cadence, weekdays: task.recurrence_weekdays, dayOfMonth: task.recurrence_day_of_month }} onRecurrenceChange={(value) => patch({ recurrence_cadence: value.cadence, recurrence_weekdays: value.weekdays, recurrence_day_of_month: value.dayOfMonth })} />
         </div>
         {isPlan ? (
           <div className="tdp-attr">
@@ -160,7 +164,7 @@ export default function TaskDetailPanel({
             {TASK_KIND_KEYS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
           </select>
         </div>
-        {planoVisibilityOn ? (
+        {shouldRenderClientVisibilityToggle(planoVisibilityOn) ? (
           <div className="tdp-visible">
             <VisibleToggleField
               label={isPlan ? "Plano visível para o cliente" : "Visível no Plano de Ação do cliente"}

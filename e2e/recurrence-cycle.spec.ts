@@ -1,0 +1,90 @@
+import { expect, test, type Page } from "@playwright/test";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+const ADMIN_EMAIL = "admin@north.com";
+const ADMIN_PASSWORD = "SenhaForte123!";
+
+function serviceClient(): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Credenciais do Supabase ausentes.");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+async function login(page: Page): Promise<void> {
+  await page.goto("/login");
+  await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);
+  await page.getByPlaceholder("Sua senha").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: /Entrar/ }).click();
+  await page.waitForURL(/\/admin/, { timeout: 15_000 });
+}
+
+test.describe("conclusão de ciclo três vezes por semana", () => {
+  let sb: SupabaseClient;
+  let parentId = "";
+
+  test.beforeAll(async () => {
+    sb = serviceClient();
+    const { data: client, error: clientError } = await sb.from("clients").select("id").eq("disabled", false).limit(1).single();
+    if (clientError || !client) throw new Error(`Cliente para E2E não encontrado: ${clientError?.message}`);
+    const { data: task, error } = await sb.from("tasks").insert({
+      client_id: client.id,
+      kind: "operacional",
+      title: `[e2e ${Date.now()}] Rotina seg qua sex`,
+      status: "backlog",
+      due_date: "2026-07-20",
+      recurrence_cadence: "semanal",
+      recurrence_weekdays: [1, 3, 5],
+    }).select("id").single();
+    if (error || !task) throw new Error(`Falha ao criar rotina E2E: ${error?.message}`);
+    parentId = task.id as string;
+  });
+
+  test.afterAll(async () => {
+    if (!parentId) return;
+    await sb.from("tasks").delete().eq("plan_id", parentId);
+    await sb.from("tasks").delete().eq("id", parentId);
+  });
+
+  test("avança segunda-quarta-sexta-segunda, cria uma execução por ciclo e recusa token antigo", async ({ page }) => {
+    test.setTimeout(60_000);
+    await login(page);
+    const transitions = [
+      ["2026-07-20", "2026-07-22"],
+      ["2026-07-22", "2026-07-24"],
+      ["2026-07-24", "2026-07-27"],
+    ] as const;
+
+    for (const [current, next] of transitions) {
+      const response = await page.evaluate(async ({ id, expectedDueDate }) => {
+        const result = await fetch(`/api/admin/tasks/${id}/complete-cycle`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expectedDueDate }),
+        });
+        return { status: result.status, body: await result.json() };
+      }, { id: parentId, expectedDueDate: current });
+      expect(response.status).toBe(200);
+      expect(response.body.parent.due_date).toBe(next);
+      expect(response.body.task).toMatchObject({ due_date: next, plan_id: parentId, recurrence_cadence: null });
+    }
+
+    const stale = await page.evaluate(async ({ id }) => {
+      const result = await fetch(`/api/admin/tasks/${id}/complete-cycle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedDueDate: "2026-07-24" }),
+      });
+      return result.status;
+    }, { id: parentId });
+    expect(stale).toBe(409);
+
+    const { data: children, error } = await sb.from("tasks").select("due_date,plan_id").eq("plan_id", parentId).order("due_date");
+    if (error) throw error;
+    expect(children).toEqual([
+      { due_date: "2026-07-22", plan_id: parentId },
+      { due_date: "2026-07-24", plan_id: parentId },
+      { due_date: "2026-07-27", plan_id: parentId },
+    ]);
+  });
+});

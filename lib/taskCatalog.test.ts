@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkpointsProgress, taskProgress } from "./taskCatalog";
+import { TASK_KIND_KEYS, canonicalTaskClassification, checkpointsProgress, taskProgress } from "./taskCatalog";
 import type { TaskStatus } from "./validation";
 
 const t = (kind: string, status: TaskStatus, progress_weight = 1) => ({ kind, status, progress_weight });
@@ -19,6 +19,20 @@ describe("taskProgress — non-plan cards", () => {
   it("falls back to the nearest earlier defined status when a stage is skipped", () => {
     // 'revisao' isn't in the 'simples' workflow → nearest at/below is em_producao (60).
     expect(taskProgress(t("operacional", "revisao"))).toBe(60);
+  });
+});
+
+describe("catálogo canônico de tipos", () => {
+  it("não expõe recorrência, roteiro ou gravação como tipos primários", () => {
+    expect(TASK_KIND_KEYS).not.toContain("publicacao_recorrente");
+    expect(TASK_KIND_KEYS).not.toContain("roteiro");
+    expect(TASK_KIND_KEYS).not.toContain("gravacao");
+  });
+
+  it("converte classificações legadas para tipo e subtipo sem perder leitura", () => {
+    expect(canonicalTaskClassification("publicacao_recorrente")).toEqual({ kind: "criativo", subtype: null });
+    expect(canonicalTaskClassification("roteiro")).toEqual({ kind: "planejamento", subtype: "roteiro" });
+    expect(canonicalTaskClassification("gravacao")).toEqual({ kind: "agendamento", subtype: "gravacao" });
   });
 });
 

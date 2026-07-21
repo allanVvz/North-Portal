@@ -66,6 +66,8 @@ npm install
 
 Rode localmente:
 
+> Antes de abrir outra instancia, rodar build ou reiniciar o ambiente, consulte [Operacao local segura: portas e cache do Next.js](docs/OPERACAO-LOCAL-PORTAS.md). Uma unica instancia Next deve usar este checkout por vez.
+
 ```bash
 npm run dev
 ```

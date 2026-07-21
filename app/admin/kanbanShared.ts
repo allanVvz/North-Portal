@@ -26,14 +26,24 @@ export const STATUS_LABEL: Record<TaskStatus, string> = Object.fromEntries(
 // `tasks.some(...)` half is a pure safety net — a column that somehow still
 // has a card sitting in it (stale flag, migration gap, whatever) must never
 // disappear out from under that card.
+// "Publicado" (concluido) is different: it's an unfinished feature (mock
+// metrics, manual post-linking) gated by a single global admin switch
+// (Configurações → Etapas) — no safety net for cards already sitting there,
+// since turning it off is meant to hide it entirely, not just for new cards.
 export function visibleColumnsFor(
   tasks: { status: TaskStatus }[],
   anyClientRevisaoAdmin: boolean,
   anyClientAprovacaoAdmin: boolean,
+  publicadoColumnVisible: boolean,
 ): typeof COLUMNS {
   const hasRevisao = anyClientRevisaoAdmin || tasks.some((t) => t.status === "revisao");
   const hasAprovacao = anyClientAprovacaoAdmin || tasks.some((t) => t.status === "aprovacao");
-  return COLUMNS.filter((c) => (c.status !== "revisao" || hasRevisao) && (c.status !== "aprovacao" || hasAprovacao));
+  return COLUMNS.filter(
+    (c) =>
+      (c.status !== "revisao" || hasRevisao) &&
+      (c.status !== "aprovacao" || hasAprovacao) &&
+      (c.status !== "concluido" || publicadoColumnVisible),
+  );
 }
 
 // Kind vocabulary/labels/icons/tones now live in the in-code catalog

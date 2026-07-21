@@ -36,6 +36,9 @@ O trigger `handle_new_user` cria o profile com o role/`client_id` corretos.
 > **Auth → URL Configuration** no Supabase: adicionar `http://localhost:3000` (e o domínio Vercel) em **Site URL / Redirect URLs**.
 
 ## 5. Rodar
+
+> Antes de iniciar, gerar build ou reiniciar o app, siga o [protocolo de portas e cache do Next.js](OPERACAO-LOCAL-PORTAS.md). Este checkout deve ter apenas uma instancia Next ativa por vez.
+
 ```bash
 npm install
 npm run dev

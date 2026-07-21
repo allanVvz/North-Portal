@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import TaskModal from "./TaskModal";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord } from "@/lib/validation";
 
+const EMPTY_RELATED_TASKS: TaskRecord[] = [];
+
 // Opens the full TaskModal for a card coming from a screen that isn't the Kanban
 // board (Revisões/Aprovações/Plano de Ação) — fetches that client's reviewer
 // candidates and its task list (for plan↔activity management) on demand.
@@ -15,6 +17,7 @@ export default function CardModalLauncher({
   onSaved,
   onDeleted,
   onChanged,
+  initialRelatedTasks = EMPTY_RELATED_TASKS,
 }: {
   task: TaskRecord;
   clientName: string;
@@ -23,10 +26,12 @@ export default function CardModalLauncher({
   onSaved: (task: TaskRecord) => void;
   onDeleted: (id: string) => void;
   onChanged?: (task: TaskRecord) => void;
+  initialRelatedTasks?: TaskRecord[];
 }) {
+  const [activeTask, setActiveTask] = useState(task);
   const [adminReviewers, setAdminReviewers] = useState<ReviewerCandidate[]>([]);
   const [clientReviewers, setClientReviewers] = useState<ReviewerCandidate[]>([]);
-  const [clientTasks, setClientTasks] = useState<TaskRecord[]>([task]);
+  const [clientTasks, setClientTasks] = useState<TaskRecord[]>(() => [task, ...initialRelatedTasks.filter((related) => related.id !== task.id)]);
   // Both default to the "hidden until loaded" side (planoVisibilityOn=false,
   // flowFlags=null -> revisaoOff/aprovacaoOff true in TaskModal) so nothing
   // flashes visible for the fetch's duration then disappears — same pattern
@@ -37,6 +42,30 @@ export default function CardModalLauncher({
   // kept showing regardless of the real global switch.
   const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
   const [flowFlags, setFlowFlags] = useState<ClientFlowFlags | null>(null);
+  // Every registered client, so the editor's Cliente picker can move a card
+  // to any of them — not just the one it currently belongs to.
+  const [clients, setClients] = useState<{ slug: string; name: string }[]>([]);
+  // Every Responsável option (team + historical names) — the field is a
+  // dropdown-only now, never free text.
+  const [assignees, setAssignees] = useState<string[]>([]);
+
+  useEffect(() => {
+    setActiveTask(task);
+    setClientTasks([task, ...initialRelatedTasks.filter((related) => related.id !== task.id)]);
+  }, [task, initialRelatedTasks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/clients")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data?.clients) setClients(data.clients.map((c: { slug: string; name: string }) => ({ slug: c.slug, name: c.name }))); })
+      .catch(() => { /* Cliente picker just shows the current one */ });
+    fetch("/api/admin/assignees")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data?.assignees) setAssignees(data.assignees); })
+      .catch(() => { /* Responsável picker just shows the current one */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +79,14 @@ export default function CardModalLauncher({
       .catch(() => { /* modal still opens, just without reviewer options */ });
     fetch(`/api/admin/tasks?slug=${encodeURIComponent(clientSlug)}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => { if (!cancelled && data?.tasks) setClientTasks(data.tasks); })
+      .then((data) => {
+        if (cancelled || !data?.tasks) return;
+        setClientTasks((current) => {
+          const merged = new Map(current.map((row) => [row.id, row]));
+          for (const row of data.tasks as TaskRecord[]) merged.set(row.id, row);
+          return Array.from(merged.values());
+        });
+      })
       .catch(() => { /* member management just shows what we have */ });
     fetch(`/api/admin/client/${encodeURIComponent(clientSlug)}/flow-flags`)
       .then((res) => (res.ok ? res.json() : null))
@@ -69,23 +105,30 @@ export default function CardModalLauncher({
   }, []);
 
   const patchLocal = (t: TaskRecord) => {
-    setClientTasks((rows) => rows.map((r) => (r.id === t.id ? t : r)));
+    setClientTasks((rows) => rows.some((r) => r.id === t.id) ? rows.map((r) => (r.id === t.id ? t : r)) : [...rows, t]);
     onChanged?.(t);
   };
+  const planCandidates = clientTasks
+    .filter((candidate) => candidate.kind === "plano_acao")
+    .map((candidate) => ({ id: candidate.id, title: candidate.title }));
 
   return (
     <TaskModal
+      key={activeTask.id}
       mode="edit"
-      task={task}
+      task={activeTask}
       slug={clientSlug}
-      clients={[]}
+      clients={clients}
+      assignees={assignees}
       clientName={clientName}
       adminReviewers={adminReviewers}
       clientReviewers={clientReviewers}
       clientTasks={clientTasks}
+      planCandidates={planCandidates}
       planoVisibilityOn={planoVisibilityOn}
       flowFlags={flowFlags}
       onTaskPatched={patchLocal}
+      onOpenRelatedTask={(related) => { patchLocal(related); setActiveTask(related); }}
       onClose={onClose}
       onSaved={(updated) => onSaved(updated)}
       onDeleted={onDeleted}

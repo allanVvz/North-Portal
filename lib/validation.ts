@@ -135,8 +135,16 @@ export const taskCreateSchema = z.object({
   client_visible: z.boolean().optional(),
   position: z.number().int().optional(),
   payload: taskPayloadSchema.optional(),
+  recurrence_cadence: z.enum(["semanal", "quinzenal", "mensal"]).nullable().optional(),
+  recurrence_weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  recurrence_day_of_month: z.number().int().min(1).max(31).nullable().optional(),
 });
-export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true });
+// slug is nullable here (unlike taskCreateSchema): null explicitly means
+// "unassign the client", undefined means "leave the client unchanged" — the
+// route resolves it to client_id since tasks has no slug column of its own.
+export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true }).extend({
+  slug: slugSchema.nullable().optional(),
+});
 
 // Performance metrics attached to a published card — flexible map so the
 // catalog (app/admin/metricDefs.ts) can grow without a schema change.
@@ -196,6 +204,85 @@ export type TaskRecord = {
   client_visible: boolean;
   payload: Record<string, unknown>;
   position: number;
+  recurrence_cadence: RecurringCadence | null;
+  recurrence_weekdays: number[];
+  recurrence_day_of_month: number | null;
+};
+
+// ---- Tarefas recorrentes dos clientes ----------------------------------------
+// Recorrência é um atributo de qualquer tarefa que não seja `plano_acao`.
+// Cada execução é outra task e usa `plan_id` para apontar para o pai recorrente,
+// reaproveitando o mesmo rollup de relações do Plano de Ação.
+export const RECURRING_CADENCES = ["semanal", "quinzenal", "mensal"] as const;
+export type RecurringCadence = (typeof RECURRING_CADENCES)[number];
+
+const recurringBaseSchema = z.object({
+  title: z.string().trim().min(1).max(240),
+  description: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
+  kind: kindSchema.refine((kind) => kind !== "plano_acao", "Plano de ação não é um tipo de recorrência.").default("operacional"),
+  cadence: z.enum(RECURRING_CADENCES).default("semanal"),
+  weekdays: z.array(z.number().int().min(0).max(6)).max(7).default([]),
+  day_of_month: z.number().int().min(1).max(31).nullable().optional(),
+  next_due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  }, "Data de execução inválida.").nullable().optional(),
+  time_of_day: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/, "Horário inválido.").nullable().optional(),
+  timezone: z.string().min(1).max(80).refine((value) => {
+    try {
+      new Intl.DateTimeFormat("pt-BR", { timeZone: value }).format();
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Fuso horário inválido.").default("America/Sao_Paulo"),
+  priority: z.enum(TASK_PRIORITIES).default("media"),
+  assignee: z.string().max(120).nullable().optional(),
+  active: z.boolean().default(true),
+  client_visible: z.boolean().default(false),
+  position: z.number().int().min(0).optional(),
+  template_payload: z.record(z.unknown()).optional(),
+});
+
+export const recurringTaskCreateSchema = recurringBaseSchema.extend({ slug: slugSchema });
+export const recurringTaskPatchSchema = recurringBaseSchema.partial().extend({ slug: slugSchema.optional() });
+
+const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida.");
+
+// expectedDueDate is an optimistic-concurrency token: the client states which
+// cycle it believes it is closing, so a double-click closes one cycle, not two.
+export const recurringCompleteSchema = z.object({
+  expectedDueDate: isoDateSchema.nullable().optional(),
+});
+export const recurringGenerateSchema = z.object({
+  occurrenceDate: isoDateSchema.optional(),
+});
+
+export type RecurringTaskRecord = {
+  id: string;
+  client_id: string;
+  title: string;
+  description: string | null;
+  kind: string;
+  cadence: RecurringCadence;
+  weekdays: number[];
+  day_of_month: number | null;
+  next_due_date: string | null;
+  time_of_day: string | null;
+  timezone: string;
+  priority: TaskPriority;
+  assignee: string | null;
+  active: boolean;
+  client_visible: boolean;
+  completed_cycles: number;
+  last_completed_at: string | null;
+  position: number;
+  template_payload: Record<string, unknown>;
+  source?: string | null;
+  external_id?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ReviewerCandidate = { id: string; label: string; role: "admin" | "client" };
@@ -338,10 +425,19 @@ export function flowFlagsCascadeEffects(current: ClientFlowFlags, next: ClientFl
 export const planoVisibilitySchema = z.object({ enabled: z.boolean() });
 
 // ---- Admin nav tabs visibility (Revisões / Aprovações, global) -----------------
-export type AdminTabsVisibility = { revisoesTabVisible: boolean; aprovacoesTabVisible: boolean };
+// publicadoColumnVisible lives in this same site_settings row — it's a
+// bespoke global toggle (not a Revisão/Aprovação-style flow pair), gating
+// the Kanban "Publicado" column while that feature (mock metrics, manual
+// post-linking) is still in development.
+export type AdminTabsVisibility = {
+  revisoesTabVisible: boolean;
+  aprovacoesTabVisible: boolean;
+  publicadoColumnVisible: boolean;
+};
 export const adminTabsVisibilitySchema = z.object({
   revisoesTabVisible: z.boolean().optional(),
   aprovacoesTabVisible: z.boolean().optional(),
+  publicadoColumnVisible: z.boolean().optional(),
 });
 
 export type Metric = {

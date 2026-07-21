@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { createTask, getClient, getClientFlowFlags, listAllTasks, listTasks, listUnassignedTasks } from "@/lib/supabase";
+import { createTask, getClient, getClientFlowFlags, listAllTasks, listRelatedTasks, listTasks, listUnassignedTasks } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, taskCreateSchema, validateSlug } from "@/lib/validation";
 
@@ -12,6 +12,13 @@ export async function GET(request: Request) {
     await requireAdmin();
     const url = new URL(request.url);
     const rawSlug = url.searchParams.get("slug") ?? "";
+    const parentId = url.searchParams.get("parentId");
+    if (parentId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(parentId)) {
+        throw new HttpError(400, "ID do card pai invalido.");
+      }
+      return NextResponse.json({ tasks: await listRelatedTasks(parentId) });
+    }
     if (url.searchParams.get("unassigned") === "1") {
       return NextResponse.json({ tasks: await listUnassignedTasks() });
     }
@@ -37,6 +44,13 @@ export async function POST(request: Request) {
     if (body.slug && !client) throw new HttpError(404, "Cliente nao encontrado.");
     const { slug: _slug, ...fields } = body;
     void _slug;
+
+    if (fields.status === "concluido" && (fields.kind ?? "criativo") !== "criativo") {
+      throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");
+    }
+    if (fields.kind === "plano_acao" && fields.recurrence_cadence) {
+      throw new HttpError(400, "Plano de Acao e um tipo unico e nao pode ser recorrente.");
+    }
 
     // Defense-in-depth: never create a task with a reviewer/approver for a
     // client whose stage is admin-disabled. Unassigned tasks have no flags
