@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import TaskModal from "./TaskModal";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord } from "@/lib/validation";
 
@@ -51,11 +51,23 @@ export default function CardModalLauncher({
   // Every Responsável option (team + historical names) — the field is a
   // dropdown-only now, never free text.
   const [assignees, setAssignees] = useState<string[]>([]);
+  const rootTaskIdRef = useRef(task.id);
 
   useEffect(() => {
+    setClientTasks((current) => {
+      const merged = new Map(current.map((row) => [row.id, row]));
+      merged.set(task.id, task);
+      for (const related of initialRelatedTasks) merged.set(related.id, related);
+      return Array.from(merged.values());
+    });
+    // A router.refresh after activating a future execution recreates the root
+    // task object. Resetting navigation on object identity used to throw the
+    // user back to the parent immediately. Only a genuinely different root
+    // card starts a new modal history.
+    if (rootTaskIdRef.current === task.id) return;
+    rootTaskIdRef.current = task.id;
     setActiveTask(task);
     setHistory(parentTask ? [parentTask] : []);
-    setClientTasks([task, ...initialRelatedTasks.filter((related) => related.id !== task.id)]);
   }, [task, initialRelatedTasks, parentTask]);
 
   useEffect(() => {
@@ -110,7 +122,10 @@ export default function CardModalLauncher({
 
   const patchLocal = (t: TaskRecord) => {
     setClientTasks((rows) => rows.some((r) => r.id === t.id) ? rows.map((r) => (r.id === t.id ? t : r)) : [...rows, t]);
-    onChanged?.(t);
+  };
+  const patchActiveTask = (t: TaskRecord) => {
+    patchLocal(t);
+    if (t.id === activeTask.id) onChanged?.(t);
   };
   const planCandidates = clientTasks
     .filter((candidate) => candidate.kind === "plano_acao")
@@ -131,7 +146,7 @@ export default function CardModalLauncher({
       planCandidates={planCandidates}
       planoVisibilityOn={planoVisibilityOn}
       flowFlags={flowFlags}
-      onTaskPatched={patchLocal}
+      onTaskPatched={patchActiveTask}
       onOpenRelatedTask={(related) => { patchLocal(related); setHistory((items) => [...items, activeTask]); setActiveTask(related); }}
       onBack={history.length ? () => {
         const previous = history[history.length - 1];

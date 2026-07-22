@@ -1,5 +1,6 @@
 import { createClient } from "./supabase/server";
-import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
+import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
+import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, nextExplicitOccurrenceDate, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch, replicatedExecutionPayload } from "./taskDateGrouping";
 import { assigneeOptions } from "./assignees";
 import { visibleOnTaskBoard } from "./taskRelations";
 import {
@@ -920,6 +921,27 @@ export async function createTask(clientId: string | null, input: Record<string, 
   return row;
 }
 
+export async function createExplicitDateTaskGroup(clientId: string | null, input: Record<string, unknown>, rawDates: unknown): Promise<TaskRecord> {
+  const dates = normalizeOccurrenceDates(rawDates, typeof input.due_date === "string" ? input.due_date : null);
+  if (dates.length < 2) return createTask(clientId, input);
+  const rule = inferDateGroupRule(dates);
+  const parent = await createTask(clientId, {
+    ...input,
+    due_date: dates[0],
+    start_date: dates[0],
+    recurrence_cadence: rule.cadence,
+    recurrence_weekdays: rule.weekdays,
+    recurrence_day_of_month: rule.dayOfMonth,
+    payload: { ...((input.payload ?? {}) as Record<string, unknown>), explicit_occurrence_dates: dates },
+  });
+  try {
+    return await createTask(clientId, explicitDateExecutionFields(parent, recurringExecutionId(parent.id, dates[0]), dates[0]));
+  } catch (error) {
+    await deleteTask(parent.id).catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function updateTask(id: string, patch: Record<string, unknown>): Promise<TaskRecord> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -934,10 +956,170 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   return row;
 }
 
+function payloadRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+async function replicateExplicitChildPayload(parentId: string, currentId: string, payload: Record<string, unknown> | null): Promise<void> {
+  if (!payload) return;
+  const related = await listRelatedTasks(parentId);
+  await Promise.all(related
+    .filter((task) => task.id !== currentId)
+    .map((task) => updateTask(task.id, { payload: replicatedExecutionPayload(payload, task.payload) })));
+}
+
+async function updateExplicitChildGroup(id: string, parent: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const shared = replicaPatch(patch);
+  const sharedPayload = payloadRecord(shared.payload);
+  delete shared.payload;
+  const local = Object.fromEntries(Object.entries(patch).filter(([key]) => !(key in shared)));
+  const supabase = await createClient();
+  if (Object.keys(shared).length) {
+    const { error } = await supabase.from("tasks").update({ ...shared, updated_at: new Date().toISOString() }).eq("plan_id", parent.id);
+    if (error) fail(error);
+    const template = parentTemplatePatch(shared);
+    if (Object.keys(template).length) await updateTask(parent.id, template);
+  }
+  const currentUpdate = Object.keys(local).length ? updateTask(id, local) : null;
+  const [, updatedCurrent] = await Promise.all([
+    replicateExplicitChildPayload(parent.id, id, sharedPayload),
+    currentUpdate,
+  ]);
+  if (updatedCurrent) return updatedCurrent;
+  const updated = await getTaskById(id);
+  if (!updated) throw new HttpError(404, "Tarefa nao encontrada.");
+  return updated;
+}
+
+async function updateExplicitParent(id: string, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const updated = await updateTask(id, patch);
+  if (isExplicitDateParent(updated)) {
+    const shared = parentTemplatePatch(patch);
+    if (Object.keys(shared).length) {
+      const supabase = await createClient();
+      const { error } = await supabase.from("tasks").update({ ...shared, updated_at: new Date().toISOString() }).eq("plan_id", updated.id);
+      if (error) fail(error);
+    }
+    const dates = explicitDatesOf(updated);
+    const related = await listRelatedTasks(updated.id);
+    const removedIds = related
+      .filter((task) => task.payload?.[EXPLICIT_GROUP_KEY] === updated.id && (!task.due_date || !dates.includes(task.due_date)))
+      .map((task) => task.id);
+    if (removedIds.length) {
+      const supabase = await createClient();
+      const { error } = await supabase.from("tasks").delete().in("id", removedIds);
+      if (error) fail(error);
+    }
+  }
+  return updated;
+}
+
+function recurringParentInput(current: TaskRecord, patch: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...current, ...patch } as TaskRecord;
+  return {
+    kind: next.kind,
+    subtype: next.subtype,
+    title: next.title,
+    status: next.status,
+    priority: next.priority,
+    assignee: next.assignee,
+    reviewer_id: next.reviewer_id,
+    approver_id: next.approver_id,
+    plan_id: null,
+    requires_review: next.requires_review,
+    requires_approval: next.requires_approval,
+    due_date: next.due_date,
+    start_date: next.start_date ?? next.due_date,
+    end_date: next.end_date,
+    scheduled_start_at: next.scheduled_start_at,
+    scheduled_end_at: next.scheduled_end_at,
+    progress_weight: next.progress_weight,
+    description: next.description,
+    client_visible: next.client_visible,
+    payload: next.payload,
+    position: next.position,
+    recurrence_cadence: next.recurrence_cadence,
+    recurrence_weekdays: next.recurrence_weekdays,
+    recurrence_day_of_month: next.recurrence_day_of_month,
+  };
+}
+
+async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const next = { ...current, ...patch } as TaskRecord;
+  if (!next.recurrence_cadence || !next.due_date) return updateTask(current.id, patch);
+  const clientId = patch.client_id === null || typeof patch.client_id === "string" ? patch.client_id : current.client_id;
+  const parent = await createTask(clientId, recurringParentInput(current, patch));
+  const fields = isExplicitDateParent(parent)
+    ? explicitDateExecutionFields(parent, current.id, next.due_date)
+    : currentRecurringExecutionFields(parent, current.id, next.due_date);
+  const { id: _id, ...executionFields } = fields;
+  void _id;
+  try {
+    return await updateTask(current.id, {
+      ...executionFields,
+      status: next.status,
+      position: next.position,
+      scheduled_start_at: next.scheduled_start_at,
+      scheduled_end_at: next.scheduled_end_at,
+    });
+  } catch (error) {
+    await deleteTask(parent.id).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function updateTaskGroup(id: string, current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const parent = current.plan_id ? await getTaskById(current.plan_id) : null;
+  if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
+  const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
+  if (!current.plan_id && !current.recurrence_cadence && nextRecurrence) {
+    return convertTaskToRecurringGroup(current, patch);
+  }
+  return updateExplicitParent(id, patch);
+}
+
 function assertCurrentRecurringCycle(parent: TaskRecord | null, expectedDueDate: string | null): asserts parent is TaskRecord & { recurrence_cadence: NonNullable<TaskRecord["recurrence_cadence"]> } {
   if (!parent) throw new HttpError(404, "Tarefa recorrente não encontrada.");
   if (!parent.recurrence_cadence) throw new HttpError(409, "Esta tarefa não é recorrente.");
   if (!expectedDueDate || parent.due_date !== expectedDueDate) throw new HttpError(409, "Este ciclo já foi concluído.");
+}
+
+async function materializeNextExplicitExecution(
+  parent: TaskRecord,
+  nextDue: string | null,
+  related: TaskRecord[],
+): Promise<{ task?: TaskRecord; created: boolean }> {
+  if (!nextDue) return { created: false };
+  const existing = related.find((task) => task.due_date === nextDue);
+  if (existing) return { task: existing, created: false };
+  const supabase = await createClient();
+  const nextId = recurringExecutionId(parent.id, nextDue);
+  const { data, error } = await supabase.from("tasks")
+    .insert(explicitDateExecutionFields(parent, nextId, nextDue, true))
+    .select(TASK_COLUMNS).limit(1);
+  if (error && error.code !== "23505") fail(error);
+  const inserted = data?.[0] as TaskRecord | undefined;
+  return { task: inserted ?? await getTaskById(nextId) ?? undefined, created: Boolean(inserted) };
+}
+
+async function completeExplicitTaskCycle(parent: TaskRecord, currentDueDate: string): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
+  const related = await listRelatedTasks(parent.id);
+  const currentTask = related.find((task) => task.due_date === currentDueDate);
+  if (!currentTask) throw new HttpError(503, "Nao foi possivel localizar a execucao atual.");
+  const nextDue = nextExplicitOccurrenceDate(explicitDatesOf(parent), currentDueDate);
+  const next = await materializeNextExplicitExecution(parent, nextDue, related);
+  const supabase = await createClient();
+  const completedCycles = (typeof parent.payload?.completed_cycles === "number" ? parent.payload.completed_cycles : 0) + 1;
+  const { data, error } = await supabase.from("tasks").update({
+    due_date: nextDue,
+    payload: { ...parent.payload, completed_cycles: completedCycles, last_completed_at: new Date().toISOString(), cycle_completed: nextDue === null },
+  }).eq("id", parent.id).eq("due_date", currentDueDate).select(TASK_COLUMNS).limit(1);
+  if (error) fail(error);
+  const updatedParent = data?.[0] as TaskRecord | undefined;
+  if (!updatedParent) throw new HttpError(409, "Este ciclo já foi concluído.");
+  const task = next.task ?? currentTask;
+  if (!task) throw new HttpError(503, "Não foi possível localizar a execução.");
+  return { parent: updatedParent, task, created: next.created };
 }
 
 export async function completeTaskCycle(id: string, expectedDueDate: string | null): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
@@ -945,6 +1127,7 @@ export async function completeTaskCycle(id: string, expectedDueDate: string | nu
   const parent = await getTaskById(id);
   assertCurrentRecurringCycle(parent, expectedDueDate);
   const currentDueDate = parent.due_date!;
+  if (isExplicitDateParent(parent)) return completeExplicitTaskCycle(parent, currentDueDate);
 
   const nextDue = nextRecurringDueDate(currentDueDate, {
     cadence: parent.recurrence_cadence,

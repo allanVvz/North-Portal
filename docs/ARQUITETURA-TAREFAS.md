@@ -28,6 +28,18 @@ O significado do pai é determinado por seus atributos: `kind = 'plano_acao'` ag
 
 O ID do filho é determinístico por pai + data futura. Duplo clique ou repetição da requisição não duplica a execução.
 
+## Grupos por múltiplas datas
+
+Selecionar duas ou mais datas transforma a tarefa em um grupo recorrente finito. As datas explícitas ficam no card-pai, em `payload.explicit_occurrence_dates`, ordenadas e sem repetição; `due_date` aponta para a ocorrência corrente. A cadência é inferida apenas para classificação visual — as datas explícitas continuam sendo a fonte de verdade.
+
+Ao converter uma tarefa existente, a API cria um pai separado e preserva o `id` da tarefa original como primeira execução visível. Essa é uma invariante: converter em recorrência nunca pode fazer o card atual sumir de Tarefas. O pai aparece em Clientes/Rotinas; a primeira execução permanece no quadro com `recurrence_cadence = null` e `plan_id` apontando para o pai.
+
+Datas futuras não são materializadas antecipadamente. “Concluir ciclo” cria somente a próxima execução, com `payload.deferred_until_accessed = true`. Ela aparece na relação do pai como “Futura” e só entra em Tarefas depois que for aberta por esse caminho. Assim, em cada ciclo existe uma tarefa operacional corrente, sem poluir o quadro com todo o futuro.
+
+Atualizações de conteúdo e estado em um filho são replicadas apenas para as outras execuções que já foram materializadas. Identidade e agenda (`id`, `plan_id`, `due_date`, `start_date` e atributos de recorrência) nunca são replicadas. Metadados locais do ciclo (`deferred_until_accessed`, `accessed_at`, `occurrence_date` e `explicit_date_group_id`) também são preservados por execução; editar a ocorrência atual nunca pode revelar uma futura antes do acesso. Atualizações de dados-base como título, tipo e responsável também mantêm o pai sincronizado.
+
+Ao concluir a última data explícita, o pai recebe `due_date = null` e `payload.cycle_completed = true`; nenhuma data adicional é inventada.
+
 ## Consultas e desempenho
 
 - `listActionPlans()` busca somente pais `plano_acao` e, em uma segunda consulta em lote, os filhos desses pais. Não varre mais todas as tarefas para montar a tela.
@@ -53,6 +65,8 @@ O campo físico continua `tasks.assignee text` para evitar uma tabela adicional.
 - Plano de Ação não aceita recorrência, tanto na interface quanto na API.
 - Filho recorrente não herda recorrência; caso contrário geraria uma árvore infinita.
 - Execução futura não aparece no quadro antes do primeiro acesso.
+- Converter uma tarefa em recorrência preserva a tarefa original como primeira execução visível; o pai é sempre um registro separado.
+- Um registro legado não-Criativo que já esteja em `Publicado` pode salvar campos não relacionados. A API continua proibindo novas entradas nessa combinação.
 - Progresso de pai é sempre rollup dos filhos; não é persistido.
 - O toggle “Visível para o cliente” é fail-closed enquanto a feature flag carrega.
 - Funções críticas têm limite automatizado de complexidade ciclomática em `lib/cyclomaticComplexity.test.ts`.

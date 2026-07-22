@@ -146,6 +146,20 @@ export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true }).e
   slug: slugSchema.nullable().optional(),
 });
 
+/** Blocks only a *new* invalid Publicado combination. Historical rows that
+ * already are non-Criativo + Publicado remain editable, so an unrelated save
+ * does not brick the card. Moving another card into that combination (or
+ * changing a published Criativo into another type) is still rejected. */
+export function introducesInvalidPublishedState(
+  current: Pick<TaskRecord, "status" | "kind">,
+  patch: { status?: TaskStatus; kind?: string },
+): boolean {
+  const currentIsInvalid = current.status === "concluido" && current.kind !== "criativo";
+  const nextStatus = patch.status ?? current.status;
+  const nextKind = patch.kind ?? current.kind;
+  return nextStatus === "concluido" && nextKind !== "criativo" && !currentIsInvalid;
+}
+
 // Performance metrics attached to a published card — flexible map so the
 // catalog (app/admin/metricDefs.ts) can grow without a schema change.
 export const taskMetricsPatchSchema = z.object({

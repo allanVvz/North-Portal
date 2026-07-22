@@ -100,7 +100,6 @@ export default function AssigneePicker({
           <button type="button" className="assignee-create" onClick={() => { setOpen(false); setEditing(true); }}>+ Escrever novo responsável</button>
         </div>
       ) : null}
-      <small className="assignee-hint">Escolha vários ou dê dois cliques para criar um nome.</small>
     </div>
   );
 }

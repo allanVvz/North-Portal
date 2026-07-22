@@ -53,6 +53,59 @@ test.describe("progresso do modal de tarefa", () => {
     const modal = page.locator(".tm");
     await expect(modal).toBeVisible();
     await expect(modal.locator(".tm-head-progress")).toHaveCount(0);
+    const desktopLayout = await modal.evaluate((element) => {
+      const identity = element.querySelector(".tm-head-identity")!.getBoundingClientRect();
+      const stepper = element.querySelector(".tm-stepper-head")!.getBoundingClientRect();
+      const actions = element.querySelector(".tm-head-actions")!.getBoundingClientRect();
+      const footer = element.querySelector(".kb-modal-actions")!.getBoundingClientRect();
+      const modalRect = element.getBoundingClientRect();
+      const steps = Array.from(element.querySelectorAll(".tm-step"));
+      return {
+        centerDelta: Math.abs((stepper.left + stepper.width / 2) - (identity.right + actions.left) / 2),
+        lastStepHasLine: Boolean(steps.at(-1)?.querySelector(".tm-step-line")),
+        lineCount: element.querySelectorAll(".tm-step-line").length,
+        stepCount: steps.length,
+        footerBottomDelta: Math.abs(modalRect.bottom - footer.bottom),
+        horizontalOverflow: element.scrollWidth > element.clientWidth,
+      };
+    });
+    expect(desktopLayout.centerDelta).toBeLessThan(2);
+    expect(desktopLayout.lastStepHasLine).toBe(false);
+    expect(desktopLayout.lineCount).toBe(desktopLayout.stepCount - 1);
+    expect(desktopLayout.footerBottomDelta).toBeLessThan(2);
+    expect(desktopLayout.horizontalOverflow).toBe(false);
+
+    const description = modal.getByPlaceholder(/Objetivo, referência e critério/);
+    const initialDescriptionHeight = await description.evaluate((element) => element.getBoundingClientRect().height);
+    await description.fill("Linha 1\nLinha 2\nLinha 3\nLinha 4\nLinha 5\nLinha 6");
+    await expect.poll(() => description.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(initialDescriptionHeight);
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const responsiveHeader = await modal.locator(".tm-stepper-head").evaluate((element) => ({
+      borderTopWidth: getComputedStyle(element).borderTopWidth,
+      horizontalOverflow: element.scrollWidth > element.clientWidth,
+    }));
+    expect(responsiveHeader.borderTopWidth).toBe("0px");
+    expect(responsiveHeader.horizontalOverflow).toBe(false);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileLayout = await modal.evaluate((element) => {
+      const modalRect = element.getBoundingClientRect();
+      const layout = element.querySelector(".tm-layout")!.getBoundingClientRect();
+      const descriptionBox = element.querySelector(".tm-main > .tm-box:has(.tm-desc-input)")!.getBoundingClientRect();
+      const comments = element.querySelector(".tm-side")!.getBoundingClientRect();
+      const footer = element.querySelector(".kb-modal-actions")!.getBoundingClientRect();
+      return {
+        commentsClearDescription: comments.top >= descriptionBox.bottom,
+        footerAfterLayout: footer.top >= layout.bottom - 2,
+        footerBottomDelta: Math.abs(modalRect.bottom - footer.bottom),
+        horizontalOverflow: element.scrollWidth > element.clientWidth,
+      };
+    });
+    expect(mobileLayout.commentsClearDescription).toBe(true);
+    expect(mobileLayout.footerAfterLayout).toBe(true);
+    expect(mobileLayout.footerBottomDelta).toBeLessThan(2);
+    expect(mobileLayout.horizontalOverflow).toBe(false);
 
     await page.evaluate(() => {
       localStorage.setItem("kb-attr-visible", JSON.stringify({ progress: true }));

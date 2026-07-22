@@ -55,6 +55,9 @@ export default function CalendarPicker({
   onRecurrenceChange,
   recurrenceFeatureEnabled = true,
   recurrenceRequired = false,
+  selectedDates,
+  onSelectedDatesChange,
+  minSelectedDates = 0,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -67,6 +70,9 @@ export default function CalendarPicker({
   onRecurrenceChange?: (value: CalendarRecurrence) => void;
   recurrenceFeatureEnabled?: boolean;
   recurrenceRequired?: boolean;
+  selectedDates?: string[];
+  onSelectedDatesChange?: (values: string[]) => void;
+  minSelectedDates?: number;
 }) {
   const [open, setOpen] = useState(false);
   const selected = parse(value);
@@ -81,6 +87,7 @@ export default function CalendarPicker({
   // from outside (grid click, "Limpar data", or our own commit below).
   const [text, setText] = useState(() => typedLabel(value));
   useEffect(() => setText(typedLabel(value)), [value]);
+  const dateValues = [...new Set([...(selectedDates ?? []), ...(value ? [value] : [])])].filter((item) => parse(item)).sort();
 
   useEffect(() => {
     if (!open) return;
@@ -111,8 +118,27 @@ export default function CalendarPicker({
     const t = text.trim();
     if (!t) { if (value) onChange(""); return; }
     const parsed = parseTyped(t);
-    if (parsed) onChange(toISO(parsed));
+    if (parsed) {
+      const nextValue = toISO(parsed);
+      if (onSelectedDatesChange) {
+        const next = [...new Set([...dateValues, nextValue])].sort();
+        onSelectedDatesChange(next);
+        onChange(next[0]);
+      } else onChange(nextValue);
+    }
     else setText(typedLabel(value));
+  }
+  function toggleDate(valueToToggle: string) {
+    if (!onSelectedDatesChange) {
+      onChange(valueToToggle);
+      setOpen(false);
+      return;
+    }
+    const exists = dateValues.includes(valueToToggle);
+    if (exists && dateValues.length <= minSelectedDates) return;
+    const next = (exists ? dateValues.filter((item) => item !== valueToToggle) : [...dateValues, valueToToggle]).sort();
+    onSelectedDatesChange(next);
+    onChange(next[0] ?? "");
   }
   function stepMonth(dir: -1 | 1) {
     setView((v) => {
@@ -143,7 +169,13 @@ export default function CalendarPicker({
             if (e.key === "Escape") setText(typedLabel(value));
           }}
         />
+        {onSelectedDatesChange ? <button type="button" className="cal-pick-add" onClick={openPicker} aria-label="Adicionar data" title="Adicionar outra data">+</button> : null}
       </div>
+      {onSelectedDatesChange && dateValues.length ? (
+        <div className="cal-date-chips" aria-label="Datas selecionadas">
+          {dateValues.map((date) => <span className="cal-date-chip" key={date}>{typedLabel(date)}<button type="button" onClick={() => toggleDate(date)} disabled={dateValues.length <= minSelectedDates} aria-label={`Remover ${typedLabel(date)}`}>×</button></span>)}
+        </div>
+      ) : null}
       {open ? (
         <div className="cal-pop">
           <div className="cal-pop-bar">
@@ -156,13 +188,14 @@ export default function CalendarPicker({
             {days.map((d) => {
               const outside = d.getMonth() !== view.m;
               const isToday = dayKey(d) === dayKey(today);
-              const isSelected = selected ? dayKey(d) === dayKey(selected) : false;
+              const iso = toISO(d);
+              const isSelected = dateValues.includes(iso);
               return (
                 <button
                   type="button"
                   key={d.toISOString()}
                   className={`cal-pop-day${outside ? " out" : ""}${isToday ? " today" : ""}${isSelected ? " sel" : ""}`}
-                  onClick={() => { onChange(toISO(d)); setOpen(false); }}
+                  onClick={() => toggleDate(iso)}
                 >
                   {d.getDate()}
                 </button>
@@ -187,11 +220,12 @@ export default function CalendarPicker({
                 </select>
               </label>
               {recurrence.cadence === "semanal" ? <div className="cal-recurrence-days">{WEEKDAYS.map((label, day) => <button type="button" className={recurrence.weekdays.includes(day) ? "on" : ""} key={day} onClick={() => onRecurrenceChange({ ...recurrence, weekdays: recurrence.weekdays.includes(day) ? recurrence.weekdays.filter((item) => item !== day) : [...recurrence.weekdays, day] })}>{label}</button>)}</div> : null}
-              {recurrence.cadence === "mensal" ? <label>Dia do mês<input type="number" min={1} max={31} value={recurrence.dayOfMonth ?? 1} onChange={(event) => onRecurrenceChange({ ...recurrence, dayOfMonth: Math.max(1, Math.min(31, Number(event.target.value) || 1)) })} /></label> : null}
+              {recurrence.cadence === "mensal" ? <p className="cal-recurrence-anchor">Dia de referência: {recurrence.dayOfMonth ?? selected?.getDate() ?? 1}</p> : null}
+              {dateValues.length > 1 ? <p className="cal-date-summary">{dateValues.length} datas selecionadas · {dateValues.length} atividades serão agrupadas.</p> : null}
             </div>
           ) : null}
           {value ? (
-            <button type="button" className="cal-pop-clear" onClick={() => { onChange(""); setOpen(false); }}>
+            <button type="button" className="cal-pop-clear" onClick={() => { onSelectedDatesChange?.([]); onChange(""); setOpen(false); }}>
               Limpar data
             </button>
           ) : null}

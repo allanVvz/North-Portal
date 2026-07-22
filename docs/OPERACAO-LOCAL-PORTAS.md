@@ -2,17 +2,21 @@
 
 Este projeto deve ter **uma unica instancia do Next.js por diretorio de trabalho**. Duas instancias apontando para o mesmo repositorio compartilham `.next/`; se um `next build` ou uma recompilacao alterar essa pasta enquanto outra instancia a le, podem surgir erros intermitentes como `500 Internal Server Error`, modulos ausentes e falhas em `/_app` ou `/_document`.
 
-## Porta padrao
+## Porta canônica neste ambiente
 
-Use a porta `3000` para o desenvolvimento normal:
+Use a porta `3001` para o desenvolvimento local deste checkout. A `3000` pode pertencer a outro projeto nesta máquina e não deve ser assumida como North Portal.
 
 ```powershell
-npm run dev
+$env:NODE_OPTIONS = "--use-system-ca"
+npm run dev -- -p 3001
 ```
 
-Para uma verificacao isolada, escolha uma porta alternativa explicita, por exemplo `3010`:
+`NODE_OPTIONS=--use-system-ca` é obrigatório neste ambiente porque login e rotas do servidor acessam o Supabase por TLS. Sem ele, `/login` pode responder `200`, mas a autenticação fica presa em `Entrando...`; portanto, porta aberta não significa backend saudável.
+
+Para uma verificação isolada, escolha outra porta explícita somente depois de parar a instância atual, por exemplo `3010`:
 
 ```powershell
+$env:NODE_OPTIONS = "--use-system-ca"
 npm run dev -- -p 3010
 ```
 
@@ -22,6 +26,7 @@ Os testes E2E devem reutilizar a instancia que ja esta ativa. Se o desenvolvimen
 
 ```powershell
 $env:E2E_PORT = "3001"
+$env:NODE_OPTIONS = "--use-system-ca"
 npm run test:e2e
 ```
 
@@ -55,17 +60,19 @@ Espere a porta deixar de aparecer como `LISTENING`. Entradas `TIME_WAIT` sao con
 2. Confirme que nenhuma porta planejada esta em `LISTENING`.
 3. Rode `npm run build` **ou** `npm run dev`, nunca em paralelo com outro servidor local do mesmo checkout.
 4. Aguarde a mensagem `Ready`.
-5. Valide pelo menos `/`, `/login` e `/admin`.
+5. Valide `/`, `/login` e `/admin` e efetue um login real. A verificação autenticada detecta falhas TLS que um simples status HTTP não detecta.
 
 Em PowerShell:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing http://localhost:3000/
-Invoke-WebRequest -UseBasicParsing http://localhost:3000/login
-Invoke-WebRequest -UseBasicParsing http://localhost:3000/admin -MaximumRedirection 0
+Invoke-WebRequest -UseBasicParsing http://localhost:3001/
+Invoke-WebRequest -UseBasicParsing http://localhost:3001/login
+Invoke-WebRequest -UseBasicParsing http://localhost:3001/admin -MaximumRedirection 0
 ```
 
 Em `/admin`, um `307` para `/login` e esperado sem uma sessao autenticada. O problema e resposta `500`, nao esse redirecionamento.
+
+Depois desses checks, autentique com uma conta de teste e confirme que a URL avança para `/admin/*`. Se o botão permanecer em `Entrando...`, confirme primeiro se o processo foi iniciado com `NODE_OPTIONS=--use-system-ca`.
 
 ## Se aparecer `Internal Server Error`
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AttrVisibilityPopover from "./AttrVisibilityPopover";
 import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
 import AssigneePicker from "./AssigneePicker";
@@ -14,6 +14,7 @@ import {
 } from "./kanbanShared";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { activatedTaskPayload, childrenOf, isDeferredTask } from "@/lib/taskRelations";
+import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
 type Draft = {
@@ -28,6 +29,7 @@ type Draft = {
   approver_id: string;
   plan_id: string;
   due_date: string;
+  occurrence_dates: string[];
   recurrence_cadence: CalendarRecurrence["cadence"];
   recurrence_weekdays: number[];
   recurrence_day_of_month: number | null;
@@ -71,6 +73,7 @@ function draftFrom(
     approver_id: task?.approver_id ?? "",
     plan_id: task?.plan_id ?? "",
     due_date: task?.due_date ?? "",
+    occurrence_dates: normalizeOccurrenceDates(p[EXPLICIT_DATES_KEY], task?.due_date),
     recurrence_cadence: task?.recurrence_cadence ?? (creationScope === "routine" || initialRecurrence ? "semanal" : null),
     recurrence_weekdays: task?.recurrence_weekdays ?? [],
     recurrence_day_of_month: task?.recurrence_day_of_month ?? null,
@@ -98,6 +101,18 @@ function Cell({ icon, label, hidden, children }: { icon: string; label: string; 
       </div>
     </div>
   );
+}
+
+function resizeTextarea(element: HTMLTextAreaElement | null): void {
+  if (!element) return;
+  element.style.height = "auto";
+  element.style.height = `${element.scrollHeight}px`;
+}
+
+function AutoGrowTextarea({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => resizeTextarea(ref.current), [props.value]);
+  return <textarea {...props} ref={ref} onChange={(event) => { onChange?.(event); resizeTextarea(event.currentTarget); }} />;
 }
 
 // Small inline dropdown used in the edit-mode header for Cliente and Tipo —
@@ -256,6 +271,12 @@ export default function TaskModal({
   // PATCH /api/admin/tasks/[id]) — hide the step as an option for every
   // other kind, but never for a card already sitting there.
   const publicadoStepHidden = draft.kind !== "criativo" && draft.status !== "concluido";
+  const progressColumns = COLUMNS.filter((column) => {
+    if (column.status === "revisao") return !revisaoStepHidden;
+    if (column.status === "aprovacao") return !aprovacaoStepHidden;
+    if (column.status === "concluido") return !publicadoStepHidden;
+    return true;
+  });
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const comments = liveTask ? commentsOf(liveTask) : [];
@@ -277,6 +298,24 @@ export default function TaskModal({
         recurrence_cadence: def.isPlan ? null : d.recurrence_cadence,
         recurrence_weekdays: def.isPlan ? [] : d.recurrence_weekdays,
         recurrence_day_of_month: def.isPlan ? null : d.recurrence_day_of_month,
+      };
+    });
+  }
+
+  function setOccurrenceDates(values: string[]) {
+    const dates = normalizeOccurrenceDates(values);
+    setDraft((current) => {
+      const first = dates[0] ?? "";
+      if (dates.length < 2) return { ...current, occurrence_dates: dates, due_date: first, start_date: first };
+      const rule = inferDateGroupRule(dates);
+      return {
+        ...current,
+        occurrence_dates: dates,
+        due_date: first,
+        start_date: first,
+        recurrence_cadence: rule.cadence,
+        recurrence_weekdays: rule.weekdays,
+        recurrence_day_of_month: rule.dayOfMonth,
       };
     });
   }
@@ -334,7 +373,6 @@ export default function TaskModal({
         });
         if (!response.ok) throw new Error();
         target = await response.json() as TaskRecord;
-        onTaskPatched?.(target);
       } catch {
         setError("Não foi possível abrir a execução.");
         setBusy(false);
@@ -399,6 +437,8 @@ export default function TaskModal({
     strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
+    if (draft.occurrence_dates.length > 1) payload[EXPLICIT_DATES_KEY] = draft.occurrence_dates;
+    else delete payload[EXPLICIT_DATES_KEY];
 
     // Agendamento: fold date + time into a single timestamp for the calendar.
     const dateStart = (draft.start_date || draft.due_date).trim();
@@ -438,7 +478,7 @@ export default function TaskModal({
       body.recurrence_cadence = null;
       body.recurrence_weekdays = [];
       body.recurrence_day_of_month = null;
-    } else if (mode === "new" && creationScope === "task") {
+    } else if (mode === "new" && creationScope === "task" && draft.occurrence_dates.length < 2) {
       body.recurrence_cadence = null;
       body.recurrence_weekdays = [];
       body.recurrence_day_of_month = null;
@@ -458,10 +498,13 @@ export default function TaskModal({
             // string as an invalid slug, not as "no client".
             body: JSON.stringify(draft.clientSlug ? { ...body, slug: draft.clientSlug } : body),
           });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const responseBody = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(responseBody?.error ?? "Não foi possível salvar a tarefa.");
+      }
       onSaved(await res.json(), !liveTask);
-    } catch {
-      setError("Não foi possível salvar a tarefa.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível salvar a tarefa.");
     }
     setBusy(false);
   }
@@ -483,9 +526,10 @@ export default function TaskModal({
       <div className={`tm tm-tone-${tone} tm-lg`} onClick={(e) => e.stopPropagation()}>
         {mode === "edit" ? (
           <div className={`tm-head tm-head-tone-${tone}`}>
-            {onBack ? <button type="button" className="tm-back" onClick={onBack} aria-label="Voltar para o card anterior" title="Voltar">←</button> : null}
-            <span className="tm-head-ico" aria-hidden>{kindIcon(draft.kind)}</span>
-            <div className="tm-head-text">
+            <div className="tm-head-identity">
+              {onBack ? <button type="button" className="tm-back" onClick={onBack} aria-label="Voltar para o card anterior" title="Voltar">←</button> : null}
+              <span className="tm-head-ico" aria-hidden>{kindIcon(draft.kind)}</span>
+              <div className="tm-head-text">
               <input
                 className="tm-title-input"
                 value={draft.title}
@@ -539,26 +583,22 @@ export default function TaskModal({
                     </HeadDropdown>
                   </>
                 ) : null}
-              </span>
+                </span>
+              </div>
             </div>
             <div className="tm-stepper tm-stepper-head" aria-label="Progresso da tarefa">
-              {COLUMNS.map((column, index) => {
-                if (column.status === "revisao" && revisaoStepHidden) return null;
-                if (column.status === "aprovacao" && aprovacaoStepHidden) return null;
-                if (column.status === "concluido" && publicadoStepHidden) return null;
-                return (
+              {progressColumns.map((column, visibleIndex) => (
                   <button
                     type="button"
                     key={column.status}
-                    className={`tm-step ${index <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""}`}
+                    className={`tm-step ${STATUS_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""}`}
                     onClick={() => set("status", column.status)}
                   >
                     <span className="tm-step-dot" />
                     <span className="tm-step-label">{column.label}</span>
-                    {index < COLUMNS.length - 1 ? <span className="tm-step-line" /> : null}
+                    {visibleIndex < progressColumns.length - 1 ? <span className="tm-step-line" /> : null}
                   </button>
-                );
-              })}
+              ))}
             </div>
             <div className="tm-head-actions">
               {visible("progress") ? (
@@ -617,7 +657,7 @@ export default function TaskModal({
                     </span>
                   ) : null}
                 </span>
-                <textarea
+                <AutoGrowTextarea
                   className="tm-desc-input"
                   rows={2}
                   value={draft.description}
@@ -654,7 +694,7 @@ export default function TaskModal({
               <Cell icon="▦" label="Data">
                 <CalendarPicker
                   value={draft.start_date || draft.due_date}
-                  onChange={(value) => setDraft((current) => ({ ...current, start_date: value, due_date: value }))}
+                  onChange={(value) => setDraft((current) => ({ ...current, start_date: value, due_date: value, occurrence_dates: current.occurrence_dates.length > 1 ? current.occurrence_dates : value ? [value] : [] }))}
                   endValue={draft.end_date}
                   onEndChange={(value) => set("end_date", value)}
                   timeValue={draft.hora}
@@ -664,6 +704,9 @@ export default function TaskModal({
                   onRecurrenceChange={(value) => setDraft((current) => ({ ...current, recurrence_cadence: value.cadence, recurrence_weekdays: value.weekdays, recurrence_day_of_month: value.dayOfMonth }))}
                   recurrenceFeatureEnabled={!kd.isPlan}
                   recurrenceRequired={mode === "new" && creationScope === "routine"}
+                  selectedDates={!kd.isPlan && !liveTask?.plan_id ? draft.occurrence_dates : undefined}
+                  onSelectedDatesChange={!kd.isPlan && !liveTask?.plan_id ? setOccurrenceDates : undefined}
+                  minSelectedDates={liveTask && draft.occurrence_dates.length > 1 ? 2 : 0}
                 />
               </Cell>
 
@@ -806,7 +849,7 @@ export default function TaskModal({
             {mode === "edit" ? (
               <div className="tm-box">
                 <p className="tm-box-label">Descrição do card</p>
-                <textarea
+                <AutoGrowTextarea
                   className="tm-desc-input"
                   rows={3}
                   value={draft.description}
@@ -817,17 +860,6 @@ export default function TaskModal({
             ) : null}
 
             {error ? <p className="admin-error">{error}</p> : null}
-
-            <div className="kb-modal-actions">
-              {liveTask ? <button className="admin-btn ghost danger" onClick={remove} disabled={busy}>Excluir</button> : <span />}
-              <div className="kb-modal-actions-right">
-                {isRecurringParent ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
-                <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
-                <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
-                  {busy ? "Salvando…" : mode === "new" ? "Criar card" : "Salvar card"}
-                </button>
-              </div>
-            </div>
           </div>
 
           {mode === "edit" ? (
@@ -859,6 +891,17 @@ export default function TaskModal({
             </div>
           ) : null}
         </div>
+
+        <footer className="kb-modal-actions">
+          {liveTask ? <button className="admin-btn ghost danger" onClick={remove} disabled={busy}>Excluir</button> : <span />}
+          <div className="kb-modal-actions-right">
+            {isRecurringParent ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
+            <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
+            <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
+              {busy ? "Salvando…" : mode === "new" ? "Criar card" : "Salvar card"}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );

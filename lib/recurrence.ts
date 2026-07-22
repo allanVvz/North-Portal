@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { RecurringCadence, TaskRecord } from "./validation";
 import { DEFERRED_TASK_FLAG } from "./taskRelations";
+import { EXPLICIT_DATES_KEY, EXPLICIT_GROUP_KEY } from "./taskDateGrouping";
 
 export type RecurrenceRule = {
   cadence: RecurringCadence;
@@ -71,4 +72,31 @@ export function recurringExecutionFields(parent: TaskRecord, id: string, occurre
     recurrence_weekdays: [],
     recurrence_day_of_month: null,
   };
+}
+
+/** Explicit multi-date execution. The current occurrence is visible; a future
+ * occurrence keeps the same deferred flag as ordinary recurrence until the
+ * user opens it from its parent. */
+export function explicitDateExecutionFields(
+  parent: TaskRecord,
+  id: string,
+  occurrenceDate: string,
+  deferred = false,
+): Record<string, unknown> {
+  const fields = recurringExecutionFields(parent, id, occurrenceDate);
+  const payload: Record<string, unknown> = { ...((fields.payload ?? {}) as Record<string, unknown>), [EXPLICIT_GROUP_KEY]: parent.id };
+  if (!deferred) delete payload[DEFERRED_TASK_FLAG];
+  delete payload[EXPLICIT_DATES_KEY];
+  delete payload.occurrence_date;
+  fields.payload = payload;
+  return fields;
+}
+
+/** The task converted into a routine remains the visible first occurrence. */
+export function currentRecurringExecutionFields(parent: TaskRecord, id: string, occurrenceDate: string): Record<string, unknown> {
+  const fields = recurringExecutionFields(parent, id, occurrenceDate);
+  const payload = { ...((fields.payload ?? {}) as Record<string, unknown>) };
+  delete payload[DEFERRED_TASK_FLAG];
+  fields.payload = payload;
+  return fields;
 }

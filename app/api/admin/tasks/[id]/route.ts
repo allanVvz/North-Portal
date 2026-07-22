@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getClient, getClientFlowFlags, getTaskById, updateTask } from "@/lib/supabase";
+import { deleteTask, getClient, getClientFlowFlags, getTaskById, updateTaskGroup } from "@/lib/supabase";
+import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { requireAdmin } from "@/lib/supabase/auth";
-import { HttpError, canLeaveRevisao, requiresManagerApproval, taskPatchSchema } from "@/lib/validation";
+import { HttpError, canLeaveRevisao, introducesInvalidPublishedState, requiresManagerApproval, taskPatchSchema } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,6 +32,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
+    const explicitDates = normalizeOccurrenceDates(patch.payload?.[EXPLICIT_DATES_KEY]);
+    if (!current.plan_id && explicitDates.length > 1) {
+      const rule = inferDateGroupRule(explicitDates);
+      patch.due_date = explicitDates[0];
+      patch.start_date = explicitDates[0];
+      patch.recurrence_cadence = rule.cadence;
+      patch.recurrence_weekdays = rule.weekdays;
+      patch.recurrence_day_of_month = rule.dayOfMonth;
+      patch.plan_id = null;
+    }
 
     // Resolve a client change before anything else — later checks (flow
     // flags) must see the DESTINATION client, not the one being left.
@@ -45,7 +56,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // "Publicado" (concluido) is Criativo-only — the correlation with a real
     // publication (payload.metaPostId) and the metrics it then accumulates
     // only make sense for that kind.
-    if ((patch.status ?? current.status) === "concluido" && (patch.kind ?? current.kind) !== "criativo") {
+    if (introducesInvalidPublishedState(current, patch)) {
       throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");
     }
     const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
@@ -86,7 +97,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    const task = await updateTask(id, patch);
+    const task = await updateTaskGroup(id, current, patch);
     return NextResponse.json(task);
   } catch (error) {
     return apiError(error);

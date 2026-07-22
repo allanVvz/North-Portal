@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { createTask, getClient, getClientFlowFlags, listAllTasks, listRelatedTasks, listTasks, listUnassignedTasks } from "@/lib/supabase";
+import { createExplicitDateTaskGroup, createTask, getClient, getClientFlowFlags, listAllTasks, listRelatedTasks, listTasks, listUnassignedTasks } from "@/lib/supabase";
+import { EXPLICIT_DATES_KEY, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, taskCreateSchema, validateSlug } from "@/lib/validation";
 
@@ -46,17 +47,22 @@ export async function POST(request: Request) {
     if (body.slug && !client) throw new HttpError(404, "Cliente nao encontrado.");
     const { slug: _slug, ...fields } = body;
     void _slug;
+    const explicitDates = normalizeOccurrenceDates(fields.payload?.[EXPLICIT_DATES_KEY], fields.due_date);
+    const createsDateGroup = explicitDates.length > 1;
 
     if (scope === "plan") {
       fields.kind = "plano_acao";
       fields.recurrence_cadence = null;
       fields.recurrence_weekdays = [];
       fields.recurrence_day_of_month = null;
+      if (fields.payload) delete fields.payload[EXPLICIT_DATES_KEY];
     } else if (scope === "task") {
       if (fields.kind === "plano_acao") throw new HttpError(400, "A tela Tarefas nao cria Planos de Acao.");
-      fields.recurrence_cadence = null;
-      fields.recurrence_weekdays = [];
-      fields.recurrence_day_of_month = null;
+      if (!createsDateGroup) {
+        fields.recurrence_cadence = null;
+        fields.recurrence_weekdays = [];
+        fields.recurrence_day_of_month = null;
+      }
     } else if (scope === "routine") {
       if (fields.kind === "plano_acao") throw new HttpError(400, "A tela Rotinas nao cria Planos de Acao.");
       if (!fields.recurrence_cadence) throw new HttpError(400, "Uma Rotina precisa ter recorrencia.");
@@ -78,7 +84,10 @@ export async function POST(request: Request) {
       if (!flags.aprovacaoAdmin) { fields.approver_id = null; fields.requires_approval = false; }
     }
 
-    const task = await createTask(client?.id ?? null, fields);
+    if (createsDateGroup) fields.plan_id = null;
+    const task = createsDateGroup
+      ? await createExplicitDateTaskGroup(client?.id ?? null, fields, explicitDates)
+      : await createTask(client?.id ?? null, fields);
     return NextResponse.json(task, { status: 201 });
   } catch (error) {
     return apiError(error);

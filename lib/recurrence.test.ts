@@ -1,10 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
+import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
 import type { TaskRecord } from "./validation";
 
 describe("concluir ciclo recorrente", () => {
   it("avança automaticamente para o próximo dia semanal configurado", () => {
     expect(nextRecurringDueDate("2026-07-20", { cadence: "semanal", weekdays: [1, 4], dayOfMonth: null })).toBe("2026-07-23");
+  });
+
+  it("materializa datas explícitas imediatamente sem herdar recorrência", () => {
+    const parent = {
+      id: "parent", client_id: null, kind: "operacional", subtype: null, title: "Rotina", status: "backlog",
+      priority: "media", assignee: null, reviewer_id: null, approver_id: null, plan_id: null,
+      requires_review: false, requires_approval: false, due_date: "2026-08-03", start_date: "2026-08-03",
+      end_date: null, scheduled_start_at: null, scheduled_end_at: null, progress_weight: 1, description: null,
+      client_visible: false, payload: { explicit_occurrence_dates: ["2026-08-03", "2026-08-05"] }, position: 0,
+      recurrence_cadence: "semanal", recurrence_weekdays: [1, 3], recurrence_day_of_month: null,
+    } as TaskRecord;
+    const child = explicitDateExecutionFields(parent, "child", "2026-08-05");
+    expect(child).toMatchObject({ id: "child", plan_id: "parent", due_date: "2026-08-05", recurrence_cadence: null });
+    expect(child.payload).toMatchObject({ explicit_date_group_id: "parent" });
+    expect(child.payload).not.toHaveProperty("deferred_until_accessed");
+    expect(child.payload).not.toHaveProperty("explicit_occurrence_dates");
+    const future = explicitDateExecutionFields(parent, "future", "2026-08-05", true);
+    expect(future.payload).toMatchObject({ deferred_until_accessed: true, explicit_date_group_id: "parent" });
+  });
+
+  it("keeps the converted task as the visible first recurring execution", () => {
+    const parent = {
+      id: "parent", client_id: null, kind: "operacional", subtype: null, title: "Rotina", status: "backlog",
+      priority: "media", assignee: null, reviewer_id: null, approver_id: null, plan_id: null,
+      requires_review: false, requires_approval: false, due_date: "2026-08-03", start_date: "2026-08-03",
+      end_date: null, scheduled_start_at: null, scheduled_end_at: null, progress_weight: 1, description: null,
+      client_visible: false, payload: {}, position: 0, recurrence_cadence: "semanal",
+      recurrence_weekdays: [1], recurrence_day_of_month: null,
+    } as TaskRecord;
+    const child = currentRecurringExecutionFields(parent, "original", "2026-08-03");
+    expect(child).toMatchObject({ id: "original", plan_id: "parent", recurrence_cadence: null });
+    expect(child.payload).not.toHaveProperty("deferred_until_accessed");
   });
 
   it("efetiva três ciclos semanais na ordem configurada e vira a semana sem pular execução", () => {
