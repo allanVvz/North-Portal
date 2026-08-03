@@ -15,8 +15,6 @@ export type TaskKind =
   | "criativo"
   | "agendamento"
   | "planejamento"
-  | "roteiro"
-  | "gravacao"
   | "operacional"
   | "checkpoint_comercial";
 
@@ -70,22 +68,6 @@ export const TASK_KINDS: Record<TaskKind, KindDef> = {
     // Curated subset for round 1; the full list comes in round 2.
     subtypes: ["roteiro", "briefing", "definicao_pauta", "busca_referencias", "checklist_gravacao", "copy_legenda", "organizacao_pastas"],
   },
-  roteiro: {
-    label: "Roteiro",
-    icon: "✎",
-    tone: "blue",
-    blurb: "Roteiro de conteúdo a produzir",
-    workflow: "padrao",
-    performance: false,
-  },
-  gravacao: {
-    label: "Gravação",
-    icon: "⏺",
-    tone: "gold",
-    blurb: "Sessão de gravação de conteúdo",
-    workflow: "padrao",
-    performance: false,
-  },
   operacional: {
     label: "Operacional",
     icon: "⚙",
@@ -117,18 +99,27 @@ export const SUBTYPE_LABEL: Record<string, string> = {
   checklist_gravacao: "Checklist de gravação",
   copy_legenda: "Copy / legenda",
   organizacao_pastas: "Organização de pastas",
-  // shared (used as both a kind and a subtype)
+  // canonical specializations
   roteiro: "Roteiro",
   gravacao: "Gravação",
 };
 
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];
 
+/** Compatibility at the read boundary while old rows are being migrated.
+ * Legacy classifications never become selectable kinds again. */
+export function canonicalTaskClassification(kind: string, subtype?: string | null): { kind: TaskKind; subtype: string | null } {
+  if (kind === "publicacao_recorrente") return { kind: "criativo", subtype: subtype ?? null };
+  if (kind === "roteiro") return { kind: "planejamento", subtype: subtype ?? "roteiro" };
+  if (kind === "gravacao") return { kind: "agendamento", subtype: subtype ?? "gravacao" };
+  return { kind: isTaskKind(kind) ? kind : "operacional", subtype: subtype ?? null };
+}
+
 export function isTaskKind(x: string): x is TaskKind {
   return x in TASK_KINDS;
 }
 export function kindDef(kind: string): KindDef {
-  return TASK_KINDS[(isTaskKind(kind) ? kind : "criativo") as TaskKind];
+  return TASK_KINDS[canonicalTaskClassification(kind).kind];
 }
 export const kindLabel = (kind: string) => kindDef(kind).label;
 export const kindTone = (kind: string) => kindDef(kind).tone;
@@ -162,7 +153,7 @@ function workflowPct(workflow: WorkflowKey, status: TaskStatus): number {
   return 0;
 }
 
-type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight">;
+type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight"> & { recurrence_cadence?: TaskRecord["recurrence_cadence"] };
 
 /**
  * Single source of truth for a card's progress (0–100).
@@ -172,7 +163,7 @@ type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight">;
  */
 export function taskProgress(task: ProgressTask, members: ProgressTask[] = []): number {
   const def = kindDef(task.kind);
-  if (def.isPlan) {
+  if (def.isPlan || task.recurrence_cadence) {
     if (members.length === 0) return 0;
     const totalWeight = members.reduce((s, m) => s + (m.progress_weight || 1), 0);
     if (totalWeight === 0) return 0;

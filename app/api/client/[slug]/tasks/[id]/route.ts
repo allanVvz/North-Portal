@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { getProfileName, getTaskById, updateTask } from "@/lib/supabase";
+import { getProfileName, getTaskById, updateTaskGroup } from "@/lib/supabase";
 import { requireClientAccess } from "@/lib/supabase/auth";
 import { clientApprovalActionSchema, HttpError, validateSlug } from "@/lib/validation";
 
@@ -48,7 +48,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
       };
     }
 
-    const updated = await updateTask(id, patch);
+    const updated = await updateTaskGroup(id, task, patch);
     return NextResponse.json(updated);
   } catch (error) {
     return apiError(error);

@@ -81,19 +81,22 @@ test.describe("Planos de Ação — dois clientes (e2e contra o backend real)", 
     await page.waitForURL(/\/admin/, { timeout: 15_000 });
 
     await page.goto("/admin/plano");
+    // The strategic view is now the default; switch explicitly to the
+    // accordion list whose structure this regression test validates.
+    await page.getByRole("button", { name: "Lista", exact: true }).click();
 
     // Karpinski plan: header shows 65%, expanding lists its 2 activities.
     const karpItem = page.locator(".plan-acc-item", { hasText: planKarp });
     await expect(karpItem).toBeVisible();
     await expect(karpItem.locator(".plan-acc-progress b")).toHaveText("65%");
-    await karpItem.locator(".plan-acc-head").click();
+    await karpItem.getByRole("button", { name: "Expandir" }).click();
     await expect(karpItem.locator(".plan-acc-list li")).toHaveCount(2);
 
     // Baita plan: 90%.
     const baitaItem = page.locator(".plan-acc-item", { hasText: planBaita });
     await expect(baitaItem).toBeVisible();
     await expect(baitaItem.locator(".plan-acc-progress b")).toHaveText("90%");
-    await baitaItem.locator(".plan-acc-head").click();
+    await baitaItem.getByRole("button", { name: "Expandir" }).click();
     await expect(baitaItem.locator(".plan-acc-list li")).toHaveCount(2);
   });
 });

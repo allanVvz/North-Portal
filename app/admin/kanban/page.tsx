@@ -1,10 +1,10 @@
-import { listClients } from "@/lib/supabase";
+import { listAssigneeOptions, listClients } from "@/lib/supabase";
 import KanbanBoard from "../KanbanBoard";
 
 export const dynamic = "force-dynamic";
 
 export default async function KanbanPage() {
-  const clients = await listClients();
+  const [clients, assignees] = await Promise.all([listClients(), listAssigneeOptions()]);
   return (
     <section className="admin-page kb-wide">
       {clients.length === 0 ? (
@@ -13,7 +13,7 @@ export default async function KanbanPage() {
           <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
         </>
       ) : (
-        <KanbanBoard clients={clients.map((c) => ({ slug: c.slug, name: c.name }))} />
+        <KanbanBoard clients={clients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
       )}
     </section>
   );

@@ -57,7 +57,7 @@ Vocabulário da plataforma usado nas referências:
 **Etapas:** analisar briefing → identificar serviço contratado → definir responsáveis internos → criar demandas no Kanban → separar por status (A Fazer/Fazendo/Feito) → definir prazo/responsável/status de cada demanda → planejar conteúdos, criativos, campanha de tráfego e assessoria comercial.
 
 **Onde vive hoje — bem coberto:**
-- Criar demandas: `/admin/kanban` (`KanbanBoard.tsx` + `TaskModal.tsx`), com `kind` no catálogo (`lib/taskCatalog.ts`: plano_acao, criativo, agendamento, planejamento, roteiro, gravacao, operacional) — cobre "conteúdos/criativos/campanha/assessoria" como tipos de tarefa.
+- Criar demandas: `/admin/kanban` (`KanbanBoard.tsx` + `TaskModal.tsx`), com `kind` no catálogo (`lib/taskCatalog.ts`: plano_acao, criativo, agendamento, planejamento, operacional, checkpoint_comercial). Roteiro é subtipo de planejamento; gravação é subtipo de agendamento; recorrência é atributo de qualquer tipo elegível.
 - Prazo/responsável/status: campos nativos do card (`assignee`, `due_date`, `status`, `priority`).
 - "Serviço contratado": hoje é só texto livre no editor do cliente (não linka com o catálogo de tarefas do Kanban).
 - Plano de Ação como card real (`kind=plano_acao`, `plan_id`) agrega as demandas-membro com progresso rollado — ver [[task-model-v2]].

@@ -6,12 +6,17 @@ import HScrollRail from "./HScrollRail";
 import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
+import TaskKindIcon from "./TaskKindIcon";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
 import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone, visibleColumnsFor } from "./kanbanShared";
-import { kindDef, kindLabel, kindTone, taskProgress } from "@/lib/taskCatalog";
+import { formatCommentTime } from "@/lib/comments";
+import { kindDef, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
+import { parseAssignees } from "@/lib/assignees";
+import { belongsToTaskScreen } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
+import { calendarMonthDates } from "./calendarUtils";
 
 type ClientLite = { slug: string; name: string };
 type View = "quadro" | "tabela" | "calendario";
@@ -86,7 +91,7 @@ function fmtDue(value: string | null): string {
   return `${d.getDate()} ${MES[d.getMonth()]}`;
 }
 
-export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
+export default function KanbanBoard({ clients, assignees }: { clients: ClientLite[]; assignees: string[] }) {
   const [tasks, setTasks] = useState<BoardRow[]>([]);
   const [adminReviewers, setAdminReviewers] = useState<ReviewerCandidate[]>([]);
   const [flowFlags, setFlowFlags] = useState<ClientFlowFlags | null>(null);
@@ -107,10 +112,13 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   const { map: attrMap, save: saveAttrMap, visible } = useAttrVisibility();
   const tableColCount = 3 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
   const { sidebarEnabled, setSidebarEnabled } = useSidebarEnabledPref();
-  const [planoVisibilityOn, setPlanoVisibilityOn] = useState(true);
+  const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
   // Whether ANY client currently has Revisão/Aprovação admin-enabled — drives
   // whether those Kanban columns show at all (see visibleColumns below).
   const [flowSummary, setFlowSummary] = useState({ anyRevisaoAdmin: false, anyAprovacaoAdmin: false });
+  // "Publicado" column — a single global switch, defaults off (still in
+  // development: mock metrics, manual post-linking). See kanbanShared.ts.
+  const [publicadoOn, setPublicadoOn] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/settings/plano-visibility")
@@ -120,6 +128,10 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     fetch("/api/admin/settings/flow-flags-summary")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data) setFlowSummary(data); })
+      .catch(() => {});
+    fetch("/api/admin/settings/tabs-visibility")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setPublicadoOn(Boolean(data.publicadoColumnVisible)); })
       .catch(() => {});
   }, []);
 
@@ -165,14 +177,15 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   // the portal (or another admin tab moves a card), without a manual refresh.
   useTaskRealtime(useCallback(() => { void load(); }, [load]));
 
+  const taskScreenTasks = useMemo(() => tasks.filter(belongsToTaskScreen), [tasks]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return tasks.filter((t) => {
+    return taskScreenTasks.filter((t) => {
       if (!taskMatchesFilters(t, activeFilters)) return false;
       if (needle && !(`${t.title} ${t.assignee ?? ""} ${t.description ?? ""}`.toLowerCase().includes(needle))) return false;
       return true;
     });
-  }, [tasks, activeFilters, q]);
+  }, [taskScreenTasks, activeFilters, q]);
 
   const byStatus = useMemo(() => {
     const map: Record<string, BoardRow[]> = Object.fromEntries(COLUMNS.map((c) => [c.status, []]));
@@ -185,15 +198,21 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   // a task using them is created/saved, since this is just derived from state.
   const responsavelColumns = useMemo(() => {
     const names = new Set<string>();
-    for (const t of filtered) names.add(t.assignee?.trim() || SEM_RESPONSAVEL);
+    for (const t of filtered) {
+      const assigned = parseAssignees(t.assignee);
+      if (assigned.length) for (const name of assigned) names.add(name);
+      else names.add(SEM_RESPONSAVEL);
+    }
     return Array.from(names).sort((a, b) => (a === SEM_RESPONSAVEL ? 1 : b === SEM_RESPONSAVEL ? -1 : a.localeCompare(b)));
   }, [filtered]);
   const byAssignee = useMemo(() => {
     const map = new Map<string, BoardRow[]>();
     for (const t of filtered) {
-      const key = t.assignee?.trim() || SEM_RESPONSAVEL;
-      const list = map.get(key);
-      if (list) list.push(t); else map.set(key, [t]);
+      const keys = parseAssignees(t.assignee);
+      for (const key of keys.length ? keys : [SEM_RESPONSAVEL]) {
+        const list = map.get(key);
+        if (list) list.push(t); else map.set(key, [t]);
+      }
     }
     return map;
   }, [filtered]);
@@ -210,7 +229,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
     return m;
   }, [tasks]);
   const progressOf = useCallback(
-    (t: TaskRecord) => (kindDef(t.kind).isPlan ? taskProgress(t, membersByPlan.get(t.id) ?? []) : taskProgress(t)),
+    (t: TaskRecord) => (kindDef(t.kind).isPlan || t.recurrence_cadence ? taskProgress(t, membersByPlan.get(t.id) ?? []) : taskProgress(t)),
     [membersByPlan],
   );
   // plano_acao cards a task can be linked to (same client as the one being edited).
@@ -251,13 +270,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   const stepWeek = (dir: -1 | 1) => setWeekStart((w) => addDays(w, dir * 7));
 
   const calDays = useMemo(() => {
-    const first = new Date(cal.y, cal.m, 1);
-    const start = new Date(cal.y, cal.m, 1 - first.getDay());
-    return Array.from({ length: 42 }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      return d;
-    });
+    return calendarMonthDates(cal.y, cal.m);
   }, [cal]);
   // Month view broken into 6 week-rows, each with its day cells + the plan bars
   // spanning that row (so plans render as continuous multi-day bars, like the
@@ -286,8 +299,8 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   useEffect(() => { void loadReviewers(reviewerSlug); void loadFlowFlags(reviewerSlug); }, [reviewerSlug, loadReviewers, loadFlowFlags]);
 
   const visibleColumns = useMemo(
-    () => visibleColumnsFor(tasks, flowSummary.anyRevisaoAdmin, flowSummary.anyAprovacaoAdmin),
-    [tasks, flowSummary],
+    () => visibleColumnsFor(tasks, flowSummary.anyRevisaoAdmin, flowSummary.anyAprovacaoAdmin, publicadoOn),
+    [tasks, flowSummary, publicadoOn],
   );
 
   const gridColCount = boardMode === "status" ? visibleColumns.length : responsavelColumns.length;
@@ -424,7 +437,11 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
   }
 
   function applyChanged(updated: TaskRecord) {
-    setTasks((rows) => rows.map((r) => (r.id === updated.id ? updated : r)));
+    setTasks((rows) => {
+      if (rows.some((r) => r.id === updated.id)) return rows.map((r) => (r.id === updated.id ? { ...r, ...updated } : r));
+      const parent = rows.find((r) => r.id === updated.plan_id);
+      return [...rows, { ...updated, clientName: parent?.clientName ?? "Outros", clientSlug: parent?.clientSlug ?? "" }];
+    });
   }
   function applySaved(updated: TaskRecord, isNew: boolean) {
     setTasks((rows) => (isNew ? [...rows, updated] : rows.map((r) => (r.id === updated.id ? updated : r))));
@@ -456,12 +473,12 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
         onClick={() => openTask(t.id)}
       >
         <div className="kb-card-top">
-          <span className={`kb-type t-tone-${kindTone(t.kind)}`}>{kindLabel(t.kind)}</span>
           {t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
           {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
           {visible("plan_link") && t.plan_id ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
+          {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
         </div>
-        <p className="kb-card-title">{t.title}</p>
+        <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} /><p className="kb-card-title">{t.title}</p></div>
         {showFormato || showPlataforma ? (
           <div className="kb-card-meta">
             {showFormato ? <span className="kb-card-pill">{formato}</span> : null}
@@ -477,6 +494,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
         <div className="kb-card-foot">
           {t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : <span />}
           <span className="kb-card-foot-right">
+            <span className="kb-updated" title="Última atualização">{formatCommentTime(t.updated_at)}</span>
             {commentsOf(t).length > 0 ? (
               <span className="kb-comments" title="Comentários no card">💬 {commentsOf(t).length}</span>
             ) : null}
@@ -501,7 +519,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           onQChange={setQ}
           filters={activeFilters}
           onFiltersChange={setActiveFilters}
-          tasks={tasks}
+          tasks={taskScreenTasks}
           onPickTask={openTask}
         />
         <span className={`kb-loadspin ${loading ? "on" : ""}`} role="status" aria-label={loading ? "Carregando" : undefined} aria-hidden={!loading} />
@@ -583,7 +601,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                                   onClick={() => openTask(t.id)}
                                   title={t.title}
                                 >
-                                  ◆ {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
+                                  <TaskKindIcon kind={t.kind} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                                 </button>
                               </div>
                             ))}
@@ -616,7 +634,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                                       onClick={() => openTask(t.id)}
                                       title={t.title}
                                     >
-                                      {t.title}
+                                      <TaskKindIcon kind={t.kind} size="sm" />{t.title}
                                     </button>
                                   ))}
                                 </div>
@@ -648,7 +666,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                             onClick={() => openTask(t.id)}
                             title={t.title}
                           >
-                            ◆ {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
+                            <TaskKindIcon kind={t.kind} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                           </button>
                         </div>
                       ))}
@@ -674,7 +692,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                             onClick={() => openTask(t.id)}
                             title={t.title}
                           >
-                            {horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
+                            <TaskKindIcon kind={t.kind} size="sm" />{horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
                           </button>
                         ))}
                         {weekEventsByDay[i].length === 0 ? <span className="kb-week-empty">—</span> : null}
@@ -762,7 +780,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
                         {t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
                         {commentsOf(t).length > 0 ? <span className="kb-comments" title="Comentários no card"> 💬 {commentsOf(t).length}</span> : null}
                       </td>
-                      <td>{kindLabel(t.kind)}</td>
+                      <td><TaskKindIcon kind={t.kind} /></td>
                       {visible("status") ? <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td> : null}
                       {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : "—"}</td> : null}
                       <td>{fmtDue(t.due_date)}</td>
@@ -791,6 +809,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           <TaskDetailPanel
             task={selectedTask}
             clientName={panelClientName}
+            assignees={assignees}
             adminReviewers={adminReviewers}
             clientReviewers={clientReviewers}
             planCandidates={planCandidates}
@@ -809,9 +828,11 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           task={editingTask}
           slug={modalSlug}
           clients={clients}
+          assignees={assignees}
           clientName={modalClientName}
           initialStatus={modalState.mode === "new" ? modalState.initialStatus : undefined}
           initialAssignee={modalState.mode === "new" ? modalState.initialAssignee : undefined}
+          creationScope="task"
           adminReviewers={adminReviewers}
           clientReviewers={clientReviewers}
           planCandidates={planCandidates}
@@ -819,6 +840,7 @@ export default function KanbanBoard({ clients }: { clients: ClientLite[] }) {
           planoVisibilityOn={planoVisibilityOn}
           flowFlags={flowFlags}
           onTaskPatched={applyChanged}
+          onOpenRelatedTask={(related) => { applyChanged(related); setModalState({ mode: "edit", taskId: related.id }); }}
           onClose={() => setModalState(null)}
           onSaved={applySaved}
           onDeleted={applyDeleted}

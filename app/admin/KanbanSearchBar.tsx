@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { matchesQuery, PRIORITY_LABEL } from "./kanbanShared";
-import { TASK_KIND_KEYS, kindLabel, kindTone } from "@/lib/taskCatalog";
+import { TASK_KIND_KEYS, kindLabel } from "@/lib/taskCatalog";
 import type { TaskRecord } from "@/lib/validation";
+import TaskKindIcon from "./TaskKindIcon";
 
 type Row = TaskRecord & { clientName?: string };
 
@@ -165,7 +166,7 @@ export default function KanbanSearchBar({
                         key={t.id}
                         onClick={() => { onPickTask(t.id); setOpen(false); }}
                       >
-                        <span className={`kb-type t-tone-${kindTone(t.kind)}`}>{kindLabel(t.kind)}</span>
+                        <TaskKindIcon kind={t.kind} size="sm" />
                         <span className="kb-searchbar-result-title">{t.title}</span>
                         {t.clientName ? <span className="kb-searchbar-result-client">{t.clientName}</span> : null}
                       </button>

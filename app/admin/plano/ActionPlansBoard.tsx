@@ -1,16 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import CardModalLauncher from "../CardModalLauncher";
+import TaskModal from "../TaskModal";
 import { STATUS_LABEL } from "../kanbanShared";
 import PlanSearchBar from "./PlanSearchBar";
 import StrategicView, { fmtDate } from "./StrategicView";
-import { kindLabel, kindTone } from "@/lib/taskCatalog";
+import TaskKindIcon from "../TaskKindIcon";
 import type { ActionPlan } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
 type View = "lista" | "estrategica";
+type EditingTarget = { task: TaskRecord; clientName: string; clientSlug: string; relatedTasks: TaskRecord[]; parentTask?: TaskRecord };
 
 // Matches the free-text query against every attribute the user might filter
 // by here — cliente, responsável (per-activity assignee) and prazo (plano ou
@@ -29,12 +31,34 @@ function planMatches(p: ActionPlan, needle: string): boolean {
   );
 }
 
-export default function ActionPlansBoard({ initial }: { initial: ActionPlan[] }) {
+export default function ActionPlansBoard({
+  initial,
+  clients,
+  assignees,
+}: {
+  initial: ActionPlan[];
+  clients: { slug: string; name: string }[];
+  assignees: string[];
+}) {
   const router = useRouter();
   const [view, setView] = useState<View>("estrategica");
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
-  const [editing, setEditing] = useState<ActionPlan | null>(null);
+  const [editing, setEditing] = useState<EditingTarget | null>(null);
+  const [creating, setCreating] = useState(false);
+  // Real global master switch — defaults to the "hidden until loaded" side
+  // (false) so a brand-new plan never silently persists client_visible:true
+  // before the fetch resolves. Same fix as CardModalLauncher.tsx.
+  const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/settings/plano-visibility")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) setPlanoVisibilityOn(Boolean(data.enabled)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const plans = useMemo(() => {
     const needle = q.trim();
@@ -49,8 +73,24 @@ export default function ActionPlansBoard({ initial }: { initial: ActionPlan[] })
     return task;
   };
 
+  function openPlan(p: ActionPlan) {
+    setEditing({ task: asTask(p), clientName: p.clientName, clientSlug: p.clientSlug, relatedTasks: p.activities });
+  }
+
+  function openActivity(p: ActionPlan, activityId: string) {
+    const task = p.activities.find((activity) => activity.id === activityId);
+    if (task) setEditing({ task, clientName: p.clientName, clientSlug: p.clientSlug, relatedTasks: [], parentTask: asTask(p) });
+  }
+
   return (
     <div className="ap">
+      <header className="admin-head">
+        <div>
+          <p className="admin-kicker">Operação</p>
+          <h1 className="admin-title">Plano de Ação</h1>
+        </div>
+        <button type="button" className="admin-btn primary" onClick={() => setCreating(true)}>+ Novo plano</button>
+      </header>
       <div className="ap-filters">
         <div className="kb-viewtabs">
           <button className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
@@ -60,7 +100,7 @@ export default function ActionPlansBoard({ initial }: { initial: ActionPlan[] })
       </div>
 
       {view === "estrategica" ? (
-        <StrategicView plans={plans} onOpenPlan={setEditing} />
+        <StrategicView plans={plans} onOpenPlan={openPlan} onOpenActivity={openActivity} />
       ) : plans.length === 0 ? (
         <p className="admin-empty">Nenhum plano de ação ainda. Crie um card do tipo “Plano de Ação” no Kanban.</p>
       ) : (
@@ -69,34 +109,40 @@ export default function ActionPlansBoard({ initial }: { initial: ActionPlan[] })
             const open = openId === p.id;
             return (
               <div className={`plan-acc-item ${open ? "open" : ""}`} key={p.id}>
-                <button className="plan-acc-head" onClick={() => setOpenId(open ? null : p.id)}>
-                  <span className={`plan-acc-caret ${open ? "on" : ""}`}>▸</span>
-                  <span className="plan-acc-title">
-                    <strong>{p.title}</strong>
+                <div className="plan-acc-head">
+                  <button
+                    type="button"
+                    className="plan-acc-caret-btn"
+                    onClick={() => setOpenId(open ? null : p.id)}
+                    aria-label={open ? "Recolher" : "Expandir"}
+                  >
+                    <span className={`plan-acc-caret ${open ? "on" : ""}`}>▸</span>
+                  </button>
+                  <button type="button" className="plan-acc-title" onClick={() => openPlan(p)}>
+                    <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} size="lg" /><strong>{p.title}</strong></span>
                     <em>{p.clientName} · {p.activities.length} atividade{p.activities.length === 1 ? "" : "s"}</em>
-                  </span>
+                    <span className="plan-acc-description">{p.description || "Adicione à descrição o porquê e o resultado esperado deste plano."}</span>
+                  </button>
                   <span className="plan-acc-progress">
                     <span className="plan-acc-bar"><span className="plan-acc-fill" style={{ width: `${p.progress}%` }} /></span>
                     <b>{p.progress}%</b>
                   </span>
-                </button>
+                </div>
 
                 {open ? (
                   <div className="plan-acc-body">
-                    <div className="plan-acc-actions">
-                      <button className="admin-btn ghost sm" onClick={() => setEditing(p)}>Abrir card</button>
-                      <button className="admin-btn primary sm" onClick={() => setEditing(p)}>Editar</button>
-                    </div>
                     {p.activities.length === 0 ? (
                       <p className="admin-sub">Nenhuma atividade vinculada. Vincule tarefas a este plano no card (atributo “Plano de Ação”).</p>
                     ) : (
                       <ul className="plan-acc-list">
                         {p.activities.map((a) => (
                           <li key={a.id}>
-                            <span className={`kb-type t-tone-${kindTone(a.kind)}`}>{kindLabel(a.kind)}</span>
-                            <span className="plan-acc-actitle">{a.title}</span>
-                            <span className="plan-acc-status">{STATUS_LABEL[a.status]}</span>
-                            <span className="plan-acc-actpct">{a.progress}%</span>
+                            <button type="button" className="plan-acc-actrow" onClick={() => openActivity(p, a.id)}>
+                              <TaskKindIcon kind={a.kind} />
+                              <span className="plan-acc-actitle">{a.title}</span>
+                              <span className="plan-acc-status">{STATUS_LABEL[a.status]}</span>
+                              <span className="plan-acc-actpct">{a.progress}%</span>
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -111,13 +157,34 @@ export default function ActionPlansBoard({ initial }: { initial: ActionPlan[] })
 
       {editing ? (
         <CardModalLauncher
-          task={asTask(editing)}
+          task={editing.task}
           clientName={editing.clientName}
           clientSlug={editing.clientSlug}
+          initialRelatedTasks={editing.relatedTasks}
+          parentTask={editing.parentTask}
           onClose={() => { setEditing(null); router.refresh(); }}
           onSaved={() => { setEditing(null); router.refresh(); }}
           onDeleted={() => { setEditing(null); router.refresh(); }}
           onChanged={() => router.refresh()}
+        />
+      ) : null}
+
+      {creating ? (
+        <TaskModal
+          mode="new"
+          task={null}
+          slug=""
+          clients={clients}
+          assignees={assignees}
+          clientName=""
+          initialKind="plano_acao"
+          creationScope="plan"
+          adminReviewers={[]}
+          clientReviewers={[]}
+          planoVisibilityOn={planoVisibilityOn}
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); router.refresh(); }}
+          onDeleted={() => {}}
         />
       ) : null}
     </div>

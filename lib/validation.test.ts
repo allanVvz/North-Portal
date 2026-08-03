@@ -5,6 +5,7 @@ import {
   canLeaveRevisao,
   clientApprovalActionSchema,
   flowFlagsCascadeEffects,
+  introducesInvalidPublishedState,
   requiresManagerApproval,
   type ClientFlowFlags,
 } from "./validation";
@@ -20,6 +21,26 @@ const flags = (overrides: Partial<ClientFlowFlags> = {}): ClientFlowFlags => ({
 describe("TASK_STATUSES", () => {
   it("keeps the Kanban column order, with the new Concluído stage between Aprovação and Publicado", () => {
     expect(TASK_STATUSES).toEqual(["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "concluido"]);
+  });
+});
+
+describe("introducesInvalidPublishedState", () => {
+  it("allows saving an unrelated field on a historical non-Criativo already in Publicado", () => {
+    expect(introducesInvalidPublishedState(
+      { status: "concluido", kind: "agendamento" },
+      { status: "concluido", kind: "agendamento" },
+    )).toBe(false);
+  });
+
+  it("still blocks entering Publicado as non-Criativo", () => {
+    expect(introducesInvalidPublishedState(
+      { status: "aprovado", kind: "agendamento" },
+      { status: "concluido" },
+    )).toBe(true);
+    expect(introducesInvalidPublishedState(
+      { status: "concluido", kind: "criativo" },
+      { kind: "agendamento" },
+    )).toBe(true);
   });
 });
 

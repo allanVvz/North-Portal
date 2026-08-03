@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import CardModalLauncher from "../CardModalLauncher";
-import { commentsOf } from "@/lib/comments";
+import { commentsOf, formatCommentTime } from "@/lib/comments";
 import type { ApprovalRecord } from "@/lib/supabase";
 import { kindLabel, kindTone } from "@/lib/taskCatalog";
 import { filterByClient, groupApprovalQueue } from "../approvalGroups";
@@ -118,7 +118,7 @@ export default function ApprovalsQueue({
                     {relTime(t.updated_at) ? ` · ${relTime(t.updated_at)}` : ""}
                   </p>
                   {lastComment ? (
-                    <p className="ap-comment-preview">"{lastComment.text}" <span>— {lastComment.author}</span></p>
+                    <p className="ap-comment-preview">"{lastComment.text}" <span>— {lastComment.author} · {formatCommentTime(lastComment.at)}</span></p>
                   ) : null}
                 </div>
                 <div className="ap-actions">

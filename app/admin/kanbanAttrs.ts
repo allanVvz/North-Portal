@@ -31,6 +31,7 @@ export type AttrDef = {
 // it isn't a gated Cell anywhere (the title is always the modal's
 // header/identifier), so a toggle for it would do nothing.
 export const ATTR_DEFS: AttrDef[] = [
+  { key: "kind", label: "Tipo", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "formato", label: "Formato", scope: "Criativo", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
   { key: "plataforma", label: "Plataforma", scope: "Criativo · Agendamento", kinds: ["criativo", "agendamento"], kind: "Seleção", defaultOn: false },
   { key: "assignee", label: "Responsável", scope: "Todos", kinds: "base", kind: "Pessoa" },

@@ -3,7 +3,8 @@
 import "./portal.css";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
-import { commentsOf, extractLatestLink } from "@/lib/comments";
+import CommentText from "@/app/CommentText";
+import { commentsOf, extractLatestLink, formatCommentTime } from "@/lib/comments";
 import { ACCESS_PLATFORMS, type ClientTask, type CredentialSummary, type DocumentRecord, type PortalPayload, type PortalPrefs } from "@/lib/validation";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { briefSteps, folders } from "./content";
@@ -1451,7 +1452,9 @@ function EntregasPage(props: {
                   {comments.length > 0 ? (
                     <div className="np-approval-comments">
                       {comments.slice(-3).map((c, i) => (
-                        <p className="np-approval-comment" key={i}><b>{c.author}:</b> {c.text}</p>
+                        <p className="np-approval-comment" key={i}>
+                          <b>{c.author}</b> <small>{formatCommentTime(c.at)}</small>: <CommentText text={c.text} />
+                        </p>
                       ))}
                     </div>
                   ) : null}

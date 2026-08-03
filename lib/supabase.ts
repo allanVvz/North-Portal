@@ -1,4 +1,8 @@
 import { createClient } from "./supabase/server";
+import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
+import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, nextExplicitOccurrenceDate, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch, replicatedExecutionPayload } from "./taskDateGrouping";
+import { assigneeOptions } from "./assignees";
+import { visibleOnTaskBoard } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
@@ -14,6 +18,7 @@ import {
   type PortalPayload,
   type PortalPrefs,
   type ReviewerCandidate,
+  type RecurringTaskRecord,
   type TaskRecord,
   type TaskStatus,
 } from "./validation";
@@ -25,7 +30,8 @@ type ContentRow = { data: Record<string, unknown> | null };
 type PrefsRow = { theme: string | null; avatar_style: number | null; display_name: string | null; username: string | null; manual_seen: boolean | null };
 
 const TASK_COLUMNS =
-  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position";
+  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at";
+
 
 const STATUS_KANBAN: Record<TaskStatus, string> = {
   backlog: "Kanban · Entrada",
@@ -179,6 +185,14 @@ function fail(error: { message?: string; code?: string } | null): never {
   throw new HttpError(503, "Nao foi possivel acessar os dados.");
 }
 
+// During a rolling deploy the application can reach production before a new
+// optional feature migration. Keep established screens available only for
+// that precise PostgREST "table missing from schema cache" response; all
+// connectivity, permission and query errors must still fail loudly.
+function isMissingOptionalTable(error: { message?: string; code?: string } | null, table: string): boolean {
+  return error?.code === "PGRST205" && Boolean(error.message?.includes(`public.${table}`));
+}
+
 export async function getClient(slug: string, includeInactive = false): Promise<ClientRow | null> {
   const supabase = await createClient();
   let query = supabase.from("clients").select("id,slug,name,is_active").eq("slug", slug).limit(1);
@@ -204,7 +218,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     // the separate "Plano de Ação" feature for earlier Kanban stages.
     supabase
       .from("tasks")
-      .select(`${TASK_COLUMNS},updated_at`)
+      .select(TASK_COLUMNS)
       .eq("client_id", client.id)
       .or("client_visible.eq.true,status.in.(aprovacao,aprovado,concluido)")
       .order("position"),
@@ -484,6 +498,7 @@ export async function getAdminTabsVisibility(): Promise<AdminTabsVisibility> {
   return {
     revisoesTabVisible: value?.revisoesTabVisible ?? false,
     aprovacoesTabVisible: value?.aprovacoesTabVisible ?? false,
+    publicadoColumnVisible: value?.publicadoColumnVisible ?? false,
   };
 }
 
@@ -707,6 +722,67 @@ export async function updateClientBundle(
 
 // ---- Tasks / Kanban (admin) -------------------------------------------------
 
+export type RecurringTask = TaskRecord & Omit<RecurringTaskRecord, "id" | "client_id" | "title" | "description" | "kind" | "priority" | "assignee" | "client_visible" | "position"> & {
+  clientName: string;
+  clientSlug: string;
+  executions: TaskRecord[];
+};
+
+/** Cross-client recurring routine feed. Deliberately independent of ActionPlan. */
+export async function listRecurringTasks(): Promise<RecurringTask[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(`${TASK_COLUMNS},clients(name,slug,disabled)`)
+    .not("recurrence_cadence", "is", null)
+    .order("position")
+    .order("due_date", { nullsFirst: false });
+  if (error) fail(error);
+  type JoinedClient = { name: string; slug: string; disabled: boolean };
+  type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
+  const parents = ((data as unknown as Row[] | null) ?? [])
+    .filter(({ clients }) => !(Array.isArray(clients) ? clients[0] : clients)?.disabled);
+  const executionsByParent = new Map<string, TaskRecord[]>();
+  if (parents.length) {
+    const { data: executionRows, error: executionError } = await supabase
+      .from("tasks")
+      .select(TASK_COLUMNS)
+      .in("plan_id", parents.map((task) => task.id))
+      .order("position")
+      .order("due_date", { nullsFirst: false });
+    if (executionError) fail(executionError);
+    for (const execution of (executionRows as TaskRecord[] | null) ?? []) {
+      if (!execution.plan_id) continue;
+      const list = executionsByParent.get(execution.plan_id);
+      if (list) list.push(execution); else executionsByParent.set(execution.plan_id, [execution]);
+    }
+  }
+  return parents
+    .map(({ clients, ...task }) => {
+      const client = Array.isArray(clients) ? clients[0] : clients;
+      const payload = task.payload ?? {};
+      return {
+        ...task,
+        cadence: task.recurrence_cadence!, weekdays: task.recurrence_weekdays,
+        day_of_month: task.recurrence_day_of_month, next_due_date: task.due_date,
+        time_of_day: typeof payload.hora === "string" ? payload.hora : null,
+        timezone: "America/Sao_Paulo", active: Boolean(task.due_date),
+        completed_cycles: typeof payload.completed_cycles === "number" ? payload.completed_cycles : 0,
+        last_completed_at: typeof payload.last_completed_at === "string" ? payload.last_completed_at : null,
+        template_payload: payload,
+        source: typeof payload.imported_from === "string" ? payload.imported_from : null,
+        external_id: typeof payload.external_id === "string" ? payload.external_id : null,
+        created_at: "",
+        clientName: client?.name ?? "—", clientSlug: client?.slug ?? "",
+        executions: executionsByParent.get(task.id) ?? [],
+      };
+    });
+}
+
+export async function recurringTasksStorageAvailable(): Promise<boolean> {
+  return true;
+}
+
 export async function listTasks(clientId: string): Promise<TaskRecord[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -716,7 +792,7 @@ export async function listTasks(clientId: string): Promise<TaskRecord[]> {
     .order("position")
     .order("created_at");
   if (error) fail(error);
-  return (data as TaskRecord[] | null) ?? [];
+  return ((data as TaskRecord[] | null) ?? []).filter(visibleOnTaskBoard);
 }
 
 // Unassigned board — tasks created without a client ("Outros" filter). client_id
@@ -732,7 +808,7 @@ export async function listUnassignedTasks(): Promise<TaskRecord[]> {
     .order("position")
     .order("created_at");
   if (error) fail(error);
-  return (data as TaskRecord[] | null) ?? [];
+  return ((data as TaskRecord[] | null) ?? []).filter(visibleOnTaskBoard);
 }
 
 export type BoardTask = TaskRecord & { clientName: string; clientSlug: string };
@@ -751,7 +827,7 @@ export async function listAllTasks(): Promise<BoardTask[]> {
   return ((data as unknown as Row[] | null) ?? [])
     // A disabled client's cards disappear from the shared board entirely —
     // unassigned tasks (clients null) are never affected by this.
-    .filter(({ clients }) => !(Array.isArray(clients) ? clients[0] : clients)?.disabled)
+    .filter(({ clients, ...task }) => visibleOnTaskBoard(task) && !(Array.isArray(clients) ? clients[0] : clients)?.disabled)
     .map(({ clients, ...task }) => {
       const c = Array.isArray(clients) ? clients[0] : clients;
       return { ...task, clientName: c?.name ?? "Outros", clientSlug: c?.slug ?? "" };
@@ -763,7 +839,7 @@ export async function listAllTasks(): Promise<BoardTask[]> {
 // with its own workflow progress, plus the plan's rolled-up progress. Powers the
 // /admin/plano accordion.
 
-export type PlanActivity = { id: string; title: string; kind: string; status: TaskStatus; progress: number; assignee: string | null; due_date: string | null };
+export type PlanActivity = TaskRecord & { progress: number };
 export type ActionPlan = TaskRecord & { clientName: string; clientSlug: string; progress: number; activities: PlanActivity[] };
 
 export async function listActionPlans(): Promise<ActionPlan[]> {
@@ -771,20 +847,27 @@ export async function listActionPlans(): Promise<ActionPlan[]> {
   const { data, error } = await supabase
     .from("tasks")
     .select(`${TASK_COLUMNS},clients(name,slug)`)
-    .order("position")
-    .order("created_at");
+    .eq("kind", "plano_acao")
+    .order("updated_at", { ascending: false });
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string };
   type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
   const rows = (data as unknown as Row[] | null) ?? [];
+  if (!rows.length) return [];
+  const { data: memberData, error: memberError } = await supabase
+    .from("tasks")
+    .select(TASK_COLUMNS)
+    .in("plan_id", rows.map((plan) => plan.id))
+    .order("position")
+    .order("created_at");
+  if (memberError) fail(memberError);
   const membersByPlan = new Map<string, TaskRecord[]>();
-  for (const r of rows) {
+  for (const r of (memberData as TaskRecord[] | null) ?? []) {
     if (!r.plan_id) continue;
     const list = membersByPlan.get(r.plan_id);
     if (list) list.push(r); else membersByPlan.set(r.plan_id, [r]);
   }
   return rows
-    .filter((r) => r.kind === "plano_acao")
     .map(({ clients, ...task }) => {
       const c = Array.isArray(clients) ? clients[0] : clients;
       const members = membersByPlan.get(task.id) ?? [];
@@ -793,12 +876,24 @@ export async function listActionPlans(): Promise<ActionPlan[]> {
         clientName: c?.name ?? "—",
         clientSlug: c?.slug ?? "",
         progress: taskProgress(task, members),
-        activities: members.map((m) => ({
-          id: m.id, title: m.title, kind: m.kind, status: m.status, progress: taskProgress(m),
-          assignee: m.assignee, due_date: m.due_date,
-        })),
+        activities: members.map((member) => ({ ...member, progress: taskProgress(member) })),
       };
     });
+}
+
+/** Direct children are intentionally queried separately from board feeds: this
+ * makes future recurrence cards immediate in their parent without materializing
+ * them on the Tasks screen. */
+export async function listRelatedTasks(parentId: string): Promise<TaskRecord[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(TASK_COLUMNS)
+    .eq("plan_id", parentId)
+    .order("position")
+    .order("due_date", { nullsFirst: false });
+  if (error) fail(error);
+  return (data as TaskRecord[] | null) ?? [];
 }
 
 // Single task read through the caller's own RLS-bound session — for an admin
@@ -825,6 +920,27 @@ export async function createTask(clientId: string | null, input: Record<string, 
   return row;
 }
 
+export async function createExplicitDateTaskGroup(clientId: string | null, input: Record<string, unknown>, rawDates: unknown): Promise<TaskRecord> {
+  const dates = normalizeOccurrenceDates(rawDates, typeof input.due_date === "string" ? input.due_date : null);
+  if (dates.length < 2) return createTask(clientId, input);
+  const rule = inferDateGroupRule(dates);
+  const parent = await createTask(clientId, {
+    ...input,
+    due_date: dates[0],
+    start_date: dates[0],
+    recurrence_cadence: rule.cadence,
+    recurrence_weekdays: rule.weekdays,
+    recurrence_day_of_month: rule.dayOfMonth,
+    payload: { ...((input.payload ?? {}) as Record<string, unknown>), explicit_occurrence_dates: dates },
+  });
+  try {
+    return await createTask(clientId, explicitDateExecutionFields(parent, recurringExecutionId(parent.id, dates[0]), dates[0]));
+  } catch (error) {
+    await deleteTask(parent.id).catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function updateTask(id: string, patch: Record<string, unknown>): Promise<TaskRecord> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -837,6 +953,236 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   const row = data?.[0] as TaskRecord | undefined;
   if (!row) throw new HttpError(404, "Tarefa nao encontrada.");
   return row;
+}
+
+function payloadRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+async function replicateExplicitChildPayload(parentId: string, currentId: string, payload: Record<string, unknown> | null): Promise<void> {
+  if (!payload) return;
+  const related = await listRelatedTasks(parentId);
+  await Promise.all(related
+    .filter((task) => task.id !== currentId)
+    .map((task) => updateTask(task.id, { payload: replicatedExecutionPayload(payload, task.payload) })));
+}
+
+async function updateExplicitChildGroup(id: string, parent: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const shared = replicaPatch(patch);
+  const sharedPayload = payloadRecord(shared.payload);
+  delete shared.payload;
+  const local = Object.fromEntries(Object.entries(patch).filter(([key]) => !(key in shared)));
+  const supabase = await createClient();
+  if (Object.keys(shared).length) {
+    const { error } = await supabase.from("tasks").update({ ...shared, updated_at: new Date().toISOString() }).eq("plan_id", parent.id);
+    if (error) fail(error);
+    const template = parentTemplatePatch(shared);
+    if (Object.keys(template).length) await updateTask(parent.id, template);
+  }
+  const currentUpdate = Object.keys(local).length ? updateTask(id, local) : null;
+  const [, updatedCurrent] = await Promise.all([
+    replicateExplicitChildPayload(parent.id, id, sharedPayload),
+    currentUpdate,
+  ]);
+  if (updatedCurrent) return updatedCurrent;
+  const updated = await getTaskById(id);
+  if (!updated) throw new HttpError(404, "Tarefa nao encontrada.");
+  return updated;
+}
+
+async function updateExplicitParent(id: string, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const updated = await updateTask(id, patch);
+  if (isExplicitDateParent(updated)) {
+    const shared = parentTemplatePatch(patch);
+    if (Object.keys(shared).length) {
+      const supabase = await createClient();
+      const { error } = await supabase.from("tasks").update({ ...shared, updated_at: new Date().toISOString() }).eq("plan_id", updated.id);
+      if (error) fail(error);
+    }
+    const dates = explicitDatesOf(updated);
+    const related = await listRelatedTasks(updated.id);
+    const removedIds = related
+      .filter((task) => task.payload?.[EXPLICIT_GROUP_KEY] === updated.id && (!task.due_date || !dates.includes(task.due_date)))
+      .map((task) => task.id);
+    if (removedIds.length) {
+      const supabase = await createClient();
+      const { error } = await supabase.from("tasks").delete().in("id", removedIds);
+      if (error) fail(error);
+    }
+  }
+  return updated;
+}
+
+function recurringParentInput(current: TaskRecord, patch: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...current, ...patch } as TaskRecord;
+  return {
+    kind: next.kind,
+    subtype: next.subtype,
+    title: next.title,
+    status: next.status,
+    priority: next.priority,
+    assignee: next.assignee,
+    reviewer_id: next.reviewer_id,
+    approver_id: next.approver_id,
+    plan_id: null,
+    requires_review: next.requires_review,
+    requires_approval: next.requires_approval,
+    due_date: next.due_date,
+    start_date: next.start_date ?? next.due_date,
+    end_date: next.end_date,
+    scheduled_start_at: next.scheduled_start_at,
+    scheduled_end_at: next.scheduled_end_at,
+    progress_weight: next.progress_weight,
+    description: next.description,
+    client_visible: next.client_visible,
+    payload: next.payload,
+    position: next.position,
+    recurrence_cadence: next.recurrence_cadence,
+    recurrence_weekdays: next.recurrence_weekdays,
+    recurrence_day_of_month: next.recurrence_day_of_month,
+  };
+}
+
+async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const next = { ...current, ...patch } as TaskRecord;
+  if (!next.recurrence_cadence || !next.due_date) return updateTask(current.id, patch);
+  const clientId = patch.client_id === null || typeof patch.client_id === "string" ? patch.client_id : current.client_id;
+  const parent = await createTask(clientId, recurringParentInput(current, patch));
+  const fields = isExplicitDateParent(parent)
+    ? explicitDateExecutionFields(parent, current.id, next.due_date)
+    : currentRecurringExecutionFields(parent, current.id, next.due_date);
+  const { id: _id, ...executionFields } = fields;
+  void _id;
+  try {
+    return await updateTask(current.id, {
+      ...executionFields,
+      status: next.status,
+      position: next.position,
+      scheduled_start_at: next.scheduled_start_at,
+      scheduled_end_at: next.scheduled_end_at,
+    });
+  } catch (error) {
+    await deleteTask(parent.id).catch(() => undefined);
+    throw error;
+  }
+}
+
+// The lowest `position` in use among the OTHER cards sharing `status`, minus a
+// step — so the just-touched card sorts above every existing card in its
+// column. Manual drag always sends `position` explicitly (see dropInColumn in
+// KanbanBoard.tsx) and is never routed through this, so a card dragged after
+// bumping to the top stays wherever the user drops it until the next edit.
+async function topPositionFor(status: TaskStatus, excludeId: string): Promise<number> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("position")
+    .eq("status", status)
+    .neq("id", excludeId)
+    .order("position", { ascending: true })
+    .limit(1);
+  if (error) fail(error);
+  const min = (data?.[0] as { position: number } | undefined)?.position ?? 0;
+  return min - 10;
+}
+
+export async function updateTaskGroup(id: string, current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  // Any content/status edit (not an explicit drag reorder) bumps the card to
+  // the top of its Kanban column — the same "just touched, sort it first"
+  // rule as the last-updated ordering on the Clientes and Plano boards.
+  if (patch.position === undefined) {
+    const nextStatus = (patch.status as TaskStatus | undefined) ?? current.status;
+    patch = { ...patch, position: await topPositionFor(nextStatus, id) };
+  }
+  const parent = current.plan_id ? await getTaskById(current.plan_id) : null;
+  if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
+  const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
+  if (!current.plan_id && !current.recurrence_cadence && nextRecurrence) {
+    return convertTaskToRecurringGroup(current, patch);
+  }
+  return updateExplicitParent(id, patch);
+}
+
+function assertCurrentRecurringCycle(parent: TaskRecord | null, expectedDueDate: string | null): asserts parent is TaskRecord & { recurrence_cadence: NonNullable<TaskRecord["recurrence_cadence"]> } {
+  if (!parent) throw new HttpError(404, "Tarefa recorrente não encontrada.");
+  if (!parent.recurrence_cadence) throw new HttpError(409, "Esta tarefa não é recorrente.");
+  if (!expectedDueDate || parent.due_date !== expectedDueDate) throw new HttpError(409, "Este ciclo já foi concluído.");
+}
+
+async function materializeNextExplicitExecution(
+  parent: TaskRecord,
+  nextDue: string | null,
+  related: TaskRecord[],
+): Promise<{ task?: TaskRecord; created: boolean }> {
+  if (!nextDue) return { created: false };
+  const existing = related.find((task) => task.due_date === nextDue);
+  if (existing) return { task: existing, created: false };
+  const supabase = await createClient();
+  const nextId = recurringExecutionId(parent.id, nextDue);
+  const { data, error } = await supabase.from("tasks")
+    .insert(explicitDateExecutionFields(parent, nextId, nextDue, true))
+    .select(TASK_COLUMNS).limit(1);
+  if (error && error.code !== "23505") fail(error);
+  const inserted = data?.[0] as TaskRecord | undefined;
+  return { task: inserted ?? await getTaskById(nextId) ?? undefined, created: Boolean(inserted) };
+}
+
+async function completeExplicitTaskCycle(parent: TaskRecord, currentDueDate: string): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
+  const related = await listRelatedTasks(parent.id);
+  const currentTask = related.find((task) => task.due_date === currentDueDate);
+  if (!currentTask) throw new HttpError(503, "Nao foi possivel localizar a execucao atual.");
+  const nextDue = nextExplicitOccurrenceDate(explicitDatesOf(parent), currentDueDate);
+  const next = await materializeNextExplicitExecution(parent, nextDue, related);
+  const supabase = await createClient();
+  const completedCycles = (typeof parent.payload?.completed_cycles === "number" ? parent.payload.completed_cycles : 0) + 1;
+  const { data, error } = await supabase.from("tasks").update({
+    due_date: nextDue,
+    payload: { ...parent.payload, completed_cycles: completedCycles, last_completed_at: new Date().toISOString(), cycle_completed: nextDue === null },
+  }).eq("id", parent.id).eq("due_date", currentDueDate).select(TASK_COLUMNS).limit(1);
+  if (error) fail(error);
+  const updatedParent = data?.[0] as TaskRecord | undefined;
+  if (!updatedParent) throw new HttpError(409, "Este ciclo já foi concluído.");
+  const task = next.task ?? currentTask;
+  if (!task) throw new HttpError(503, "Não foi possível localizar a execução.");
+  return { parent: updatedParent, task, created: next.created };
+}
+
+export async function completeTaskCycle(id: string, expectedDueDate: string | null): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
+  const supabase = await createClient();
+  const parent = await getTaskById(id);
+  assertCurrentRecurringCycle(parent, expectedDueDate);
+  const currentDueDate = parent.due_date!;
+  if (isExplicitDateParent(parent)) return completeExplicitTaskCycle(parent, currentDueDate);
+
+  const nextDue = nextRecurringDueDate(currentDueDate, {
+    cadence: parent.recurrence_cadence,
+    weekdays: parent.recurrence_weekdays,
+    dayOfMonth: parent.recurrence_day_of_month,
+  });
+
+  const executionId = recurringExecutionId(id, nextDue);
+  const { data: inserted, error: insertError } = await supabase.from("tasks")
+    .insert(recurringExecutionFields(parent, executionId, nextDue))
+    .select(TASK_COLUMNS).limit(1);
+  if (insertError && insertError.code !== "23505") fail(insertError);
+
+  const completedCycles = (typeof parent.payload?.completed_cycles === "number" ? parent.payload.completed_cycles : 0) + 1;
+  const { data: advanced, error: updateError } = await supabase.from("tasks").update({
+    due_date: nextDue,
+    payload: { ...(parent.payload ?? {}), completed_cycles: completedCycles, last_completed_at: new Date().toISOString() },
+  }).eq("id", id).eq("due_date", currentDueDate).select(TASK_COLUMNS).limit(1);
+  if (updateError) fail(updateError);
+  const updatedParent = advanced?.[0] as TaskRecord | undefined;
+  if (!updatedParent) throw new HttpError(409, "Este ciclo já foi concluído.");
+
+  let task = inserted?.[0] as TaskRecord | undefined;
+  if (!task) {
+    const { data: existing, error } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", executionId).limit(1);
+    if (error) fail(error);
+    task = existing?.[0] as TaskRecord | undefined;
+  }
+  if (!task) throw new HttpError(503, "Não foi possível materializar a execução.");
+  return { parent: updatedParent, task, created: Boolean(inserted?.length) };
 }
 
 export async function deleteTask(id: string): Promise<void> {
@@ -881,7 +1227,7 @@ async function selectApprovalRows(statuses: TaskStatus[]): Promise<ApprovalRow[]
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},updated_at,clients(name,slug),reviewer:profiles!tasks_reviewer_id_fkey(full_name),approver:profiles!tasks_approver_id_fkey(full_name)`)
+    .select(`${TASK_COLUMNS},clients(name,slug),reviewer:profiles!tasks_reviewer_id_fkey(full_name),approver:profiles!tasks_approver_id_fkey(full_name)`)
     .in("status", statuses)
     .order("updated_at", { ascending: false });
   if (error) fail(error);
@@ -920,7 +1266,7 @@ export async function listPublishedTasks(): Promise<PublishedTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},updated_at,clients(name,slug),task_metrics(metrics,source,updated_at)`)
+    .select(`${TASK_COLUMNS},clients(name,slug),task_metrics(metrics,source,updated_at)`)
     .eq("status", "concluido")
     .order("updated_at", { ascending: false });
   if (error) fail(error);
@@ -1312,6 +1658,9 @@ export async function getCachedInsights(): Promise<InsightsCacheRow[]> {
   const { data, error } = await supabase
     .from("meta_insights_cache")
     .select("client_id,account_id,datasource,date_from,date_to,payload,fetched_at");
+  // An un-migrated cache table should degrade to "no cache yet", not take the
+  // whole performance dashboard down with a 503.
+  if (isMissingOptionalTable(error, "meta_insights_cache")) return [];
   if (error) fail(error);
   return (data as InsightsCacheRow[] | null) ?? [];
 }
@@ -1321,6 +1670,7 @@ export async function upsertInsightsCache(row: Omit<InsightsCacheRow, "fetched_a
   const { error } = await supabase
     .from("meta_insights_cache")
     .upsert({ ...row, fetched_at: new Date().toISOString() }, { onConflict: "account_id,datasource" });
+  if (isMissingOptionalTable(error, "meta_insights_cache")) return;
   if (error) fail(error);
 }
 
@@ -1381,6 +1731,32 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 function reviewerLabel(p: TeamMember): string {
   const base = p.full_name?.trim() || (p.role === "admin" ? "Administrador" : "Cliente");
   return p.level === "gerente" ? `${base} (gerente)` : base;
+}
+
+// Responsável options: every admin team member (so a brand-new hire is
+// pickable even before ever being assigned anything) union every distinct
+// free-text name already used as an assignee historically (legacy/freelancer
+// names with no login). Deduped + sorted; small dataset, no DB-side DISTINCT
+// needed.
+export async function listAssigneeOptions(): Promise<string[]> {
+  const supabase = await createClient();
+  const [
+    { data: profileRows, error: profileErr },
+    { data: taskRows, error: taskErr },
+  ] = await Promise.all([
+    supabase.from("profiles").select("full_name").eq("role", "admin"),
+    supabase.from("tasks").select("assignee").not("assignee", "is", null),
+  ]);
+  if (profileErr) fail(profileErr);
+  if (taskErr) fail(taskErr);
+  const values: (string | null)[] = [];
+  for (const r of (profileRows ?? []) as { full_name: string | null }[]) {
+    values.push(r.full_name);
+  }
+  for (const r of (taskRows ?? []) as { assignee: string | null }[]) {
+    values.push(r.assignee);
+  }
+  return assigneeOptions(values);
 }
 
 /** Candidates for the internal Revisão stage — admin accounts only. */

@@ -1,21 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AttrVisibilityPopover from "./AttrVisibilityPopover";
-import CalendarPicker from "./CalendarPicker";
+import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
+import AssigneePicker from "./AssigneePicker";
+import TaskKindIcon from "./TaskKindIcon";
 import VisibleToggleField from "./VisibleToggleField";
+import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { ATTR_DEFS, useAttrVisibility } from "./kanbanAttrs";
 import {
   COLUMNS, FORMATO_OPTIONS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, STATUS_ORDER,
-  TONES, commentsOf, initials, relTime,
+  TONES, commentsOf, initials,
 } from "./kanbanShared";
-import { TASK_KIND_KEYS, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
+import CommentText from "@/app/CommentText";
+import { formatCommentTime } from "@/lib/comments";
+import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
+import { activatedTaskPayload, childrenOf, isDeferredTask } from "@/lib/taskRelations";
+import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
-
-// The "new task" picker only offers these 4 — the other kinds in the catalog
-// (planejamento, roteiro, gravacao, checkpoint_comercial) still exist and are
-// reachable via the Tipo select once a card is created/edited.
-const NEW_TASK_KINDS = ["plano_acao", "criativo", "agendamento", "operacional"];
 
 type Draft = {
   title: string;
@@ -29,6 +31,10 @@ type Draft = {
   approver_id: string;
   plan_id: string;
   due_date: string;
+  occurrence_dates: string[];
+  recurrence_cadence: CalendarRecurrence["cadence"];
+  recurrence_weekdays: number[];
+  recurrence_day_of_month: number | null;
   start_date: string;
   end_date: string;
   hora: string;
@@ -41,14 +47,27 @@ type Draft = {
   plataforma: string;
 };
 
-function draftFrom(task: TaskRecord | null, initialStatus: TaskStatus | undefined, initialSlug: string, initialAssignee?: string): Draft {
+export type TaskCreationScope = "task" | "plan" | "routine";
+
+function draftFrom(
+  task: TaskRecord | null,
+  initialStatus: TaskStatus | undefined,
+  initialSlug: string,
+  initialAssignee?: string,
+  initialKind?: string,
+  initialRecurrence = false,
+  creationScope = "task",
+): Draft {
+  const requestedKind = task?.kind ?? (creationScope === "plan" ? "plano_acao" : initialKind ?? "operacional");
+  const scopedKind = !task && creationScope !== "plan" && requestedKind === "plano_acao" ? "operacional" : requestedKind;
+  const classification = canonicalTaskClassification(scopedKind, task?.subtype);
   const p = (task?.payload ?? {}) as Record<string, unknown>;
   const str = (k: string) => (typeof p[k] === "string" ? (p[k] as string) : "");
   return {
     title: task?.title ?? "",
-    kind: task?.kind ?? "criativo",
+    kind: classification.kind,
     clientSlug: initialSlug,
-    subtype: task?.subtype ?? "",
+    subtype: classification.subtype ?? "",
     status: task?.status ?? initialStatus ?? "backlog",
     priority: task?.priority ?? "media",
     assignee: task?.assignee ?? initialAssignee ?? "",
@@ -56,6 +75,10 @@ function draftFrom(task: TaskRecord | null, initialStatus: TaskStatus | undefine
     approver_id: task?.approver_id ?? "",
     plan_id: task?.plan_id ?? "",
     due_date: task?.due_date ?? "",
+    occurrence_dates: normalizeOccurrenceDates(p[EXPLICIT_DATES_KEY], task?.due_date),
+    recurrence_cadence: task?.recurrence_cadence ?? (creationScope === "routine" || initialRecurrence ? "semanal" : null),
+    recurrence_weekdays: task?.recurrence_weekdays ?? [],
+    recurrence_day_of_month: task?.recurrence_day_of_month ?? null,
     start_date: task?.start_date ?? "",
     end_date: task?.end_date ?? "",
     hora: str("hora"),
@@ -82,9 +105,30 @@ function Cell({ icon, label, hidden, children }: { icon: string; label: string; 
   );
 }
 
-// Small styled dropdown replacing the old 8-card grid — only the 4 curated
-// kinds are offered when creating a task.
-function TypeSelect({ kind, onPick }: { kind: string; onPick: (kind: string) => void }) {
+function resizeTextarea(element: HTMLTextAreaElement | null): void {
+  if (!element) return;
+  element.style.height = "auto";
+  element.style.height = `${element.scrollHeight}px`;
+}
+
+function AutoGrowTextarea({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => resizeTextarea(ref.current), [props.value]);
+  return <textarea {...props} ref={ref} onChange={(event) => { onChange?.(event); resizeTextarea(event.currentTarget); }} />;
+}
+
+// Small inline dropdown used in the edit-mode header for Cliente and Tipo —
+// click the pill, pick from the list, it closes itself (the click on an
+// option bubbles up to the panel's own onClick).
+function HeadDropdown({
+  trigger,
+  children,
+  className,
+}: {
+  trigger: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -105,40 +149,20 @@ function TypeSelect({ kind, onPick }: { kind: string; onPick: (kind: string) => 
   }, [open]);
 
   return (
-    <div className="tm-typeselect" ref={ref}>
-      <p className="tm-typeselect-label">Tipo de tarefa</p>
+    <div className={`tm-headpick ${className ?? ""}`} ref={ref}>
       <button
         type="button"
-        className={`tm-typeselect-trigger tm-typecard-tone-${kindTone(kind)}`}
-        onClick={() => setOpen((o) => !o)}
+        className="tm-headpick-trigger"
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="tm-typeselect-ico" aria-hidden>{kindIcon(kind)}</span>
-        <span className="tm-typeselect-text">
-          <strong>{kindLabel(kind)}</strong>
-          <small>{kindDef(kind).blurb}</small>
-        </span>
-        <span className={`tm-typeselect-caret ${open ? "on" : ""}`} aria-hidden>⌄</span>
+        {trigger}
+        <span className={`tm-headpick-caret ${open ? "on" : ""}`} aria-hidden>⌄</span>
       </button>
       {open ? (
-        <div className="tm-typeselect-panel" role="listbox">
-          {NEW_TASK_KINDS.map((k) => (
-            <button
-              type="button"
-              key={k}
-              role="option"
-              aria-selected={kind === k}
-              className={`tm-typeselect-option tm-typecard-tone-${kindTone(k)} ${kind === k ? "on" : ""}`}
-              onClick={() => { onPick(k); setOpen(false); }}
-            >
-              <span className="tm-typeselect-ico" aria-hidden>{kindIcon(k)}</span>
-              <span className="tm-typeselect-text">
-                <strong>{kindLabel(k)}</strong>
-                <small>{kindDef(k).blurb}</small>
-              </span>
-            </button>
-          ))}
+        <div className="tm-headpick-panel" role="listbox" onClick={() => setOpen(false)}>
+          {children}
         </div>
       ) : null}
     </div>
@@ -150,16 +174,22 @@ export default function TaskModal({
   task,
   slug,
   clients,
+  assignees,
   clientName,
   initialStatus,
   initialAssignee,
+  initialKind,
+  initialRecurrence = false,
+  creationScope = "task",
   adminReviewers,
   clientReviewers,
   planCandidates = [],
   clientTasks = [],
-  planoVisibilityOn = true,
+  planoVisibilityOn = false,
   flowFlags = null,
   onTaskPatched,
+  onOpenRelatedTask,
+  onBack,
   onClose,
   onSaved,
   onDeleted,
@@ -168,9 +198,13 @@ export default function TaskModal({
   task: TaskRecord | null;
   slug: string;
   clients: { slug: string; name: string }[];
+  assignees: string[];
   clientName: string;
   initialStatus?: TaskStatus;
   initialAssignee?: string;
+  initialKind?: string;
+  initialRecurrence?: boolean;
+  creationScope?: TaskCreationScope;
   adminReviewers: ReviewerCandidate[];
   clientReviewers: ReviewerCandidate[];
   planCandidates?: { id: string; title: string }[];
@@ -178,11 +212,13 @@ export default function TaskModal({
   planoVisibilityOn?: boolean;
   flowFlags?: ClientFlowFlags | null;
   onTaskPatched?: (task: TaskRecord) => void;
+  onOpenRelatedTask?: (task: TaskRecord) => void;
+  onBack?: () => void;
   onClose: () => void;
   onSaved: (task: TaskRecord, isNew: boolean) => void;
   onDeleted: (id: string) => void;
 }) {
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee));
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
   const [liveTask, setLiveTask] = useState<TaskRecord | null>(task);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
@@ -196,11 +232,16 @@ export default function TaskModal({
   const kd = kindDef(draft.kind);
   const tone = kindTone(draft.kind);
   const subtypes = kd.subtypes ?? [];
-  // In "new" mode the Cliente attribute can change the target client, so the
-  // header label tracks the draft instead of the (possibly stale) prop.
-  const draftClientName = mode === "new"
-    ? (clients.find((c) => c.slug === draft.clientSlug)?.name ?? "Sem cliente")
-    : clientName;
+  const creationKinds = TASK_KIND_KEYS.filter((kind) => {
+    if (mode === "edit") return kd.isPlan ? kind === "plano_acao" : kind !== "plano_acao";
+    return creationScope === "plan" ? kind === "plano_acao" : kind !== "plano_acao";
+  });
+  // The Cliente attribute can change the target client in both modes now, so
+  // the header label tracks the draft instead of the (possibly stale) prop.
+  // Falls back to the prop for edit mode before `clients` has loaded.
+  const draftClientName = draft.clientSlug
+    ? (clients.find((c) => c.slug === draft.clientSlug)?.name ?? clientName ?? "Sem cliente")
+    : (mode === "new" ? "Sem cliente" : clientName);
   const attrsForKind = ATTR_DEFS.filter((a) => a.kinds === "base" || (a.kinds as string[]).includes(draft.kind));
   // A client with Revisão/Aprovação admin-disabled never has that stage —
   // hide the field and force "sem revisor"/"sem aprovador" on save. While
@@ -228,11 +269,26 @@ export default function TaskModal({
   // the current position never becomes literally invisible.
   const revisaoStepHidden = revisaoOff && !(revisaoVisual && draft.reviewer_id) && draft.status !== "revisao";
   const aprovacaoStepHidden = aprovacaoOff && !(aprovacaoVisual && draft.approver_id) && draft.status !== "aprovacao";
+  // "Publicado" is Criativo-only (server enforces this too, see
+  // PATCH /api/admin/tasks/[id]) — hide the step as an option for every
+  // other kind, but never for a card already sitting there.
+  const publicadoStepHidden = draft.kind !== "criativo" && draft.status !== "concluido";
+  const progressColumns = COLUMNS.filter((column) => {
+    if (column.status === "revisao") return !revisaoStepHidden;
+    if (column.status === "aprovacao") return !aprovacaoStepHidden;
+    if (column.status === "concluido") return !publicadoStepHidden;
+    return true;
+  });
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const comments = liveTask ? commentsOf(liveTask) : [];
+  const isRecurringParent = Boolean(liveTask?.recurrence_cadence);
+  const onTaskPatchedRef = useRef(onTaskPatched);
+  useEffect(() => { onTaskPatchedRef.current = onTaskPatched; }, [onTaskPatched]);
 
   function pickKind(kind: string) {
+    if (mode === "new" && creationScope === "plan" && kind !== "plano_acao") return;
+    if (mode === "new" && creationScope !== "plan" && kind === "plano_acao") return;
     setDraft((d) => {
       const def = kindDef(kind);
       return {
@@ -241,6 +297,27 @@ export default function TaskModal({
         subtype: "", // reset — subtype vocabulary is per-kind
         // A plan can't belong to another plan.
         plan_id: def.isPlan ? "" : d.plan_id,
+        recurrence_cadence: def.isPlan ? null : d.recurrence_cadence,
+        recurrence_weekdays: def.isPlan ? [] : d.recurrence_weekdays,
+        recurrence_day_of_month: def.isPlan ? null : d.recurrence_day_of_month,
+      };
+    });
+  }
+
+  function setOccurrenceDates(values: string[]) {
+    const dates = normalizeOccurrenceDates(values);
+    setDraft((current) => {
+      const first = dates[0] ?? "";
+      if (dates.length < 2) return { ...current, occurrence_dates: dates, due_date: first, start_date: first };
+      const rule = inferDateGroupRule(dates);
+      return {
+        ...current,
+        occurrence_dates: dates,
+        due_date: first,
+        start_date: first,
+        recurrence_cadence: rule.cadence,
+        recurrence_weekdays: rule.weekdays,
+        recurrence_day_of_month: rule.dayOfMonth,
       };
     });
   }
@@ -248,8 +325,13 @@ export default function TaskModal({
   // Plan ↔ activity linking (for plano_acao cards): members are tasks whose
   // plan_id points here; candidates are the client's still-unlinked non-plan
   // tasks. Linking/unlinking just PATCHes the activity's plan_id.
-  const planMembers = liveTask ? clientTasks.filter((t) => t.plan_id === liveTask.id) : [];
-  const planPct = kd.isPlan && liveTask ? taskProgress(liveTask, planMembers) : 0;
+  const planMembers = liveTask ? childrenOf(liveTask.id, clientTasks) : [];
+  // Unsaved status changes are the task's current UI truth. Reading liveTask
+  // here left the percentage frozen until Save, even while the stepper moved.
+  const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: draft.status } : null;
+  const headerPct = progressTask
+    ? (kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers) : taskProgress(progressTask))
+    : 0;
   const linkableCandidates = liveTask
     ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.plan_id && t.client_id === liveTask.client_id)
     : [];
@@ -261,6 +343,46 @@ export default function TaskModal({
       });
       if (res.ok) onTaskPatched?.(await res.json());
     } catch { /* leave as-is; user can retry */ }
+  }
+
+  // Board feeds intentionally omit future recurring executions. Fetching the
+  // direct relation here keeps the parent modal complete without slowing the
+  // Tasks screen or making the future card visible there.
+  useEffect(() => {
+    if (!liveTask || (!kindDef(liveTask.kind).isPlan && !liveTask.recurrence_cadence)) return;
+    let cancelled = false;
+    fetch(`/api/admin/tasks?parentId=${encodeURIComponent(liveTask.id)}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.tasks)) return;
+        for (const related of data.tasks as TaskRecord[]) onTaskPatchedRef.current?.(related);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [liveTask?.id]);
+
+  async function openRelatedTask(member: TaskRecord) {
+    if (!onOpenRelatedTask) return;
+    setError("");
+    let target = member;
+    if (isDeferredTask(member)) {
+      setBusy(true);
+      try {
+        const response = await fetch(`/api/admin/tasks/${member.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payload: activatedTaskPayload(member.payload) }),
+        });
+        if (!response.ok) throw new Error();
+        target = await response.json() as TaskRecord;
+      } catch {
+        setError("Não foi possível abrir a execução.");
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
+    }
+    onOpenRelatedTask(target);
   }
 
   async function sendComment() {
@@ -277,6 +399,32 @@ export default function TaskModal({
     } catch { /* comment stays unsent; user can retry */ }
   }
 
+  async function completeCycle() {
+    if (!liveTask?.recurrence_cadence || !liveTask.due_date) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/complete-cycle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedDueDate: liveTask.due_date }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? "Não foi possível concluir o ciclo.");
+      }
+      const result = await res.json() as { parent: TaskRecord; task: TaskRecord };
+      setLiveTask(result.parent);
+      setDraft((current) => ({ ...current, due_date: result.parent.due_date ?? "", start_date: result.parent.due_date ?? "" }));
+      onTaskPatched?.(result.parent);
+      onTaskPatched?.(result.task);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível concluir o ciclo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save() {
     if (!draft.title.trim()) return;
     setBusy(true);
@@ -291,11 +439,14 @@ export default function TaskModal({
     strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
+    if (draft.occurrence_dates.length > 1) payload[EXPLICIT_DATES_KEY] = draft.occurrence_dates;
+    else delete payload[EXPLICIT_DATES_KEY];
 
     // Agendamento: fold date + time into a single timestamp for the calendar.
+    const dateStart = (draft.start_date || draft.due_date).trim();
     const scheduled_start_at =
-      draft.kind === "agendamento" && draft.due_date.trim() && draft.hora.trim()
-        ? `${draft.due_date.trim()}T${draft.hora.trim()}:00`
+      dateStart && draft.hora.trim()
+        ? `${dateStart}T${draft.hora.trim()}:00`
         : null;
 
     const body: Record<string, unknown> = {
@@ -313,27 +464,49 @@ export default function TaskModal({
       // with the flow admin-disabled never requires it, regardless of draft.
       requires_review: revisaoOff ? false : Boolean(draft.reviewer_id),
       requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
-      due_date: draft.due_date.trim() || null,
-      start_date: kd.isPlan ? draft.start_date.trim() || null : null,
-      end_date: kd.isPlan ? draft.end_date.trim() || null : null,
+      due_date: (draft.start_date || draft.due_date).trim() || null,
+      recurrence_cadence: draft.recurrence_cadence,
+      recurrence_weekdays: draft.recurrence_cadence === "semanal" ? draft.recurrence_weekdays : [],
+      recurrence_day_of_month: draft.recurrence_cadence === "mensal" ? (draft.recurrence_day_of_month ?? 1) : null,
+      start_date: draft.start_date.trim() || draft.due_date.trim() || null,
+      end_date: draft.end_date.trim() || null,
       scheduled_start_at,
       description: draft.description.trim() || null,
       client_visible: planoVisibilityOn ? draft.client_visible : false,
       payload,
     };
+    if (mode === "new" && creationScope === "plan") {
+      body.kind = "plano_acao";
+      body.recurrence_cadence = null;
+      body.recurrence_weekdays = [];
+      body.recurrence_day_of_month = null;
+    } else if (mode === "new" && creationScope === "task" && draft.occurrence_dates.length < 2) {
+      body.recurrence_cadence = null;
+      body.recurrence_weekdays = [];
+      body.recurrence_day_of_month = null;
+    } else if (mode === "new" && creationScope === "routine" && !body.recurrence_cadence) {
+      body.recurrence_cadence = "semanal";
+    }
+    // Cliente is editable in edit mode too now — always send it (as the
+    // current draft, whether changed or not) so a real change actually moves
+    // the card; null explicitly means "sem cliente".
+    if (liveTask) body.slug = draft.clientSlug || null;
     try {
       const res = liveTask
         ? await fetch(`/api/admin/tasks/${liveTask.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-        : await fetch(`/api/admin/tasks`, {
+        : await fetch(`/api/admin/tasks?scope=${creationScope}`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             // Omit slug entirely for "sem cliente" — the schema treats an empty
             // string as an invalid slug, not as "no client".
             body: JSON.stringify(draft.clientSlug ? { ...body, slug: draft.clientSlug } : body),
           });
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const responseBody = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(responseBody?.error ?? "Não foi possível salvar a tarefa.");
+      }
       onSaved(await res.json(), !liveTask);
-    } catch {
-      setError("Não foi possível salvar a tarefa.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível salvar a tarefa.");
     }
     setBusy(false);
   }
@@ -355,25 +528,113 @@ export default function TaskModal({
       <div className={`tm tm-tone-${tone} tm-lg`} onClick={(e) => e.stopPropagation()}>
         {mode === "edit" ? (
           <div className={`tm-head tm-head-tone-${tone}`}>
-            <span className="tm-head-ico" aria-hidden>{kindIcon(draft.kind)}</span>
-            <div className="tm-head-text">
+            <div className="tm-head-identity">
+              {onBack ? <button type="button" className="tm-back" onClick={onBack} aria-label="Voltar para o card anterior" title="Voltar">←</button> : null}
+              <span className="tm-head-ico" aria-hidden>{kindIcon(draft.kind)}</span>
+              <div className="tm-head-text">
               <input
                 className="tm-title-input"
                 value={draft.title}
                 onChange={(e) => set("title", e.target.value)}
                 placeholder="Título da tarefa"
               />
-              <span className="tm-head-client">{clientName} · {kindLabel(draft.kind)}{draft.subtype ? ` · ${subtypeLabel(draft.subtype)}` : ""}</span>
+              <span className="tm-head-client">
+                <HeadDropdown className="tm-headpick-client" trigger={<span className="tm-headpick-label">{draftClientName}</span>}>
+                  <button type="button" className={`tm-headpick-option ${!draft.clientSlug ? "on" : ""}`} onClick={() => set("clientSlug", "")}>
+                    — Sem cliente —
+                  </button>
+                  {clients.map((c) => (
+                    <button
+                      type="button"
+                      key={c.slug}
+                      className={`tm-headpick-option ${draft.clientSlug === c.slug ? "on" : ""}`}
+                      onClick={() => set("clientSlug", c.slug)}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </HeadDropdown>
+                {visible("kind") ? (
+                  <>
+                    <span className="tm-head-sep">·</span>
+                    <HeadDropdown
+                      className="tm-headpick-kind"
+                      trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{kindLabel(draft.kind)}</span>}
+                    >
+                      {creationKinds.map((k) => (
+                        <button type="button" key={k} className={`tm-headpick-option ${draft.kind === k ? "on" : ""}`} onClick={() => pickKind(k)}>
+                          <span className="tm-headpick-ico" aria-hidden>{kindIcon(k)}</span>{kindLabel(k)}
+                        </button>
+                      ))}
+                    </HeadDropdown>
+                  </>
+                ) : null}
+                {subtypes.length ? (
+                  <>
+                    <span className="tm-head-sep">·</span>
+                    <HeadDropdown
+                      className="tm-headpick-subtype"
+                      trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabel(draft.subtype) : "Subtipo"}</span>}
+                    >
+                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
+                      {subtypes.map((subtype) => (
+                        <button type="button" key={subtype} className={`tm-headpick-option ${draft.subtype === subtype ? "on" : ""}`} onClick={() => set("subtype", subtype)}>
+                          {subtypeLabel(subtype)}
+                        </button>
+                      ))}
+                    </HeadDropdown>
+                  </>
+                ) : null}
+                </span>
+              </div>
+            </div>
+            <div className="tm-stepper tm-stepper-head" aria-label="Progresso da tarefa">
+              {progressColumns.map((column, visibleIndex) => (
+                  <button
+                    type="button"
+                    key={column.status}
+                    className={`tm-step ${STATUS_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""}`}
+                    onClick={() => set("status", column.status)}
+                  >
+                    <span className="tm-step-dot" />
+                    <span className="tm-step-label">{column.label}</span>
+                    {visibleIndex < progressColumns.length - 1 ? <span className="tm-step-line" /> : null}
+                  </button>
+              ))}
             </div>
             <div className="tm-head-actions">
+              {visible("progress") ? (
+                <div className="tm-head-progress" title={`Progresso ${headerPct}%`}>
+                  <span><span style={{ width: `${headerPct}%` }} /></span>
+                  <b>{headerPct}%</b>
+                </div>
+              ) : null}
               <AttrVisibilityPopover attrs={attrsForKind} />
               <button className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
             </div>
           </div>
         ) : (
           <div className="tm-head tm-head-plain">
-            <div>
-              <h2>Nova Tarefa</h2>
+            <div className="tm-head-text">
+              <div className="tm-new-headline">
+                <h2>Nova Tarefa</h2>
+                <HeadDropdown
+                  className="tm-new-kind"
+                  trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{kindLabel(draft.kind)}</span>}
+                >
+                  {creationKinds.map((kind) => (
+                    <button type="button" key={kind} className={`tm-headpick-option ${draft.kind === kind ? "on" : ""}`} onClick={() => pickKind(kind)}>
+                      <span className="tm-headpick-ico" aria-hidden>{kindIcon(kind)}</span>{kindLabel(kind)}
+                    </button>
+                  ))}
+                </HeadDropdown>
+                {subtypes.length ? (
+                  <HeadDropdown className="tm-new-kind" trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabel(draft.subtype) : "Subtipo"}</span>}>
+                    <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
+                    {subtypes.map((subtype) => <button type="button" key={subtype} className={`tm-headpick-option ${draft.subtype === subtype ? "on" : ""}`} onClick={() => set("subtype", subtype)}>{subtypeLabel(subtype)}</button>)}
+                  </HeadDropdown>
+                ) : null}
+              </div>
               <p className="admin-sub">Conte o essencial e escolha o tipo do card.</p>
             </div>
             <button className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
@@ -390,8 +651,15 @@ export default function TaskModal({
                   onChange={(e) => set("title", e.target.value)}
                   placeholder="Título da tarefa"
                 />
-                <span className="tm-newclient">{draftClientName}</span>
-                <textarea
+                <span className="tm-newclient">
+                  {draftClientName}
+                  {initialKind ? (
+                    <span className="tm-newtype-badge">
+                      <span aria-hidden>{kindIcon(initialKind)}</span> {kindLabel(initialKind)}
+                    </span>
+                  ) : null}
+                </span>
+                <AutoGrowTextarea
                   className="tm-desc-input"
                   rows={2}
                   value={draft.description}
@@ -400,29 +668,6 @@ export default function TaskModal({
                 />
               </div>
             ) : null}
-
-            {mode === "new" ? (
-              <TypeSelect kind={draft.kind} onPick={pickKind} />
-            ) : (
-              <div className="tm-stepper">
-                {COLUMNS.map((c, i) => {
-                  if (c.status === "revisao" && revisaoStepHidden) return null;
-                  if (c.status === "aprovacao" && aprovacaoStepHidden) return null;
-                  return (
-                    <button
-                      type="button"
-                      key={c.status}
-                      className={`tm-step ${i <= stepIdx ? "done" : ""} ${draft.status === c.status ? "current" : ""}`}
-                      onClick={() => set("status", c.status)}
-                    >
-                      <span className="tm-step-dot" />
-                      <span className="tm-step-label">{c.label}</span>
-                      {i < COLUMNS.length - 1 ? <span className="tm-step-line" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
 
             <div className="tm-grid">
               {/* Cliente — só no modo novo; pode ficar "Sem cliente" (cai no filtro "Outros") */}
@@ -434,23 +679,6 @@ export default function TaskModal({
                   </select>
                 </Cell>
               ) : null}
-              {/* Tipo & subtipo */}
-              {mode === "edit" ? (
-                <Cell icon={kindIcon(draft.kind)} label="Tipo">
-                  <select value={draft.kind} onChange={(e) => pickKind(e.target.value)}>
-                    {TASK_KIND_KEYS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
-                  </select>
-                </Cell>
-              ) : null}
-              {subtypes.length ? (
-                <Cell icon="◧" label="Subtipo" hidden={!visible("subtype")}>
-                  <select value={draft.subtype} onChange={(e) => set("subtype", e.target.value)}>
-                    <option value="">—</option>
-                    {subtypes.map((s) => <option key={s} value={s}>{subtypeLabel(s)}</option>)}
-                  </select>
-                </Cell>
-              ) : null}
-
               {/* Vínculo com plano (não para o próprio plano) */}
               {!kd.isPlan ? (
                 <Cell icon="◆" label="Plano de Ação" hidden={!visible("plan_link")}>
@@ -463,28 +691,26 @@ export default function TaskModal({
                 </Cell>
               ) : null}
 
-              {/* Datas */}
-              {kd.isPlan ? (
-                <>
-                  <Cell icon="▦" label="Início">
-                    <CalendarPicker value={draft.start_date} onChange={(v) => set("start_date", v)} placeholder="—" />
-                  </Cell>
-                  <Cell icon="▦" label="Fim">
-                    <CalendarPicker value={draft.end_date} onChange={(v) => set("end_date", v)} placeholder="—" />
-                  </Cell>
-                </>
-              ) : draft.kind === "agendamento" ? (
-                <Cell icon="▦" label="Data/hora">
-                  <div className="tm-cell-inline">
-                    <CalendarPicker value={draft.due_date} onChange={(v) => set("due_date", v)} placeholder="—" />
-                    <input type="time" value={draft.hora} onChange={(e) => set("hora", e.target.value)} />
-                  </div>
-                </Cell>
-              ) : (
-                <Cell icon="▦" label="Prazo">
-                  <CalendarPicker value={draft.due_date} onChange={(v) => set("due_date", v)} placeholder="—" />
-                </Cell>
-              )}
+              {/* Um único campo inteligente concentra início, fim opcional,
+                  horário e recorrência. Dia do mês vive dentro do calendário. */}
+              <Cell icon="▦" label="Data">
+                <CalendarPicker
+                  value={draft.start_date || draft.due_date}
+                  onChange={(value) => setDraft((current) => ({ ...current, start_date: value, due_date: value, occurrence_dates: current.occurrence_dates.length > 1 ? current.occurrence_dates : value ? [value] : [] }))}
+                  endValue={draft.end_date}
+                  onEndChange={(value) => set("end_date", value)}
+                  timeValue={draft.hora}
+                  onTimeChange={(value) => set("hora", value)}
+                  placeholder="Sem data"
+                  recurrence={{ cadence: draft.recurrence_cadence, weekdays: draft.recurrence_weekdays, dayOfMonth: draft.recurrence_day_of_month }}
+                  onRecurrenceChange={(value) => setDraft((current) => ({ ...current, recurrence_cadence: value.cadence, recurrence_weekdays: value.weekdays, recurrence_day_of_month: value.dayOfMonth }))}
+                  recurrenceFeatureEnabled={!kd.isPlan}
+                  recurrenceRequired={mode === "new" && creationScope === "routine"}
+                  selectedDates={!kd.isPlan && !liveTask?.plan_id ? draft.occurrence_dates : undefined}
+                  onSelectedDatesChange={!kd.isPlan && !liveTask?.plan_id ? setOccurrenceDates : undefined}
+                  minSelectedDates={liveTask && draft.occurrence_dates.length > 1 ? 2 : 0}
+                />
+              </Cell>
 
               {/* Atributos por kind */}
               {draft.kind === "criativo" ? (
@@ -538,9 +764,10 @@ export default function TaskModal({
                 </Cell>
               )}
 
-              {/* Responsável */}
+              {/* Multiple people stay backwards-compatible in one DB field,
+                  but behave as a reusable list in the editor. */}
               <Cell icon="◔" label="Responsável" hidden={!visible("assignee")}>
-                <input value={draft.assignee} onChange={(e) => set("assignee", e.target.value)} placeholder="Nome" />
+                <AssigneePicker value={draft.assignee} options={assignees} onChange={(value) => set("assignee", value)} disabled={busy} />
               </Cell>
 
               <Cell icon="⚑" label="Status" hidden={!visible("status")}>
@@ -552,29 +779,26 @@ export default function TaskModal({
                 </select>
               </Cell>
 
-              {/* Progresso — só existe para planos de ação (média das tarefas) */}
-              {kd.isPlan ? (
-                <Cell icon="◑" label="Progresso" hidden={!visible("progress")}>
-                  <span className="tm-cell-static">Média das tarefas · {planPct}%</span>
-                </Cell>
-              ) : null}
             </div>
 
-            {kd.isPlan && liveTask ? (
+            {(kd.isPlan || isRecurringParent) && liveTask ? (
               <div className="tm-box tm-planmembers">
-                <p className="tm-box-label">Atividades do plano ({planMembers.length})</p>
+                <p className="tm-box-label">{isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({planMembers.length})</p>
                 <div className="tm-member-list">
                   {planMembers.map((m) => (
                     <div className="tm-member" key={m.id}>
-                      <span className={`kb-type t-tone-${kindTone(m.kind)}`}>{kindLabel(m.kind)}</span>
-                      <span className="tm-member-title">{m.title}</span>
-                      <span className="tm-member-status">{STATUS_LABEL[m.status]}</span>
-                      <button className="tm-member-unlink" title="Desvincular do plano" onClick={() => linkMember(m.id, null)}>✕</button>
+                      <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(m)} disabled={!onOpenRelatedTask || busy}>
+                        <TaskKindIcon kind={m.kind} size="sm" />
+                        <span className="tm-member-title">{m.title}</span>
+                        <span className="tm-member-status">{isDeferredTask(m) ? "Futura · abrir tarefa" : STATUS_LABEL[m.status]}</span>
+                        <span className="tm-member-arrow" aria-hidden>↗</span>
+                      </button>
+                      {!isRecurringParent ? <button className="tm-member-unlink" title="Desvincular do plano" onClick={() => linkMember(m.id, null)}>✕</button> : null}
                     </div>
                   ))}
-                  {planMembers.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhuma atividade vinculada ainda.</p> : null}
+                  {planMembers.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>{isRecurringParent ? "Conclua o ciclo atual para criar a próxima execução." : "Nenhuma atividade vinculada ainda."}</p> : null}
                 </div>
-                {linkableCandidates.length ? (
+                {!isRecurringParent && linkableCandidates.length ? (
                   <select
                     className="tm-member-add"
                     value=""
@@ -587,7 +811,7 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {planoVisibilityOn ? (
+            {shouldRenderClientVisibilityToggle(planoVisibilityOn) ? (
               <div className="tm-box tm-visibility-box">
                 <VisibleToggleField
                   label={kd.isPlan ? "Plano visível para o cliente" : "Visível no Plano de Ação do cliente"}
@@ -627,7 +851,7 @@ export default function TaskModal({
             {mode === "edit" ? (
               <div className="tm-box">
                 <p className="tm-box-label">Descrição do card</p>
-                <textarea
+                <AutoGrowTextarea
                   className="tm-desc-input"
                   rows={3}
                   value={draft.description}
@@ -638,16 +862,6 @@ export default function TaskModal({
             ) : null}
 
             {error ? <p className="admin-error">{error}</p> : null}
-
-            <div className="kb-modal-actions">
-              {liveTask ? <button className="admin-btn ghost danger" onClick={remove} disabled={busy}>Excluir</button> : <span />}
-              <div className="kb-modal-actions-right">
-                <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
-                <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
-                  {busy ? "Salvando…" : mode === "new" ? "Criar card" : "Salvar card"}
-                </button>
-              </div>
-            </div>
           </div>
 
           {mode === "edit" ? (
@@ -659,8 +873,8 @@ export default function TaskModal({
                     <div className="tm-comment" key={i}>
                       <span className="tm-comment-av">{initials(c.author)}</span>
                       <div>
-                        <p className="tm-comment-meta"><b>{c.author}</b><small>{relTime(c.at)}</small></p>
-                        <p className="tm-comment-text">{c.text}</p>
+                        <p className="tm-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
+                        <p className="tm-comment-text"><CommentText text={c.text} /></p>
                       </div>
                     </div>
                   ))}
@@ -679,6 +893,17 @@ export default function TaskModal({
             </div>
           ) : null}
         </div>
+
+        <footer className="kb-modal-actions">
+          {liveTask ? <button className="admin-btn ghost danger" onClick={remove} disabled={busy}>Excluir</button> : <span />}
+          <div className="kb-modal-actions-right">
+            {isRecurringParent ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
+            <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
+            <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
+              {busy ? "Salvando…" : mode === "new" ? "Criar card" : "Salvar card"}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );

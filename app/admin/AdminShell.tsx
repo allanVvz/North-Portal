@@ -10,6 +10,7 @@ const NAV_GROUPS: { head: string; items: { href: string; ico: string; label: str
   {
     head: "Operação",
     items: [
+      { href: "/admin", ico: "◎", label: "Clientes" },
       { href: "/admin/plano", ico: "◈", label: "Plano de Ação" },
       { href: "/admin/kanban", ico: "▤", label: "Tarefas" },
       { href: "/admin/revisoes", ico: "◑", label: "Revisões" },
@@ -19,7 +20,6 @@ const NAV_GROUPS: { head: string; items: { href: string; ico: string; label: str
   {
     head: "Dados",
     items: [
-      { href: "/admin", ico: "◔", label: "Clientes" },
       { href: "/admin/performance", ico: "▤", label: "Performance" },
       { href: "/admin/documentos", ico: "▦", label: "Informações" },
     ],

@@ -4,10 +4,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // Real end-to-end coverage of the Agenda page against the live backend — no
 // mocks: (1) a client with no `agendamento` tasks falls back to the static
 // demo content (today's behavior, preserved); (2) once a real agendamento
-// card exists, its title replaces the static one; (3) a card created while
-// the page is open appears live via the same tasks-table realtime channel
-// already used by Plano de Ação / Feedbacks (no reload); (4) a screenshot of
-// the populated Agenda is captured in light and dark, as requested. Cleans up
+// card exists and the global Plano/Agenda visibility switch is on, its title
+// replaces the static one; when the switch is off, the fallback remains by
+// design. The test never flips that production-wide setting. Cleans up
 // everything it creates, including the throwaway client.
 
 const ADMIN_EMAIL = "admin@north.com";
@@ -81,6 +80,15 @@ test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend r
     await page.goto(`/${SLUG}#agenda`);
     await expect(page.locator(".np-next-event").getByText(STATIC_NEXT_TITLE)).toBeVisible({ timeout: 20_000 });
 
+    const { data: visibilitySetting, error: visibilityError } = await sb
+      .from("site_settings")
+      .select("value")
+      .eq("key", "plano_acao_visibility")
+      .limit(1)
+      .maybeSingle();
+    if (visibilityError) throw visibilityError;
+    const agendaEnabled = visibilitySetting?.value?.enabled === true;
+
     // 2. Seed one real, future agendamento card -> real title replaces the static one.
     //    Deliberately does NOT contain STATIC_NEXT_TITLE as a substring, so the
     //    two are unambiguous to `getByText`.
@@ -104,6 +112,11 @@ test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend r
     if (taskErr || !task) throw new Error(`seed agendamento failed: ${taskErr?.message}`);
 
     await page.reload();
+    if (!agendaEnabled) {
+      await expect(page.locator(".np-next-event").getByText(STATIC_NEXT_TITLE)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(eventTitle)).toHaveCount(0);
+      return;
+    }
     await expect(page.getByText(eventTitle).first()).toBeVisible();
     await expect(page.getByText(STATIC_NEXT_TITLE)).toHaveCount(0);
 

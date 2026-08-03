@@ -6,8 +6,8 @@ const MONTHS_FULL = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
-const MONTHS_ABBR = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const WEEKDAYS = ["D", "S", "T", "Q", "Q", "S", "S"];
+export type CalendarRecurrence = { cadence: "semanal" | "quinzenal" | "mensal" | null; weekdays: number[]; dayOfMonth: number | null };
 
 function parse(value: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
@@ -18,26 +18,61 @@ function parse(value: string): Date | null {
 function toISO(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-function fmtLabel(value: string, mode: "day" | "month"): string {
-  const d = parse(value);
-  if (!d) return "";
-  if (mode === "month") return `${MONTHS_FULL[d.getMonth()]} ${d.getFullYear()}`;
-  return `${d.getDate()} ${MONTHS_ABBR[d.getMonth()]} ${d.getFullYear()}`;
-}
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 
-/** A compact date field: click to open a month-grid popover, click a day to set it. */
+// Typed-input format: DD/MM/AAAA — what someone would naturally type, not the
+// "5 jul 2026" read-only label.
+function typedLabel(value: string): string {
+  const d = parse(value);
+  if (!d) return "";
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+}
+// Accepts DD/MM/AAAA, DD/MM/AA (assumes 20xx) and DD/MM (assumes current
+// year) — forgiving of whatever a person actually types.
+function parseTyped(text: string): Date | null {
+  const m = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/.exec(text.trim());
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = m[3] ? (m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])) : new Date().getFullYear();
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const d = new Date(year, month - 1, day);
+  // Rejects overflow like 31/02 silently rolling into March.
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+  return d;
+}
+
+/** A compact date field: type DD/MM/AAAA directly, or click the ▦ icon to open a month-grid popover. */
 export default function CalendarPicker({
   value,
   onChange,
   placeholder = "Selecionar data",
-  mode = "day",
+  endValue,
+  onEndChange,
+  timeValue,
+  onTimeChange,
+  recurrence,
+  onRecurrenceChange,
+  recurrenceFeatureEnabled = true,
+  recurrenceRequired = false,
+  selectedDates,
+  onSelectedDatesChange,
+  minSelectedDates = 0,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  /** "month" shows only "Junho 2026" in the trigger (e.g. for períodos) while still picking a day internally. */
-  mode?: "day" | "month";
+  endValue?: string;
+  onEndChange?: (value: string) => void;
+  timeValue?: string;
+  onTimeChange?: (value: string) => void;
+  recurrence?: CalendarRecurrence;
+  onRecurrenceChange?: (value: CalendarRecurrence) => void;
+  recurrenceFeatureEnabled?: boolean;
+  recurrenceRequired?: boolean;
+  selectedDates?: string[];
+  onSelectedDatesChange?: (values: string[]) => void;
+  minSelectedDates?: number;
 }) {
   const [open, setOpen] = useState(false);
   const selected = parse(value);
@@ -47,6 +82,12 @@ export default function CalendarPicker({
     return { y: base.getFullYear(), m: base.getMonth() };
   });
   const ref = useRef<HTMLDivElement>(null);
+  // Free-typed text buffer — separate from `value` so a mid-typo keystroke
+  // never has to be a valid date. Re-synced from `value` whenever it changes
+  // from outside (grid click, "Limpar data", or our own commit below).
+  const [text, setText] = useState(() => typedLabel(value));
+  useEffect(() => setText(typedLabel(value)), [value]);
+  const dateValues = [...new Set([...(selectedDates ?? []), ...(value ? [value] : [])])].filter((item) => parse(item)).sort();
 
   useEffect(() => {
     if (!open) return;
@@ -69,6 +110,36 @@ export default function CalendarPicker({
     setView({ y: base.getFullYear(), m: base.getMonth() });
     setOpen((o) => !o);
   }
+  // Commit whatever's typed: a valid date updates the real value (which then
+  // re-syncs `text` to its canonical DD/MM/AAAA form); empty clears it;
+  // anything else (still mid-typo) just reverts the buffer, the real value
+  // is untouched.
+  function commitTyped() {
+    const t = text.trim();
+    if (!t) { if (value) onChange(""); return; }
+    const parsed = parseTyped(t);
+    if (parsed) {
+      const nextValue = toISO(parsed);
+      if (onSelectedDatesChange) {
+        const next = [...new Set([...dateValues, nextValue])].sort();
+        onSelectedDatesChange(next);
+        onChange(next[0]);
+      } else onChange(nextValue);
+    }
+    else setText(typedLabel(value));
+  }
+  function toggleDate(valueToToggle: string) {
+    if (!onSelectedDatesChange) {
+      onChange(valueToToggle);
+      setOpen(false);
+      return;
+    }
+    const exists = dateValues.includes(valueToToggle);
+    if (exists && dateValues.length <= minSelectedDates) return;
+    const next = (exists ? dateValues.filter((item) => item !== valueToToggle) : [...dateValues, valueToToggle]).sort();
+    onSelectedDatesChange(next);
+    onChange(next[0] ?? "");
+  }
   function stepMonth(dir: -1 | 1) {
     setView((v) => {
       const d = new Date(v.y, v.m + dir, 1);
@@ -85,10 +156,26 @@ export default function CalendarPicker({
 
   return (
     <div className="cal-pick" ref={ref}>
-      <button type="button" className="cal-pick-trigger" onClick={openPicker}>
-        <span className="cal-pick-ico" aria-hidden>▦</span>
-        <span className={value ? "" : "cal-pick-placeholder"}>{value ? fmtLabel(value, mode) : placeholder}</span>
-      </button>
+      <div className="cal-pick-trigger">
+        <button type="button" className="cal-pick-ico" aria-label="Abrir calendário" onClick={openPicker}>▦</button>
+        <input
+          className="cal-pick-input"
+          value={text}
+          placeholder={placeholder}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commitTyped}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commitTyped(); (e.target as HTMLInputElement).blur(); }
+            if (e.key === "Escape") setText(typedLabel(value));
+          }}
+        />
+        {onSelectedDatesChange ? <button type="button" className="cal-pick-add" onClick={openPicker} aria-label="Adicionar data" title="Adicionar outra data">+</button> : null}
+      </div>
+      {onSelectedDatesChange && dateValues.length ? (
+        <div className="cal-date-chips" aria-label="Datas selecionadas">
+          {dateValues.map((date) => <span className="cal-date-chip" key={date}>{typedLabel(date)}<button type="button" onClick={() => toggleDate(date)} disabled={dateValues.length <= minSelectedDates} aria-label={`Remover ${typedLabel(date)}`}>×</button></span>)}
+        </div>
+      ) : null}
       {open ? (
         <div className="cal-pop">
           <div className="cal-pop-bar">
@@ -101,21 +188,44 @@ export default function CalendarPicker({
             {days.map((d) => {
               const outside = d.getMonth() !== view.m;
               const isToday = dayKey(d) === dayKey(today);
-              const isSelected = selected ? dayKey(d) === dayKey(selected) : false;
+              const iso = toISO(d);
+              const isSelected = dateValues.includes(iso);
               return (
                 <button
                   type="button"
                   key={d.toISOString()}
                   className={`cal-pop-day${outside ? " out" : ""}${isToday ? " today" : ""}${isSelected ? " sel" : ""}`}
-                  onClick={() => { onChange(toISO(d)); setOpen(false); }}
+                  onClick={() => toggleDate(iso)}
                 >
                   {d.getDate()}
                 </button>
               );
             })}
           </div>
+          {(onEndChange || onTimeChange) ? (
+            <div className="cal-schedule">
+              <label>Início<input type="date" value={value} onChange={(event) => onChange(event.target.value)} /></label>
+              {onEndChange ? <label>Fim <small>opcional</small><input type="date" min={value || undefined} value={endValue ?? ""} onChange={(event) => onEndChange(event.target.value)} /></label> : null}
+              {onTimeChange ? <label>Horário <small>opcional</small><input type="time" value={timeValue ?? ""} onChange={(event) => onTimeChange(event.target.value)} /></label> : null}
+            </div>
+          ) : null}
+          {recurrenceFeatureEnabled && recurrence && onRecurrenceChange ? (
+            <div className="cal-recurrence">
+              <label>Repetir
+                <select value={recurrence.cadence ?? ""} onChange={(event) => {
+                  const cadence = (event.target.value || null) as CalendarRecurrence["cadence"];
+                  onRecurrenceChange({ cadence, weekdays: cadence === "semanal" ? recurrence.weekdays : [], dayOfMonth: cadence === "mensal" ? (recurrence.dayOfMonth ?? selected?.getDate() ?? 1) : null });
+                }}>
+                  {!recurrenceRequired ? <option value="">Nenhuma</option> : null}<option value="semanal">Semanal</option><option value="quinzenal">Quinzenal</option><option value="mensal">Mensal</option>
+                </select>
+              </label>
+              {recurrence.cadence === "semanal" ? <div className="cal-recurrence-days">{WEEKDAYS.map((label, day) => <button type="button" className={recurrence.weekdays.includes(day) ? "on" : ""} key={day} onClick={() => onRecurrenceChange({ ...recurrence, weekdays: recurrence.weekdays.includes(day) ? recurrence.weekdays.filter((item) => item !== day) : [...recurrence.weekdays, day] })}>{label}</button>)}</div> : null}
+              {recurrence.cadence === "mensal" ? <p className="cal-recurrence-anchor">Dia de referência: {recurrence.dayOfMonth ?? selected?.getDate() ?? 1}</p> : null}
+              {dateValues.length > 1 ? <p className="cal-date-summary">{dateValues.length} datas selecionadas · {dateValues.length} atividades serão agrupadas.</p> : null}
+            </div>
+          ) : null}
           {value ? (
-            <button type="button" className="cal-pop-clear" onClick={() => { onChange(""); setOpen(false); }}>
+            <button type="button" className="cal-pop-clear" onClick={() => { onSelectedDatesChange?.([]); onChange(""); setOpen(false); }}>
               Limpar data
             </button>
           ) : null}

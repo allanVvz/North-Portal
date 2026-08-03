@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { postToTaskMetrics } from "@/app/admin/performance/insights";
 import { apiError } from "@/lib/api";
-import { getCachedInsights, getTaskById, getTaskMetrics, getWindsorSettings, updateTask, upsertTaskMetrics } from "@/lib/supabase";
+import { getCachedInsights, getTaskById, getTaskMetrics, getWindsorSettings, updateTaskGroup, upsertTaskMetrics } from "@/lib/supabase";
 import { requireAdminManager } from "@/lib/supabase/auth";
 import { HttpError, performanceSyncSchema } from "@/lib/validation";
 import type { MetaPost } from "@/lib/windsor";
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       const existing = await getTaskMetrics(taskId);
       const merged = { ...existing, ...postToTaskMetrics(entry.post) };
       await upsertTaskMetrics(taskId, task.client_id, merged, "windsor");
-      await updateTask(taskId, { payload: { ...(task.payload ?? {}), metaPostId: postId } });
+      await updateTaskGroup(taskId, task, { payload: { ...(task.payload ?? {}), metaPostId: postId } });
       results.push({ taskId, ok: true });
     }
 

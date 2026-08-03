@@ -112,3 +112,26 @@ Em grande parte **já cobertos**: o Plano de Ação do cliente é alimentado pel
 - `npx tsc --noEmit` (o `next build` corrompe `.next` se o `next dev` estiver rodando — parar o dev antes).
 - Rota compila + gate de auth: `HttpWebRequest` sem redirect deve retornar **307 → /login** quando deslogado.
 - A olho no Chrome logado como `admin@north.com` (senha `SenhaForte123!`), tema claro **e** escuro.
+# Padrões reutilizáveis de atributos
+
+## Multisseletor compacto
+
+O seletor de **Responsável** é a referência para atributos que aceitam múltiplos valores sem transformar o modal em um formulário pesado:
+
+- valores escolhidos aparecem como chips removíveis;
+- o botão circular `+` abre as opções disponíveis;
+- criação livre fica dentro do dropdown, sem texto de instrução permanente;
+- clique fora e `Escape` fecham o seletor;
+- cada remoção possui `aria-label` específico e o controle continua utilizável por teclado;
+- o estado serializado deve ser normalizado em uma função de domínio, não dentro do JSX.
+
+Use esse padrão quando houver seleção múltipla real e o conjunto couber num popover. O atributo **Data** reutiliza a mesma gramática visual: chips de datas, botão `+` e calendário multisseleção. Não usar para escolhas mutuamente exclusivas, ações destrutivas ou listas extensas que exijam busca e paginação.
+
+## Header e footer do modal de tarefa
+
+- O header de edição tem três zonas responsivas: identidade (voltar, tipo, título e cliente), progresso e ações. O progresso deve ocupar a coluna central disponível entre identidade e lateral direita; nunca usar `left: 50%` do modal como alinhamento fixo.
+- A lista de etapas deve ser filtrada antes do render. O conector é desenhado conforme o índice da lista **visível**, nunca conforme o catálogo completo; isso impede uma linha solta quando Revisão, Aprovação ou Publicado estiverem desligados.
+- Em larguras menores, o progresso pode ocupar uma segunda linha, sem `border-top`: a quebra responsiva não deve inventar um separador visual.
+- O footer (`Excluir`, `Cancelar`, `Salvar`) é irmão de `.tm-layout`, nunca filho de `.tm-main`: assim ocupa a base estrutural do modal em desktop e mobile, sem ficar antes do painel de comentários quando as colunas empilham. O conteúdo central rola por trás dessa base fixa e deve existir respiro entre a descrição e o footer.
+- A descrição cresce conforme o conteúdo até um limite; depois usa rolagem vertical interna. Não usar altura fixa que deixe texto cortado nem crescimento ilimitado que expulse o footer da tela.
+- A navegação pai → execução usa histórico local por `id`. Um `router.refresh()` pode atualizar os dados do card, mas não pode reiniciar `activeTask` quando o `id` raiz continua igual; caso contrário, abrir uma execução futura volta imediatamente ao pai e o botão Voltar desaparece.
