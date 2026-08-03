@@ -6,7 +6,9 @@ import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
-import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials, relTime } from "./kanbanShared";
+import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials } from "./kanbanShared";
+import CommentText from "@/app/CommentText";
+import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, kindDef, kindLabel } from "@/lib/taskCatalog";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
@@ -198,8 +200,8 @@ export default function TaskDetailPanel({
             <div className="tdp-comment" key={i}>
               <span className="tdp-comment-av">{initials(c.author)}</span>
               <div>
-                <p className="tdp-comment-meta"><b>{c.author}</b><small>{relTime(c.at)}</small></p>
-                <p className="tdp-comment-text">{c.text}</p>
+                <p className="tdp-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
+                <p className="tdp-comment-text"><CommentText text={c.text} /></p>
               </div>
             </div>
           ))}

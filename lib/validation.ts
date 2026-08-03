@@ -221,6 +221,7 @@ export type TaskRecord = {
   recurrence_cadence: RecurringCadence | null;
   recurrence_weekdays: number[];
   recurrence_day_of_month: number | null;
+  updated_at: string;
 };
 
 // ---- Tarefas recorrentes dos clientes ----------------------------------------

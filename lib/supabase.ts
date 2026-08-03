@@ -30,7 +30,7 @@ type ContentRow = { data: Record<string, unknown> | null };
 type PrefsRow = { theme: string | null; avatar_style: number | null; display_name: string | null; username: string | null; manual_seen: boolean | null };
 
 const TASK_COLUMNS =
-  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month";
+  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at";
 
 
 const STATUS_KANBAN: Record<TaskStatus, string> = {
@@ -218,7 +218,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     // the separate "Plano de Ação" feature for earlier Kanban stages.
     supabase
       .from("tasks")
-      .select(`${TASK_COLUMNS},updated_at`)
+      .select(TASK_COLUMNS)
       .eq("client_id", client.id)
       .or("client_visible.eq.true,status.in.(aprovacao,aprovado,concluido)")
       .order("position"),
@@ -772,7 +772,7 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
         template_payload: payload,
         source: typeof payload.imported_from === "string" ? payload.imported_from : null,
         external_id: typeof payload.external_id === "string" ? payload.external_id : null,
-        created_at: "", updated_at: "",
+        created_at: "",
         clientName: client?.name ?? "—", clientSlug: client?.slug ?? "",
         executions: executionsByParent.get(task.id) ?? [],
       };
@@ -848,8 +848,7 @@ export async function listActionPlans(): Promise<ActionPlan[]> {
     .from("tasks")
     .select(`${TASK_COLUMNS},clients(name,slug)`)
     .eq("kind", "plano_acao")
-    .order("position")
-    .order("created_at");
+    .order("updated_at", { ascending: false });
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string };
   type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
@@ -1068,7 +1067,33 @@ async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<st
   }
 }
 
+// The lowest `position` in use among the OTHER cards sharing `status`, minus a
+// step — so the just-touched card sorts above every existing card in its
+// column. Manual drag always sends `position` explicitly (see dropInColumn in
+// KanbanBoard.tsx) and is never routed through this, so a card dragged after
+// bumping to the top stays wherever the user drops it until the next edit.
+async function topPositionFor(status: TaskStatus, excludeId: string): Promise<number> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("position")
+    .eq("status", status)
+    .neq("id", excludeId)
+    .order("position", { ascending: true })
+    .limit(1);
+  if (error) fail(error);
+  const min = (data?.[0] as { position: number } | undefined)?.position ?? 0;
+  return min - 10;
+}
+
 export async function updateTaskGroup(id: string, current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  // Any content/status edit (not an explicit drag reorder) bumps the card to
+  // the top of its Kanban column — the same "just touched, sort it first"
+  // rule as the last-updated ordering on the Clientes and Plano boards.
+  if (patch.position === undefined) {
+    const nextStatus = (patch.status as TaskStatus | undefined) ?? current.status;
+    patch = { ...patch, position: await topPositionFor(nextStatus, id) };
+  }
   const parent = current.plan_id ? await getTaskById(current.plan_id) : null;
   if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
   const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
@@ -1202,7 +1227,7 @@ async function selectApprovalRows(statuses: TaskStatus[]): Promise<ApprovalRow[]
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},updated_at,clients(name,slug),reviewer:profiles!tasks_reviewer_id_fkey(full_name),approver:profiles!tasks_approver_id_fkey(full_name)`)
+    .select(`${TASK_COLUMNS},clients(name,slug),reviewer:profiles!tasks_reviewer_id_fkey(full_name),approver:profiles!tasks_approver_id_fkey(full_name)`)
     .in("status", statuses)
     .order("updated_at", { ascending: false });
   if (error) fail(error);
@@ -1241,7 +1266,7 @@ export async function listPublishedTasks(): Promise<PublishedTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},updated_at,clients(name,slug),task_metrics(metrics,source,updated_at)`)
+    .select(`${TASK_COLUMNS},clients(name,slug),task_metrics(metrics,source,updated_at)`)
     .eq("status", "concluido")
     .order("updated_at", { ascending: false });
   if (error) fail(error);

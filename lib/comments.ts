@@ -9,7 +9,7 @@ export function commentsOf(payload: Record<string, unknown> | null | undefined):
   return Array.isArray(comments) ? (comments as TaskComment[]) : [];
 }
 
-const URL_RE = /https?:\/\/[^\s)]+/i;
+const URL_RE = /https?:\/\/[^\s)]+/gi;
 
 /** The most recent link pasted into any comment — this is what "abrir card" /
  *  "ver material" points to now, replacing the old static per-client Drive
@@ -20,4 +20,39 @@ export function extractLatestLink(comments: TaskComment[]): string | null {
     if (match) return match[0];
   }
   return null;
+}
+
+/** Splits comment text into plain-text and URL segments so callers can render
+ *  pasted links as clickable `<a>` tags without each duplicating the regex. */
+export function splitCommentText(text: string): Array<{ text: string } | { url: string }> {
+  const parts: Array<{ text: string } | { url: string }> = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(URL_RE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) parts.push({ text: text.slice(lastIndex, index) });
+    parts.push({ url: match[0] });
+    lastIndex = index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex) });
+  return parts;
+}
+
+const DAY_MS = 86400000;
+
+/** Comment publish time: relative for the first 24h ("agora" / "há X min" /
+ *  "há X h"), then an absolute pt-BR date/time past that — so an old comment
+ *  never reads as a vague "há 12 dias". */
+export function formatCommentTime(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  const diff = now - then;
+  if (diff < DAY_MS) {
+    if (diff < 60000) return "agora";
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 60) return `há ${minutes} min`;
+    return `há ${Math.floor(diff / 3.6e6)} h`;
+  }
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("pt-BR");
+  const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${date} ${time}`;
 }

@@ -189,6 +189,14 @@ describe("agrupamento e ordenação do quadro", () => {
     expect(ordenadas.map((t) => t.id)).toEqual(["a", "b", "c"]);
   });
 
+  it("desempata mesmo prazo pela atualização mais recente", () => {
+    const ordenadas = [
+      make({ id: "old", next_due_date: "2026-08-01", updated_at: "2026-07-18T10:00:00Z" }),
+      make({ id: "new", next_due_date: "2026-08-01", updated_at: "2026-07-19T10:00:00Z" }),
+    ].sort(compareByUrgency);
+    expect(ordenadas.map((t) => t.id)).toEqual(["new", "old"]);
+  });
+
   it("omite colunas de prazo vazias", () => {
     const grupos = groupRecurring([make({ next_due_date: "2026-07-18" })], "prazo", "2026-07-20");
     expect(grupos.map((g) => g.key)).toEqual(["atrasadas"]);

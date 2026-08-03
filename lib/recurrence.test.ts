@@ -15,6 +15,7 @@ describe("concluir ciclo recorrente", () => {
       end_date: null, scheduled_start_at: null, scheduled_end_at: null, progress_weight: 1, description: null,
       client_visible: false, payload: { explicit_occurrence_dates: ["2026-08-03", "2026-08-05"] }, position: 0,
       recurrence_cadence: "semanal", recurrence_weekdays: [1, 3], recurrence_day_of_month: null,
+      updated_at: "2026-08-03T00:00:00.000Z",
     } as TaskRecord;
     const child = explicitDateExecutionFields(parent, "child", "2026-08-05");
     expect(child).toMatchObject({ id: "child", plan_id: "parent", due_date: "2026-08-05", recurrence_cadence: null });
@@ -33,6 +34,7 @@ describe("concluir ciclo recorrente", () => {
       end_date: null, scheduled_start_at: null, scheduled_end_at: null, progress_weight: 1, description: null,
       client_visible: false, payload: {}, position: 0, recurrence_cadence: "semanal",
       recurrence_weekdays: [1], recurrence_day_of_month: null,
+      updated_at: "2026-08-03T00:00:00.000Z",
     } as TaskRecord;
     const child = currentRecurringExecutionFields(parent, "original", "2026-08-03");
     expect(child).toMatchObject({ id: "original", plan_id: "parent", recurrence_cadence: null });
@@ -69,6 +71,7 @@ describe("concluir ciclo recorrente", () => {
       end_date: null, scheduled_start_at: null, scheduled_end_at: null, progress_weight: 1, description: null,
       client_visible: false, payload: { completed_cycles: 2 }, position: 3, recurrence_cadence: "semanal",
       recurrence_weekdays: [1], recurrence_day_of_month: null,
+      updated_at: "2026-07-20T00:00:00.000Z",
     } satisfies TaskRecord;
     const child = recurringExecutionFields(parent, "child", "2026-07-27");
     expect(child.plan_id).toBe(parent.id);

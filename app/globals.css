@@ -2159,6 +2159,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kb-card-foot-right { display: inline-flex; align-items: center; gap: 8px; }
 .kb-assignee { font-size: 11px; font-weight: 700; color: var(--a-teal-text); background: var(--a-teal-soft); width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; }
+.kb-updated { font-size: 11px; color: var(--a-muted); }
 .kb-comments { font-size: 11px; color: var(--a-sec); background: var(--a-inset); padding: 2px 7px; border-radius: 999px; font-weight: 600; }
 .kb-prio { font-size: 11px; color: var(--a-muted); }
 .kb-prio.p-alta { color: var(--a-danger); font-weight: 600; }

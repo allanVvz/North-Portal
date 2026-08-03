@@ -10,8 +10,10 @@ import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { ATTR_DEFS, useAttrVisibility } from "./kanbanAttrs";
 import {
   COLUMNS, FORMATO_OPTIONS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, STATUS_ORDER,
-  TONES, commentsOf, initials, relTime,
+  TONES, commentsOf, initials,
 } from "./kanbanShared";
+import CommentText from "@/app/CommentText";
+import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { activatedTaskPayload, childrenOf, isDeferredTask } from "@/lib/taskRelations";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
@@ -871,8 +873,8 @@ export default function TaskModal({
                     <div className="tm-comment" key={i}>
                       <span className="tm-comment-av">{initials(c.author)}</span>
                       <div>
-                        <p className="tm-comment-meta"><b>{c.author}</b><small>{relTime(c.at)}</small></p>
-                        <p className="tm-comment-text">{c.text}</p>
+                        <p className="tm-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
+                        <p className="tm-comment-text"><CommentText text={c.text} /></p>
                       </div>
                     </div>
                   ))}

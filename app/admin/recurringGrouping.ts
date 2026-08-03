@@ -51,8 +51,9 @@ export function prazoBucket(task: RecurringTask, today: string): string {
 }
 
 /**
- * Overdue first, then soonest due date, then title. Nulls sort last — a routine
- * with no date is never the most urgent thing on the board.
+ * Overdue first, then soonest due date, then most recently updated. Nulls
+ * sort last — a routine with no date is never the most urgent thing on the
+ * board.
  */
 export function compareByUrgency(a: RecurringTask, b: RecurringTask): number {
   if (a.next_due_date !== b.next_due_date) {
@@ -60,7 +61,7 @@ export function compareByUrgency(a: RecurringTask, b: RecurringTask): number {
     if (!b.next_due_date) return -1;
     return a.next_due_date < b.next_due_date ? -1 : 1;
   }
-  return a.title.localeCompare(b.title, "pt-BR");
+  return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
 }
 
 export function groupRecurring(tasks: RecurringTask[], groupBy: RecurringGroupBy, today: string): RecurringGroup[] {

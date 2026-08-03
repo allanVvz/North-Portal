@@ -10,6 +10,7 @@ import TaskKindIcon from "./TaskKindIcon";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
 import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone, visibleColumnsFor } from "./kanbanShared";
+import { formatCommentTime } from "@/lib/comments";
 import { kindDef, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
@@ -493,6 +494,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         <div className="kb-card-foot">
           {t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : <span />}
           <span className="kb-card-foot-right">
+            <span className="kb-updated" title="Última atualização">{formatCommentTime(t.updated_at)}</span>
             {commentsOf(t).length > 0 ? (
               <span className="kb-comments" title="Comentários no card">💬 {commentsOf(t).length}</span>
             ) : null}
