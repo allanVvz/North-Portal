@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { listAssigneeOptions, listClients } from "@/lib/supabase";
 import KanbanBoard from "../KanbanBoard";
 
@@ -13,7 +14,9 @@ export default async function KanbanPage() {
           <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
         </>
       ) : (
-        <KanbanBoard clients={clients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
+        <Suspense fallback={null}>
+          <KanbanBoard clients={clients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
+        </Suspense>
       )}
     </section>
   );

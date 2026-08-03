@@ -223,6 +223,8 @@ export default function TaskModal({
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   // lazy: this modal only ever mounts client-side after a click — reading
   // localStorage synchronously here (vs. starting empty + syncing in an
   // effect) is what stops attributes from flashing visible then disappearing
@@ -383,6 +385,17 @@ export default function TaskModal({
       setBusy(false);
     }
     onOpenRelatedTask(target);
+  }
+
+  async function copyCardLink() {
+    const id = liveTask?.id ?? task?.id;
+    if (!id) return;
+    const url = `${window.location.origin}/admin/kanban?task=${id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1800);
+    } catch { /* clipboard unavailable; button just won't confirm */ }
   }
 
   async function sendComment() {
@@ -610,6 +623,9 @@ export default function TaskModal({
                 </div>
               ) : null}
               <AttrVisibilityPopover attrs={attrsForKind} />
+              <button type="button" className="tm-copylink" onClick={copyCardLink} title="Copiar link direto para este card">
+                {linkCopied ? "Link copiado" : "🔗 Copiar link"}
+              </button>
               <button className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
             </div>
           </div>
@@ -851,13 +867,29 @@ export default function TaskModal({
             {mode === "edit" ? (
               <div className="tm-box">
                 <p className="tm-box-label">Descrição do card</p>
-                <AutoGrowTextarea
-                  className="tm-desc-input"
-                  rows={3}
-                  value={draft.description}
-                  onChange={(e) => set("description", e.target.value)}
-                  placeholder="Objetivo, referência e critério de pronto entram aqui antes de enviar para o quadro."
-                />
+                {editingDescription ? (
+                  <AutoGrowTextarea
+                    className="tm-desc-input"
+                    rows={3}
+                    autoFocus
+                    value={draft.description}
+                    onChange={(e) => set("description", e.target.value)}
+                    onBlur={() => setEditingDescription(false)}
+                    placeholder="Objetivo, referência e critério de pronto entram aqui antes de enviar para o quadro."
+                  />
+                ) : (
+                  <div
+                    className="tm-desc-input tm-desc-view"
+                    onDoubleClick={() => setEditingDescription(true)}
+                    title="Clique duas vezes para editar"
+                  >
+                    {draft.description ? (
+                      <CommentText text={draft.description} />
+                    ) : (
+                      <span className="tm-desc-placeholder">Objetivo, referência e critério de pronto entram aqui antes de enviar para o quadro.</span>
+                    )}
+                  </div>
+                )}
               </div>
             ) : null}
 

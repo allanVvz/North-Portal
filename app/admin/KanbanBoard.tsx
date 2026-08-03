@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AttributesConfigModal from "./AttributesConfigModal";
 import HScrollRail from "./HScrollRail";
 import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
@@ -92,6 +93,9 @@ function fmtDue(value: string | null): string {
 }
 
 export default function KanbanBoard({ clients, assignees }: { clients: ClientLite[]; assignees: string[] }) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const deepLinkHandledRef = useRef(false);
   const [tasks, setTasks] = useState<BoardRow[]>([]);
   const [adminReviewers, setAdminReviewers] = useState<ReviewerCandidate[]>([]);
   const [flowFlags, setFlowFlags] = useState<ClientFlowFlags | null>(null);
@@ -435,6 +439,23 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     if (sidebarEnabled) setSelectedId(id);
     else { setSelectedId(null); setModalState({ mode: "edit", taskId: id }); }
   }
+
+  // "Copiar link" on a card points here with ?task=<id> — resolve it once
+  // per page load (fetching the full record even if it isn't in the current
+  // board feed, e.g. a filtered-out plan activity) and strip the param so a
+  // later reload/close doesn't reopen the same card.
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    const id = searchParams.get("task");
+    if (!id) return;
+    deepLinkHandledRef.current = true;
+    fetch(`/api/admin/tasks/${id}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((found) => { if (found) { applyChanged(found); openTask(id); } })
+      .catch(() => { /* bad/stale link; board just opens normally */ });
+    router.replace("/admin/kanban", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   function applyChanged(updated: TaskRecord) {
     setTasks((rows) => {
