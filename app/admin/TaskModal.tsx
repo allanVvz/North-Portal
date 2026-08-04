@@ -27,6 +27,7 @@ type Draft = {
   status: TaskStatus;
   priority: TaskPriority;
   assignee: string;
+  assignee_profile_ids: string[];
   reviewer_id: string;
   approver_id: string;
   plan_id: string;
@@ -48,6 +49,10 @@ type Draft = {
 };
 
 export type TaskCreationScope = "task" | "plan" | "routine";
+
+type PendingMember =
+  | { key: string; kind: "existing"; taskId: string; title: string }
+  | { key: string; kind: "new"; title: string; assignee: string; due_date: string };
 
 function draftFrom(
   task: TaskRecord | null,
@@ -71,6 +76,7 @@ function draftFrom(
     status: task?.status ?? initialStatus ?? "backlog",
     priority: task?.priority ?? "media",
     assignee: task?.assignee ?? initialAssignee ?? "",
+    assignee_profile_ids: task?.assignee_profile_ids ?? [],
     reviewer_id: task?.reviewer_id ?? "",
     approver_id: task?.approver_id ?? "",
     plan_id: task?.plan_id ?? "",
@@ -163,6 +169,116 @@ function HeadDropdown({
       {open ? (
         <div className="tm-headpick-panel" role="listbox" onClick={() => setOpen(false)}>
           {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Search-or-create field for plan activities — types filter existing
+// unlinked candidates from the same client; no exact match reveals a small
+// inline form (responsável + data) so a brand-new activity can be queued
+// without leaving the plan modal.
+function PlanMemberComposer({
+  candidates,
+  assignees,
+  defaultAssignee,
+  defaultDueDate,
+  busy,
+  onLinkExisting,
+  onCreateNew,
+}: {
+  candidates: { id: string; title: string; kind: string }[];
+  assignees: string[];
+  defaultAssignee: string;
+  defaultDueDate: string;
+  busy: boolean;
+  onLinkExisting: (candidate: { id: string; title: string }) => void;
+  onCreateNew: (data: { title: string; assignee: string; due_date: string }) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [formAssignee, setFormAssignee] = useState(defaultAssignee);
+  const [formDate, setFormDate] = useState(defaultDueDate);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const needle = query.trim().toLowerCase();
+  const matches = needle ? candidates.filter((c) => c.title.toLowerCase().includes(needle)).slice(0, 6) : [];
+  const exact = needle ? candidates.some((c) => c.title.toLowerCase() === needle) : false;
+
+  function startCreate() {
+    setFormAssignee(defaultAssignee);
+    setFormDate(defaultDueDate);
+    setCreating(true);
+    setOpen(false);
+  }
+
+  function submitCreate() {
+    const title = query.trim();
+    if (!title) return;
+    onCreateNew({ title, assignee: formAssignee, due_date: formDate });
+    setQuery("");
+    setCreating(false);
+  }
+
+  if (creating) {
+    return (
+      <div className="tm-member-createform">
+        <p className="tm-member-createform-title">Nova atividade: “{query.trim()}”</p>
+        <div className="kb-modal-row">
+          <label className="admin-field"><span>Responsável</span>
+            <select value={formAssignee} onChange={(e) => setFormAssignee(e.target.value)}>
+              <option value="">— Sem responsável —</option>
+              {assignees.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </label>
+          <label className="admin-field"><span>Data</span>
+            <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
+          </label>
+        </div>
+        <div className="kb-modal-actions-right tm-member-createform-actions">
+          <button type="button" className="admin-btn ghost" onClick={() => setCreating(false)}>Cancelar</button>
+          <button type="button" className="admin-btn primary" onClick={submitCreate} disabled={busy || !query.trim()}>+ Adicionar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="tm-member-search" ref={ref}>
+      <input
+        className="tm-member-search-input"
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => query.trim() && setOpen(true)}
+        placeholder="+ Buscar ou criar atividade…"
+        disabled={busy}
+      />
+      {open && needle ? (
+        <div className="tm-member-search-dropdown">
+          {matches.map((c) => (
+            <button type="button" key={c.id} className="tm-member-search-option" onClick={() => { onLinkExisting(c); setQuery(""); setOpen(false); }}>
+              <TaskKindIcon kind={c.kind} size="sm" />
+              <span>{c.title}</span>
+            </button>
+          ))}
+          {!exact ? (
+            <button type="button" className="tm-member-search-option tm-member-search-create" onClick={startCreate}>
+              + Criar atividade “{query.trim()}”
+            </button>
+          ) : matches.length === 0 ? (
+            <p className="tm-member-search-empty">Essa atividade já existe.</p>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -347,6 +463,63 @@ export default function TaskModal({
     } catch { /* leave as-is; user can retry */ }
   }
 
+  // Same linking, but for a brand-new plan (mode="new", no id yet): activities
+  // typed here are queued locally and only actually created/linked once the
+  // plan itself is saved (see save()).
+  const isNewPlan = mode === "new" && creationScope === "plan";
+  const [pendingMembers, setPendingMembers] = useState<PendingMember[]>([]);
+  const [newPlanClientTasks, setNewPlanClientTasks] = useState<TaskRecord[]>([]);
+  useEffect(() => {
+    if (!isNewPlan || !draft.clientSlug) { setNewPlanClientTasks([]); return; }
+    let cancelled = false;
+    fetch(`/api/admin/tasks?slug=${encodeURIComponent(draft.clientSlug)}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => { if (!cancelled && Array.isArray(data?.tasks)) setNewPlanClientTasks(data.tasks); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isNewPlan, draft.clientSlug]);
+  const newPlanCandidates = isNewPlan
+    ? newPlanClientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.plan_id && !pendingMembers.some((m) => m.kind === "existing" && m.taskId === t.id))
+    : [];
+  function addPendingExisting(candidate: { id: string; title: string }) {
+    setPendingMembers((current) => [...current, { key: `e-${candidate.id}`, kind: "existing", taskId: candidate.id, title: candidate.title }]);
+  }
+  function addPendingNew(data: { title: string; assignee: string; due_date: string }) {
+    setPendingMembers((current) => [...current, { key: `n-${Date.now()}-${current.length}`, kind: "new", ...data }]);
+  }
+  function removePendingMember(key: string) {
+    setPendingMembers((current) => current.filter((m) => m.key !== key));
+  }
+
+  // Same idea for an already-saved plan: creates the activity straight away
+  // (instead of queueing) and links it via plan_id in the same request.
+  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string }) {
+    if (!liveTask) return;
+    setBusy(true);
+    setError("");
+    const body: Record<string, unknown> = {
+      title: data.title,
+      kind: "operacional",
+      assignee: data.assignee || null,
+      due_date: data.due_date || null,
+      start_date: data.due_date || null,
+      status: "backlog",
+      priority: "media",
+      plan_id: liveTask.id,
+    };
+    try {
+      const res = await fetch(`/api/admin/tasks?scope=task`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft.clientSlug ? { ...body, slug: draft.clientSlug } : body),
+      });
+      if (!res.ok) throw new Error();
+      onTaskPatched?.(await res.json());
+    } catch {
+      setError("Não foi possível criar a atividade.");
+    }
+    setBusy(false);
+  }
+
   // Board feeds intentionally omit future recurring executions. Fetching the
   // direct relation here keeps the parent modal complete without slowing the
   // Tasks screen or making the future card visible there.
@@ -469,6 +642,7 @@ export default function TaskModal({
       status: draft.status,
       priority: draft.priority,
       assignee: draft.assignee.trim() || null,
+      assignee_profile_ids: draft.assignee_profile_ids,
       reviewer_id: revisaoOff ? null : draft.reviewer_id || null,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
@@ -517,7 +691,34 @@ export default function TaskModal({
         const responseBody = await res.json().catch(() => null) as { error?: string } | null;
         throw new Error(responseBody?.error ?? "Não foi possível salvar a tarefa.");
       }
-      onSaved(await res.json(), !liveTask);
+      const savedTask = await res.json() as TaskRecord;
+      // Activities queued while the plan itself had no id yet: link the
+      // existing ones and create the brand-new ones now that it does.
+      if (!liveTask && isNewPlan && pendingMembers.length) {
+        await Promise.allSettled(pendingMembers.map((member) => {
+          if (member.kind === "existing") {
+            return fetch(`/api/admin/tasks/${member.taskId}`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ plan_id: savedTask.id }),
+            });
+          }
+          const memberBody: Record<string, unknown> = {
+            title: member.title,
+            kind: "operacional",
+            assignee: member.assignee || null,
+            due_date: member.due_date || null,
+            start_date: member.due_date || null,
+            status: "backlog",
+            priority: "media",
+            plan_id: savedTask.id,
+          };
+          return fetch(`/api/admin/tasks?scope=task`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(draft.clientSlug ? { ...memberBody, slug: draft.clientSlug } : memberBody),
+          });
+        }));
+      }
+      onSaved(savedTask, !liveTask);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível salvar a tarefa.");
     }
@@ -783,7 +984,16 @@ export default function TaskModal({
               {/* Multiple people stay backwards-compatible in one DB field,
                   but behave as a reusable list in the editor. */}
               <Cell icon="◔" label="Responsável" hidden={!visible("assignee")}>
-                <AssigneePicker value={draft.assignee} options={assignees} onChange={(value) => set("assignee", value)} disabled={busy} />
+                <AssigneePicker
+                  assignee={draft.assignee}
+                  assigneeProfileIds={draft.assignee_profile_ids}
+                  accountOptions={adminReviewers}
+                  freeTextOptions={assignees}
+                  onChange={({ assignee, assigneeProfileIds }) =>
+                    setDraft((current) => ({ ...current, assignee: assignee ?? "", assignee_profile_ids: assigneeProfileIds }))
+                  }
+                  disabled={busy}
+                />
               </Cell>
 
               <Cell icon="⚑" label="Status" hidden={!visible("status")}>
@@ -797,32 +1007,54 @@ export default function TaskModal({
 
             </div>
 
-            {(kd.isPlan || isRecurringParent) && liveTask ? (
+            {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
               <div className="tm-box tm-planmembers">
-                <p className="tm-box-label">{isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({planMembers.length})</p>
+                <p className="tm-box-label">
+                  {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
+                </p>
                 <div className="tm-member-list">
-                  {planMembers.map((m) => (
-                    <div className="tm-member" key={m.id}>
-                      <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(m)} disabled={!onOpenRelatedTask || busy}>
-                        <TaskKindIcon kind={m.kind} size="sm" />
-                        <span className="tm-member-title">{m.title}</span>
-                        <span className="tm-member-status">{isDeferredTask(m) ? "Futura · abrir tarefa" : STATUS_LABEL[m.status]}</span>
-                        <span className="tm-member-arrow" aria-hidden>↗</span>
-                      </button>
-                      {!isRecurringParent ? <button className="tm-member-unlink" title="Desvincular do plano" onClick={() => linkMember(m.id, null)}>✕</button> : null}
-                    </div>
-                  ))}
-                  {planMembers.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>{isRecurringParent ? "Conclua o ciclo atual para criar a próxima execução." : "Nenhuma atividade vinculada ainda."}</p> : null}
+                  {liveTask ? (
+                    planMembers.map((m) => (
+                      <div className="tm-member" key={m.id}>
+                        <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(m)} disabled={!onOpenRelatedTask || busy}>
+                          <TaskKindIcon kind={m.kind} size="sm" />
+                          <span className="tm-member-title">{m.title}</span>
+                          <span className="tm-member-status">{isDeferredTask(m) ? "Futura · abrir tarefa" : STATUS_LABEL[m.status]}</span>
+                          <span className="tm-member-arrow" aria-hidden>↗</span>
+                        </button>
+                        {!isRecurringParent ? <button className="tm-member-unlink" title="Desvincular do plano" onClick={() => linkMember(m.id, null)}>✕</button> : null}
+                      </div>
+                    ))
+                  ) : (
+                    pendingMembers.map((m) => (
+                      <div className="tm-member" key={m.key}>
+                        <span className="tm-member-open tm-member-pending">
+                          <TaskKindIcon kind="operacional" size="sm" />
+                          <span className="tm-member-title">{m.title}</span>
+                          <span className="tm-member-status">
+                            {m.kind === "existing" ? "Vincular ao criar" : [m.assignee, m.due_date].filter(Boolean).join(" · ") || "Criar ao salvar"}
+                          </span>
+                        </span>
+                        <button className="tm-member-unlink" title="Remover" onClick={() => removePendingMember(m.key)}>✕</button>
+                      </div>
+                    ))
+                  )}
+                  {(liveTask ? planMembers.length : pendingMembers.length) === 0 ? (
+                    <p className="admin-sub" style={{ margin: 0 }}>
+                      {isRecurringParent ? "Conclua o ciclo atual para criar a próxima execução." : "Nenhuma atividade vinculada ainda."}
+                    </p>
+                  ) : null}
                 </div>
-                {!isRecurringParent && linkableCandidates.length ? (
-                  <select
-                    className="tm-member-add"
-                    value=""
-                    onChange={(e) => { if (e.target.value) void linkMember(e.target.value, liveTask.id); }}
-                  >
-                    <option value="">+ Vincular atividade existente…</option>
-                    {linkableCandidates.map((t) => <option key={t.id} value={t.id}>{kindLabel(t.kind)} · {t.title}</option>)}
-                  </select>
+                {!isRecurringParent ? (
+                  <PlanMemberComposer
+                    candidates={liveTask ? linkableCandidates : newPlanCandidates}
+                    assignees={assignees}
+                    defaultAssignee={draft.assignee}
+                    defaultDueDate={draft.start_date || draft.due_date}
+                    busy={busy}
+                    onLinkExisting={(c) => { if (liveTask) void linkMember(c.id, liveTask.id); else addPendingExisting(c); }}
+                    onCreateNew={(data) => { if (liveTask) void createLinkedActivity(data); else addPendingNew(data); }}
+                  />
                 ) : null}
               </div>
             ) : null}
