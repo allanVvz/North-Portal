@@ -27,7 +27,6 @@ type Draft = {
   status: TaskStatus;
   priority: TaskPriority;
   assignee: string;
-  assignee_profile_ids: string[];
   reviewer_id: string;
   approver_id: string;
   plan_id: string;
@@ -76,7 +75,6 @@ function draftFrom(
     status: task?.status ?? initialStatus ?? "backlog",
     priority: task?.priority ?? "media",
     assignee: task?.assignee ?? initialAssignee ?? "",
-    assignee_profile_ids: task?.assignee_profile_ids ?? [],
     reviewer_id: task?.reviewer_id ?? "",
     approver_id: task?.approver_id ?? "",
     plan_id: task?.plan_id ?? "",
@@ -642,7 +640,6 @@ export default function TaskModal({
       status: draft.status,
       priority: draft.priority,
       assignee: draft.assignee.trim() || null,
-      assignee_profile_ids: draft.assignee_profile_ids,
       reviewer_id: revisaoOff ? null : draft.reviewer_id || null,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
@@ -984,16 +981,7 @@ export default function TaskModal({
               {/* Multiple people stay backwards-compatible in one DB field,
                   but behave as a reusable list in the editor. */}
               <Cell icon="◔" label="Responsável" hidden={!visible("assignee")}>
-                <AssigneePicker
-                  assignee={draft.assignee}
-                  assigneeProfileIds={draft.assignee_profile_ids}
-                  accountOptions={adminReviewers}
-                  freeTextOptions={assignees}
-                  onChange={({ assignee, assigneeProfileIds }) =>
-                    setDraft((current) => ({ ...current, assignee: assignee ?? "", assignee_profile_ids: assigneeProfileIds }))
-                  }
-                  disabled={busy}
-                />
+                <AssigneePicker value={draft.assignee} options={assignees} onChange={(value) => set("assignee", value)} disabled={busy} />
               </Cell>
 
               <Cell icon="⚑" label="Status" hidden={!visible("status")}>
