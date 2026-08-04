@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { deleteTask, getClient, getClientFlowFlags, getTaskById, updateTaskGroup } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
+import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, canLeaveRevisao, introducesInvalidPublishedState, requiresManagerApproval, taskPatchSchema } from "@/lib/validation";
 
@@ -33,14 +34,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
     const explicitDates = normalizeOccurrenceDates(patch.payload?.[EXPLICIT_DATES_KEY]);
-    if (!current.plan_id && explicitDates.length > 1) {
+    if (!current.recurrence_cadence && !recurrenceParentIdOf(current) && explicitDates.length > 1) {
       const rule = inferDateGroupRule(explicitDates);
       patch.due_date = explicitDates[0];
       patch.start_date = explicitDates[0];
       patch.recurrence_cadence = rule.cadence;
       patch.recurrence_weekdays = rule.weekdays;
       patch.recurrence_day_of_month = rule.dayOfMonth;
-      patch.plan_id = null;
     }
 
     // Resolve a client change before anything else — later checks (flow
@@ -97,7 +97,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    const task = await updateTaskGroup(id, current, patch);
+    const task = await updateTaskGroup(id, current, recurringActionPlanPatch(current, patch));
     return NextResponse.json(task);
   } catch (error) {
     return apiError(error);

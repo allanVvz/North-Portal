@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { RecurringCadence, TaskRecord } from "./validation";
-import { DEFERRED_TASK_FLAG } from "./taskRelations";
+import { ACTION_PLAN_PAYLOAD_KEY, DEFERRED_TASK_FLAG } from "./taskRelations";
 import { EXPLICIT_DATES_KEY, EXPLICIT_GROUP_KEY } from "./taskDateGrouping";
 
 export type RecurrenceRule = {
@@ -46,6 +46,11 @@ export function recurringExecutionFields(parent: TaskRecord, id: string, occurre
   };
   delete payload.completed_cycles;
   delete payload.last_completed_at;
+  // Per-occurrence metadata never flows from the recurrence template into a
+  // future execution. In particular, linking one execution to an Action Plan
+  // must not silently link the next cycle too.
+  delete payload[ACTION_PLAN_PAYLOAD_KEY];
+  delete payload.accessed_at;
   return {
     id,
     client_id: parent.client_id,

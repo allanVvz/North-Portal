@@ -15,7 +15,7 @@ import { formatCommentTime } from "@/lib/comments";
 import { kindDef, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
-import { belongsToTaskScreen } from "@/lib/taskRelations";
+import { actionPlanIdOf, belongsToTaskScreen } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 import { calendarMonthDates } from "./calendarUtils";
 
@@ -226,9 +226,11 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const membersByPlan = useMemo(() => {
     const m = new Map<string, TaskRecord[]>();
     for (const t of tasks) {
-      if (!t.plan_id) continue;
-      const list = m.get(t.plan_id);
-      if (list) list.push(t); else m.set(t.plan_id, [t]);
+      const parentIds = new Set([t.plan_id, actionPlanIdOf(t)].filter((id): id is string => Boolean(id)));
+      for (const parentId of parentIds) {
+        const list = m.get(parentId);
+        if (list) list.push(t); else m.set(parentId, [t]);
+      }
     }
     return m;
   }, [tasks]);
@@ -496,7 +498,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         <div className="kb-card-top">
           {t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
           {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
-          {visible("plan_link") && t.plan_id ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
+          {visible("plan_link") && actionPlanIdOf(t) ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
           {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
         </div>
         <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} /><p className="kb-card-title">{t.title}</p></div>

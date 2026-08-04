@@ -83,4 +83,20 @@ describe("concluir ciclo recorrente", () => {
       deferred_until_accessed: true,
     });
   });
+
+  it("não herda o Plano de Ação local ao criar a próxima ocorrência", () => {
+    const parent = {
+      id: "parent", client_id: null, kind: "operacional", subtype: null, title: "Rotina", status: "backlog",
+      priority: "media", assignee: null, reviewer_id: null, approver_id: null, plan_id: null,
+      requires_review: false, requires_approval: false, due_date: "2026-08-03", start_date: "2026-08-03",
+      end_date: null, scheduled_start_at: null, scheduled_end_at: null, progress_weight: 1, description: null,
+      client_visible: false, payload: { action_plan_id: "local", accessed_at: "agora" }, position: 0,
+      recurrence_cadence: "semanal", recurrence_weekdays: [1], recurrence_day_of_month: null,
+      updated_at: "2026-08-03T00:00:00.000Z",
+    } satisfies TaskRecord;
+    const next = recurringExecutionFields(parent, "next", "2026-08-10");
+    expect(next.payload).not.toHaveProperty("action_plan_id");
+    expect(next.payload).not.toHaveProperty("accessed_at");
+    expect(next).toMatchObject({ plan_id: parent.id, due_date: "2026-08-10" });
+  });
 });

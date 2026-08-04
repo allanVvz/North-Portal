@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { activatedTaskPayload, belongsToTaskScreen, childrenOf, isDeferredTask, visibleOnTaskBoard } from "./taskRelations";
+import {
+  actionPlanIdOf,
+  actionPlanMembersOf,
+  activatedTaskPayload,
+  belongsToTaskScreen,
+  childrenOf,
+  isDeferredTask,
+  recurringActionPlanPatch,
+  visibleOnTaskBoard,
+} from "./taskRelations";
 
 describe("relações entre tarefas", () => {
   it("mantém a execução futura sob o pai sem exibi-la no quadro", () => {
@@ -12,6 +21,34 @@ describe("relações entre tarefas", () => {
   it("materializa a tarefa no primeiro acesso sem perder seu payload", () => {
     const payload = activatedTaskPayload({ deferred_until_accessed: true, recurrence_parent_id: "parent" }, "2026-07-21T12:00:00.000Z");
     expect(payload).toEqual({ recurrence_parent_id: "parent", accessed_at: "2026-07-21T12:00:00.000Z" });
+  });
+
+  it("separa o plano de ação do pai de uma ocorrência recorrente", () => {
+    const ordinary = { plan_id: "plan", payload: {} };
+    const occurrence = {
+      plan_id: "recurrence-parent",
+      payload: { recurrence_parent_id: "recurrence-parent", action_plan_id: "plan" },
+    };
+    expect(actionPlanIdOf(ordinary)).toBe("plan");
+    expect(actionPlanIdOf(occurrence)).toBe("plan");
+    expect(childrenOf("recurrence-parent", [occurrence])).toEqual([occurrence]);
+    expect(actionPlanMembersOf("plan", [ordinary, occurrence])).toEqual([ordinary, occurrence]);
+  });
+
+  it("vincula e desvincula uma ocorrência sem sobrescrever seu plan_id", () => {
+    const current = {
+      plan_id: "recurrence-parent",
+      payload: { recurrence_parent_id: "recurrence-parent", comments: [] },
+    };
+    const linked = recurringActionPlanPatch(current, { plan_id: "action-plan", status: "em_producao" });
+    expect(linked).not.toHaveProperty("plan_id");
+    expect(linked).toMatchObject({ status: "em_producao", payload: { recurrence_parent_id: "recurrence-parent", action_plan_id: "action-plan" } });
+
+    const unlinked = recurringActionPlanPatch(
+      { ...current, payload: linked.payload as Record<string, unknown> },
+      { plan_id: null },
+    );
+    expect(unlinked.payload).toEqual({ recurrence_parent_id: "recurrence-parent", comments: [] });
   });
 });
 

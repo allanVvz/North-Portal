@@ -18,6 +18,12 @@ Tudo que representa trabalho vive em `public.tasks`. Não criar tabelas paralela
 
 O significado do pai é determinado por seus atributos: `kind = 'plano_acao'` agrega atividades; `recurrence_cadence` agrega execuções. Um filho continua sendo uma tarefa completa, com status, responsável, comentários e prazo próprios.
 
+### Duas relações em uma ocorrência
+
+`tasks.plan_id` continua sendo a relação estrutural principal. Em uma tarefa comum ele pode apontar para um Plano de Ação; em uma ocorrência recorrente ele sempre aponta para o pai da recorrência. Quando somente essa ocorrência também pertence a um Plano de Ação, a relação secundária fica em `payload.action_plan_id`.
+
+Esse campo JSON é um workaround intencional, sem chave estrangeira e sem migration. Leitores de planos e progresso aceitam `plan_id` ou `payload.action_plan_id`, enquanto leitores da recorrência continuam seguindo o `plan_id` direto. Vincular ou desvincular uma ocorrência nunca altera seu pai, e a próxima ocorrência nasce sem `action_plan_id`.
+
 ## Ciclo de recorrência
 
 1. O pai guarda em `due_date` a ocorrência corrente.
@@ -36,13 +42,13 @@ Ao converter uma tarefa existente, a API cria um pai separado e preserva o `id` 
 
 Datas futuras não são materializadas antecipadamente. “Concluir ciclo” cria somente a próxima execução, com `payload.deferred_until_accessed = true`. Ela aparece na relação do pai como “Futura” e só entra em Tarefas depois que for aberta por esse caminho. Assim, em cada ciclo existe uma tarefa operacional corrente, sem poluir o quadro com todo o futuro.
 
-Atualizações de conteúdo e estado em um filho são replicadas apenas para as outras execuções que já foram materializadas. Identidade e agenda (`id`, `plan_id`, `due_date`, `start_date` e atributos de recorrência) nunca são replicadas. Metadados locais do ciclo (`deferred_until_accessed`, `accessed_at`, `occurrence_date` e `explicit_date_group_id`) também são preservados por execução; editar a ocorrência atual nunca pode revelar uma futura antes do acesso. Atualizações de dados-base como título, tipo e responsável também mantêm o pai sincronizado.
+Atualizações de conteúdo e estado em um filho são replicadas apenas para as outras execuções que já foram materializadas. Identidade e agenda (`id`, `plan_id`, `due_date`, `start_date` e atributos de recorrência) nunca são replicadas. Metadados locais do ciclo (`deferred_until_accessed`, `accessed_at`, `occurrence_date`, `explicit_date_group_id` e `action_plan_id`) também são preservados por execução; editar a ocorrência atual nunca pode revelar uma futura nem vinculá-la a um plano antes da escolha explícita. Atualizações de dados-base como título, tipo e responsável também mantêm o pai sincronizado.
 
 Ao concluir a última data explícita, o pai recebe `due_date = null` e `payload.cycle_completed = true`; nenhuma data adicional é inventada.
 
 ## Consultas e desempenho
 
-- `listActionPlans()` busca somente pais `plano_acao` e, em uma segunda consulta em lote, os filhos desses pais. Não varre mais todas as tarefas para montar a tela.
+- `listActionPlans()` busca somente pais `plano_acao` e, em uma segunda consulta em lote, membros por `plan_id` ou `payload.action_plan_id`. Não varre mais todas as tarefas para montar a tela.
 - `listRecurringTasks()` busca os pais recorrentes e suas execuções em lote. O modal recebe os filhos já no primeiro render.
 - `GET /api/admin/tasks?parentId=<uuid>` existe para abrir relações diretamente sem carregar um quadro inteiro.
 - Feeds do quadro filtram filhos futuros. A consulta relacional continua enxergando esses filhos.
@@ -66,6 +72,8 @@ O campo físico continua `tasks.assignee text` para evitar uma tabela adicional.
 - Filho recorrente não herda recorrência; caso contrário geraria uma árvore infinita.
 - Execução futura não aparece no quadro antes do primeiro acesso.
 - Converter uma tarefa em recorrência preserva a tarefa original como primeira execução visível; o pai é sempre um registro separado.
+- Converter uma tarefa já vinculada a um plano transfere esse vínculo apenas para `payload.action_plan_id` da primeira execução.
+- Vincular uma ocorrência a um Plano de Ação não altera seu `plan_id` nem vincula ocorrências futuras.
 - Um registro legado não-Criativo que já esteja em `Publicado` pode salvar campos não relacionados. A API continua proibindo novas entradas nessa combinação.
 - Progresso de pai é sempre rollup dos filhos; não é persistido.
 - O toggle “Visível para o cliente” é fail-closed enquanto a feature flag carrega.

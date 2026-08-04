@@ -2,7 +2,7 @@ import { createClient } from "./supabase/server";
 import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, nextExplicitOccurrenceDate, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch, replicatedExecutionPayload } from "./taskDateGrouping";
 import { assigneeOptions } from "./assignees";
-import { visibleOnTaskBoard } from "./taskRelations";
+import { actionPlanIdOf, actionPlanMembersOf, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
@@ -57,7 +57,7 @@ function fmtDateRange(start: string | null, end: string | null): string {
 function planoFromTasks(rows: TaskRecord[], allRows: TaskRecord[]): PortalContent["plano"] {
   return rows.map((t) => {
     const p = (t.payload ?? {}) as Record<string, unknown>;
-    const members = allRows.filter((m) => m.plan_id === t.id);
+    const members = actionPlanMembersOf(t.id, allRows);
     const pct = taskProgress(t, members);
     const statusLabel =
       typeof p.statusLabel === "string"
@@ -854,18 +854,20 @@ export async function listActionPlans(): Promise<ActionPlan[]> {
   type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
   const rows = (data as unknown as Row[] | null) ?? [];
   if (!rows.length) return [];
+  const planIds = rows.map((plan) => plan.id);
   const { data: memberData, error: memberError } = await supabase
     .from("tasks")
     .select(TASK_COLUMNS)
-    .in("plan_id", rows.map((plan) => plan.id))
+    .or(`plan_id.in.(${planIds.join(",")}),payload->>action_plan_id.in.(${planIds.join(",")})`)
     .order("position")
     .order("created_at");
   if (memberError) fail(memberError);
   const membersByPlan = new Map<string, TaskRecord[]>();
   for (const r of (memberData as TaskRecord[] | null) ?? []) {
-    if (!r.plan_id) continue;
-    const list = membersByPlan.get(r.plan_id);
-    if (list) list.push(r); else membersByPlan.set(r.plan_id, [r]);
+    const planId = actionPlanIdOf(r);
+    if (!planId) continue;
+    const list = membersByPlan.get(planId);
+    if (list) list.push(r); else membersByPlan.set(planId, [r]);
   }
   return rows
     .map(({ clients, ...task }) => {
@@ -889,7 +891,7 @@ export async function listRelatedTasks(parentId: string): Promise<TaskRecord[]> 
   const { data, error } = await supabase
     .from("tasks")
     .select(TASK_COLUMNS)
-    .eq("plan_id", parentId)
+    .or(`plan_id.eq.${parentId},payload->>action_plan_id.eq.${parentId}`)
     .order("position")
     .order("due_date", { nullsFirst: false });
   if (error) fail(error);
@@ -920,21 +922,30 @@ export async function createTask(clientId: string | null, input: Record<string, 
   return row;
 }
 
+function inputActionPlanId(input: Record<string, unknown>): string | null {
+  const value = input.plan_id;
+  return typeof value === "string" && value ? value : null;
+}
+
 export async function createExplicitDateTaskGroup(clientId: string | null, input: Record<string, unknown>, rawDates: unknown): Promise<TaskRecord> {
   const dates = normalizeOccurrenceDates(rawDates, typeof input.due_date === "string" ? input.due_date : null);
   if (dates.length < 2) return createTask(clientId, input);
   const rule = inferDateGroupRule(dates);
+  const actionPlanId = inputActionPlanId(input);
   const parent = await createTask(clientId, {
     ...input,
+    plan_id: null,
     due_date: dates[0],
     start_date: dates[0],
     recurrence_cadence: rule.cadence,
     recurrence_weekdays: rule.weekdays,
     recurrence_day_of_month: rule.dayOfMonth,
-    payload: { ...((input.payload ?? {}) as Record<string, unknown>), explicit_occurrence_dates: dates },
+    payload: { ...withActionPlanId((input.payload ?? {}) as Record<string, unknown>, null), explicit_occurrence_dates: dates },
   });
   try {
-    return await createTask(clientId, explicitDateExecutionFields(parent, recurringExecutionId(parent.id, dates[0]), dates[0]));
+    const first = explicitDateExecutionFields(parent, recurringExecutionId(parent.id, dates[0]), dates[0]);
+    first.payload = withActionPlanId(first.payload as Record<string, unknown>, actionPlanId);
+    return await createTask(clientId, first);
   } catch (error) {
     await deleteTask(parent.id).catch(() => undefined);
     throw error;
@@ -979,7 +990,8 @@ async function updateExplicitChildGroup(id: string, parent: TaskRecord, patch: R
     const template = parentTemplatePatch(shared);
     if (Object.keys(template).length) await updateTask(parent.id, template);
   }
-  const currentUpdate = Object.keys(local).length ? updateTask(id, local) : null;
+  const currentPatch = sharedPayload ? { ...local, payload: sharedPayload } : local;
+  const currentUpdate = Object.keys(currentPatch).length ? updateTask(id, currentPatch) : null;
   const [, updatedCurrent] = await Promise.all([
     replicateExplicitChildPayload(parent.id, id, sharedPayload),
     currentUpdate,
@@ -1035,7 +1047,7 @@ function recurringParentInput(current: TaskRecord, patch: Record<string, unknown
     progress_weight: next.progress_weight,
     description: next.description,
     client_visible: next.client_visible,
-    payload: next.payload,
+    payload: withActionPlanId(next.payload, null),
     position: next.position,
     recurrence_cadence: next.recurrence_cadence,
     recurrence_weekdays: next.recurrence_weekdays,
@@ -1046,6 +1058,7 @@ function recurringParentInput(current: TaskRecord, patch: Record<string, unknown
 async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
   const next = { ...current, ...patch } as TaskRecord;
   if (!next.recurrence_cadence || !next.due_date) return updateTask(current.id, patch);
+  const actionPlanId = actionPlanIdOf(next);
   const clientId = patch.client_id === null || typeof patch.client_id === "string" ? patch.client_id : current.client_id;
   const parent = await createTask(clientId, recurringParentInput(current, patch));
   const fields = isExplicitDateParent(parent)
@@ -1053,6 +1066,7 @@ async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<st
     : currentRecurringExecutionFields(parent, current.id, next.due_date);
   const { id: _id, ...executionFields } = fields;
   void _id;
+  executionFields.payload = withActionPlanId(executionFields.payload as Record<string, unknown>, actionPlanId);
   try {
     return await updateTask(current.id, {
       ...executionFields,
@@ -1097,7 +1111,7 @@ export async function updateTaskGroup(id: string, current: TaskRecord, patch: Re
   const parent = current.plan_id ? await getTaskById(current.plan_id) : null;
   if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
   const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
-  if (!current.plan_id && !current.recurrence_cadence && nextRecurrence) {
+  if (!current.recurrence_cadence && !recurrenceParentIdOf(current) && nextRecurrence) {
     return convertTaskToRecurringGroup(current, patch);
   }
   return updateExplicitParent(id, patch);

@@ -226,8 +226,9 @@ export type TaskRecord = {
 
 // ---- Tarefas recorrentes dos clientes ----------------------------------------
 // Recorrência é um atributo de qualquer tarefa que não seja `plano_acao`.
-// Cada execução é outra task e usa `plan_id` para apontar para o pai recorrente,
-// reaproveitando o mesmo rollup de relações do Plano de Ação.
+// Cada execução é outra task e usa `plan_id` para apontar para o pai recorrente.
+// Se a execução também pertencer a um Plano de Ação, essa relação secundária
+// fica em `payload.action_plan_id` para não sobrescrever o pai da recorrência.
 export const RECURRING_CADENCES = ["semanal", "quinzenal", "mensal"] as const;
 export type RecurringCadence = (typeof RECURRING_CADENCES)[number];
 

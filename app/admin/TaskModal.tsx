@@ -15,7 +15,7 @@ import {
 import CommentText from "@/app/CommentText";
 import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { activatedTaskPayload, childrenOf, isDeferredTask } from "@/lib/taskRelations";
+import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, childrenOf, isDeferredTask } from "@/lib/taskRelations";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
@@ -77,7 +77,7 @@ function draftFrom(
     assignee: task?.assignee ?? initialAssignee ?? "",
     reviewer_id: task?.reviewer_id ?? "",
     approver_id: task?.approver_id ?? "",
-    plan_id: task?.plan_id ?? "",
+    plan_id: task ? actionPlanIdOf(task) ?? "" : "",
     due_date: task?.due_date ?? "",
     occurrence_dates: normalizeOccurrenceDates(p[EXPLICIT_DATES_KEY], task?.due_date),
     recurrence_cadence: task?.recurrence_cadence ?? (creationScope === "routine" || initialRecurrence ? "semanal" : null),
@@ -441,7 +441,9 @@ export default function TaskModal({
   // Plan ↔ activity linking (for plano_acao cards): members are tasks whose
   // plan_id points here; candidates are the client's still-unlinked non-plan
   // tasks. Linking/unlinking just PATCHes the activity's plan_id.
-  const planMembers = liveTask ? childrenOf(liveTask.id, clientTasks) : [];
+  const planMembers = liveTask
+    ? (kd.isPlan ? actionPlanMembersOf(liveTask.id, clientTasks) : childrenOf(liveTask.id, clientTasks))
+    : [];
   // Unsaved status changes are the task's current UI truth. Reading liveTask
   // here left the percentage frozen until Save, even while the stepper moved.
   const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: draft.status } : null;
@@ -449,7 +451,7 @@ export default function TaskModal({
     ? (kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers) : taskProgress(progressTask))
     : 0;
   const linkableCandidates = liveTask
-    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.plan_id && t.client_id === liveTask.client_id)
+    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !actionPlanIdOf(t) && t.client_id === liveTask.client_id)
     : [];
   async function linkMember(taskId: string, planId: string | null) {
     try {
@@ -477,7 +479,7 @@ export default function TaskModal({
     return () => { cancelled = true; };
   }, [isNewPlan, draft.clientSlug]);
   const newPlanCandidates = isNewPlan
-    ? newPlanClientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.plan_id && !pendingMembers.some((m) => m.kind === "existing" && m.taskId === t.id))
+    ? newPlanClientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !actionPlanIdOf(t) && !pendingMembers.some((m) => m.kind === "existing" && m.taskId === t.id))
     : [];
   function addPendingExisting(candidate: { id: string; title: string }) {
     setPendingMembers((current) => [...current, { key: `e-${candidate.id}`, kind: "existing", taskId: candidate.id, title: candidate.title }]);
@@ -894,7 +896,7 @@ export default function TaskModal({
                 </Cell>
               ) : null}
               {/* Vínculo com plano (não para o próprio plano) */}
-              {!kd.isPlan ? (
+              {!kd.isPlan && !(mode === "new" && creationScope === "routine") ? (
                 <Cell icon="◆" label="Plano de Ação" hidden={!visible("plan_link")}>
                   <select value={draft.plan_id} onChange={(e) => set("plan_id", e.target.value)}>
                     <option value="">— Sem plano —</option>

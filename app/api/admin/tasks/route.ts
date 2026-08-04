@@ -84,7 +84,10 @@ export async function POST(request: Request) {
       if (!flags.aprovacaoAdmin) { fields.approver_id = null; fields.requires_approval = false; }
     }
 
-    if (createsDateGroup) fields.plan_id = null;
+    // A recurrence parent is a template, not an Action Plan activity. For an
+    // explicit-date group createExplicitDateTaskGroup transfers the selected
+    // plan only to the first occurrence.
+    if (fields.recurrence_cadence && !createsDateGroup) fields.plan_id = null;
     const task = createsDateGroup
       ? await createExplicitDateTaskGroup(client?.id ?? null, fields, explicitDates)
       : await createTask(client?.id ?? null, fields);

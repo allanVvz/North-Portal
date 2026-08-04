@@ -34,4 +34,15 @@ describe("agrupamento de tarefas por datas explícitas", () => {
     expect(nextExplicitOccurrenceDate(dates, dates[0])).toBe(dates[1]);
     expect(nextExplicitOccurrenceDate(dates, dates[1])).toBeNull();
   });
+
+  it("não replica o Plano de Ação local entre ocorrências", () => {
+    expect(replicatedExecutionPayload(
+      { comments: [], action_plan_id: "plano-da-atual" },
+      { deferred_until_accessed: true },
+    )).toEqual({ comments: [], deferred_until_accessed: true });
+    expect(replicatedExecutionPayload(
+      { comments: [] },
+      { action_plan_id: "plano-da-futura" },
+    )).toEqual({ comments: [], action_plan_id: "plano-da-futura" });
+  });
 });

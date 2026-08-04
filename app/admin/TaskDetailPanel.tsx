@@ -10,6 +10,7 @@ import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials } from "./kanbanShar
 import CommentText from "@/app/CommentText";
 import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, kindDef, kindLabel } from "@/lib/taskCatalog";
+import { actionPlanIdOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
 export default function TaskDetailPanel({
@@ -141,7 +142,7 @@ export default function TaskDetailPanel({
           <div className="tdp-attr">
             <span>Plano de Ação</span>
             <select
-              value={task.plan_id ?? ""} disabled={busy}
+              value={actionPlanIdOf(task) ?? ""} disabled={busy}
               onChange={(e) => patch({ plan_id: e.target.value || null })}
             >
               <option value="">— Sem plano —</option>
