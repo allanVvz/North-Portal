@@ -85,13 +85,13 @@ test.describe("Kanban publicado, calendário temático e escala global", () => {
       expect(dark.border).not.toBe("rgba(0, 0, 0, 0)");
       expect(dark.shadow).not.toBe("none");
 
-      expect(await page.locator("html").evaluate((element) => getComputedStyle(element).zoom)).toBe("0.77");
+      expect(await page.locator("html").evaluate((element) => getComputedStyle(element).zoom)).toBe("0.8");
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(modal).toBeVisible();
       const modalBox = await modal.boundingBox();
       expect(modalBox).not.toBeNull();
       expect(modalBox!.x).toBeGreaterThanOrEqual(0);
-      expect(modalBox!.width).toBeLessThanOrEqual(390 / 0.77 + 2);
+      expect(modalBox!.width).toBeLessThanOrEqual(390 / 0.8 + 2);
 
       expect((await page.request.patch("/api/admin/settings/tabs-visibility", { data: { publicadoColumnVisible: true } })).ok()).toBeTruthy();
       await page.setViewportSize({ width: 1280, height: 720 });
