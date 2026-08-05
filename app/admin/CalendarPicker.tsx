@@ -253,7 +253,7 @@ export default function CalendarPicker({
           {onTimeChange ? <div className="cal-schedule cal-time-last"><label>Horário <small>opcional</small><input type="time" value={timeValue ?? ""} onChange={(event) => onTimeChange(event.target.value)} /></label></div> : null}
           {value ? <button type="button" className="cal-pop-clear" onClick={() => { onChange(""); onEndChange?.(""); }}>Limpar intervalo</button> : null}
         </div>,
-        document.body,
+        document.querySelector(".admin-shell") ?? document.body,
       ) : null}
     </div>
   );

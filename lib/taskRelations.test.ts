@@ -6,11 +6,19 @@ import {
   belongsToTaskScreen,
   childrenOf,
   isDeferredTask,
+  recurrenceParentOf,
   recurringActionPlanPatch,
   visibleOnTaskBoard,
 } from "./taskRelations";
 
 describe("relações entre tarefas", () => {
+  it("resolve a relação imutável da execução com o card pai carregado", () => {
+    const tasks = [{ id: "parent" }, { id: "other" }];
+    expect(recurrenceParentOf("parent", tasks)).toEqual({ id: "parent" });
+    expect(recurrenceParentOf("missing", tasks)).toBeNull();
+    expect(recurrenceParentOf(null, tasks)).toBeNull();
+  });
+
   it("mantém a execução futura sob o pai sem exibi-la no quadro", () => {
     const child = { id: "child", plan_id: "parent", payload: { deferred_until_accessed: true } };
     expect(childrenOf("parent", [child])).toEqual([child]);

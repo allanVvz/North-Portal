@@ -15,7 +15,7 @@ import {
 import CommentText from "@/app/CommentText";
 import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf } from "@/lib/taskRelations";
+import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
@@ -334,6 +334,8 @@ export default function TaskModal({
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
   const [liveTask, setLiveTask] = useState<TaskRecord | null>(task);
+  const recurrenceParentId = liveTask ? recurrenceParentIdOf(liveTask) : null;
+  const [recurrenceParent, setRecurrenceParent] = useState<TaskRecord | null>(() => recurrenceParentOf(recurrenceParentId, clientTasks));
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -401,6 +403,18 @@ export default function TaskModal({
   const isRecurringParent = Boolean(liveTask?.recurrence_cadence || liveTask?.payload?.recurrence_group === true);
   const onTaskPatchedRef = useRef(onTaskPatched);
   useEffect(() => { onTaskPatchedRef.current = onTaskPatched; }, [onTaskPatched]);
+
+  useEffect(() => {
+    if (!recurrenceParentId) { setRecurrenceParent(null); return; }
+    const loaded = recurrenceParentOf(recurrenceParentId, clientTasks);
+    if (loaded) { setRecurrenceParent(loaded); return; }
+    let cancelled = false;
+    fetch(`/api/admin/tasks/${encodeURIComponent(recurrenceParentId)}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((parent: TaskRecord | null) => { if (!cancelled && parent) setRecurrenceParent(parent); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [recurrenceParentId, clientTasks]);
 
   function pickKind(kind: string) {
     if (mode === "new" && creationScope === "plan" && kind !== "plano_acao") return;
@@ -1003,6 +1017,24 @@ export default function TaskModal({
               </Cell>
 
             </div>
+
+            {liveTask && recurrenceParentId ? (
+              <div className="tm-box tm-planmembers">
+                <p className="tm-box-label">Card pai (1)</p>
+                <div className="tm-member-list">
+                  {recurrenceParent ? (
+                    <div className="tm-member">
+                      <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(recurrenceParent)} disabled={!onOpenRelatedTask || busy}>
+                        <TaskKindIcon kind={recurrenceParent.kind} size="sm" />
+                        <span className="tm-member-title">{recurrenceParent.title}</span>
+                        <span className="tm-member-status">{STATUS_LABEL[recurrenceParent.status]}</span>
+                        <span className="tm-member-arrow" aria-hidden>↗</span>
+                      </button>
+                    </div>
+                  ) : <p className="admin-sub" style={{ margin: 0 }}>Carregando card pai…</p>}
+                </div>
+              </div>
+            ) : null}
 
             {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
               <div className="tm-box tm-planmembers">

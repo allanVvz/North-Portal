@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COLUMNS, STATUS_LABEL, visibleColumnsFor } from "./kanbanShared";
+import { COLUMNS, STATUS_LABEL, statusAfterKanbanDrop, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
 
 describe("Kanban COLUMNS", () => {
   it("has 6 columns, Concluído sitting between Aprovação and Publicado", () => {
@@ -76,5 +76,25 @@ describe("visibleColumnsFor (Publicado column visibility)", () => {
 
   it("shows Publicado once the global switch is on", () => {
     expect(visibleColumnsFor([], false, false, true).some((c) => c.status === "concluido")).toBe(true);
+  });
+});
+
+describe("Publicado merged into Concluído", () => {
+  const tasks = [
+    { id: "approved", status: "aprovado" as const },
+    { id: "published", status: "concluido" as const },
+    { id: "production", status: "em_producao" as const },
+  ];
+
+  it("groups approved and published cards only while the Publicado column is hidden", () => {
+    expect(tasksForKanbanColumn(tasks, "aprovado", false).map((task) => task.id)).toEqual(["approved", "published"]);
+    expect(tasksForKanbanColumn(tasks, "aprovado", true).map((task) => task.id)).toEqual(["approved"]);
+    expect(tasksForKanbanColumn(tasks, "concluido", true).map((task) => task.id)).toEqual(["published"]);
+  });
+
+  it("preserves a published status when reordered in the merged column", () => {
+    expect(statusAfterKanbanDrop("concluido", "aprovado", false)).toBe("concluido");
+    expect(statusAfterKanbanDrop("em_producao", "aprovado", false)).toBe("aprovado");
+    expect(statusAfterKanbanDrop("concluido", "aprovado", true)).toBe("aprovado");
   });
 });

@@ -134,6 +134,15 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     const modal = page.locator(".tm");
     await expect(modal).toBeVisible({ timeout: 20_000 });
     await expect(modal.getByText(/Execuções da recorrência/)).toContainText("(2)");
+
+    await page.goto(`/admin/kanban?task=${first.id}`);
+    const childModal = page.locator(".tm");
+    await expect(childModal).toBeVisible({ timeout: 20_000 });
+    const parentBox = childModal.locator(".tm-planmembers", { hasText: "Card pai (1)" });
+    await expect(parentBox).toContainText(parent.title);
+    await expect(parentBox.locator(".tm-member-unlink")).toHaveCount(0);
+    await parentBox.locator(".tm-member-open").click();
+    await expect(page.locator(".tm").getByText(/Execuções da recorrência/)).toContainText("(2)");
   });
 
   test("cria, conclui, desativa e reativa um Plano recorrente sem duplicar atividades", async ({ page }) => {

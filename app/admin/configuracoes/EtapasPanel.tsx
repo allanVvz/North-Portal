@@ -26,8 +26,7 @@ const FLOWS: FlowDef[] = [
 // itself has no toggle at all — it's automatic, visible only while at least
 // one card actually sits in that stage. "Publicado" is the exception: a
 // single global switch (no per-client dimension) since it's not a flow stage
-// but an unfinished feature (mock metrics, manual post-linking) — defaults
-// off.
+// but a presentation choice: off merges its cards visually into Concluído.
 export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
   const [slug, setSlug] = useState(clients[0]?.slug ?? "");
   const [flags, setFlags] = useState<ClientFlowFlags | null>(null);
@@ -113,7 +112,7 @@ export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
             <span className="sw" /><span>Ativa</span>
           </label>
           <p className="admin-sub set-etapas-note">
-            Ainda em desenvolvimento (métricas mock, vínculo com a publicação real é manual). Desligada, a coluna some do Kanban inteiro; ligada, só cards do tipo Criativo podem ser movidos para ela.
+            Ligada, Concluído e Publicado aparecem em colunas separadas. Desligada, apenas a coluna Publicado some e seus cards são exibidos dentro de Concluído, sem mudar o status; só cards do tipo Criativo podem ser publicados.
           </p>
         </div>
       ) : null}

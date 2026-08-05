@@ -1,7 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300;1,9..144,400&family=Inter:wght@400;500;600;700;800&display=swap");
 
 :root {
-  --ui-scale: 0.85;
+  --ui-scale: 0.77;
   --bg: #0c282c;
   --bg-soft: #103034;
   --sand: #dcd0b4;
@@ -2605,7 +2605,13 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .cal-schedule label small { opacity: .72; }
 .cal-schedule input { min-width: 0; border: 1px solid var(--a-border); border-radius: 7px; background: var(--a-surface2); color: var(--a-ink); padding: 5px 7px; font-size: 11px; }
 .cal-pop { padding-bottom: 12px; }
-.cal-pop.cal-pop-range { padding: 16px; }
+.cal-pop.cal-pop-range {
+  padding: 16px;
+  background: var(--a-surface, #fbfcfa);
+  border-color: var(--a-border-strong, rgba(12, 44, 44, .28));
+  box-shadow: 0 18px 52px rgba(5, 24, 27, .28), 0 0 0 1px color-mix(in srgb, var(--a-surface, #fbfcfa) 72%, transparent);
+}
+.admin-shell[data-theme="dark"] .cal-pop.cal-pop-range { box-shadow: 0 20px 56px rgba(0, 0, 0, .58), 0 0 0 1px rgba(147, 194, 184, .12); }
 .cal-pop-range .cal-pop-grid { gap: 3px; }
 .cal-pop-range .cal-pop-day { position: relative; border-radius: 9px; min-height: 39px; }
 .cal-pop-day.in-range { border-radius: 0; background: var(--a-teal-soft); color: var(--a-teal-text); }
@@ -2977,6 +2983,7 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .kb-recurrence-mark { color: var(--a-purple-text); font-size: 12px; }
 .kb-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
 .kb-card-pill { font-size: 10.5px; color: var(--a-sec); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; }
+.kb-published-mark { color: var(--a-teal-text); background: var(--a-teal-soft); font-weight: 700; }
 
 /* ---- Visible-to-client toggle (shared TaskModal/TaskDetailPanel component) ---- */
 .vtf { display: flex; flex-direction: column; gap: 6px; }

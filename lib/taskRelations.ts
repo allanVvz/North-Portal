@@ -77,3 +77,8 @@ export function actionPlanMembersOf<T extends TaskRelation>(planId: string, task
 export function recurrenceExecutionsOf<T extends Pick<TaskRecord, "payload">>(parentId: string, tasks: readonly T[]): T[] {
   return tasks.filter((task) => recurrenceParentIdOf(task) === parentId);
 }
+
+export function recurrenceParentOf<T extends Pick<TaskRecord, "id">>(parentId: string | null, tasks: readonly T[]): T | null {
+  if (!parentId) return null;
+  return tasks.find((task) => task.id === parentId) ?? null;
+}
