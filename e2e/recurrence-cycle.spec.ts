@@ -35,6 +35,9 @@ test.describe("conclusão de ciclo três vezes por semana", () => {
       due_date: "2026-07-20",
       recurrence_cadence: "semanal",
       recurrence_weekdays: [1, 3, 5],
+      start_date: "2026-07-20",
+      end_date: "2026-07-20",
+      payload: { recurrence_group: true, recurrence_cycle: 0, recurrence_revision: 1 },
     }).select("id").single();
     if (error || !task) throw new Error(`Falha ao criar rotina E2E: ${error?.message}`);
     parentId = task.id as string;
@@ -55,15 +58,15 @@ test.describe("conclusão de ciclo três vezes por semana", () => {
       ["2026-07-24", "2026-07-27"],
     ] as const;
 
-    for (const [current, next] of transitions) {
-      const response = await page.evaluate(async ({ id, expectedDueDate }) => {
+    for (const [cycle, [current, next]] of transitions.entries()) {
+      const response = await page.evaluate(async ({ id, expectedDueDate, expectedCycle }) => {
         const result = await fetch(`/api/admin/tasks/${id}/complete-cycle`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ expectedDueDate }),
+          body: JSON.stringify({ expectedDueDate, expectedCycle, expectedRevision: 1 }),
         });
         return { status: result.status, body: await result.json() };
-      }, { id: parentId, expectedDueDate: current });
+      }, { id: parentId, expectedDueDate: current, expectedCycle: cycle });
       expect(response.status).toBe(200);
       expect(response.body.parent.due_date).toBe(next);
       expect(response.body.task).toMatchObject({ due_date: next, plan_id: parentId, recurrence_cadence: null });
@@ -73,11 +76,29 @@ test.describe("conclusão de ciclo três vezes por semana", () => {
       const result = await fetch(`/api/admin/tasks/${id}/complete-cycle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedDueDate: "2026-07-24" }),
+        body: JSON.stringify({ expectedDueDate: "2026-07-24", expectedCycle: 2, expectedRevision: 1 }),
       });
-      return result.status;
+      return { status: result.status, body: await result.json() };
     }, { id: parentId });
-    expect(stale).toBe(409);
+    expect(stale.status).toBe(200);
+    expect(stale.body.created).toBe(false);
+    expect(stale.body.parent.due_date).toBe("2026-07-27");
+
+    const changed = await page.request.patch(`/api/admin/tasks/${parentId}`, { data: { recurrence_weekdays: [1, 4] } });
+    expect(changed.ok()).toBeTruthy();
+    const staleRevision = await page.request.post(`/api/admin/tasks/${parentId}/complete-cycle`, {
+      data: { expectedCycle: 3, expectedRevision: 1, expectedDueDate: "2026-07-27" },
+    });
+    expect(staleRevision.status()).toBe(409);
+    const conflict = await staleRevision.json();
+    expect(conflict.code).toBe("recurrence_schedule_changed");
+    expect(conflict.parent.payload.recurrence_revision).toBe(2);
+
+    const retried = await page.request.post(`/api/admin/tasks/${parentId}/complete-cycle`, {
+      data: { expectedCycle: 3, expectedRevision: 2, expectedDueDate: "2026-07-27" },
+    });
+    expect(retried.ok()).toBeTruthy();
+    expect((await retried.json()).parent.due_date).toBe("2026-07-30");
 
     const { data: children, error } = await sb.from("tasks").select("due_date,plan_id").eq("plan_id", parentId).order("due_date");
     if (error) throw error;
@@ -85,6 +106,7 @@ test.describe("conclusão de ciclo três vezes por semana", () => {
       { due_date: "2026-07-22", plan_id: parentId },
       { due_date: "2026-07-24", plan_id: parentId },
       { due_date: "2026-07-27", plan_id: parentId },
+      { due_date: "2026-07-30", plan_id: parentId },
     ]);
   });
 });

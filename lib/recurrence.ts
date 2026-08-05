@@ -1,51 +1,119 @@
 import { createHash } from "node:crypto";
 import type { RecurringCadence, TaskRecord } from "./validation";
-import { DEFERRED_TASK_FLAG } from "./taskRelations";
+import { ACTION_PLAN_PAYLOAD_KEY, DEFERRED_TASK_FLAG } from "./taskRelations";
 import { EXPLICIT_DATES_KEY, EXPLICIT_GROUP_KEY } from "./taskDateGrouping";
+import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf } from "./recurrenceState";
 
 export type RecurrenceRule = {
   cadence: RecurringCadence;
   weekdays: number[];
   dayOfMonth: number | null;
+  startDate?: string | null;
 };
 
-/** Calculates the next parent date after one cycle is closed. Date-only and
- * UTC by design: this avoids moving a routine around midnight in BRT. */
-export function nextRecurringDueDate(current: string, rule: RecurrenceRule): string {
-  const date = new Date(`${current}T12:00:00Z`);
+function atNoon(value: string): Date {
+  const date = new Date(`${value}T12:00:00Z`);
   if (Number.isNaN(date.getTime())) throw new Error("Data de recorrência inválida.");
+  return date;
+}
 
-  if (rule.cadence === "quinzenal") date.setUTCDate(date.getUTCDate() + 14);
-  else if (rule.cadence === "mensal") {
-    const day = rule.dayOfMonth ?? date.getUTCDate();
-    date.setUTCDate(1);
-    date.setUTCMonth(date.getUTCMonth() + 1);
-    const last = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
-    date.setUTCDate(Math.min(day, last));
-  } else if (rule.weekdays.length) {
-    do date.setUTCDate(date.getUTCDate() + 1); while (!rule.weekdays.includes(date.getUTCDay()));
-  } else date.setUTCDate(date.getUTCDate() + 7);
-
+function iso(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Stable identity makes retries and double clicks converge on one execution. */
-export function recurringExecutionId(parentId: string, occurrenceDate: string): string {
-  const digest = createHash("sha256").update(`${parentId}:${occurrenceDate}`).digest("hex").slice(0, 32).split("");
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function startOfWeek(date: Date): Date {
+  return addDays(date, -date.getUTCDay());
+}
+
+function uniqueWeekdays(values: number[]): number[] {
+  return [...new Set(values)].filter((day) => day >= 0 && day <= 6).sort((a, b) => a - b);
+}
+
+function nextWeeklyDate(current: Date, weekdays: number[], weekInterval: 1 | 2, anchor: Date): Date {
+  for (let offset = 1; offset <= 28; offset += 1) {
+    const candidate = addDays(current, offset);
+    if (!weekdays.includes(candidate.getUTCDay())) continue;
+    const weeksFromAnchor = Math.floor((startOfWeek(candidate).getTime() - startOfWeek(anchor).getTime()) / 604_800_000);
+    if (((weeksFromAnchor % weekInterval) + weekInterval) % weekInterval === 0) return candidate;
+  }
+  throw new Error("Não foi possível calcular a próxima ocorrência.");
+}
+
+function monthlyCandidate(anchor: Date, weekdays: number[]): Date {
+  let best: Date | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let offset = -7; offset <= 7; offset += 1) {
+    const candidate = addDays(anchor, offset);
+    if (!weekdays.includes(candidate.getUTCDay())) continue;
+    const distance = Math.abs(offset);
+    if (distance < bestDistance || (distance === bestDistance && candidate > (best ?? candidate))) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  if (!best) throw new Error("Não foi possível calcular a ocorrência mensal.");
+  return best;
+}
+
+/** Returns the next occurrence after `current`. Weekly and fortnightly rules
+ * can emit every selected weekday. Monthly rules keep the start date as their
+ * month anchor and choose the selected weekday nearest to it (future wins a
+ * tie), within the specified ±7 day window. */
+export function nextRecurringDueDate(current: string, rule: RecurrenceRule): string {
+  const currentDate = atNoon(current);
+  const start = atNoon(rule.startDate ?? current);
+  const weekdays = uniqueWeekdays(rule.weekdays.length ? rule.weekdays : [start.getUTCDay()]);
+
+  if (rule.cadence === "semanal") return iso(nextWeeklyDate(currentDate, weekdays, 1, start));
+  if (rule.cadence === "quinzenal") return iso(nextWeeklyDate(currentDate, weekdays, 2, start));
+
+  const anchorDay = start.getUTCDate();
+  for (let monthOffset = 1; monthOffset <= 240; monthOffset += 1) {
+    const month = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + monthOffset, 1, 12));
+    const lastDay = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0, 12)).getUTCDate();
+    month.setUTCDate(Math.min(anchorDay, lastDay));
+    const candidate = monthlyCandidate(month, weekdays);
+    if (candidate > currentDate) return iso(candidate);
+  }
+  throw new Error("Não foi possível calcular a próxima ocorrência mensal.");
+}
+
+/** Stable identity is based on the cycle, not its editable date. */
+export function recurringExecutionId(parentId: string, cycle: number | string): string {
+  const identity = typeof cycle === "number" ? `cycle:${cycle}` : cycle;
+  const digest = createHash("sha256").update(`${parentId}:${identity}`).digest("hex").slice(0, 32).split("");
   digest[12] = "5";
   digest[16] = ((parseInt(digest[16], 16) & 3) | 8).toString(16);
   return `${digest.slice(0, 8).join("")}-${digest.slice(8, 12).join("")}-${digest.slice(12, 16).join("")}-${digest.slice(16, 20).join("")}-${digest.slice(20).join("")}`;
 }
 
-export function recurringExecutionFields(parent: TaskRecord, id: string, occurrenceDate: string): Record<string, unknown> {
+function occurrenceTimestamp(parent: TaskRecord, occurrenceDate: string): string | null {
+  const payloadTime = typeof parent.payload?.hora === "string" ? parent.payload.hora : "";
+  const timestampTime = parent.scheduled_start_at?.match(/T(\d{2}:\d{2}(?::\d{2})?)/)?.[1] ?? "";
+  const time = payloadTime || timestampTime;
+  return time ? `${occurrenceDate}T${time.length === 5 ? `${time}:00` : time}` : null;
+}
+
+export function recurringExecutionFields(parent: TaskRecord, id: string, occurrenceDate: string, cycle = recurrenceCycleOf(parent) + 1): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     ...(parent.payload ?? {}),
     recurrence_parent_id: parent.id,
     occurrence_date: occurrenceDate,
+    [RECURRENCE_CYCLE_KEY]: cycle,
     [DEFERRED_TASK_FLAG]: true,
   };
   delete payload.completed_cycles;
   delete payload.last_completed_at;
+  delete payload[RECURRENCE_GROUP_KEY];
+  delete payload[RECURRENCE_REVISION_KEY];
+  delete payload[ACTION_PLAN_PAYLOAD_KEY];
+  delete payload.accessed_at;
   return {
     id,
     client_id: parent.client_id,
@@ -63,6 +131,8 @@ export function recurringExecutionFields(parent: TaskRecord, id: string, occurre
     due_date: occurrenceDate,
     start_date: occurrenceDate,
     end_date: null,
+    scheduled_start_at: occurrenceTimestamp(parent, occurrenceDate),
+    scheduled_end_at: null,
     progress_weight: parent.progress_weight,
     description: parent.description,
     client_visible: parent.client_visible,
@@ -74,15 +144,8 @@ export function recurringExecutionFields(parent: TaskRecord, id: string, occurre
   };
 }
 
-/** Explicit multi-date execution. The current occurrence is visible; a future
- * occurrence keeps the same deferred flag as ordinary recurrence until the
- * user opens it from its parent. */
-export function explicitDateExecutionFields(
-  parent: TaskRecord,
-  id: string,
-  occurrenceDate: string,
-  deferred = false,
-): Record<string, unknown> {
+/** Compatibility helper for legacy explicit-date groups during migration. */
+export function explicitDateExecutionFields(parent: TaskRecord, id: string, occurrenceDate: string, deferred = false): Record<string, unknown> {
   const fields = recurringExecutionFields(parent, id, occurrenceDate);
   const payload: Record<string, unknown> = { ...((fields.payload ?? {}) as Record<string, unknown>), [EXPLICIT_GROUP_KEY]: parent.id };
   if (!deferred) delete payload[DEFERRED_TASK_FLAG];
@@ -94,7 +157,7 @@ export function explicitDateExecutionFields(
 
 /** The task converted into a routine remains the visible first occurrence. */
 export function currentRecurringExecutionFields(parent: TaskRecord, id: string, occurrenceDate: string): Record<string, unknown> {
-  const fields = recurringExecutionFields(parent, id, occurrenceDate);
+  const fields = recurringExecutionFields(parent, id, occurrenceDate, 0);
   const payload = { ...((fields.payload ?? {}) as Record<string, unknown>) };
   delete payload[DEFERRED_TASK_FLAG];
   fields.payload = payload;

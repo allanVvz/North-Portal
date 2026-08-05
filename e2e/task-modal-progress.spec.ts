@@ -75,6 +75,9 @@ test.describe("progresso do modal de tarefa", () => {
     expect(desktopLayout.footerBottomDelta).toBeLessThan(2);
     expect(desktopLayout.horizontalOverflow).toBe(false);
 
+    // Description is a click-to-edit view (feat: clickable card description) —
+    // double-click the read view to reveal the textarea before interacting with it.
+    await modal.locator(".tm-desc-view").dblclick();
     const description = modal.getByPlaceholder(/Objetivo, referência e critério/);
     const initialDescriptionHeight = await description.evaluate((element) => element.getBoundingClientRect().height);
     await description.fill("Linha 1\nLinha 2\nLinha 3\nLinha 4\nLinha 5\nLinha 6");

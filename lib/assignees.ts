@@ -27,3 +27,16 @@ export function assigneeOptions(values: readonly (string | null | undefined)[]):
   }
   return Array.from(names.values()).sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
+
+/** Combines the legacy free-text `assignee` field with the display names of
+ * any linked task_assignees accounts into the same CSV representation the
+ * rest of the app already reads — so every existing consumer of
+ * `TaskRecord.assignee` keeps working unchanged once accounts exist. */
+export function mergeAssigneeDisplay(
+  freeText: string | null | undefined,
+  linkedNames: readonly (string | null | undefined)[],
+): string | null {
+  const linked = linkedNames.filter((name): name is string => Boolean(name?.trim()));
+  const merged = formatAssignees([...parseAssignees(freeText), ...linked]);
+  return merged || null;
+}

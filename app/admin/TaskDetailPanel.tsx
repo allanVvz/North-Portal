@@ -10,6 +10,7 @@ import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials } from "./kanbanShar
 import CommentText from "@/app/CommentText";
 import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, kindDef, kindLabel } from "@/lib/taskCatalog";
+import { actionPlanIdOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
 export default function TaskDetailPanel({
@@ -104,10 +105,12 @@ export default function TaskDetailPanel({
         <div className="tdp-attr">
           <span>Responsável</span>
           <AssigneePicker
-            value={task.assignee ?? ""}
-            options={assignees}
+            assignee={task.assignee}
+            assigneeProfileIds={task.assignee_profile_ids}
+            accountOptions={adminReviewers}
+            freeTextOptions={assignees}
             disabled={busy}
-            onChange={(value) => void patch({ assignee: value || null })}
+            onChange={({ assignee, assigneeProfileIds }) => void patch({ assignee, assignee_profile_ids: assigneeProfileIds })}
           />
         </div>
         {/* flowFlags starts null while its fetch is in flight — treat that as
@@ -141,7 +144,7 @@ export default function TaskDetailPanel({
           <div className="tdp-attr">
             <span>Plano de Ação</span>
             <select
-              value={task.plan_id ?? ""} disabled={busy}
+              value={actionPlanIdOf(task) ?? ""} disabled={busy}
               onChange={(e) => patch({ plan_id: e.target.value || null })}
             >
               <option value="">— Sem plano —</option>

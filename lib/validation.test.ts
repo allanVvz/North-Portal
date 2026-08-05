@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   TASK_STATUSES,
   anyClientHasFlowEnabled,
+  canDecideApproval,
   canLeaveRevisao,
   clientApprovalActionSchema,
   flowFlagsCascadeEffects,
@@ -90,6 +91,33 @@ describe("canLeaveRevisao", () => {
   it("is a no-op for any status other than Revisão", () => {
     expect(canLeaveRevisao("aprovacao", "user-a", "user-b")).toBe(true);
     expect(canLeaveRevisao("em_producao", null, "any-admin-id")).toBe(true);
+  });
+});
+
+describe("canDecideApproval", () => {
+  it("always allows a gerente, regardless of who the approver is", () => {
+    expect(canDecideApproval("aprovacao", "aprovado", "user-a", "user-b", "gerente")).toBe(true);
+    expect(canDecideApproval("aprovacao", "aprovado", null, "user-b", "gerente")).toBe(true);
+  });
+
+  it("allows the assigned approver even at editor level", () => {
+    expect(canDecideApproval("aprovacao", "aprovado", "user-a", "user-a", "editor")).toBe(true);
+  });
+
+  it("blocks a non-gerente who is not the assigned approver", () => {
+    expect(canDecideApproval("aprovacao", "aprovado", "user-a", "user-b", "editor")).toBe(false);
+  });
+
+  it("blocks any non-gerente when the card has no approver assigned yet", () => {
+    // Unlike canLeaveRevisao's unclaimed-card exception, an unassigned
+    // approver never opens the door — approving/reopening stays gerente-only
+    // until someone is explicitly designated.
+    expect(canDecideApproval("aprovacao", "aprovado", null, "user-b", "editor")).toBe(false);
+  });
+
+  it("is a no-op for transitions that are not an approval decision", () => {
+    expect(canDecideApproval("aprovacao", "em_producao", "user-a", "user-b", "editor")).toBe(true);
+    expect(canDecideApproval("backlog", "em_producao", null, "any-user", "usuario")).toBe(true);
   });
 });
 

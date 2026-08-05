@@ -47,6 +47,7 @@ test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend r
 
   test.afterAll(async () => {
     if (clientId) {
+      await deleteAuthUserByEmail(sb, `${SLUG}@e2e-test.com`);
       await sb.from("tasks").delete().eq("client_id", clientId);
       await sb.from("briefing_answers").delete().eq("client_id", clientId);
       await sb.from("client_drive_links").delete().eq("client_id", clientId);

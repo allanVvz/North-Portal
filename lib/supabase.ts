@@ -1,8 +1,15 @@
 import { createClient } from "./supabase/server";
-import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
-import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, nextExplicitOccurrenceDate, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch, replicatedExecutionPayload } from "./taskDateGrouping";
-import { assigneeOptions } from "./assignees";
-import { visibleOnTaskBoard } from "./taskRelations";
+import {
+  currentRecurringExecutionFields,
+  explicitDateExecutionFields,
+  nextRecurringDueDate,
+  recurringExecutionFields,
+  recurringExecutionId,
+} from "./recurrence";
+import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
+import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch, replicatedExecutionPayload } from "./taskDateGrouping";
+import { assigneeOptions, mergeAssigneeDisplay } from "./assignees";
+import { actionPlanIdOf, actionPlanMembersOf, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
@@ -18,6 +25,7 @@ import {
   type PortalPayload,
   type PortalPrefs,
   type ReviewerCandidate,
+  type RecurringCadence,
   type RecurringTaskRecord,
   type TaskRecord,
   type TaskStatus,
@@ -31,6 +39,35 @@ type PrefsRow = { theme: string | null; avatar_style: number | null; display_nam
 
 const TASK_COLUMNS =
   "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at";
+
+// Responsável linked to a real account (task_assignees), merged into the
+// legacy `assignee` free-text column at read time — see mergeAssigneeDisplay.
+// Every read path that ends up in a UI-facing response selects this instead
+// of the bare TASK_COLUMNS so `assignee` always reflects linked accounts too.
+const TASK_ASSIGNEES_JOIN = "task_assignees(profile:profiles(id,full_name))";
+const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN}`;
+
+type JoinedAssigneeProfile = { id: string; full_name: string | null };
+type TaskAssigneesJoin = { task_assignees?: { profile: JoinedAssigneeProfile | JoinedAssigneeProfile[] | null }[] | null };
+
+// Merges linked-account names into the legacy free-text `assignee` column
+// (mergeAssigneeDisplay) and surfaces the linked profile ids too, so the
+// picker can pre-select real-account chips wherever a task object already
+// flows (Kanban board state, modal, detail panel) without a second request —
+// same precedent as reviewer_id/approver_id already being plain fields.
+function mergeTaskAssigneeRow<T extends { assignee: string | null } & TaskAssigneesJoin>(
+  row: T,
+): Omit<T, "task_assignees"> & { assignee_profile_ids: string[] } {
+  const { task_assignees, ...rest } = row;
+  const linkedProfiles = (task_assignees ?? [])
+    .map((r) => (Array.isArray(r.profile) ? r.profile[0] : r.profile))
+    .filter((p): p is JoinedAssigneeProfile => Boolean(p));
+  return {
+    ...rest,
+    assignee: mergeAssigneeDisplay(rest.assignee, linkedProfiles.map((p) => p.full_name)),
+    assignee_profile_ids: linkedProfiles.map((p) => p.id),
+  };
+}
 
 
 const STATUS_KANBAN: Record<TaskStatus, string> = {
@@ -57,7 +94,7 @@ function fmtDateRange(start: string | null, end: string | null): string {
 function planoFromTasks(rows: TaskRecord[], allRows: TaskRecord[]): PortalContent["plano"] {
   return rows.map((t) => {
     const p = (t.payload ?? {}) as Record<string, unknown>;
-    const members = allRows.filter((m) => m.plan_id === t.id);
+    const members = actionPlanMembersOf(t.id, allRows);
     const pct = taskProgress(t, members);
     const statusLabel =
       typeof p.statusLabel === "string"
@@ -218,7 +255,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     // the separate "Plano de Ação" feature for earlier Kanban stages.
     supabase
       .from("tasks")
-      .select(TASK_COLUMNS)
+      .select(TASK_COLUMNS_WITH_ASSIGNEES)
       .eq("client_id", client.id)
       .or("client_visible.eq.true,status.in.(aprovacao,aprovado,concluido)")
       .order("position"),
@@ -240,7 +277,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const r = results.data?.[0] as ResultsRow | undefined;
   const c = content.data?.[0] as ContentRow | undefined;
   const p = prefs.data?.[0] as PrefsRow | undefined;
-  const taskRows = (tasks.data as ClientTask[] | null) ?? [];
+  const taskRows = ((tasks.data as unknown as (ClientTask & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
   const documentRows = (documents.data as DocumentRecord[] | null) ?? [];
 
   // Platform-wide master switch: while off, every client_visible flag is
@@ -733,25 +770,26 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},clients(name,slug,disabled)`)
-    .not("recurrence_cadence", "is", null)
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled)`)
+    .or("recurrence_cadence.not.is.null,payload->>recurrence_group.eq.true")
     .order("position")
     .order("due_date", { nullsFirst: false });
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string; disabled: boolean };
-  type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
+  type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
   const parents = ((data as unknown as Row[] | null) ?? [])
-    .filter(({ clients }) => !(Array.isArray(clients) ? clients[0] : clients)?.disabled);
+    .filter(({ clients }) => !(Array.isArray(clients) ? clients[0] : clients)?.disabled)
+    .map(mergeTaskAssigneeRow);
   const executionsByParent = new Map<string, TaskRecord[]>();
   if (parents.length) {
     const { data: executionRows, error: executionError } = await supabase
       .from("tasks")
-      .select(TASK_COLUMNS)
+      .select(TASK_COLUMNS_WITH_ASSIGNEES)
       .in("plan_id", parents.map((task) => task.id))
       .order("position")
       .order("due_date", { nullsFirst: false });
     if (executionError) fail(executionError);
-    for (const execution of (executionRows as TaskRecord[] | null) ?? []) {
+    for (const execution of ((executionRows as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow)) {
       if (!execution.plan_id) continue;
       const list = executionsByParent.get(execution.plan_id);
       if (list) list.push(execution); else executionsByParent.set(execution.plan_id, [execution]);
@@ -763,10 +801,11 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
       const payload = task.payload ?? {};
       return {
         ...task,
-        cadence: task.recurrence_cadence!, weekdays: task.recurrence_weekdays,
+        cadence: (task.recurrence_cadence ?? (typeof payload.recurrence_last_cadence === "string" ? payload.recurrence_last_cadence : "semanal")) as RecurringCadence,
+        weekdays: task.recurrence_weekdays,
         day_of_month: task.recurrence_day_of_month, next_due_date: task.due_date,
         time_of_day: typeof payload.hora === "string" ? payload.hora : null,
-        timezone: "America/Sao_Paulo", active: Boolean(task.due_date),
+        timezone: "America/Sao_Paulo", active: Boolean(task.recurrence_cadence),
         completed_cycles: typeof payload.completed_cycles === "number" ? payload.completed_cycles : 0,
         last_completed_at: typeof payload.last_completed_at === "string" ? payload.last_completed_at : null,
         template_payload: payload,
@@ -787,12 +826,12 @@ export async function listTasks(clientId: string): Promise<TaskRecord[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(TASK_COLUMNS)
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
     .eq("client_id", clientId)
     .order("position")
     .order("created_at");
   if (error) fail(error);
-  return ((data as TaskRecord[] | null) ?? []).filter(visibleOnTaskBoard);
+  return ((data as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow).filter(visibleOnTaskBoard);
 }
 
 // Unassigned board — tasks created without a client ("Outros" filter). client_id
@@ -803,12 +842,12 @@ export async function listUnassignedTasks(): Promise<TaskRecord[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(TASK_COLUMNS)
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
     .is("client_id", null)
     .order("position")
     .order("created_at");
   if (error) fail(error);
-  return ((data as TaskRecord[] | null) ?? []).filter(visibleOnTaskBoard);
+  return ((data as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow).filter(visibleOnTaskBoard);
 }
 
 export type BoardTask = TaskRecord & { clientName: string; clientSlug: string };
@@ -818,16 +857,17 @@ export async function listAllTasks(): Promise<BoardTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},clients(name,slug,disabled)`)
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled)`)
     .order("position")
     .order("created_at");
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string; disabled: boolean };
-  type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
+  type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
   return ((data as unknown as Row[] | null) ?? [])
     // A disabled client's cards disappear from the shared board entirely —
     // unassigned tasks (clients null) are never affected by this.
     .filter(({ clients, ...task }) => visibleOnTaskBoard(task) && !(Array.isArray(clients) ? clients[0] : clients)?.disabled)
+    .map(mergeTaskAssigneeRow)
     .map(({ clients, ...task }) => {
       const c = Array.isArray(clients) ? clients[0] : clients;
       return { ...task, clientName: c?.name ?? "Outros", clientSlug: c?.slug ?? "" };
@@ -846,28 +886,31 @@ export async function listActionPlans(): Promise<ActionPlan[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},clients(name,slug)`)
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug)`)
     .eq("kind", "plano_acao")
     .order("updated_at", { ascending: false });
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string };
-  type Row = TaskRecord & { clients: JoinedClient | JoinedClient[] | null };
-  const rows = (data as unknown as Row[] | null) ?? [];
+  type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
+  const rows = ((data as unknown as Row[] | null) ?? []).filter((task) => task.payload?.[RECURRENCE_GROUP_KEY] !== true);
   if (!rows.length) return [];
+  const planIds = rows.map((plan) => plan.id);
   const { data: memberData, error: memberError } = await supabase
     .from("tasks")
-    .select(TASK_COLUMNS)
-    .in("plan_id", rows.map((plan) => plan.id))
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
+    .or(`plan_id.in.(${planIds.join(",")}),payload->>action_plan_id.in.(${planIds.join(",")})`)
     .order("position")
     .order("created_at");
   if (memberError) fail(memberError);
   const membersByPlan = new Map<string, TaskRecord[]>();
-  for (const r of (memberData as TaskRecord[] | null) ?? []) {
-    if (!r.plan_id) continue;
-    const list = membersByPlan.get(r.plan_id);
-    if (list) list.push(r); else membersByPlan.set(r.plan_id, [r]);
+  for (const r of ((memberData as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow)) {
+    const planId = actionPlanIdOf(r);
+    if (!planId) continue;
+    const list = membersByPlan.get(planId);
+    if (list) list.push(r); else membersByPlan.set(planId, [r]);
   }
   return rows
+    .map(mergeTaskAssigneeRow)
     .map(({ clients, ...task }) => {
       const c = Array.isArray(clients) ? clients[0] : clients;
       const members = membersByPlan.get(task.id) ?? [];
@@ -888,12 +931,12 @@ export async function listRelatedTasks(parentId: string): Promise<TaskRecord[]> 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(TASK_COLUMNS)
-    .eq("plan_id", parentId)
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
+    .or(`plan_id.eq.${parentId},payload->>action_plan_id.eq.${parentId}`)
     .order("position")
     .order("due_date", { nullsFirst: false });
   if (error) fail(error);
-  return (data as TaskRecord[] | null) ?? [];
+  return ((data as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
 }
 
 // Single task read through the caller's own RLS-bound session — for an admin
@@ -902,9 +945,10 @@ export async function listRelatedTasks(parentId: string): Promise<TaskRecord[]> 
 // client), so a non-visible/foreign task simply comes back as null.
 export async function getTaskById(id: string): Promise<TaskRecord | null> {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", id).limit(1);
+  const { data, error } = await supabase.from("tasks").select(TASK_COLUMNS_WITH_ASSIGNEES).eq("id", id).limit(1);
   if (error) fail(error);
-  return (data?.[0] as TaskRecord | undefined) ?? null;
+  const row = data?.[0] as unknown as (TaskRecord & TaskAssigneesJoin) | undefined;
+  return row ? mergeTaskAssigneeRow(row) : null;
 }
 
 export async function createTask(clientId: string | null, input: Record<string, unknown>): Promise<TaskRecord> {
@@ -920,21 +964,30 @@ export async function createTask(clientId: string | null, input: Record<string, 
   return row;
 }
 
+function inputActionPlanId(input: Record<string, unknown>): string | null {
+  const value = input.plan_id;
+  return typeof value === "string" && value ? value : null;
+}
+
 export async function createExplicitDateTaskGroup(clientId: string | null, input: Record<string, unknown>, rawDates: unknown): Promise<TaskRecord> {
   const dates = normalizeOccurrenceDates(rawDates, typeof input.due_date === "string" ? input.due_date : null);
   if (dates.length < 2) return createTask(clientId, input);
   const rule = inferDateGroupRule(dates);
+  const actionPlanId = inputActionPlanId(input);
   const parent = await createTask(clientId, {
     ...input,
+    plan_id: null,
     due_date: dates[0],
     start_date: dates[0],
     recurrence_cadence: rule.cadence,
     recurrence_weekdays: rule.weekdays,
     recurrence_day_of_month: rule.dayOfMonth,
-    payload: { ...((input.payload ?? {}) as Record<string, unknown>), explicit_occurrence_dates: dates },
+    payload: { ...withActionPlanId((input.payload ?? {}) as Record<string, unknown>, null), explicit_occurrence_dates: dates },
   });
   try {
-    return await createTask(clientId, explicitDateExecutionFields(parent, recurringExecutionId(parent.id, dates[0]), dates[0]));
+    const first = explicitDateExecutionFields(parent, recurringExecutionId(parent.id, dates[0]), dates[0]);
+    first.payload = withActionPlanId(first.payload as Record<string, unknown>, actionPlanId);
+    return await createTask(clientId, first);
   } catch (error) {
     await deleteTask(parent.id).catch(() => undefined);
     throw error;
@@ -979,7 +1032,8 @@ async function updateExplicitChildGroup(id: string, parent: TaskRecord, patch: R
     const template = parentTemplatePatch(shared);
     if (Object.keys(template).length) await updateTask(parent.id, template);
   }
-  const currentUpdate = Object.keys(local).length ? updateTask(id, local) : null;
+  const currentPatch = sharedPayload ? { ...local, payload: sharedPayload } : local;
+  const currentUpdate = Object.keys(currentPatch).length ? updateTask(id, currentPatch) : null;
   const [, updatedCurrent] = await Promise.all([
     replicateExplicitChildPayload(parent.id, id, sharedPayload),
     currentUpdate,
@@ -1015,6 +1069,7 @@ async function updateExplicitParent(id: string, patch: Record<string, unknown>):
 
 function recurringParentInput(current: TaskRecord, patch: Record<string, unknown>): Record<string, unknown> {
   const next = { ...current, ...patch } as TaskRecord;
+  const startDate = next.start_date ?? next.due_date;
   return {
     kind: next.kind,
     subtype: next.subtype,
@@ -1027,15 +1082,15 @@ function recurringParentInput(current: TaskRecord, patch: Record<string, unknown
     plan_id: null,
     requires_review: next.requires_review,
     requires_approval: next.requires_approval,
-    due_date: next.due_date,
-    start_date: next.start_date ?? next.due_date,
-    end_date: next.end_date,
+    due_date: startDate,
+    start_date: startDate,
+    end_date: next.end_date && startDate && next.end_date >= startDate ? next.end_date : startDate,
     scheduled_start_at: next.scheduled_start_at,
     scheduled_end_at: next.scheduled_end_at,
     progress_weight: next.progress_weight,
     description: next.description,
     client_visible: next.client_visible,
-    payload: next.payload,
+    payload: recurrenceParentPayload(withActionPlanId(next.payload, null)),
     position: next.position,
     recurrence_cadence: next.recurrence_cadence,
     recurrence_weekdays: next.recurrence_weekdays,
@@ -1043,9 +1098,36 @@ function recurringParentInput(current: TaskRecord, patch: Record<string, unknown
   };
 }
 
+/** New recurring cards created outside Rotinas need the same parent/template
+ * split as an existing card being converted. The returned row is the first
+ * real execution, so Plan cards continue to appear on the Plan surface. */
+export async function createRecurringTaskGroup(clientId: string | null, input: Record<string, unknown>): Promise<TaskRecord> {
+  const startDate = typeof input.start_date === "string" ? input.start_date : typeof input.due_date === "string" ? input.due_date : null;
+  if (!startDate || !input.recurrence_cadence) return createTask(clientId, input);
+  const actionPlanId = inputActionPlanId(input);
+  const parent = await createTask(clientId, {
+    ...input,
+    plan_id: null,
+    due_date: startDate,
+    start_date: startDate,
+    end_date: typeof input.end_date === "string" && input.end_date >= startDate ? input.end_date : startDate,
+    payload: recurrenceParentPayload(withActionPlanId((input.payload ?? {}) as Record<string, unknown>, null)),
+  });
+  try {
+    const firstId = recurringExecutionId(parent.id, 0);
+    const fields = currentRecurringExecutionFields(parent, firstId, startDate);
+    fields.payload = withActionPlanId(fields.payload as Record<string, unknown>, actionPlanId);
+    return await createTask(clientId, fields);
+  } catch (error) {
+    await deleteTask(parent.id).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
   const next = { ...current, ...patch } as TaskRecord;
   if (!next.recurrence_cadence || !next.due_date) return updateTask(current.id, patch);
+  const actionPlanId = actionPlanIdOf(next);
   const clientId = patch.client_id === null || typeof patch.client_id === "string" ? patch.client_id : current.client_id;
   const parent = await createTask(clientId, recurringParentInput(current, patch));
   const fields = isExplicitDateParent(parent)
@@ -1053,6 +1135,7 @@ async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<st
     : currentRecurringExecutionFields(parent, current.id, next.due_date);
   const { id: _id, ...executionFields } = fields;
   void _id;
+  executionFields.payload = withActionPlanId(executionFields.payload as Record<string, unknown>, actionPlanId);
   try {
     return await updateTask(current.id, {
       ...executionFields,
@@ -1086,95 +1169,165 @@ async function topPositionFor(status: TaskStatus, excludeId: string): Promise<nu
   return min - 10;
 }
 
-export async function updateTaskGroup(id: string, current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
-  // Any content/status edit (not an explicit drag reorder) bumps the card to
-  // the top of its Kanban column — the same "just touched, sort it first"
-  // rule as the last-updated ordering on the Clientes and Plano boards.
+async function patchWithTopPosition(id: string, current: TaskRecord, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (patch.position === undefined) {
     const nextStatus = (patch.status as TaskStatus | undefined) ?? current.status;
-    patch = { ...patch, position: await topPositionFor(nextStatus, id) };
+    return { ...patch, position: await topPositionFor(nextStatus, id) };
   }
-  const parent = current.plan_id ? await getTaskById(current.plan_id) : null;
+  return patch;
+}
+
+async function updateRecurringExecution(id: string, parent: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
+  const updated = await updateTask(id, patch);
+  if (updated.due_date) {
+    const bounds: Record<string, unknown> = {};
+    if (!parent.start_date || updated.due_date < parent.start_date) bounds.start_date = updated.due_date;
+    if (!parent.end_date || updated.due_date > parent.end_date) bounds.end_date = updated.due_date;
+    if (Object.keys(bounds).length) await updateTask(parent.id, bounds);
+  }
+  return updated;
+}
+
+async function updateRecurrenceTemplate(current: TaskRecord, patch: Record<string, unknown>, nextRecurrence: unknown, retried = false): Promise<TaskRecord> {
+  const originalPatch = { ...patch, payload: payloadRecord(patch.payload) ? { ...payloadRecord(patch.payload)! } : patch.payload };
+  const related = await listRelatedTasks(current.id);
+  const executions = related.filter((task) => recurrenceParentIdOf(task) === current.id);
+  const scheduleKeys = ["recurrence_cadence", "recurrence_weekdays", "recurrence_day_of_month", "start_date"];
+  const changedSchedule = scheduleKeys.some((key) => Object.prototype.hasOwnProperty.call(patch, key)
+    && JSON.stringify(patch[key]) !== JSON.stringify((current as unknown as Record<string, unknown>)[key]));
+  const nextPayload = { ...(payloadRecord(patch.payload) ?? current.payload ?? {}) };
+  const currentCycle = recurrenceCycleOf(current);
+  const revision = recurrenceRevisionOf(current) + (changedSchedule ? 1 : 0);
+  if (nextRecurrence) {
+    Object.assign(nextPayload, recurrenceParentPayload(nextPayload, executions.length ? currentCycle : 0, revision));
+    const start = typeof patch.start_date === "string" ? patch.start_date : current.start_date ?? current.due_date;
+    if (!executions.length && start) {
+      patch.due_date = start;
+      patch.start_date = start;
+      delete nextPayload.completed_cycles;
+      delete nextPayload.last_completed_at;
+    } else if (executions.length) {
+      delete patch.due_date;
+    }
+    const due = typeof patch.due_date === "string" ? patch.due_date : current.due_date;
+    const end = typeof patch.end_date === "string" ? patch.end_date : current.end_date;
+    if (due && (!end || end < due)) patch.end_date = due;
+  } else if (executions.length) {
+    if (current.recurrence_cadence) nextPayload.recurrence_last_cadence = current.recurrence_cadence;
+    Object.assign(nextPayload, recurrenceParentPayload(nextPayload, currentCycle, revision));
+  } else {
+    delete nextPayload[RECURRENCE_GROUP_KEY];
+    delete nextPayload[RECURRENCE_CYCLE_KEY];
+    delete nextPayload[RECURRENCE_REVISION_KEY];
+  }
+  patch.payload = nextPayload;
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("tasks")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", current.id)
+    .contains("payload", {
+      [RECURRENCE_CYCLE_KEY]: currentCycle,
+      [RECURRENCE_REVISION_KEY]: recurrenceRevisionOf(current),
+    })
+    .select(TASK_COLUMNS).limit(1);
+  if (error) fail(error);
+  const updated = data?.[0] as TaskRecord | undefined;
+  if (updated) return updated;
+  const refreshed = await getTaskById(current.id);
+  if (!refreshed) throw new HttpError(404, "Tarefa não encontrada.");
+  if (retried) throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent: refreshed });
+  return updateRecurrenceTemplate(refreshed, originalPatch, nextRecurrence, true);
+}
+
+function shouldConvertToRecurringGroup(current: TaskRecord, recurrenceParentId: string | null, historical: boolean, nextRecurrence: unknown): boolean {
+  return !current.recurrence_cadence && !recurrenceParentId && !historical && Boolean(nextRecurrence);
+}
+
+export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch: Record<string, unknown>): Promise<TaskRecord> {
+  const patch = await patchWithTopPosition(id, current, rawPatch);
+  const recurrenceParentId = recurrenceParentIdOf(current);
+  const parent = recurrenceParentId ? await getTaskById(recurrenceParentId) : null;
   if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
   const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
-  if (!current.plan_id && !current.recurrence_cadence && nextRecurrence) {
+  const historical = current.payload?.[RECURRENCE_GROUP_KEY] === true;
+  if (shouldConvertToRecurringGroup(current, recurrenceParentId, historical, nextRecurrence)) {
     return convertTaskToRecurringGroup(current, patch);
   }
-  return updateExplicitParent(id, patch);
+  if (parent) return updateRecurringExecution(id, parent, patch);
+  if (current.recurrence_cadence || historical) return updateRecurrenceTemplate(current, patch, nextRecurrence);
+  return updateTask(id, patch);
 }
 
-function assertCurrentRecurringCycle(parent: TaskRecord | null, expectedDueDate: string | null): asserts parent is TaskRecord & { recurrence_cadence: NonNullable<TaskRecord["recurrence_cadence"]> } {
-  if (!parent) throw new HttpError(404, "Tarefa recorrente não encontrada.");
-  if (!parent.recurrence_cadence) throw new HttpError(409, "Esta tarefa não é recorrente.");
-  if (!expectedDueDate || parent.due_date !== expectedDueDate) throw new HttpError(409, "Este ciclo já foi concluído.");
-}
-
-async function materializeNextExplicitExecution(
-  parent: TaskRecord,
-  nextDue: string | null,
-  related: TaskRecord[],
-): Promise<{ task?: TaskRecord; created: boolean }> {
-  if (!nextDue) return { created: false };
-  const existing = related.find((task) => task.due_date === nextDue);
-  if (existing) return { task: existing, created: false };
-  const supabase = await createClient();
-  const nextId = recurringExecutionId(parent.id, nextDue);
-  const { data, error } = await supabase.from("tasks")
-    .insert(explicitDateExecutionFields(parent, nextId, nextDue, true))
-    .select(TASK_COLUMNS).limit(1);
-  if (error && error.code !== "23505") fail(error);
-  const inserted = data?.[0] as TaskRecord | undefined;
-  return { task: inserted ?? await getTaskById(nextId) ?? undefined, created: Boolean(inserted) };
-}
-
-async function completeExplicitTaskCycle(parent: TaskRecord, currentDueDate: string): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
-  const related = await listRelatedTasks(parent.id);
-  const currentTask = related.find((task) => task.due_date === currentDueDate);
-  if (!currentTask) throw new HttpError(503, "Nao foi possivel localizar a execucao atual.");
-  const nextDue = nextExplicitOccurrenceDate(explicitDatesOf(parent), currentDueDate);
-  const next = await materializeNextExplicitExecution(parent, nextDue, related);
-  const supabase = await createClient();
-  const completedCycles = (typeof parent.payload?.completed_cycles === "number" ? parent.payload.completed_cycles : 0) + 1;
-  const { data, error } = await supabase.from("tasks").update({
-    due_date: nextDue,
-    payload: { ...parent.payload, completed_cycles: completedCycles, last_completed_at: new Date().toISOString(), cycle_completed: nextDue === null },
-  }).eq("id", parent.id).eq("due_date", currentDueDate).select(TASK_COLUMNS).limit(1);
-  if (error) fail(error);
-  const updatedParent = data?.[0] as TaskRecord | undefined;
-  if (!updatedParent) throw new HttpError(409, "Este ciclo já foi concluído.");
-  const task = next.task ?? currentTask;
-  if (!task) throw new HttpError(503, "Não foi possível localizar a execução.");
-  return { parent: updatedParent, task, created: next.created };
-}
-
-export async function completeTaskCycle(id: string, expectedDueDate: string | null): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
+async function completeTaskCycleForRequest(
+  id: string,
+  expectedCycle: number | undefined,
+  expectedRevision: number | undefined,
+  expectedDueDate: string | null,
+): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
   const supabase = await createClient();
   const parent = await getTaskById(id);
-  assertCurrentRecurringCycle(parent, expectedDueDate);
-  const currentDueDate = parent.due_date!;
-  if (isExplicitDateParent(parent)) return completeExplicitTaskCycle(parent, currentDueDate);
+  if (!parent) throw new HttpError(404, "Tarefa recorrente não encontrada.");
+  if (!parent.recurrence_cadence || !parent.due_date) throw new HttpError(409, "Esta tarefa não está recorrente.");
+  const currentCycle = recurrenceCycleOf(parent);
+  const currentRevision = recurrenceRevisionOf(parent);
+  const requestedCycle = expectedCycle ?? (expectedDueDate === parent.due_date ? currentCycle : undefined);
+  const requestedRevision = expectedRevision ?? currentRevision;
+  if (requestedCycle === undefined || requestedRevision !== currentRevision || requestedCycle > currentCycle) {
+    throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent });
+  }
+  if (requestedCycle < currentCycle) {
+    const repeatedId = recurringExecutionId(id, requestedCycle + 1);
+    let repeated = await getTaskById(repeatedId);
+    if (!repeated && requestedCycle + 1 === currentCycle) {
+      const { data, error } = await supabase.from("tasks")
+        .insert(recurringExecutionFields(parent, repeatedId, parent.due_date, currentCycle))
+        .select(TASK_COLUMNS).limit(1);
+      if (error && error.code !== "23505") fail(error);
+      repeated = (data?.[0] as TaskRecord | undefined) ?? await getTaskById(repeatedId);
+    }
+    if (!repeated) throw new HttpError(503, "Não foi possível localizar a execução já criada.");
+    return { parent, task: repeated, created: false };
+  }
 
-  const nextDue = nextRecurringDueDate(currentDueDate, {
+  const nextCycle = currentCycle + 1;
+  const nextDue = nextRecurringDueDate(parent.due_date, {
     cadence: parent.recurrence_cadence,
     weekdays: parent.recurrence_weekdays,
     dayOfMonth: parent.recurrence_day_of_month,
+    startDate: parent.start_date ?? parent.due_date,
   });
-
-  const executionId = recurringExecutionId(id, nextDue);
-  const { data: inserted, error: insertError } = await supabase.from("tasks")
-    .insert(recurringExecutionFields(parent, executionId, nextDue))
-    .select(TASK_COLUMNS).limit(1);
-  if (insertError && insertError.code !== "23505") fail(insertError);
-
-  const completedCycles = (typeof parent.payload?.completed_cycles === "number" ? parent.payload.completed_cycles : 0) + 1;
+  const nextPayload = recurrenceParentPayload({
+    ...(parent.payload ?? {}),
+    completed_cycles: nextCycle,
+    last_completed_at: new Date().toISOString(),
+  }, nextCycle, currentRevision);
   const { data: advanced, error: updateError } = await supabase.from("tasks").update({
     due_date: nextDue,
-    payload: { ...(parent.payload ?? {}), completed_cycles: completedCycles, last_completed_at: new Date().toISOString() },
-  }).eq("id", id).eq("due_date", currentDueDate).select(TASK_COLUMNS).limit(1);
+    end_date: !parent.end_date || nextDue > parent.end_date ? nextDue : parent.end_date,
+    payload: nextPayload,
+  }).eq("id", id).contains("payload", {
+    [RECURRENCE_CYCLE_KEY]: currentCycle,
+    [RECURRENCE_REVISION_KEY]: currentRevision,
+  }).select(TASK_COLUMNS).limit(1);
   if (updateError) fail(updateError);
-  const updatedParent = advanced?.[0] as TaskRecord | undefined;
-  if (!updatedParent) throw new HttpError(409, "Este ciclo já foi concluído.");
+  let updatedParent = advanced?.[0] as TaskRecord | undefined;
+  if (!updatedParent) {
+    const refreshed = await getTaskById(id);
+    if (!refreshed) throw new HttpError(404, "Tarefa recorrente não encontrada.");
+    if (recurrenceRevisionOf(refreshed) !== currentRevision) {
+      throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent: refreshed });
+    }
+    if (recurrenceCycleOf(refreshed) !== nextCycle) {
+      throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent: refreshed });
+    }
+    updatedParent = refreshed;
+  }
 
+  const executionId = recurringExecutionId(id, nextCycle);
+  const { data: inserted, error: insertError } = await supabase.from("tasks")
+    .insert(recurringExecutionFields(parent, executionId, nextDue, nextCycle))
+    .select(TASK_COLUMNS).limit(1);
+  if (insertError && insertError.code !== "23505") fail(insertError);
   let task = inserted?.[0] as TaskRecord | undefined;
   if (!task) {
     const { data: existing, error } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", executionId).limit(1);
@@ -1185,10 +1338,34 @@ export async function completeTaskCycle(id: string, expectedDueDate: string | nu
   return { parent: updatedParent, task, created: Boolean(inserted?.length) };
 }
 
+export async function completeTaskCycle(
+  id: string,
+  expectedCycle: number | undefined,
+  expectedRevision: number | undefined,
+  expectedDueDate: string | null,
+): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
+  return completeTaskCycleForRequest(id, expectedCycle, expectedRevision, expectedDueDate);
+}
+
 export async function deleteTask(id: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("tasks").delete().eq("id", id);
   if (error) fail(error);
+}
+
+// Replaces the full set of linked Responsável accounts for a task —
+// delete-then-insert, no diffing, no history table (same "mutable, no audit
+// trail" product decision already applied to reviewer_id/approver_id).
+export async function setTaskAssigneeProfiles(taskId: string, profileIds: string[]): Promise<void> {
+  const supabase = await createClient();
+  const unique = Array.from(new Set(profileIds));
+  const { error: delError } = await supabase.from("task_assignees").delete().eq("task_id", taskId);
+  if (delError) fail(delError);
+  if (!unique.length) return;
+  const { error: insError } = await supabase
+    .from("task_assignees")
+    .insert(unique.map((profile_id) => ({ task_id: taskId, profile_id })));
+  if (insError) fail(insError);
 }
 
 // ---- Revisões & Aprovações (admin) -------------------------------------------
@@ -1207,7 +1384,7 @@ export type ApprovalRecord = TaskRecord & {
 
 type JoinedClient = { name: string; slug: string };
 type JoinedReviewer = { full_name: string | null };
-type ApprovalRow = TaskRecord & {
+type ApprovalRow = TaskRecord & TaskAssigneesJoin & {
   updated_at: string | null;
   clients: JoinedClient | JoinedClient[] | null;
   reviewer: JoinedReviewer | JoinedReviewer[] | null;
@@ -1215,7 +1392,7 @@ type ApprovalRow = TaskRecord & {
 };
 
 function toApprovalRecords(rows: ApprovalRow[] | null): ApprovalRecord[] {
-  return (rows ?? []).map(({ clients, reviewer, approver, ...task }) => {
+  return (rows ?? []).map(mergeTaskAssigneeRow).map(({ clients, reviewer, approver, ...task }) => {
     const c = Array.isArray(clients) ? clients[0] : clients;
     const r = Array.isArray(reviewer) ? reviewer[0] : reviewer;
     const a = Array.isArray(approver) ? approver[0] : approver;
@@ -1227,7 +1404,9 @@ async function selectApprovalRows(statuses: TaskStatus[]): Promise<ApprovalRow[]
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},clients(name,slug),reviewer:profiles!tasks_reviewer_id_fkey(full_name),approver:profiles!tasks_approver_id_fkey(full_name)`)
+    .select(
+      `${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug),reviewer:profiles!tasks_reviewer_id_fkey(full_name),approver:profiles!tasks_approver_id_fkey(full_name)`,
+    )
     .in("status", statuses)
     .order("updated_at", { ascending: false });
   if (error) fail(error);
@@ -1266,18 +1445,18 @@ export async function listPublishedTasks(): Promise<PublishedTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS},clients(name,slug),task_metrics(metrics,source,updated_at)`)
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug),task_metrics(metrics,source,updated_at)`)
     .eq("status", "concluido")
     .order("updated_at", { ascending: false });
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string };
   type JoinedMetrics = { metrics: Record<string, string> | null; source: string; updated_at: string | null };
-  type Row = TaskRecord & {
+  type Row = TaskRecord & TaskAssigneesJoin & {
     updated_at: string | null;
     clients: JoinedClient | JoinedClient[] | null;
     task_metrics: JoinedMetrics | JoinedMetrics[] | null;
   };
-  return ((data as unknown as Row[] | null) ?? []).map(({ clients, task_metrics, ...task }) => {
+  return ((data as unknown as Row[] | null) ?? []).map(mergeTaskAssigneeRow).map(({ clients, task_metrics, ...task }) => {
     const c = Array.isArray(clients) ? clients[0] : clients;
     const m = Array.isArray(task_metrics) ? task_metrics[0] : task_metrics;
     return {
@@ -1771,14 +1950,18 @@ export async function listAdminReviewers(): Promise<ReviewerCandidate[]> {
   return ((data as TeamMember[] | null) ?? []).map((p) => ({ id: p.id, role: p.role, label: reviewerLabel(p) }));
 }
 
-/** Candidates for the client-facing Aprovação stage — that client's own accounts only. */
-export async function listClientReviewerCandidates(clientId: string): Promise<ReviewerCandidate[]> {
+/** Candidates for the Aprovação stage — the client's own accounts, union the
+ * whole North team (admin). Aprovação is now decidable either by the client
+ * OR by a North teammate designated as approver (product decision: North
+ * team members can also be approvers, not just the client). */
+export async function listApproverCandidates(clientId: string): Promise<ReviewerCandidate[]> {
   if (!uuidPattern.test(clientId)) throw new HttpError(400, "Cliente invalido.");
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("profiles")
     .select("id,full_name,role,client_id,level")
-    .eq("client_id", clientId)
+    .or(`client_id.eq.${clientId},role.eq.admin`)
+    .order("role", { ascending: false })
     .order("full_name");
   if (error) fail(error);
   return ((data as TeamMember[] | null) ?? []).map((p) => ({ id: p.id, role: p.role, label: reviewerLabel(p) }));

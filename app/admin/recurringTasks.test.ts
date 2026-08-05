@@ -29,6 +29,7 @@ const task: RecurringTask = {
   timezone: "America/Sao_Paulo",
   priority: "alta",
   assignee: "Ana",
+  assignee_profile_ids: [],
   reviewer_id: null,
   approver_id: null,
   plan_id: null,
@@ -75,9 +76,9 @@ describe("tarefas recorrentes de clientes", () => {
     expect(text).toContain("ana");
   });
 
-  it("impede que plano de ação seja criado como recorrência", () => {
+  it("permite que plano de ação seja criado como recorrência", () => {
     const result = recurringTaskCreateSchema.safeParse({ slug: "cliente-exemplo", title: "Plano", kind: "plano_acao" });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("rejeita datas, horários e fusos que falhariam apenas no banco", () => {

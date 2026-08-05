@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getClient, getClientFlowFlags, getTaskById, updateTaskGroup } from "@/lib/supabase";
+import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, updateTaskGroup } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
+import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
-import { HttpError, canLeaveRevisao, introducesInvalidPublishedState, requiresManagerApproval, taskPatchSchema } from "@/lib/validation";
+import { HttpError, canDecideApproval, canLeaveRevisao, introducesInvalidPublishedState, taskPatchSchema } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,19 +29,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID invalido.");
-    const { slug, ...patch } = taskPatchSchema.parse(await request.json());
+    const { slug, assignee_profile_ids, ...patch } = taskPatchSchema.parse(await request.json());
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
     const explicitDates = normalizeOccurrenceDates(patch.payload?.[EXPLICIT_DATES_KEY]);
-    if (!current.plan_id && explicitDates.length > 1) {
+    if (!current.recurrence_cadence && !recurrenceParentIdOf(current) && explicitDates.length > 1) {
       const rule = inferDateGroupRule(explicitDates);
       patch.due_date = explicitDates[0];
       patch.start_date = explicitDates[0];
       patch.recurrence_cadence = rule.cadence;
       patch.recurrence_weekdays = rule.weekdays;
       patch.recurrence_day_of_month = rule.dayOfMonth;
-      patch.plan_id = null;
+      patch.end_date = explicitDates.at(-1);
+      if (patch.payload) delete patch.payload[EXPLICIT_DATES_KEY];
     }
 
     // Resolve a client change before anything else — later checks (flow
@@ -60,17 +62,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");
     }
     const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
-    if ((patch.kind ?? current.kind) === "plano_acao" && nextRecurrence) {
-      throw new HttpError(400, "Plano de Acao e um tipo unico e nao pode ser recorrente.");
+    if (nextRecurrence) {
+      const start = patch.start_date !== undefined ? patch.start_date : current.start_date ?? current.due_date;
+      const weekdays = patch.recurrence_weekdays ?? current.recurrence_weekdays;
+      if (!start) throw new HttpError(400, "Informe o início da recorrência.");
+      if (!weekdays.length) throw new HttpError(400, "Selecione pelo menos um dia da semana.");
+      patch.start_date = start;
+      patch.recurrence_day_of_month = nextRecurrence === "mensal" ? Number(start.slice(8, 10)) : null;
+      const end = patch.end_date !== undefined ? patch.end_date : current.end_date;
+      if (!end || end < start) patch.end_date = start;
     }
 
-    // Only gerente-level admins decide the approval gate either way — approve
-    // (aprovado) or reopen a resolved card back to aprovacao — enforced here
-    // so it holds regardless of surface (Kanban drag, TaskModal, Aprovações).
+    // A gerente always decides the approval gate either way — approve
+    // (aprovado) or reopen a resolved card back to aprovacao — and now so
+    // does the specific approver_id assigned to the card (North teammates
+    // can be approvers too, not just gerentes/clients). Enforced here so it
+    // holds regardless of surface (Kanban drag, TaskModal, Aprovações).
     // Every other transition (including moving a card OUT of aprovacao to
     // anything other than aprovado) is unrestricted.
-    if (requiresManagerApproval(current.status, patch.status) && session.level !== "gerente") {
-      throw new HttpError(403, "Apenas gerentes podem aprovar ou reabrir um card.");
+    if (!canDecideApproval(current.status, patch.status, current.approver_id, session.userId, session.level)) {
+      throw new HttpError(403, "Apenas gerentes ou o aprovador designado podem aprovar ou reabrir um card.");
     }
 
     // Only the reviewer assigned on the card can move it out of Revisão —
@@ -97,7 +108,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    const task = await updateTaskGroup(id, current, patch);
+    const task = await updateTaskGroup(id, current, recurringActionPlanPatch(current, patch));
+    if (assignee_profile_ids !== undefined) {
+      await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
+      const full = await getTaskById(task.id);
+      return NextResponse.json(full ?? task);
+    }
     return NextResponse.json(task);
   } catch (error) {
     return apiError(error);
