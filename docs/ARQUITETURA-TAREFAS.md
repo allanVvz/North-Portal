@@ -74,6 +74,8 @@ O campo físico continua `tasks.assignee text` para evitar uma tabela adicional.
 - Converter uma tarefa em recorrência preserva a tarefa original como primeira execução visível; o pai é sempre um registro separado.
 - Converter uma tarefa já vinculada a um plano transfere esse vínculo apenas para `payload.action_plan_id` da primeira execução.
 - Vincular uma ocorrência a um Plano de Ação não altera seu `plan_id` nem vincula ocorrências futuras.
+- Remover uma ligação torna o filho independente e limpa tanto `plan_id` quanto os metadados correspondentes no `payload`.
+- Excluir um pai nunca exclui seus filhos: todas as ligações diretas e secundárias são removidas antes da exclusão.
 - Um registro legado não-Criativo que já esteja em `Publicado` pode salvar campos não relacionados. A API continua proibindo novas entradas nessa combinação.
 - Progresso de pai é sempre rollup dos filhos; não é persistido.
 - O toggle “Visível para o cliente” é fail-closed enquanto a feature flag carrega.

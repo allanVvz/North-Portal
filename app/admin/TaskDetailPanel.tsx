@@ -8,6 +8,7 @@ import TaskKindIcon from "./TaskKindIcon";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials } from "./kanbanShared";
 import CommentText from "@/app/CommentText";
+import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, kindDef, kindLabel } from "@/lib/taskCatalog";
 import { actionPlanIdOf } from "@/lib/taskRelations";
@@ -40,6 +41,7 @@ export default function TaskDetailPanel({
 }) {
   const [comment, setComment] = useState("");
   const [description, setDescription] = useState(task.description ?? "");
+  const { name: currentUserName } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
   useEffect(() => setDescription(task.description ?? ""), [task.id, task.description]);
 
@@ -65,7 +67,7 @@ export default function TaskDetailPanel({
   async function sendComment() {
     const text = comment.trim();
     if (!text) return;
-    const next = [...comments, { author: "Admin North", text, at: new Date().toISOString() }];
+    const next = [...comments, { author: currentUserName, text, at: new Date().toISOString() }];
     setComment("");
     await patchPayload({ comments: next });
   }

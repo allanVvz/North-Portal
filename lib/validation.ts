@@ -412,6 +412,9 @@ export const agencyProfileSchema = z.object({
   site: z.string().max(MAX_TEXT_BYTES),
   note: z.string().max(MAX_TEXT_BYTES),
 });
+export const meProfileSchema = z.object({
+  full_name: z.string().trim().min(1).max(MAX_TEXT_BYTES),
+});
 
 // ---- Client flow flags (Revisão/Aprovação safe-hide) ---------------------------
 // admin/cliente gate the reviewer/approver assignment + client-facing

@@ -8,8 +8,8 @@ import {
 } from "./recurrence";
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch, replicatedExecutionPayload } from "./taskDateGrouping";
-import { assigneeOptions, mergeAssigneeDisplay } from "./assignees";
-import { actionPlanIdOf, actionPlanMembersOf, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
+import { mergeAssigneeDisplay } from "./assignees";
+import { actionPlanIdOf, actionPlanMembersOf, detachedTaskRelationPatch, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
@@ -1245,11 +1245,14 @@ function shouldConvertToRecurringGroup(current: TaskRecord, recurrenceParentId: 
 
 export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch: Record<string, unknown>): Promise<TaskRecord> {
   const patch = await patchWithTopPosition(id, current, rawPatch);
-  const recurrenceParentId = recurrenceParentIdOf(current);
+  const historical = current.payload?.[RECURRENCE_GROUP_KEY] === true;
+  // A recurrence template always owns its executions. Ignore any stale
+  // child-only payload reference so saving the parent cannot route it through
+  // the execution update path.
+  const recurrenceParentId = current.recurrence_cadence || historical ? null : recurrenceParentIdOf(current);
   const parent = recurrenceParentId ? await getTaskById(recurrenceParentId) : null;
   if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
   const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
-  const historical = current.payload?.[RECURRENCE_GROUP_KEY] === true;
   if (shouldConvertToRecurringGroup(current, recurrenceParentId, historical, nextRecurrence)) {
     return convertTaskToRecurringGroup(current, patch);
   }
@@ -1347,7 +1350,26 @@ export async function completeTaskCycle(
   return completeTaskCycleForRequest(id, expectedCycle, expectedRevision, expectedDueDate);
 }
 
+export async function detachTaskRelation(taskId: string, parentId: string): Promise<TaskRecord> {
+  const task = await getTaskById(taskId);
+  if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
+  const patch = detachedTaskRelationPatch(task, parentId);
+  if (!patch) throw new HttpError(409, "Esta ligacao nao existe mais.");
+  return updateTask(taskId, patch);
+}
+
+async function detachChildrenBeforeDelete(parentId: string): Promise<void> {
+  const children = await listRelatedTasks(parentId);
+  await Promise.all(children.map(async (child) => {
+    const patch = detachedTaskRelationPatch(child, parentId);
+    if (patch) await updateTask(child.id, patch);
+  }));
+}
+
 export async function deleteTask(id: string): Promise<void> {
+  // The FK uses ON DELETE SET NULL, but relations also have metadata in
+  // payload. Clear both representations so former children are standalone.
+  await detachChildrenBeforeDelete(id);
   const supabase = await createClient();
   const { error } = await supabase.from("tasks").delete().eq("id", id);
   if (error) fail(error);
@@ -1891,6 +1913,12 @@ export async function getProfileName(userId: string): Promise<string | null> {
   return name?.trim() || null;
 }
 
+export async function updateProfileName(userId: string, fullName: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", userId);
+  if (error) fail(error);
+}
+
 export async function listTeam(): Promise<TeamMember[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -1908,34 +1936,23 @@ export async function listTeam(): Promise<TeamMember[]> {
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function reviewerLabel(p: TeamMember): string {
-  const base = p.full_name?.trim() || (p.role === "admin" ? "Administrador" : "Cliente");
-  return p.level === "gerente" ? `${base} (gerente)` : base;
+  return p.full_name?.trim() || (p.role === "admin" ? "Administrador" : "Cliente");
 }
 
-// Responsável options: every admin team member (so a brand-new hire is
-// pickable even before ever being assigned anything) union every distinct
-// free-text name already used as an assignee historically (legacy/freelancer
-// names with no login). Deduped + sorted; small dataset, no DB-side DISTINCT
-// needed.
+// Responsável options are the registered admin accounts only. Historical
+// free-text assignee names remain readable on old cards, but are no longer
+// offered as loose options now that the whole team has accounts.
 export async function listAssigneeOptions(): Promise<string[]> {
   const supabase = await createClient();
-  const [
-    { data: profileRows, error: profileErr },
-    { data: taskRows, error: taskErr },
-  ] = await Promise.all([
-    supabase.from("profiles").select("full_name").eq("role", "admin"),
-    supabase.from("tasks").select("assignee").not("assignee", "is", null),
-  ]);
+  const { data: profileRows, error: profileErr } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("role", "admin")
+    .order("full_name");
   if (profileErr) fail(profileErr);
-  if (taskErr) fail(taskErr);
-  const values: (string | null)[] = [];
-  for (const r of (profileRows ?? []) as { full_name: string | null }[]) {
-    values.push(r.full_name);
-  }
-  for (const r of (taskRows ?? []) as { assignee: string | null }[]) {
-    values.push(r.assignee);
-  }
-  return assigneeOptions(values);
+  return (profileRows ?? [])
+    .map((row) => (row as { full_name: string | null }).full_name?.trim() ?? "")
+    .filter(Boolean);
 }
 
 /** Candidates for the internal Revisão stage — admin accounts only. */

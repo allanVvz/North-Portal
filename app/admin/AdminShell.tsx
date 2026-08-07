@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CurrentUserProvider } from "./CurrentUserContext";
 
 type Theme = "light" | "dark";
 
@@ -219,7 +220,9 @@ export default function AdminShell({
         </aside>
       ) : null}
 
-      <main className="admin-main">{children}</main>
+      <main className="admin-main">
+        <CurrentUserProvider user={{ name, email, initials }}>{children}</CurrentUserProvider>
+      </main>
     </div>
   );
 }

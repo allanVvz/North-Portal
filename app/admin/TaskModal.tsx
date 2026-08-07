@@ -13,6 +13,7 @@ import {
   TONES, commentsOf, initials,
 } from "./kanbanShared";
 import CommentText from "@/app/CommentText";
+import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
@@ -334,9 +335,14 @@ export default function TaskModal({
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
   const [liveTask, setLiveTask] = useState<TaskRecord | null>(task);
-  const recurrenceParentId = liveTask ? recurrenceParentIdOf(liveTask) : null;
+  // A recurrence template is a parent even if legacy data accidentally still
+  // carries a child-only recurrence_parent_id. It must never render a second
+  // "Card pai" box or try to fetch itself as a parent.
+  const isRecurringParent = Boolean(liveTask?.recurrence_cadence || liveTask?.payload?.recurrence_group === true);
+  const recurrenceParentId = liveTask && !isRecurringParent ? recurrenceParentIdOf(liveTask) : null;
   const [recurrenceParent, setRecurrenceParent] = useState<TaskRecord | null>(() => recurrenceParentOf(recurrenceParentId, clientTasks));
   const [comment, setComment] = useState("");
+  const { name: currentUserName } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editingDescription, setEditingDescription] = useState(false);
@@ -400,7 +406,6 @@ export default function TaskModal({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const comments = liveTask ? commentsOf(liveTask) : [];
-  const isRecurringParent = Boolean(liveTask?.recurrence_cadence || liveTask?.payload?.recurrence_group === true);
   const onTaskPatchedRef = useRef(onTaskPatched);
   useEffect(() => { onTaskPatchedRef.current = onTaskPatched; }, [onTaskPatched]);
 
@@ -457,6 +462,26 @@ export default function TaskModal({
       });
       if (res.ok) onTaskPatched?.(await res.json());
     } catch { /* leave as-is; user can retry */ }
+  }
+
+  async function unlinkMember(taskId: string, parentId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${taskId}/relations/${parentId}`, { method: "DELETE" });
+      const body = await res.json().catch(() => null) as TaskRecord | { error?: string } | null;
+      if (!res.ok) throw new Error(body && "error" in body ? body.error : "Não foi possível remover a ligação.");
+      const updated = body as TaskRecord;
+      if (liveTask?.id === updated.id) {
+        setLiveTask(updated);
+        setDraft(draftFrom(updated, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
+      }
+      onTaskPatched?.(updated);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível remover a ligação.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Same linking, but for a brand-new plan (mode="new", no id yet): activities
@@ -570,7 +595,7 @@ export default function TaskModal({
   async function sendComment() {
     if (!liveTask || !comment.trim()) return;
     const text = comment.trim();
-    const next = [...comments, { author: "Admin North", text, at: new Date().toISOString() }];
+    const next = [...comments, { author: currentUserName, text, at: new Date().toISOString() }];
     setComment("");
     try {
       const res = await fetch(`/api/admin/tasks/${liveTask.id}`, {
@@ -733,9 +758,13 @@ export default function TaskModal({
     if (!liveTask) return;
     setBusy(true);
     try {
-      await fetch(`/api/admin/tasks/${liveTask.id}`, { method: "DELETE" });
+      const response = await fetch(`/api/admin/tasks/${liveTask.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? "Não foi possível excluir.");
+      }
       onDeleted(liveTask.id);
-    } catch { setError("Não foi possível excluir."); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível excluir."); }
     setBusy(false);
   }
 
@@ -1024,6 +1053,14 @@ export default function TaskModal({
                 <div className="tm-member-list">
                   {recurrenceParent ? (
                     <div className="tm-member">
+                      <button
+                        type="button"
+                        className="tm-member-unlink"
+                        title="Remover ligação com o card pai"
+                        aria-label="Remover ligação com o card pai"
+                        onClick={() => void unlinkMember(liveTask.id, recurrenceParent.id)}
+                        disabled={busy}
+                      >✕</button>
                       <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(recurrenceParent)} disabled={!onOpenRelatedTask || busy}>
                         <TaskKindIcon kind={recurrenceParent.kind} size="sm" />
                         <span className="tm-member-title">{recurrenceParent.title}</span>
@@ -1045,18 +1082,26 @@ export default function TaskModal({
                   {liveTask ? (
                     planMembers.map((m) => (
                       <div className="tm-member" key={m.id}>
+                        <button
+                          type="button"
+                          className="tm-member-unlink"
+                          title={isRecurringParent ? "Remover ligação com esta execução" : "Desvincular do plano"}
+                          aria-label={isRecurringParent ? `Remover ligação com ${m.title}` : `Desvincular ${m.title} do plano`}
+                          onClick={() => void unlinkMember(m.id, liveTask.id)}
+                          disabled={busy}
+                        >✕</button>
                         <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(m)} disabled={!onOpenRelatedTask || busy}>
                           <TaskKindIcon kind={m.kind} size="sm" />
                           <span className="tm-member-title">{m.title}</span>
                           <span className="tm-member-status">{isDeferredTask(m) ? "Futura · abrir tarefa" : STATUS_LABEL[m.status]}</span>
                           <span className="tm-member-arrow" aria-hidden>↗</span>
                         </button>
-                        {!isRecurringParent ? <button className="tm-member-unlink" title="Desvincular do plano" onClick={() => linkMember(m.id, null)}>✕</button> : null}
                       </div>
                     ))
                   ) : (
                     pendingMembers.map((m) => (
                       <div className="tm-member" key={m.key}>
+                        <button type="button" className="tm-member-unlink" title="Remover" aria-label={`Remover ${m.title}`} onClick={() => removePendingMember(m.key)}>✕</button>
                         <span className="tm-member-open tm-member-pending">
                           <TaskKindIcon kind="operacional" size="sm" />
                           <span className="tm-member-title">{m.title}</span>
@@ -1064,7 +1109,6 @@ export default function TaskModal({
                             {m.kind === "existing" ? "Vincular ao criar" : [m.assignee, m.due_date].filter(Boolean).join(" · ") || "Criar ao salvar"}
                           </span>
                         </span>
-                        <button className="tm-member-unlink" title="Remover" onClick={() => removePendingMember(m.key)}>✕</button>
                       </div>
                     ))
                   )}

@@ -5,6 +5,7 @@ import {
   activatedTaskPayload,
   belongsToTaskScreen,
   childrenOf,
+  detachedTaskRelationPatch,
   isDeferredTask,
   recurrenceParentOf,
   recurringActionPlanPatch,
@@ -57,6 +58,43 @@ describe("relações entre tarefas", () => {
       { plan_id: null },
     );
     expect(unlinked.payload).toEqual({ recurrence_parent_id: "recurrence-parent", comments: [] });
+  });
+
+  it("torna uma execução recorrente independente sem perder seu conteúdo", () => {
+    const patch = detachedTaskRelationPatch({
+      plan_id: "recurrence-parent",
+      payload: {
+        recurrence_parent_id: "recurrence-parent",
+        recurrence_cycle: 2,
+        occurrence_date: "2026-08-05",
+        deferred_until_accessed: true,
+        comments: [{ text: "conteúdo preservado" }],
+        action_plan_id: "action-plan",
+      },
+    }, "recurrence-parent");
+
+    expect(patch).toEqual({
+      plan_id: null,
+      payload: {
+        comments: [{ text: "conteúdo preservado" }],
+        action_plan_id: "action-plan",
+      },
+    });
+  });
+
+  it("remove apenas a ligação secundária com o plano", () => {
+    const patch = detachedTaskRelationPatch({
+      plan_id: "recurrence-parent",
+      payload: {
+        recurrence_parent_id: "recurrence-parent",
+        action_plan_id: "action-plan",
+        comments: [],
+      },
+    }, "action-plan");
+
+    expect(patch).toEqual({
+      payload: { recurrence_parent_id: "recurrence-parent", comments: [] },
+    });
   });
 });
 

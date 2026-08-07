@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
+import { recurrenceParentPayload } from "./recurrenceState";
 import type { TaskRecord } from "./validation";
 
 describe("concluir ciclo recorrente", () => {
+  it("não deixa metadados de filho em um pai recorrente", () => {
+    expect(recurrenceParentPayload({
+      recurrence_parent_id: "old-parent",
+      occurrence_date: "2026-08-05",
+      deferred_until_accessed: true,
+      explicit_date_group_id: "old-parent",
+      comments: [],
+    })).toEqual(expect.objectContaining({ recurrence_group: true, recurrence_cycle: 0, recurrence_revision: 1, comments: [] }));
+    const payload = recurrenceParentPayload({ recurrence_parent_id: "old-parent", occurrence_date: "2026-08-05" });
+    expect(payload).not.toHaveProperty("recurrence_parent_id");
+    expect(payload).not.toHaveProperty("occurrence_date");
+  });
+
   it("avança automaticamente para o próximo dia semanal configurado", () => {
     expect(nextRecurringDueDate("2026-07-20", { cadence: "semanal", weekdays: [1, 4], dayOfMonth: null })).toBe("2026-07-23");
   });

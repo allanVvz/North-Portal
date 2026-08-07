@@ -4,7 +4,7 @@ import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssignee
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
-import { HttpError, canDecideApproval, canLeaveRevisao, introducesInvalidPublishedState, taskPatchSchema } from "@/lib/validation";
+import { HttpError, canLeaveRevisao, introducesInvalidPublishedState, taskPatchSchema } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -71,17 +71,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       patch.recurrence_day_of_month = nextRecurrence === "mensal" ? Number(start.slice(8, 10)) : null;
       const end = patch.end_date !== undefined ? patch.end_date : current.end_date;
       if (!end || end < start) patch.end_date = start;
-    }
-
-    // A gerente always decides the approval gate either way — approve
-    // (aprovado) or reopen a resolved card back to aprovacao — and now so
-    // does the specific approver_id assigned to the card (North teammates
-    // can be approvers too, not just gerentes/clients). Enforced here so it
-    // holds regardless of surface (Kanban drag, TaskModal, Aprovações).
-    // Every other transition (including moving a card OUT of aprovacao to
-    // anything other than aprovado) is unrestricted.
-    if (!canDecideApproval(current.status, patch.status, current.approver_id, session.userId, session.level)) {
-      throw new HttpError(403, "Apenas gerentes ou o aprovador designado podem aprovar ou reabrir um card.");
     }
 
     // Only the reviewer assigned on the card can move it out of Revisão —

@@ -140,9 +140,27 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     await expect(childModal).toBeVisible({ timeout: 20_000 });
     const parentBox = childModal.locator(".tm-planmembers", { hasText: "Card pai (1)" });
     await expect(parentBox).toContainText(parent.title);
-    await expect(parentBox.locator(".tm-member-unlink")).toHaveCount(0);
+    await expect(parentBox.locator(".tm-member-unlink")).toHaveCount(1);
     await parentBox.locator(".tm-member-open").click();
     await expect(page.locator(".tm").getByText(/Execuções da recorrência/)).toContainText("(2)");
+
+    await page.goto(`/admin/kanban?task=${first.id}`);
+    const reopenedChild = page.locator(".tm");
+    await reopenedChild.locator(".tm-planmembers", { hasText: "Card pai (1)" }).locator(".tm-member-unlink").click();
+    await expect(reopenedChild.locator(".tm-planmembers", { hasText: "Card pai (1)" })).toHaveCount(0);
+    const standalone = await (await page.request.get(`/api/admin/tasks/${first.id}`)).json();
+    expect(standalone.plan_id).toBeNull();
+    expect(standalone.payload).not.toHaveProperty("recurrence_parent_id");
+    expect(standalone.payload.action_plan_id).toBe(planId);
+
+    const deletedParent = await page.request.delete(`/api/admin/tasks/${parentId}`);
+    expect(deletedParent.ok()).toBeTruthy();
+    const preservedChild = await page.request.get(`/api/admin/tasks/${completed.task.id}`);
+    expect(preservedChild.ok()).toBeTruthy();
+    const preserved = await preservedChild.json();
+    expect(preserved).toMatchObject({ id: completed.task.id, plan_id: null });
+    expect(preserved.payload).not.toHaveProperty("recurrence_parent_id");
+    parentId = "";
   });
 
   test("cria, conclui, desativa e reativa um Plano recorrente sem duplicar atividades", async ({ page }) => {

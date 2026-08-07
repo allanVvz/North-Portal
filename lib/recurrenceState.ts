@@ -24,5 +24,12 @@ export function recurrenceParentPayload(payload: Record<string, unknown> | null 
   };
   delete next[EXPLICIT_DATES_KEY];
   delete next.cycle_completed;
+  // A template can be reconstructed from a former execution. Child-only
+  // relation fields must not survive that conversion, otherwise the UI (and
+  // future relation queries) can mistake the parent for its own child.
+  delete next.recurrence_parent_id;
+  delete next.occurrence_date;
+  delete next.deferred_until_accessed;
+  delete next.explicit_date_group_id;
   return next;
 }

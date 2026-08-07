@@ -6,6 +6,7 @@ import { commentsOf, formatCommentTime } from "@/lib/comments";
 import type { ApprovalRecord } from "@/lib/supabase";
 import { kindLabel, kindTone } from "@/lib/taskCatalog";
 import { filterByClient, groupApprovalQueue } from "../approvalGroups";
+import { useCurrentAdminUser } from "../CurrentUserContext";
 
 type ClientLite = { slug: string; name: string };
 
@@ -30,11 +31,9 @@ function relTime(iso: string | null): string {
 export default function ApprovalsQueue({
   initial,
   clients,
-  canApprove,
 }: {
   initial: ApprovalRecord[];
   clients: ClientLite[];
-  canApprove: boolean;
 }) {
   const [items, setItems] = useState<ApprovalRecord[]>(initial);
   const [clientFilter, setClientFilter] = useState("");
@@ -42,6 +41,7 @@ export default function ApprovalsQueue({
   const [toast, setToast] = useState<string>("");
   const [commentFor, setCommentFor] = useState<ApprovalRecord | null>(null);
   const [openTask, setOpenTask] = useState<ApprovalRecord | null>(null);
+  const { name: currentUserName } = useCurrentAdminUser();
 
   const scoped = useMemo(() => filterByClient(items, clientFilter), [items, clientFilter]);
   const groups = useMemo(() => groupApprovalQueue(scoped), [scoped]);
@@ -80,7 +80,7 @@ export default function ApprovalsQueue({
   }
 
   function sendComment(t: ApprovalRecord, text: string) {
-    const comments = [...commentsOf(t.payload), { author: "Admin North", text, at: new Date().toISOString() }];
+    const comments = [...commentsOf(t.payload), { author: currentUserName, text, at: new Date().toISOString() }];
     void patch(t.id, { payload: { ...t.payload, comments } }, "Comentário enviado.");
     setCommentFor(null);
   }
@@ -130,8 +130,7 @@ export default function ApprovalsQueue({
                   </button>
                   <button
                     className="admin-btn primary"
-                    disabled={busy === t.id || !canApprove}
-                    title={canApprove ? undefined : "Apenas gerentes podem aprovar"}
+                    disabled={busy === t.id}
                     onClick={() => approve(t)}
                   >
                     Aprovar
@@ -166,8 +165,7 @@ export default function ApprovalsQueue({
                   </button>
                   <button
                     className="admin-btn ghost"
-                    disabled={busy === t.id || !canApprove}
-                    title={canApprove ? undefined : "Apenas gerentes podem reabrir"}
+                    disabled={busy === t.id}
                     onClick={() => reopen(t)}
                   >
                     Reabrir
