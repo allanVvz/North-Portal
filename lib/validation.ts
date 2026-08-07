@@ -82,6 +82,23 @@ export function canLeaveRevisao(
   return reviewerId === actingUserId;
 }
 
+// The gate for approving (→ aprovado) or reopening (aprovado → aprovacao) a
+// card: a gerente always decides, and now that the North team can also be an
+// approver (not just gerentes/clients), the specific approver_id assigned to
+// the card decides too — mirrors canLeaveRevisao's identity-based exception,
+// so an editor-level approver isn't locked out of their own assigned cards.
+export function canDecideApproval(
+  currentStatus: TaskStatus | undefined,
+  nextStatus: TaskStatus | undefined,
+  approverId: string | null | undefined,
+  actingUserId: string,
+  actingLevel: string | null | undefined,
+): boolean {
+  if (!requiresManagerApproval(currentStatus, nextStatus)) return true;
+  if (actingLevel === "gerente") return true;
+  return Boolean(approverId) && approverId === actingUserId;
+}
+
 // `kind`/`subtype` are free TEXT validated only for length here — the real
 // vocabulary lives in the in-code catalog (lib/taskCatalog.ts), which is a
 // one-way consumer of this file. Adding a kind is a code change there, not a
@@ -120,6 +137,9 @@ export const taskCreateSchema = z.object({
   status: z.enum(TASK_STATUSES).optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
   assignee: z.string().max(120).nullable().optional(),
+  // Not a tasks column — resolved into task_assignees rows by the route
+  // handler (setTaskAssigneeProfiles), same treatment as `slug`/`client_id`.
+  assignee_profile_ids: z.array(z.string().uuid()).max(20).optional(),
   reviewer_id: z.string().uuid().nullable().optional(),
   approver_id: z.string().uuid().nullable().optional(),
   plan_id: z.string().uuid().nullable().optional(),
@@ -202,7 +222,13 @@ export type TaskRecord = {
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
+  // Legacy free text, merged at read time with linked accounts (see
+  // mergeAssigneeDisplay) — always the combined display string.
   assignee: string | null;
+  // Linked task_assignees accounts (uuids), for pre-selecting real-account
+  // chips in the picker. Always present on read; never written directly —
+  // writes go through assignee_profile_ids on the patch schema instead.
+  assignee_profile_ids: string[];
   reviewer_id: string | null;
   approver_id: string | null;
   plan_id: string | null;
@@ -235,7 +261,7 @@ export type RecurringCadence = (typeof RECURRING_CADENCES)[number];
 const recurringBaseSchema = z.object({
   title: z.string().trim().min(1).max(240),
   description: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
-  kind: kindSchema.refine((kind) => kind !== "plano_acao", "Plano de ação não é um tipo de recorrência.").default("operacional"),
+  kind: kindSchema.default("operacional"),
   cadence: z.enum(RECURRING_CADENCES).default("semanal"),
   weekdays: z.array(z.number().int().min(0).max(6)).max(7).default([]),
   day_of_month: z.number().int().min(1).max(31).nullable().optional(),
@@ -266,9 +292,11 @@ export const recurringTaskPatchSchema = recurringBaseSchema.partial().extend({ s
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida.");
 
-// expectedDueDate is an optimistic-concurrency token: the client states which
-// cycle it believes it is closing, so a double-click closes one cycle, not two.
+// Cycle + revision are the canonical concurrency identity. expectedDueDate is
+// accepted temporarily for clients deployed before this contract.
 export const recurringCompleteSchema = z.object({
+  expectedCycle: z.number().int().min(0).optional(),
+  expectedRevision: z.number().int().min(1).optional(),
   expectedDueDate: isoDateSchema.nullable().optional(),
 });
 export const recurringGenerateSchema = z.object({
@@ -383,6 +411,9 @@ export const agencyProfileSchema = z.object({
   email: z.string().max(MAX_TEXT_BYTES),
   site: z.string().max(MAX_TEXT_BYTES),
   note: z.string().max(MAX_TEXT_BYTES),
+});
+export const meProfileSchema = z.object({
+  full_name: z.string().trim().min(1).max(MAX_TEXT_BYTES),
 });
 
 // ---- Client flow flags (Revisão/Aprovação safe-hide) ---------------------------
@@ -537,7 +568,7 @@ export const clientApprovalActionSchema = z
   });
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public details?: Record<string, unknown>) {
     super(message);
   }
 }

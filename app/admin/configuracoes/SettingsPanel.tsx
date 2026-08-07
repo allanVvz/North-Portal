@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import type { AgencyProfile, CheckpointTemplate, LegalDoc, TeamMember } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import CheckpointTemplates from "./CheckpointTemplates";
 import EtapasPanel from "./EtapasPanel";
 import WindsorIntegration from "./WindsorIntegration";
 import { useSidebarEnabledPref } from "../kanbanPrefs";
+
+const PROFILE_PHOTO_STORAGE_KEY = "admin-profile-photo-mock";
 
 type Tab = "perfil" | "equipe" | "politicas" | "etapas" | "checkpoints" | "faturamento" | "integracoes";
 const TABS: { key: Tab; label: string }[] = [
@@ -32,12 +35,14 @@ export default function SettingsPanel({
   team,
   checkpointTemplates,
   clients,
+  currentUser,
 }: {
   legalDocs: LegalDoc[];
   agency: AgencyProfile;
   team: TeamMember[];
   checkpointTemplates: CheckpointTemplate[];
   clients: { slug: string; name: string }[];
+  currentUser: { fullName: string; email: string };
 }) {
   const [tab, setTab] = useState<Tab>("perfil");
 
@@ -52,7 +57,12 @@ export default function SettingsPanel({
       </nav>
 
       <div className="set-body">
-        {tab === "perfil" ? <AgencyForm initial={agency} /> : null}
+        {tab === "perfil" ? (
+          <>
+            <MyAccountForm initial={currentUser} />
+            <AgencyForm initial={agency} />
+          </>
+        ) : null}
         {tab === "equipe" ? <TeamList team={team} /> : null}
         {tab === "politicas" ? (
           <>
@@ -70,6 +80,171 @@ export default function SettingsPanel({
           </div>
         ) : null}
         {tab === "integracoes" ? <WindsorIntegration clients={clients} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function initialsOf(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return words.length ? words.slice(0, 2).map((w) => w[0]).join("").toUpperCase() : "AD";
+}
+
+function MyAccountForm({ initial }: { initial: { fullName: string; email: string } }) {
+  const [photo, setPhoto] = useState<string | null>(null);
+
+  const [fullName, setFullName] = useState(initial.fullName || initial.email);
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameMsg, setNameMsg] = useState("");
+
+  const [email, setEmail] = useState(initial.email);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailMsg, setEmailMsg] = useState("");
+
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState("");
+
+  useEffect(() => {
+    setPhoto(window.localStorage.getItem(PROFILE_PHOTO_STORAGE_KEY));
+  }, []);
+
+  function onPhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      setPhoto(dataUrl);
+      window.localStorage.setItem(PROFILE_PHOTO_STORAGE_KEY, dataUrl);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  }
+
+  function removePhoto() {
+    setPhoto(null);
+    window.localStorage.removeItem(PROFILE_PHOTO_STORAGE_KEY);
+  }
+
+  async function saveName() {
+    setNameBusy(true);
+    setNameMsg("");
+    try {
+      const res = await fetch("/api/admin/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full_name: fullName.trim() }),
+      });
+      setNameMsg(res.ok ? "Salvo." : "Não foi possível salvar.");
+    } catch {
+      setNameMsg("Não foi possível salvar.");
+    }
+    setNameBusy(false);
+  }
+
+  async function saveEmail() {
+    setEmailBusy(true);
+    setEmailMsg("");
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.updateUser({ email: email.trim() });
+      setEmailMsg(error ? "Não foi possível atualizar o e-mail." : "Confirme o novo e-mail pelo link que acabamos de enviar.");
+    } catch {
+      setEmailMsg("Não foi possível atualizar o e-mail.");
+    }
+    setEmailBusy(false);
+  }
+
+  async function savePassword() {
+    setPasswordMsg("");
+    if (password.length < 6) {
+      setPasswordMsg("A senha precisa ter ao menos 6 caracteres.");
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setPasswordMsg("As senhas não coincidem.");
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) {
+        setPasswordMsg("Não foi possível atualizar a senha.");
+      } else {
+        setPasswordMsg("Senha atualizada.");
+        setPassword("");
+        setPasswordConfirm("");
+      }
+    } catch {
+      setPasswordMsg("Não foi possível atualizar a senha.");
+    }
+    setPasswordBusy(false);
+  }
+
+  return (
+    <div className="set-card">
+      <h2 className="set-h">Minha conta</h2>
+      <p className="admin-sub">Seus dados pessoais de acesso.</p>
+
+      <div className="set-avatar-row">
+        {/* eslint-disable-next-line @next/next/no-img-element -- local preview of a not-yet-uploaded file; no remote optimization applies */}
+        <span className="set-avatar-big">{photo ? <img src={photo} alt="" /> : initialsOf(fullName)}</span>
+        <div className="set-avatar-actions">
+          <div className="set-avatar-buttons">
+            <label className="admin-btn ghost">
+              Escolher foto
+              <input type="file" accept="image/*" onChange={onPhotoChange} className="set-avatar-input" />
+            </label>
+            {photo ? <button className="admin-btn ghost" onClick={removePhoto}>Remover</button> : null}
+          </div>
+          <p className="set-note-inline">Foto de exemplo, salva só neste navegador — upload real chega quando tivermos um bucket de armazenamento configurado.</p>
+        </div>
+      </div>
+
+      <div className="set-grid">
+        <label className="admin-field"><span>Nome de usuário</span>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+        </label>
+      </div>
+      <div className="set-actions">
+        {nameMsg ? <span className="set-msg">{nameMsg}</span> : <span />}
+        <button className="admin-btn primary" onClick={saveName} disabled={nameBusy || !fullName.trim()}>
+          {nameBusy ? "Salvando…" : "Salvar nome"}
+        </button>
+      </div>
+
+      <div className="set-visibility-divider" />
+
+      <div className="set-grid">
+        <label className="admin-field"><span>E-mail</span>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </label>
+      </div>
+      <div className="set-actions">
+        {emailMsg ? <span className="set-msg">{emailMsg}</span> : <span />}
+        <button className="admin-btn primary" onClick={saveEmail} disabled={emailBusy || !email.trim()}>
+          {emailBusy ? "Salvando…" : "Salvar e-mail"}
+        </button>
+      </div>
+
+      <div className="set-visibility-divider" />
+
+      <div className="set-grid">
+        <label className="admin-field"><span>Nova senha</span>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" autoComplete="new-password" />
+        </label>
+        <label className="admin-field"><span>Confirmar senha</span>
+          <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} autoComplete="new-password" />
+        </label>
+      </div>
+      <div className="set-actions">
+        {passwordMsg ? <span className="set-msg">{passwordMsg}</span> : <span />}
+        <button className="admin-btn primary" onClick={savePassword} disabled={passwordBusy || !password}>
+          {passwordBusy ? "Salvando…" : "Alterar senha"}
+        </button>
       </div>
     </div>
   );

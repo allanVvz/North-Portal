@@ -4,7 +4,7 @@ import { HttpError } from "./validation";
 
 export function apiError(error: unknown) {
   if (error instanceof HttpError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: error.message, ...(error.details ?? {}) }, { status: error.status });
   }
   if (error instanceof ZodError) {
     return NextResponse.json({ error: "Dados invalidos." }, { status: 400 });

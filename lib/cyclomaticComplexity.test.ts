@@ -47,8 +47,8 @@ describe("limite de complexidade ciclomática do núcleo de tarefas", () => {
     ["lib/supabase.ts", "updateTaskGroup", 10],
     ["lib/supabase.ts", "updateExplicitChildGroup", 9],
     ["lib/supabase.ts", "updateExplicitParent", 7],
-    ["lib/supabase.ts", "completeExplicitTaskCycle", 7],
-    ["lib/supabase.ts", "materializeNextExplicitExecution", 7],
+    ["lib/supabase.ts", "updateRecurringExecution", 7],
+    ["lib/supabase.ts", "patchWithTopPosition", 4],
   ] as const;
 
   it.each(cases)("mantém %s:%s abaixo de %i caminhos", (relativeFile, functionName, maximum) => {

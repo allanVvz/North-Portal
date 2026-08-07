@@ -3,6 +3,14 @@ import type { TaskRecord } from "./validation";
 export const DEFERRED_TASK_FLAG = "deferred_until_accessed";
 export const ACTION_PLAN_PAYLOAD_KEY = "action_plan_id";
 
+const RECURRENCE_RELATION_PAYLOAD_KEYS = [
+  "recurrence_parent_id",
+  "recurrence_cycle",
+  "occurrence_date",
+  "explicit_date_group_id",
+  DEFERRED_TASK_FLAG,
+] as const;
+
 type TaskRelation = Pick<TaskRecord, "plan_id" | "payload">;
 
 export function recurrenceParentIdOf(task: Pick<TaskRecord, "payload">): string | null {
@@ -29,6 +37,26 @@ export function withActionPlanId(
   return next;
 }
 
+/** Returns the minimal patch that makes `task` independent from `parentId`.
+ * Recurrence metadata must be removed together with the FK; leaving it behind
+ * would make the task look related even after Postgres sets plan_id to null. */
+export function detachedTaskRelationPatch(
+  task: TaskRelation,
+  parentId: string,
+): Record<string, unknown> | null {
+  if (task.plan_id === parentId) {
+    const payload = { ...(task.payload ?? {}) };
+    if (recurrenceParentIdOf(task) === parentId) {
+      for (const key of RECURRENCE_RELATION_PAYLOAD_KEYS) delete payload[key];
+    }
+    return { plan_id: null, payload };
+  }
+  if (task.payload?.[ACTION_PLAN_PAYLOAD_KEY] === parentId) {
+    return { payload: withActionPlanId(task.payload, null) };
+  }
+  return null;
+}
+
 /** PATCH callers keep using plan_id as the public plan-link field. On a
  * recurring execution, translate that write to the payload and leave the FK
  * pointing at the recurrence parent. */
@@ -52,7 +80,7 @@ export function isDeferredTask(task: Pick<TaskRecord, "payload">): boolean {
 }
 
 export function visibleOnTaskBoard<T extends Pick<TaskRecord, "payload">>(task: T): boolean {
-  return !isDeferredTask(task);
+  return !isDeferredTask(task) && task.payload?.recurrence_group !== true;
 }
 
 /** The Tarefas surface owns only ordinary, non-recurring work cards. */
@@ -72,4 +100,13 @@ export function childrenOf<T extends Pick<TaskRecord, "plan_id">>(parentId: stri
 
 export function actionPlanMembersOf<T extends TaskRelation>(planId: string, tasks: readonly T[]): T[] {
   return tasks.filter((task) => actionPlanIdOf(task) === planId);
+}
+
+export function recurrenceExecutionsOf<T extends Pick<TaskRecord, "payload">>(parentId: string, tasks: readonly T[]): T[] {
+  return tasks.filter((task) => recurrenceParentIdOf(task) === parentId);
+}
+
+export function recurrenceParentOf<T extends Pick<TaskRecord, "id">>(parentId: string | null, tasks: readonly T[]): T | null {
+  if (!parentId) return null;
+  return tasks.find((task) => task.id === parentId) ?? null;
 }

@@ -26,12 +26,16 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
   let planId = "";
   let parentId = "";
   let taskId = "";
+  let clientSlug = "";
+  let recurringPlanParentId = "";
+  let recurringPlanExecutionId = "";
+  let recurringPlanActivityId = "";
   const planTitle = `[e2e ${RUN}] Plano com ocorrência`;
   const taskTitle = `[e2e ${RUN}] Tarefa convertida`;
 
   test.beforeAll(async () => {
     sb = serviceClient();
-    const { data: client, error: clientError } = await sb.from("clients").select("id").eq("disabled", false).limit(1).single();
+    const { data: client, error: clientError } = await sb.from("clients").select("id,slug").eq("disabled", false).limit(1).single();
     if (clientError || !client) throw new Error(`Cliente para E2E não encontrado: ${clientError?.message}`);
     const { data: plan, error: planError } = await sb.from("tasks").insert({
       client_id: client.id,
@@ -41,6 +45,7 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     }).select("id").single();
     if (planError || !plan) throw new Error(`Falha ao criar plano E2E: ${planError?.message}`);
     planId = plan.id as string;
+    clientSlug = client.slug as string;
   });
 
   test.afterAll(async () => {
@@ -49,6 +54,11 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
       await sb.from("tasks").delete().eq("id", parentId);
     }
     if (taskId) await sb.from("tasks").delete().eq("id", taskId);
+    if (recurringPlanActivityId) await sb.from("tasks").delete().eq("id", recurringPlanActivityId);
+    if (recurringPlanParentId) {
+      await sb.from("tasks").delete().eq("plan_id", recurringPlanParentId);
+      await sb.from("tasks").delete().eq("id", recurringPlanParentId);
+    }
     if (planId) await sb.from("tasks").delete().eq("id", planId);
   });
 
@@ -124,5 +134,86 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     const modal = page.locator(".tm");
     await expect(modal).toBeVisible({ timeout: 20_000 });
     await expect(modal.getByText(/Execuções da recorrência/)).toContainText("(2)");
+
+    await page.goto(`/admin/kanban?task=${first.id}`);
+    const childModal = page.locator(".tm");
+    await expect(childModal).toBeVisible({ timeout: 20_000 });
+    const parentBox = childModal.locator(".tm-planmembers", { hasText: "Card pai (1)" });
+    await expect(parentBox).toContainText(parent.title);
+    await expect(parentBox.locator(".tm-member-unlink")).toHaveCount(1);
+    await parentBox.locator(".tm-member-open").click();
+    await expect(page.locator(".tm").getByText(/Execuções da recorrência/)).toContainText("(2)");
+
+    await page.goto(`/admin/kanban?task=${first.id}`);
+    const reopenedChild = page.locator(".tm");
+    await reopenedChild.locator(".tm-planmembers", { hasText: "Card pai (1)" }).locator(".tm-member-unlink").click();
+    await expect(reopenedChild.locator(".tm-planmembers", { hasText: "Card pai (1)" })).toHaveCount(0);
+    const standalone = await (await page.request.get(`/api/admin/tasks/${first.id}`)).json();
+    expect(standalone.plan_id).toBeNull();
+    expect(standalone.payload).not.toHaveProperty("recurrence_parent_id");
+    expect(standalone.payload.action_plan_id).toBe(planId);
+
+    const deletedParent = await page.request.delete(`/api/admin/tasks/${parentId}`);
+    expect(deletedParent.ok()).toBeTruthy();
+    const preservedChild = await page.request.get(`/api/admin/tasks/${completed.task.id}`);
+    expect(preservedChild.ok()).toBeTruthy();
+    const preserved = await preservedChild.json();
+    expect(preserved).toMatchObject({ id: completed.task.id, plan_id: null });
+    expect(preserved.payload).not.toHaveProperty("recurrence_parent_id");
+    parentId = "";
+  });
+
+  test("cria, conclui, desativa e reativa um Plano recorrente sem duplicar atividades", async ({ page }) => {
+    await login(page);
+    const created = await page.request.post("/api/admin/tasks?scope=plan", {
+      data: {
+        slug: clientSlug,
+        title: `[e2e ${RUN}] Plano recorrente`,
+        kind: "plano_acao",
+        due_date: "2026-08-03",
+        start_date: "2026-08-03",
+        end_date: "2026-08-03",
+        recurrence_cadence: "semanal",
+        recurrence_weekdays: [1],
+      },
+    });
+    expect(created.status()).toBe(201);
+    const firstPlan = await created.json();
+    recurringPlanExecutionId = firstPlan.id;
+    recurringPlanParentId = firstPlan.plan_id;
+    expect(firstPlan).toMatchObject({ kind: "plano_acao", recurrence_cadence: null });
+
+    const activityResponse = await page.request.post("/api/admin/tasks?scope=task", {
+      data: { slug: clientSlug, title: `[e2e ${RUN}] Atividade original`, kind: "operacional", plan_id: firstPlan.id },
+    });
+    expect(activityResponse.status()).toBe(201);
+    const activity = await activityResponse.json();
+    recurringPlanActivityId = activity.id;
+
+    const completed = await page.request.post(`/api/admin/tasks/${recurringPlanParentId}/complete-cycle`, {
+      data: { expectedCycle: 0, expectedRevision: 1, expectedDueDate: "2026-08-03" },
+    });
+    expect(completed.ok()).toBeTruthy();
+    const nextPlan = (await completed.json()).task;
+    expect(nextPlan).toMatchObject({ kind: "plano_acao", due_date: "2026-08-10", plan_id: recurringPlanParentId });
+
+    const originalActivities = (await (await page.request.get(`/api/admin/tasks?parentId=${firstPlan.id}`)).json()).tasks;
+    const nextActivities = (await (await page.request.get(`/api/admin/tasks?parentId=${nextPlan.id}`)).json()).tasks;
+    expect(originalActivities.map((item: { id: string }) => item.id)).toContain(activity.id);
+    expect(nextActivities).toHaveLength(0);
+
+    const disabled = await page.request.patch(`/api/admin/tasks/${recurringPlanParentId}`, { data: { recurrence_cadence: null } });
+    expect(disabled.ok()).toBeTruthy();
+    expect(await disabled.json()).toMatchObject({ id: recurringPlanParentId, recurrence_cadence: null, payload: { recurrence_group: true } });
+    const history = (await (await page.request.get(`/api/admin/tasks?parentId=${recurringPlanParentId}`)).json()).tasks;
+    expect(history).toHaveLength(2);
+
+    const reactivated = await page.request.patch(`/api/admin/tasks/${recurringPlanParentId}`, {
+      data: { recurrence_cadence: "semanal", recurrence_weekdays: [1] },
+    });
+    expect(reactivated.ok()).toBeTruthy();
+    expect((await reactivated.json()).id).toBe(recurringPlanParentId);
+    const sameHistory = (await (await page.request.get(`/api/admin/tasks?parentId=${recurringPlanParentId}`)).json()).tasks;
+    expect(sameHistory).toHaveLength(2);
   });
 });

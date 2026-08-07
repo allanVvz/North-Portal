@@ -5,12 +5,21 @@ import {
   activatedTaskPayload,
   belongsToTaskScreen,
   childrenOf,
+  detachedTaskRelationPatch,
   isDeferredTask,
+  recurrenceParentOf,
   recurringActionPlanPatch,
   visibleOnTaskBoard,
 } from "./taskRelations";
 
 describe("relações entre tarefas", () => {
+  it("resolve a relação imutável da execução com o card pai carregado", () => {
+    const tasks = [{ id: "parent" }, { id: "other" }];
+    expect(recurrenceParentOf("parent", tasks)).toEqual({ id: "parent" });
+    expect(recurrenceParentOf("missing", tasks)).toBeNull();
+    expect(recurrenceParentOf(null, tasks)).toBeNull();
+  });
+
   it("mantém a execução futura sob o pai sem exibi-la no quadro", () => {
     const child = { id: "child", plan_id: "parent", payload: { deferred_until_accessed: true } };
     expect(childrenOf("parent", [child])).toEqual([child]);
@@ -50,6 +59,43 @@ describe("relações entre tarefas", () => {
     );
     expect(unlinked.payload).toEqual({ recurrence_parent_id: "recurrence-parent", comments: [] });
   });
+
+  it("torna uma execução recorrente independente sem perder seu conteúdo", () => {
+    const patch = detachedTaskRelationPatch({
+      plan_id: "recurrence-parent",
+      payload: {
+        recurrence_parent_id: "recurrence-parent",
+        recurrence_cycle: 2,
+        occurrence_date: "2026-08-05",
+        deferred_until_accessed: true,
+        comments: [{ text: "conteúdo preservado" }],
+        action_plan_id: "action-plan",
+      },
+    }, "recurrence-parent");
+
+    expect(patch).toEqual({
+      plan_id: null,
+      payload: {
+        comments: [{ text: "conteúdo preservado" }],
+        action_plan_id: "action-plan",
+      },
+    });
+  });
+
+  it("remove apenas a ligação secundária com o plano", () => {
+    const patch = detachedTaskRelationPatch({
+      plan_id: "recurrence-parent",
+      payload: {
+        recurrence_parent_id: "recurrence-parent",
+        action_plan_id: "action-plan",
+        comments: [],
+      },
+    }, "action-plan");
+
+    expect(patch).toEqual({
+      payload: { recurrence_parent_id: "recurrence-parent", comments: [] },
+    });
+  });
 });
 
 describe("separação da tela Tarefas", () => {
@@ -60,5 +106,6 @@ describe("separação da tela Tarefas", () => {
     expect(belongsToTaskScreen({ ...base, kind: "plano_acao" })).toBe(false);
     expect(belongsToTaskScreen({ ...base, recurrence_cadence: "semanal" })).toBe(false);
     expect(belongsToTaskScreen({ ...base, payload: { deferred_until_accessed: true } })).toBe(false);
+    expect(belongsToTaskScreen({ ...base, payload: { recurrence_group: true } })).toBe(false);
   });
 });

@@ -23,7 +23,7 @@
   --np-cover-blue: linear-gradient(135deg, #6b93b4, #37576f);
   --np-cover-purple: linear-gradient(135deg, #9a89b0, #6a5a82);
 
-  min-height: 100vh;
+  min-height: calc(100vh / var(--ui-scale));
   background: var(--np-bg);
   color: var(--np-ink);
   font-family: var(--sans);
@@ -378,7 +378,7 @@ body.np-menu-open { overflow: hidden; }
 .np-veil { position: fixed; inset: 0; z-index: 150; background: var(--np-bg); opacity: 0; pointer-events: none; transition: opacity .24s ease; }
 .np-veil.show { opacity: .55; }
 
-.np-fatal { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 40px; }
+.np-fatal { min-height: calc(100vh / var(--ui-scale)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 40px; }
 .np-fatal h1 { font-family: var(--serif); font-weight: 500; color: var(--np-ink-serif); }
 .np-fatal p { color: var(--np-muted); }
 
@@ -410,7 +410,7 @@ body.np-menu-open { overflow: hidden; }
 .np-home-pill-row { display: flex; justify-content: center; margin-top: 14px; }
 .np-home-pill-row .np-pill { font-size: 13px; padding: 8px 16px; }
 
-.np-happening { background: var(--np-surface); border-top: 1px solid var(--np-border); width: 100vw; margin-left: calc(50% - 50vw); margin-top: 40px; padding: 40px max(40px, calc(50vw - 600px)); }
+.np-happening { background: var(--np-surface); border-top: 1px solid var(--np-border); width: calc(100vw / var(--ui-scale)); margin-left: calc(50% - (50vw / var(--ui-scale))); margin-top: 40px; padding: 40px max(40px, calc((50vw / var(--ui-scale)) - 600px)); }
 .np-h2 { margin: 0 0 22px; font-size: 20px; font-weight: 700; color: var(--np-ink); }
 .np-hap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .np-hap-card { background: var(--np-surface-2); border-radius: var(--np-radius); padding: 22px; }
@@ -445,13 +445,13 @@ body.np-menu-open { overflow: hidden; }
   .np-stat:hover, .np-hap-card:hover { transform: none; }
 }
 
-.np-band { background: var(--np-cream); width: 100vw; margin-left: calc(50% - 50vw); padding: 34px 40px; text-align: center; }
+.np-band { background: var(--np-cream); width: calc(100vw / var(--ui-scale)); margin-left: calc(50% - (50vw / var(--ui-scale))); padding: 34px 40px; text-align: center; }
 .np-band p { margin: 0; font-family: var(--serif); font-style: italic; font-size: clamp(18px, 2.2vw, 26px); color: var(--np-cream-ink); }
 
 /* ============================= Footer ============================= */
 .np-footer {
   display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
-  padding: 26px max(40px, calc(50vw - 600px)); border-top: 1px solid var(--np-border); background: var(--np-surface-2);
+  padding: 26px max(40px, calc((50vw / var(--ui-scale)) - 600px)); border-top: 1px solid var(--np-border); background: var(--np-surface-2);
 }
 .np-footer-links { display: flex; gap: 24px; }
 .np-footer-links a { color: var(--np-muted); text-decoration: none; font-size: 14px; }
@@ -573,7 +573,7 @@ body.np-menu-open { overflow: hidden; }
 .np-recent-text strong { display: block; font-size: 15px; color: var(--np-ink); }
 .np-recent-text em { font-style: normal; font-size: 12px; color: var(--np-muted); }
 
-.np-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--np-ink); color: var(--np-surface); font-size: 13.5px; padding: 11px 20px; border-radius: 999px; box-shadow: var(--np-shadow); z-index: 300; max-width: calc(100vw - 32px); text-align: center; }
+.np-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--np-ink); color: var(--np-surface); font-size: 13.5px; padding: 11px 20px; border-radius: 999px; box-shadow: var(--np-shadow); z-index: 300; max-width: calc((100vw / var(--ui-scale)) - 32px); text-align: center; }
 
 .np-modal-backdrop { position: fixed; inset: 0; background: rgba(10, 20, 18, .45); display: grid; place-items: center; padding: 20px; z-index: 250; }
 .np-modal { width: min(480px, 100%); background: var(--np-surface); border: 1px solid var(--np-border); border-radius: var(--np-radius-lg); box-shadow: var(--np-shadow); padding: 24px; }
@@ -756,8 +756,8 @@ body.np-menu-open { overflow: hidden; }
 .np-radio.dark { background: var(--np-ink-serif); border-color: var(--np-ink-serif); }
 
 /* ============================= Briefing wizard ============================= */
-.np-briefing-shell { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; padding-top: var(--np-header-h); }
-.np-brief-sidebar { border-right: 1px solid var(--np-border); padding: 40px 28px; position: sticky; top: var(--np-header-h); align-self: start; height: calc(100vh - var(--np-header-h)); overflow-y: auto; }
+.np-briefing-shell { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh / var(--ui-scale)); padding-top: var(--np-header-h); }
+.np-brief-sidebar { border-right: 1px solid var(--np-border); padding: 40px 28px; position: sticky; top: var(--np-header-h); align-self: start; height: calc((100vh / var(--ui-scale)) - var(--np-header-h)); overflow-y: auto; }
 .np-brief-current { display: block; font-size: 24px; font-weight: 600; margin: 4px 0 8px; }
 .np-brief-meta { font-style: normal; display: block; font-size: 12px; color: var(--np-muted); margin-bottom: 12px; }
 .np-brief-progress { height: 4px; border-radius: 999px; background: var(--np-surface-2); overflow: hidden; margin-bottom: 24px; }
@@ -791,7 +791,7 @@ body.np-menu-open { overflow: hidden; }
 .np-brief-chip.error { color: var(--np-danger); }
 
 /* ============================= Café (Briefing 0) ============================= */
-.np-cafe { min-height: 100vh; display: flex; flex-direction: column; padding: 0 clamp(28px, 6vw, 110px); }
+.np-cafe { min-height: calc(100vh / var(--ui-scale)); display: flex; flex-direction: column; padding: 0 clamp(28px, 6vw, 110px); }
 .np-cafe::before { content: ""; position: fixed; inset: 0 0 auto 0; height: 4px; background: var(--np-green); }
 .np-cafe-top { display: flex; align-items: center; justify-content: space-between; padding: 30px 0; }
 .np-cafe-body { flex: 1; display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 60px; }

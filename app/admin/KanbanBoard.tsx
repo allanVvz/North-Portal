@@ -10,7 +10,7 @@ import TaskModal from "./TaskModal";
 import TaskKindIcon from "./TaskKindIcon";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
-import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, taskTone, visibleColumnsFor } from "./kanbanShared";
+import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, statusAfterKanbanDrop, taskTone, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
 import { formatCommentTime } from "@/lib/comments";
 import { kindDef, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
@@ -120,8 +120,8 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // Whether ANY client currently has Revisão/Aprovação admin-enabled — drives
   // whether those Kanban columns show at all (see visibleColumns below).
   const [flowSummary, setFlowSummary] = useState({ anyRevisaoAdmin: false, anyAprovacaoAdmin: false });
-  // "Publicado" column — a single global switch, defaults off (still in
-  // development: mock metrics, manual post-linking). See kanbanShared.ts.
+  // "Publicado" column — a single global switch. Off merges its cards into
+  // Concluído as a visual-only projection. See kanbanShared.ts.
   const [publicadoOn, setPublicadoOn] = useState(false);
 
   useEffect(() => {
@@ -191,11 +191,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     });
   }, [taskScreenTasks, activeFilters, q]);
 
-  const byStatus = useMemo(() => {
-    const map: Record<string, BoardRow[]> = Object.fromEntries(COLUMNS.map((c) => [c.status, []]));
-    for (const t of filtered) map[t.status].push(t);
-    return map;
-  }, [filtered]);
+  const tasksInStatusColumn = useCallback(
+    (status: TaskStatus) => tasksForKanbanColumn(filtered, status, publicadoOn),
+    [filtered, publicadoOn],
+  );
 
   // Responsável mode: one column per distinct assignee among the filtered
   // tasks — brand new names show up as a new column automatically the moment
@@ -349,11 +348,15 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     if (!dragged) return;
     const before = tasks;
 
-    const columnTasks = byStatus[status].filter((t) => t.id !== draggedId);
+    const columnTasks = tasksInStatusColumn(status).filter((t) => t.id !== draggedId);
     const insertAt = beforeTaskId ? columnTasks.findIndex((t) => t.id === beforeTaskId) : -1;
     const at = insertAt === -1 ? columnTasks.length : insertAt;
     const reordered = [...columnTasks.slice(0, at), dragged, ...columnTasks.slice(at)];
-    const withPositions = reordered.map((t, i) => ({ ...t, status, position: i * 10 }));
+    const withPositions = reordered.map((t, i) => ({
+      ...t,
+      status: statusAfterKanbanDrop(t.status, status, publicadoOn),
+      position: i * 10,
+    }));
 
     const changed = withPositions.filter((t) => {
       const prior = tasks.find((r) => r.id === t.id);
@@ -379,7 +382,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
       setTasks(before);
       setError("Não foi possível mover o card — verifique sua conexão.");
     }
-  }, [dragId, tasks, byStatus]);
+  }, [dragId, tasks, tasksInStatusColumn, publicadoOn]);
 
   // Responsável mode: dropping a card onto a person's column just reassigns
   // it — no reordering/position touch, so it can't disturb the status-based
@@ -507,6 +510,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
             {showFormato ? <span className="kb-card-pill">{formato}</span> : null}
             {showPlataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
           </div>
+        ) : null}
+        {!publicadoOn && t.status === "concluido" ? (
+          <div className="kb-card-meta"><span className="kb-card-pill kb-published-mark">Publicado</span></div>
         ) : null}
         {visible("progress") ? (
           <div className="kb-card-progress">
@@ -729,7 +735,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           ) : view === "quadro" ? (
             <div className="kb-board" ref={boardRef} style={{ gridTemplateColumns: `repeat(${Math.max(gridColCount, 1)}, minmax(240px, 1fr))` }}>
               {boardMode === "status" ? (
-                visibleColumns.map((col) => (
+                visibleColumns.map((col) => {
+                  const columnTasks = tasksInStatusColumn(col.status);
+                  return (
                   <div
                     className={`kb-col ${dragId ? "drop-target" : ""}`}
                     key={col.status}
@@ -738,11 +746,11 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                   >
                     <div className="kb-col-head">
                       <span>{col.label}</span>
-                      <em>{byStatus[col.status].length}</em>
+                      <em>{columnTasks.length}</em>
                     </div>
                     <div className="kb-col-body">
-                      {byStatus[col.status].map((t) => renderCard(t, () => void dropInColumn(col.status, t.id)))}
-                      {byStatus[col.status].length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
+                      {columnTasks.map((t) => renderCard(t, () => void dropInColumn(col.status, t.id)))}
+                      {columnTasks.length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
                     </div>
                     <button
                       type="button"
@@ -752,7 +760,8 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                       + Adicionar tarefa
                     </button>
                   </div>
-                ))
+                  );
+                })
               ) : (
                 responsavelColumns.map((who) => (
                   <div
@@ -847,6 +856,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
 
       {modalState ? (
         <TaskModal
+          key={`${modalState.mode}:${modalState.mode === "edit" ? modalState.taskId : `${modalState.initialStatus ?? ""}:${modalState.initialAssignee ?? ""}`}`}
           mode={modalState.mode}
           task={editingTask}
           slug={modalSlug}

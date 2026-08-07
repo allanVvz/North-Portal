@@ -26,10 +26,9 @@ export const STATUS_LABEL: Record<TaskStatus, string> = Object.fromEntries(
 // `tasks.some(...)` half is a pure safety net — a column that somehow still
 // has a card sitting in it (stale flag, migration gap, whatever) must never
 // disappear out from under that card.
-// "Publicado" (concluido) is different: it's an unfinished feature (mock
-// metrics, manual post-linking) gated by a single global admin switch
-// (Configurações → Etapas) — no safety net for cards already sitting there,
-// since turning it off is meant to hide it entirely, not just for new cards.
+// "Publicado" (concluido) is gated by one global switch. Hiding its dedicated
+// column keeps published cards visible as a visual projection in Concluído;
+// their persisted status remains `concluido`.
 export function visibleColumnsFor(
   tasks: { status: TaskStatus }[],
   anyClientRevisaoAdmin: boolean,
@@ -44,6 +43,29 @@ export function visibleColumnsFor(
       (c.status !== "aprovacao" || hasAprovacao) &&
       (c.status !== "concluido" || publicadoColumnVisible),
   );
+}
+
+/** Tasks rendered in a status column. With Publicado hidden, Concluído is a
+ * visual union of `aprovado` and `concluido` without mutating either status. */
+export function tasksForKanbanColumn<T extends { status: TaskStatus }>(
+  tasks: readonly T[],
+  columnStatus: TaskStatus,
+  publicadoColumnVisible: boolean,
+): T[] {
+  if (columnStatus === "aprovado" && !publicadoColumnVisible) {
+    return tasks.filter((task) => task.status === "aprovado" || task.status === "concluido");
+  }
+  return tasks.filter((task) => task.status === columnStatus);
+}
+
+/** Published cards reordered inside the merged column remain published. */
+export function statusAfterKanbanDrop(
+  currentStatus: TaskStatus,
+  columnStatus: TaskStatus,
+  publicadoColumnVisible: boolean,
+): TaskStatus {
+  if (!publicadoColumnVisible && columnStatus === "aprovado" && currentStatus === "concluido") return "concluido";
+  return columnStatus;
 }
 
 // Kind vocabulary/labels/icons/tones now live in the in-code catalog

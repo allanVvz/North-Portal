@@ -16,6 +16,8 @@ import { recurringOccurrences } from "./recurringOccurrences";
 import { RECURRING_GROUP_BY_LABEL, compareByUrgency, groupRecurring, type RecurringGroupBy } from "./recurringGrouping";
 import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "./calendarUtils";
 import TaskKindIcon from "./TaskKindIcon";
+import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
+import type { TaskRecord } from "@/lib/validation";
 
 type Section = "recorrencias" | "cadastro";
 type RecurrenceView = "colunas" | "lista" | "calendario";
@@ -190,12 +192,20 @@ export default function ClientsWorkspace({
     router.refresh();
   }
 
-  async function completeCycle(task: RecurringTask) {
+  async function completeCycle(task: RecurringTask | TaskRecord, retried = false): Promise<void> {
     const response = await fetch(`/api/admin/tasks/${task.id}/complete-cycle`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expectedDueDate: task.next_due_date }),
+      body: JSON.stringify({
+        expectedCycle: recurrenceCycleOf(task),
+        expectedRevision: recurrenceRevisionOf(task),
+        expectedDueDate: "next_due_date" in task ? task.next_due_date : task.due_date,
+      }),
     });
-    if (response.ok) router.refresh();
+    if (response.ok) { router.refresh(); return; }
+    const body = await response.json().catch(() => null) as { code?: string; parent?: TaskRecord } | null;
+    if (!retried && body?.code === "recurrence_schedule_changed" && body.parent) {
+      await completeCycle(body.parent, true);
+    }
   }
 
   return (
@@ -283,7 +293,7 @@ export default function ClientsWorkspace({
                     <div><strong>{column.label}</strong><span>{column.tasks.length} {column.tasks.length === 1 ? "rotina" : "rotinas"}</span></div>
                   </header>
                   <div className="rec-column-stack">
-                    {column.tasks.map((task) => <RecurrenceCard task={task} today={today} onOpen={() => setSelected(task)} onComplete={() => void completeCycle(task)} key={`${column.key}-${task.id}`} />)}
+                    {column.tasks.map((task) => <RecurrenceCard task={task} today={today} onOpen={() => setSelected(task)} onComplete={task.active ? () => void completeCycle(task) : undefined} key={`${column.key}-${task.id}`} />)}
                   </div>
                 </section>
               ))}
@@ -307,7 +317,7 @@ export default function ClientsWorkspace({
                     <span className={`rec-list-due ${RECURRING_STATE_TONE[state]}`}>{formatDate(task.next_due_date)}</span>
                     <span>{PRIORITY_LABEL[task.priority]}</span>
                     </button>
-                    <button type="button" className="rec-list-complete" onClick={() => void completeCycle(task)}>✓ Concluir ciclo</button>
+                    {task.active ? <button type="button" className="rec-list-complete" onClick={() => void completeCycle(task)}>✓ Concluir ciclo</button> : <span className="rec-list-complete">Histórico</span>}
                   </div>
                 );
               })}

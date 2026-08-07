@@ -1,12 +1,10 @@
 import { listApprovalQueue, listClients } from "@/lib/supabase";
-import { getSession } from "@/lib/supabase/auth";
 import ApprovalsQueue from "./ApprovalsQueue";
 
 export const dynamic = "force-dynamic";
 
 export default async function AprovacoesPage() {
-  const [approvals, clients, session] = await Promise.all([listApprovalQueue(), listClients(), getSession()]);
-  const canApprove = session?.level === "gerente";
+  const [approvals, clients] = await Promise.all([listApprovalQueue(), listClients()]);
   return (
     <section className="admin-page">
       <header className="admin-head">
@@ -18,7 +16,6 @@ export default async function AprovacoesPage() {
       <ApprovalsQueue
         initial={approvals}
         clients={clients.map((c) => ({ slug: c.slug, name: c.name }))}
-        canApprove={canApprove}
       />
     </section>
   );

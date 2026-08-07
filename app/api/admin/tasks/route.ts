@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { createExplicitDateTaskGroup, createTask, getClient, getClientFlowFlags, listAllTasks, listRelatedTasks, listTasks, listUnassignedTasks } from "@/lib/supabase";
-import { EXPLICIT_DATES_KEY, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
+import {
+  createRecurringTaskGroup,
+  createTask,
+  getClient,
+  getClientFlowFlags,
+  getTaskById,
+  listAllTasks,
+  listRelatedTasks,
+  listTasks,
+  listUnassignedTasks,
+  setTaskAssigneeProfiles,
+} from "@/lib/supabase";
+import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
+import { recurrenceParentPayload } from "@/lib/recurrenceState";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, taskCreateSchema, validateSlug } from "@/lib/validation";
 
@@ -45,34 +57,42 @@ export async function POST(request: Request) {
     const body = taskCreateSchema.parse(await request.json());
     const client = body.slug ? await getClient(body.slug, true) : null;
     if (body.slug && !client) throw new HttpError(404, "Cliente nao encontrado.");
-    const { slug: _slug, ...fields } = body;
+    const { slug: _slug, assignee_profile_ids, ...fields } = body;
     void _slug;
     const explicitDates = normalizeOccurrenceDates(fields.payload?.[EXPLICIT_DATES_KEY], fields.due_date);
     const createsDateGroup = explicitDates.length > 1;
+    if (createsDateGroup) {
+      const rule = inferDateGroupRule(explicitDates);
+      fields.due_date = explicitDates[0];
+      fields.start_date = explicitDates[0];
+      fields.end_date = explicitDates.at(-1);
+      fields.recurrence_cadence = rule.cadence;
+      fields.recurrence_weekdays = rule.weekdays;
+      fields.recurrence_day_of_month = rule.dayOfMonth;
+      if (fields.payload) delete fields.payload[EXPLICIT_DATES_KEY];
+    }
 
     if (scope === "plan") {
       fields.kind = "plano_acao";
-      fields.recurrence_cadence = null;
-      fields.recurrence_weekdays = [];
-      fields.recurrence_day_of_month = null;
-      if (fields.payload) delete fields.payload[EXPLICIT_DATES_KEY];
     } else if (scope === "task") {
       if (fields.kind === "plano_acao") throw new HttpError(400, "A tela Tarefas nao cria Planos de Acao.");
-      if (!createsDateGroup) {
-        fields.recurrence_cadence = null;
-        fields.recurrence_weekdays = [];
-        fields.recurrence_day_of_month = null;
-      }
     } else if (scope === "routine") {
-      if (fields.kind === "plano_acao") throw new HttpError(400, "A tela Rotinas nao cria Planos de Acao.");
       if (!fields.recurrence_cadence) throw new HttpError(400, "Uma Rotina precisa ter recorrencia.");
     }
 
     if (fields.status === "concluido" && (fields.kind ?? "criativo") !== "criativo") {
       throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");
     }
-    if (fields.kind === "plano_acao" && fields.recurrence_cadence) {
-      throw new HttpError(400, "Plano de Acao e um tipo unico e nao pode ser recorrente.");
+    if (fields.recurrence_cadence) {
+      const start = fields.start_date ?? fields.due_date;
+      if (!start) throw new HttpError(400, "Informe o início da recorrência.");
+      if (!fields.recurrence_weekdays?.length) throw new HttpError(400, "Selecione pelo menos um dia da semana.");
+      fields.start_date = start;
+      fields.due_date = start;
+      fields.end_date = fields.end_date && fields.end_date >= start ? fields.end_date : start;
+      fields.recurrence_day_of_month = fields.recurrence_cadence === "mensal" ? Number(start.slice(8, 10)) : null;
+      fields.payload = recurrenceParentPayload(fields.payload);
+      delete fields.payload[EXPLICIT_DATES_KEY];
     }
 
     // Defense-in-depth: never create a task with a reviewer/approver for a
@@ -84,14 +104,17 @@ export async function POST(request: Request) {
       if (!flags.aprovacaoAdmin) { fields.approver_id = null; fields.requires_approval = false; }
     }
 
-    // A recurrence parent is a template, not an Action Plan activity. For an
-    // explicit-date group createExplicitDateTaskGroup transfers the selected
-    // plan only to the first occurrence.
-    if (fields.recurrence_cadence && !createsDateGroup) fields.plan_id = null;
-    const task = createsDateGroup
-      ? await createExplicitDateTaskGroup(client?.id ?? null, fields, explicitDates)
-      : await createTask(client?.id ?? null, fields);
-    return NextResponse.json(task, { status: 201 });
+    const task = fields.recurrence_cadence && scope !== "routine"
+        ? await createRecurringTaskGroup(client?.id ?? null, fields)
+        : await createTask(client?.id ?? null, fields);
+    if (assignee_profile_ids?.length) {
+      await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
+      // A recurring group's returned row is the first execution; its parent
+      // template needs the same linked accounts.
+      if (task.plan_id && task.plan_id !== task.id) await setTaskAssigneeProfiles(task.plan_id, assignee_profile_ids);
+    }
+    const full = await getTaskById(task.id);
+    return NextResponse.json(full ?? task, { status: 201 });
   } catch (error) {
     return apiError(error);
   }

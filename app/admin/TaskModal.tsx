@@ -13,10 +13,11 @@ import {
   TONES, commentsOf, initials,
 } from "./kanbanShared";
 import CommentText from "@/app/CommentText";
+import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, childrenOf, isDeferredTask } from "@/lib/taskRelations";
-import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
+import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
+import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 
 type Draft = {
@@ -27,11 +28,11 @@ type Draft = {
   status: TaskStatus;
   priority: TaskPriority;
   assignee: string;
+  assignee_profile_ids: string[];
   reviewer_id: string;
   approver_id: string;
   plan_id: string;
   due_date: string;
-  occurrence_dates: string[];
   recurrence_cadence: CalendarRecurrence["cadence"];
   recurrence_weekdays: number[];
   recurrence_day_of_month: number | null;
@@ -75,11 +76,11 @@ function draftFrom(
     status: task?.status ?? initialStatus ?? "backlog",
     priority: task?.priority ?? "media",
     assignee: task?.assignee ?? initialAssignee ?? "",
+    assignee_profile_ids: task?.assignee_profile_ids ?? [],
     reviewer_id: task?.reviewer_id ?? "",
     approver_id: task?.approver_id ?? "",
     plan_id: task ? actionPlanIdOf(task) ?? "" : "",
     due_date: task?.due_date ?? "",
-    occurrence_dates: normalizeOccurrenceDates(p[EXPLICIT_DATES_KEY], task?.due_date),
     recurrence_cadence: task?.recurrence_cadence ?? (creationScope === "routine" || initialRecurrence ? "semanal" : null),
     recurrence_weekdays: task?.recurrence_weekdays ?? [],
     recurrence_day_of_month: task?.recurrence_day_of_month ?? null,
@@ -334,7 +335,14 @@ export default function TaskModal({
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
   const [liveTask, setLiveTask] = useState<TaskRecord | null>(task);
+  // A recurrence template is a parent even if legacy data accidentally still
+  // carries a child-only recurrence_parent_id. It must never render a second
+  // "Card pai" box or try to fetch itself as a parent.
+  const isRecurringParent = Boolean(liveTask?.recurrence_cadence || liveTask?.payload?.recurrence_group === true);
+  const recurrenceParentId = liveTask && !isRecurringParent ? recurrenceParentIdOf(liveTask) : null;
+  const [recurrenceParent, setRecurrenceParent] = useState<TaskRecord | null>(() => recurrenceParentOf(recurrenceParentId, clientTasks));
   const [comment, setComment] = useState("");
+  const { name: currentUserName } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editingDescription, setEditingDescription] = useState(false);
@@ -398,9 +406,20 @@ export default function TaskModal({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const comments = liveTask ? commentsOf(liveTask) : [];
-  const isRecurringParent = Boolean(liveTask?.recurrence_cadence);
   const onTaskPatchedRef = useRef(onTaskPatched);
   useEffect(() => { onTaskPatchedRef.current = onTaskPatched; }, [onTaskPatched]);
+
+  useEffect(() => {
+    if (!recurrenceParentId) { setRecurrenceParent(null); return; }
+    const loaded = recurrenceParentOf(recurrenceParentId, clientTasks);
+    if (loaded) { setRecurrenceParent(loaded); return; }
+    let cancelled = false;
+    fetch(`/api/admin/tasks/${encodeURIComponent(recurrenceParentId)}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((parent: TaskRecord | null) => { if (!cancelled && parent) setRecurrenceParent(parent); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [recurrenceParentId, clientTasks]);
 
   function pickKind(kind: string) {
     if (mode === "new" && creationScope === "plan" && kind !== "plano_acao") return;
@@ -413,27 +432,9 @@ export default function TaskModal({
         subtype: "", // reset — subtype vocabulary is per-kind
         // A plan can't belong to another plan.
         plan_id: def.isPlan ? "" : d.plan_id,
-        recurrence_cadence: def.isPlan ? null : d.recurrence_cadence,
-        recurrence_weekdays: def.isPlan ? [] : d.recurrence_weekdays,
-        recurrence_day_of_month: def.isPlan ? null : d.recurrence_day_of_month,
-      };
-    });
-  }
-
-  function setOccurrenceDates(values: string[]) {
-    const dates = normalizeOccurrenceDates(values);
-    setDraft((current) => {
-      const first = dates[0] ?? "";
-      if (dates.length < 2) return { ...current, occurrence_dates: dates, due_date: first, start_date: first };
-      const rule = inferDateGroupRule(dates);
-      return {
-        ...current,
-        occurrence_dates: dates,
-        due_date: first,
-        start_date: first,
-        recurrence_cadence: rule.cadence,
-        recurrence_weekdays: rule.weekdays,
-        recurrence_day_of_month: rule.dayOfMonth,
+        recurrence_cadence: d.recurrence_cadence,
+        recurrence_weekdays: d.recurrence_weekdays,
+        recurrence_day_of_month: d.recurrence_day_of_month,
       };
     });
   }
@@ -442,7 +443,7 @@ export default function TaskModal({
   // plan_id points here; candidates are the client's still-unlinked non-plan
   // tasks. Linking/unlinking just PATCHes the activity's plan_id.
   const planMembers = liveTask
-    ? (kd.isPlan ? actionPlanMembersOf(liveTask.id, clientTasks) : childrenOf(liveTask.id, clientTasks))
+    ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
   // Unsaved status changes are the task's current UI truth. Reading liveTask
   // here left the percentage frozen until Save, even while the stepper moved.
@@ -461,6 +462,26 @@ export default function TaskModal({
       });
       if (res.ok) onTaskPatched?.(await res.json());
     } catch { /* leave as-is; user can retry */ }
+  }
+
+  async function unlinkMember(taskId: string, parentId: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${taskId}/relations/${parentId}`, { method: "DELETE" });
+      const body = await res.json().catch(() => null) as TaskRecord | { error?: string } | null;
+      if (!res.ok) throw new Error(body && "error" in body ? body.error : "Não foi possível remover a ligação.");
+      const updated = body as TaskRecord;
+      if (liveTask?.id === updated.id) {
+        setLiveTask(updated);
+        setDraft(draftFrom(updated, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
+      }
+      onTaskPatched?.(updated);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível remover a ligação.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Same linking, but for a brand-new plan (mode="new", no id yet): activities
@@ -574,7 +595,7 @@ export default function TaskModal({
   async function sendComment() {
     if (!liveTask || !comment.trim()) return;
     const text = comment.trim();
-    const next = [...comments, { author: "Admin North", text, at: new Date().toISOString() }];
+    const next = [...comments, { author: currentUserName, text, at: new Date().toISOString() }];
     setComment("");
     try {
       const res = await fetch(`/api/admin/tasks/${liveTask.id}`, {
@@ -585,23 +606,31 @@ export default function TaskModal({
     } catch { /* comment stays unsent; user can retry */ }
   }
 
-  async function completeCycle() {
-    if (!liveTask?.recurrence_cadence || !liveTask.due_date) return;
+  async function completeCycle(retried = false, cycleTask = liveTask): Promise<void> {
+    if (!cycleTask?.recurrence_cadence || !cycleTask.due_date) return;
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}/complete-cycle`, {
+      const res = await fetch(`/api/admin/tasks/${cycleTask.id}/complete-cycle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedDueDate: liveTask.due_date }),
+        body: JSON.stringify({ expectedCycle: recurrenceCycleOf(cycleTask), expectedRevision: recurrenceRevisionOf(cycleTask), expectedDueDate: cycleTask.due_date }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => null) as { error?: string } | null;
+        const body = await res.json().catch(() => null) as { error?: string; code?: string; parent?: TaskRecord } | null;
+        if (!retried && body?.code === "recurrence_schedule_changed" && body.parent) {
+          setLiveTask(body.parent);
+          setDraft(draftFrom(body.parent, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
+          onTaskPatched?.(body.parent);
+          setBusy(false);
+          await completeCycle(true, body.parent);
+          return;
+        }
         throw new Error(body?.error ?? "Não foi possível concluir o ciclo.");
       }
       const result = await res.json() as { parent: TaskRecord; task: TaskRecord };
       setLiveTask(result.parent);
-      setDraft((current) => ({ ...current, due_date: result.parent.due_date ?? "", start_date: result.parent.due_date ?? "" }));
+      setDraft((current) => ({ ...current, due_date: result.parent.due_date ?? "", end_date: result.parent.end_date ?? current.end_date }));
       onTaskPatched?.(result.parent);
       onTaskPatched?.(result.task);
     } catch (cause) {
@@ -613,8 +642,16 @@ export default function TaskModal({
 
   async function save() {
     if (!draft.title.trim()) return;
-    setBusy(true);
     setError("");
+    if (draft.recurrence_cadence && !draft.start_date.trim()) {
+      setError("Informe o início da recorrência.");
+      return;
+    }
+    if (draft.recurrence_cadence && !draft.recurrence_weekdays.length) {
+      setError("Selecione pelo menos um dia da semana.");
+      return;
+    }
+    setBusy(true);
     const existingPayload = (liveTask?.payload ?? {}) as Record<string, unknown>;
     const payload: Record<string, unknown> = { ...existingPayload };
     delete payload.pct; // progress is computed now, never persisted
@@ -625,8 +662,7 @@ export default function TaskModal({
     strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
-    if (draft.occurrence_dates.length > 1) payload[EXPLICIT_DATES_KEY] = draft.occurrence_dates;
-    else delete payload[EXPLICIT_DATES_KEY];
+    delete payload.explicit_occurrence_dates;
 
     // Agendamento: fold date + time into a single timestamp for the calendar.
     const dateStart = (draft.start_date || draft.due_date).trim();
@@ -642,6 +678,7 @@ export default function TaskModal({
       status: draft.status,
       priority: draft.priority,
       assignee: draft.assignee.trim() || null,
+      assignee_profile_ids: draft.assignee_profile_ids,
       reviewer_id: revisaoOff ? null : draft.reviewer_id || null,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
@@ -650,9 +687,9 @@ export default function TaskModal({
       // with the flow admin-disabled never requires it, regardless of draft.
       requires_review: revisaoOff ? false : Boolean(draft.reviewer_id),
       requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
-      due_date: (draft.start_date || draft.due_date).trim() || null,
+      due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
       recurrence_cadence: draft.recurrence_cadence,
-      recurrence_weekdays: draft.recurrence_cadence === "semanal" ? draft.recurrence_weekdays : [],
+      recurrence_weekdays: draft.recurrence_cadence ? draft.recurrence_weekdays : [],
       recurrence_day_of_month: draft.recurrence_cadence === "mensal" ? (draft.recurrence_day_of_month ?? 1) : null,
       start_date: draft.start_date.trim() || draft.due_date.trim() || null,
       end_date: draft.end_date.trim() || null,
@@ -663,13 +700,6 @@ export default function TaskModal({
     };
     if (mode === "new" && creationScope === "plan") {
       body.kind = "plano_acao";
-      body.recurrence_cadence = null;
-      body.recurrence_weekdays = [];
-      body.recurrence_day_of_month = null;
-    } else if (mode === "new" && creationScope === "task" && draft.occurrence_dates.length < 2) {
-      body.recurrence_cadence = null;
-      body.recurrence_weekdays = [];
-      body.recurrence_day_of_month = null;
     } else if (mode === "new" && creationScope === "routine" && !body.recurrence_cadence) {
       body.recurrence_cadence = "semanal";
     }
@@ -728,9 +758,13 @@ export default function TaskModal({
     if (!liveTask) return;
     setBusy(true);
     try {
-      await fetch(`/api/admin/tasks/${liveTask.id}`, { method: "DELETE" });
+      const response = await fetch(`/api/admin/tasks/${liveTask.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? "Não foi possível excluir.");
+      }
       onDeleted(liveTask.id);
-    } catch { setError("Não foi possível excluir."); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível excluir."); }
     setBusy(false);
   }
 
@@ -912,7 +946,16 @@ export default function TaskModal({
               <Cell icon="▦" label="Data">
                 <CalendarPicker
                   value={draft.start_date || draft.due_date}
-                  onChange={(value) => setDraft((current) => ({ ...current, start_date: value, due_date: value, occurrence_dates: current.occurrence_dates.length > 1 ? current.occurrence_dates : value ? [value] : [] }))}
+                  onChange={(value) => setDraft((current) => {
+                    const day = value ? new Date(`${value}T12:00:00`).getDay() : null;
+                    return {
+                      ...current,
+                      start_date: value,
+                      due_date: liveTask?.recurrence_cadence ? current.due_date : value,
+                      end_date: value && (!current.end_date || current.end_date < value) ? value : current.end_date,
+                      recurrence_weekdays: current.recurrence_cadence && !current.recurrence_weekdays.length && day !== null ? [day] : current.recurrence_weekdays,
+                    };
+                  })}
                   endValue={draft.end_date}
                   onEndChange={(value) => set("end_date", value)}
                   timeValue={draft.hora}
@@ -920,11 +963,9 @@ export default function TaskModal({
                   placeholder="Sem data"
                   recurrence={{ cadence: draft.recurrence_cadence, weekdays: draft.recurrence_weekdays, dayOfMonth: draft.recurrence_day_of_month }}
                   onRecurrenceChange={(value) => setDraft((current) => ({ ...current, recurrence_cadence: value.cadence, recurrence_weekdays: value.weekdays, recurrence_day_of_month: value.dayOfMonth }))}
-                  recurrenceFeatureEnabled={!kd.isPlan}
+                  recurrenceFeatureEnabled
                   recurrenceRequired={mode === "new" && creationScope === "routine"}
-                  selectedDates={!kd.isPlan && !liveTask?.plan_id ? draft.occurrence_dates : undefined}
-                  onSelectedDatesChange={!kd.isPlan && !liveTask?.plan_id ? setOccurrenceDates : undefined}
-                  minSelectedDates={liveTask && draft.occurrence_dates.length > 1 ? 2 : 0}
+                  nextExecutionValue={isRecurringParent ? liveTask?.due_date ?? undefined : undefined}
                 />
               </Cell>
 
@@ -983,7 +1024,16 @@ export default function TaskModal({
               {/* Multiple people stay backwards-compatible in one DB field,
                   but behave as a reusable list in the editor. */}
               <Cell icon="◔" label="Responsável" hidden={!visible("assignee")}>
-                <AssigneePicker value={draft.assignee} options={assignees} onChange={(value) => set("assignee", value)} disabled={busy} />
+                <AssigneePicker
+                  assignee={draft.assignee}
+                  assigneeProfileIds={draft.assignee_profile_ids}
+                  accountOptions={adminReviewers}
+                  freeTextOptions={assignees}
+                  onChange={({ assignee, assigneeProfileIds }) =>
+                    setDraft((current) => ({ ...current, assignee: assignee ?? "", assignee_profile_ids: assigneeProfileIds }))
+                  }
+                  disabled={busy}
+                />
               </Cell>
 
               <Cell icon="⚑" label="Status" hidden={!visible("status")}>
@@ -997,6 +1047,32 @@ export default function TaskModal({
 
             </div>
 
+            {liveTask && recurrenceParentId ? (
+              <div className="tm-box tm-planmembers">
+                <p className="tm-box-label">Card pai (1)</p>
+                <div className="tm-member-list">
+                  {recurrenceParent ? (
+                    <div className="tm-member">
+                      <button
+                        type="button"
+                        className="tm-member-unlink"
+                        title="Remover ligação com o card pai"
+                        aria-label="Remover ligação com o card pai"
+                        onClick={() => void unlinkMember(liveTask.id, recurrenceParent.id)}
+                        disabled={busy}
+                      >✕</button>
+                      <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(recurrenceParent)} disabled={!onOpenRelatedTask || busy}>
+                        <TaskKindIcon kind={recurrenceParent.kind} size="sm" />
+                        <span className="tm-member-title">{recurrenceParent.title}</span>
+                        <span className="tm-member-status">{STATUS_LABEL[recurrenceParent.status]}</span>
+                        <span className="tm-member-arrow" aria-hidden>↗</span>
+                      </button>
+                    </div>
+                  ) : <p className="admin-sub" style={{ margin: 0 }}>Carregando card pai…</p>}
+                </div>
+              </div>
+            ) : null}
+
             {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
               <div className="tm-box tm-planmembers">
                 <p className="tm-box-label">
@@ -1006,18 +1082,26 @@ export default function TaskModal({
                   {liveTask ? (
                     planMembers.map((m) => (
                       <div className="tm-member" key={m.id}>
+                        <button
+                          type="button"
+                          className="tm-member-unlink"
+                          title={isRecurringParent ? "Remover ligação com esta execução" : "Desvincular do plano"}
+                          aria-label={isRecurringParent ? `Remover ligação com ${m.title}` : `Desvincular ${m.title} do plano`}
+                          onClick={() => void unlinkMember(m.id, liveTask.id)}
+                          disabled={busy}
+                        >✕</button>
                         <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(m)} disabled={!onOpenRelatedTask || busy}>
                           <TaskKindIcon kind={m.kind} size="sm" />
                           <span className="tm-member-title">{m.title}</span>
                           <span className="tm-member-status">{isDeferredTask(m) ? "Futura · abrir tarefa" : STATUS_LABEL[m.status]}</span>
                           <span className="tm-member-arrow" aria-hidden>↗</span>
                         </button>
-                        {!isRecurringParent ? <button className="tm-member-unlink" title="Desvincular do plano" onClick={() => linkMember(m.id, null)}>✕</button> : null}
                       </div>
                     ))
                   ) : (
                     pendingMembers.map((m) => (
                       <div className="tm-member" key={m.key}>
+                        <button type="button" className="tm-member-unlink" title="Remover" aria-label={`Remover ${m.title}`} onClick={() => removePendingMember(m.key)}>✕</button>
                         <span className="tm-member-open tm-member-pending">
                           <TaskKindIcon kind="operacional" size="sm" />
                           <span className="tm-member-title">{m.title}</span>
@@ -1025,7 +1109,6 @@ export default function TaskModal({
                             {m.kind === "existing" ? "Vincular ao criar" : [m.assignee, m.due_date].filter(Boolean).join(" · ") || "Criar ao salvar"}
                           </span>
                         </span>
-                        <button className="tm-member-unlink" title="Remover" onClick={() => removePendingMember(m.key)}>✕</button>
                       </div>
                     ))
                   )}
@@ -1151,7 +1234,7 @@ export default function TaskModal({
         <footer className="kb-modal-actions">
           {liveTask ? <button className="admin-btn ghost danger" onClick={remove} disabled={busy}>Excluir</button> : <span />}
           <div className="kb-modal-actions-right">
-            {isRecurringParent ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
+            {liveTask?.recurrence_cadence ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
             <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
             <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
               {busy ? "Salvando…" : mode === "new" ? "Criar card" : "Salvar card"}

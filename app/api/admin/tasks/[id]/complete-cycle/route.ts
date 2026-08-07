@@ -11,8 +11,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID inválido.");
-    const { expectedDueDate } = recurringCompleteSchema.parse(await request.json().catch(() => ({})));
-    return NextResponse.json(await completeTaskCycle(id, expectedDueDate ?? null));
+    const { expectedCycle, expectedRevision, expectedDueDate } = recurringCompleteSchema.parse(await request.json().catch(() => ({})));
+    return NextResponse.json(await completeTaskCycle(id, expectedCycle, expectedRevision, expectedDueDate ?? null));
   } catch (error) {
     return apiError(error);
   }
