@@ -1243,6 +1243,24 @@ function shouldConvertToRecurringGroup(current: TaskRecord, recurrenceParentId: 
   return !current.recurrence_cadence && !recurrenceParentId && !historical && Boolean(nextRecurrence);
 }
 
+async function routeTaskGroupUpdate(
+  id: string,
+  current: TaskRecord,
+  patch: Record<string, unknown>,
+  parent: TaskRecord | null,
+  recurrenceParentId: string | null,
+  historical: boolean,
+  nextRecurrence: unknown,
+): Promise<TaskRecord> {
+  if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
+  if (shouldConvertToRecurringGroup(current, recurrenceParentId, historical, nextRecurrence)) {
+    return convertTaskToRecurringGroup(current, patch);
+  }
+  if (parent) return updateRecurringExecution(id, parent, patch);
+  if (current.recurrence_cadence || historical) return updateRecurrenceTemplate(current, patch, nextRecurrence);
+  return updateTask(id, patch);
+}
+
 export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch: Record<string, unknown>): Promise<TaskRecord> {
   const patch = await patchWithTopPosition(id, current, rawPatch);
   const historical = current.payload?.[RECURRENCE_GROUP_KEY] === true;
@@ -1251,14 +1269,8 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   // the execution update path.
   const recurrenceParentId = current.recurrence_cadence || historical ? null : recurrenceParentIdOf(current);
   const parent = recurrenceParentId ? await getTaskById(recurrenceParentId) : null;
-  if (parent && isExplicitDateParent(parent)) return updateExplicitChildGroup(id, parent, patch);
   const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
-  if (shouldConvertToRecurringGroup(current, recurrenceParentId, historical, nextRecurrence)) {
-    return convertTaskToRecurringGroup(current, patch);
-  }
-  if (parent) return updateRecurringExecution(id, parent, patch);
-  if (current.recurrence_cadence || historical) return updateRecurrenceTemplate(current, patch, nextRecurrence);
-  return updateTask(id, patch);
+  return routeTaskGroupUpdate(id, current, patch, parent, recurrenceParentId, historical, nextRecurrence);
 }
 
 async function completeTaskCycleForRequest(
