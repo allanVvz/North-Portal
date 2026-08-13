@@ -60,7 +60,7 @@ O Portal North é uma aplicação web **multi-cliente por `slug`**. Cada cliente
 |---|---|
 | `README.md` | Onboarding do repo, URLs, rotas, env. **Precisa de atualização** (ver §11). |
 | `ADMIN.md` | Exemplo de `curl` administrativo. |
-| `scripts/seed-client.mjs` | Cria/ativa cliente via rota admin. |
+| `supabase/seed.sql` | Único seed demonstrativo, sanitizado e idempotente (ver runbook de reprodução). |
 | `scripts/update-client.mjs` | Atualiza cliente via rota admin (JSON arbitrário). |
 | `docs/REQUISITOS-PORTAL-NORTH.md` | **Este documento.** |
 | `docs/DUVIDAS-PRE-DEPLOY.md` | Perguntas técnicas pré-deploy. |
@@ -239,7 +239,7 @@ create unique index client_results_client_id_unique_idx on public.client_results
 4. Retorna `{ok:true}`.
 
 ### 5.5 Cadastro de novo cliente
-> **Gap operacional:** hoje **não há endpoint de criação (`POST`)**. `scripts/seed-client.mjs` faz um `PATCH` admin que assume que o cliente **já existe** no banco. O fluxo "criar clients + 3 filhos vazios" precisa ser feito **manualmente no Supabase** (SQL/Studio) ou por um endpoint novo. Ver §11 e Dúvidas.
+> **Nota histórica:** o antigo `scripts/seed-client.mjs` foi removido por depender de autenticação obsoleta. A reprodução demonstrativa usa somente `supabase/seed.sql`; o cadastro operacional usa a API/admin autenticada atual.
 
 Fluxo desejado: definir name+slug → inserir `clients` → inserir os 3 filhos vazios → preencher via admin → `is_active=true`.
 

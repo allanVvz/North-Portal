@@ -1,0 +1,14 @@
+# Local project metadata used by the pinned Supabase CLI.
+# The cloud project reference is intentionally supplied via SUPABASE_PROJECT_REF.
+project_id = "north-portal"
+
+[db]
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]

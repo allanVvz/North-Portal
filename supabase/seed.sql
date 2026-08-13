@@ -1,66 +1,83 @@
--- Demo seed: validated clients + their briefing/links/results + sample tasks.
--- Auth users (admin + client logins) are created separately via:
---   npm run create:user -- admin@north.com "Senha123!" admin
---   npm run create:user -- cliente@karpinski.com "Senha123!" client karpinski
--- Run this AFTER the migrations. Safe to re-run (idempotent).
+-- Sanitized, idempotent demonstration data only.
+-- No production exports, real credentials, real users, or customer data belong here.
+-- Auth users are created separately with `npm run create:demo-users`.
 
--- ---- clients ----
 insert into public.clients (slug, name, is_active) values
-  ('north', 'ADM NORTH', true),
-  ('karpinski', 'Karpinski Detalhamento', true),
-  ('baita-conveniencia', 'Baita Conveniencia', true)
-on conflict (slug) do update set name = excluded.name, is_active = true;
+  ('north-demo', 'North Demo', true),
+  ('cliente-demo', 'Cliente Exemplo', true)
+on conflict (slug) do update set name = excluded.name, is_active = excluded.is_active;
 
--- ---- one empty child row per client (briefing/links/results) ----
 insert into public.briefing_answers (client_id)
-  select id from public.clients on conflict (client_id) do nothing;
+select id from public.clients where slug in ('north-demo', 'cliente-demo')
+on conflict (client_id) do nothing;
 insert into public.client_drive_links (client_id)
-  select id from public.clients on conflict (client_id) do nothing;
+select id from public.clients where slug in ('north-demo', 'cliente-demo')
+on conflict (client_id) do nothing;
 insert into public.client_results (client_id)
-  select id from public.clients on conflict (client_id) do nothing;
+select id from public.clients where slug in ('north-demo', 'cliente-demo')
+on conflict (client_id) do nothing;
 
--- ---- Karpinski briefing (per-question keys: <card>_q<n>) ----
-update public.briefing_answers set answers = jsonb_build_object(
-  'b1_historia_q1', 'A Karpinski comecou em 2019 como uma garagem de detailing.',
-  'b1_historia_q2', 'Atua ha cerca de 6 anos no mercado.',
-  'b2_metas_q1', 'Aumentar orcamentos qualificados via Direct.',
-  'b7_midia_q1', 'Orcamento inicial de R$ 900/mes.'
-), submitted = false
-where client_id = (select id from public.clients where slug = 'karpinski');
+insert into public.briefing_answers (client_id, answers, submitted)
+select id, jsonb_build_object(
+  'b1_historia_q1', 'Empresa demonstrativa criada para validar o portal.',
+  'b2_metas_q1', 'Receber contatos qualificados pelos canais digitais.',
+  'b7_midia_q1', 'Orcamento ficticio para fins de demonstracao.'
+), false
+from public.clients where slug = 'cliente-demo'
+on conflict (client_id) do update
+set answers = excluded.answers, submitted = excluded.submitted;
 
--- ---- Karpinski links + results ----
-update public.client_drive_links set
-  brand_url = 'https://drive.google.com/drive/folders/DEMO-marca-karpinski',
-  products_url = 'https://drive.google.com/drive/folders/DEMO-servicos-karpinski',
-  uploads_url = 'https://drive.google.com/drive/folders/DEMO-uploads-karpinski'
-where client_id = (select id from public.clients where slug = 'karpinski');
+insert into public.client_drive_links (client_id, brand_url, products_url, uploads_url)
+select id,
+  'https://example.com/demo/marca',
+  'https://example.com/demo/produtos',
+  'https://example.com/demo/uploads'
+from public.clients where slug = 'cliente-demo'
+on conflict (client_id) do update set
+  brand_url = excluded.brand_url,
+  products_url = excluded.products_url,
+  uploads_url = excluded.uploads_url;
 
-update public.client_results set
-  top_metrics = '[
-    {"label":"Orcamentos no Direct","value":"63","variation":"+41%","description":"Ultimos 30 dias"},
-    {"label":"Alcance","value":"48,2 mil","variation":"+12%","description":"Contas alcancadas"},
-    {"label":"Custo por lead","value":"R$ 7,80","variation":"-23%","description":"Meta Ads"},
-    {"label":"Agendamentos","value":"29","variation":"+18%","description":"Vitrificacao/polimento"}
+insert into public.client_results (client_id, top_metrics, insights, report_url, feedback_url)
+select id,
+  '[
+    {"label":"Contatos","value":"24","variation":"+12%","description":"Dados ficticios"},
+    {"label":"Alcance","value":"18 mil","variation":"+8%","description":"Dados ficticios"},
+    {"label":"Custo por lead","value":"R$ 9,40","variation":"-5%","description":"Dados ficticios"},
+    {"label":"Agendamentos","value":"11","variation":"+10%","description":"Dados ficticios"}
   ]'::jsonb,
-  insights = '[
-    {"title":"Stories de bastidor convertem mais","description":"Sequencias mostrando o processo geraram 2x mais DMs.","category":"Conteudo","date":"2026-06-28"}
-  ]'::jsonb,
-  report_url = 'https://drive.google.com/file/d/DEMO-relatorio-karpinski',
-  feedback_url = 'https://forms.gle/DEMO-feedback-karpinski'
-where client_id = (select id from public.clients where slug = 'karpinski');
+  '[{"title":"Conteudo de bastidor","description":"Exemplo sanitizado de insight.","category":"Conteudo","date":"2026-08-01"}]'::jsonb,
+  'https://example.com/demo/relatorio',
+  'https://example.com/demo/feedback'
+from public.clients where slug = 'cliente-demo'
+on conflict (client_id) do update set
+  top_metrics = excluded.top_metrics,
+  insights = excluded.insights,
+  report_url = excluded.report_url,
+  feedback_url = excluded.feedback_url;
 
--- ---- sample tasks for Karpinski ----
-insert into public.tasks (client_id, type, title, status, priority, assignee, due_date, client_visible, description)
-select c.id, t.type::public.task_type, t.title, t.status::public.task_status, t.priority::public.task_priority,
-       t.assignee, t.due_date::date, t.client_visible, t.description
+insert into public.tasks
+  (id, client_id, kind, title, status, priority, assignee, due_date, client_visible, description, payload, position)
+select t.id::uuid, c.id, t.kind, t.title, t.status::public.task_status,
+  t.priority::public.task_priority, t.assignee, t.due_date::date,
+  t.client_visible, t.description, '{"demo":true}'::jsonb, t.position
 from public.clients c
 cross join (values
-  ('criativo','Capas de Reels - Lancamento delivery','revisao','alta','Ana', '2026-07-08', true, 'Serie de 3 capas para o lancamento.'),
-  ('agendamento','Campanha de delivery - Junho','aprovacao','media','Marcos', '2026-07-03', false, 'Aprovar copy e segmentacao internamente antes de mandar ao cliente.'),
-  ('criativo','Estruturar pastas no Google Drive','aprovacao','baixa','Ana', '2026-07-04', true, 'Aguardando aprovacao do cliente.'),
-  ('desempenho','Relatorio mensal','em_producao','media','North', '2026-07-15', false, 'Consolidar metricas do mes.'),
-  ('criativo','Reels de bastidor - vitrificacao','revisao','media','Ana', '2026-07-10', true, 'Revisor validando corte e legenda antes de mandar para aprovacao.'),
-  ('agendamento','Post de aniversario da loja','aprovado','baixa','Marcos', '2026-07-05', true, 'Aprovado pelo cliente, aguardando data de publicacao.')
-) as t(type, title, status, priority, assignee, due_date, client_visible, description)
-where c.slug = 'karpinski'
-on conflict do nothing;
+  ('d0000000-0000-4000-8000-000000000001','criativo','Capas para campanha demonstrativa','revisao','alta','Equipe Demo','2026-08-12',true,'Peca ficticia para validar o fluxo de revisao.',10),
+  ('d0000000-0000-4000-8000-000000000002','agendamento','Campanha de lancamento demonstrativa','aprovacao','media','Equipe Demo','2026-08-14',true,'Campanha ficticia aguardando aprovacao.',20),
+  ('d0000000-0000-4000-8000-000000000003','operacional','Organizar materiais de demonstracao','em_producao','baixa','Equipe Demo','2026-08-16',false,'Tarefa interna ficticia.',30),
+  ('d0000000-0000-4000-8000-000000000004','criativo','Video curto de bastidor','aprovado','media','Equipe Demo','2026-08-18',true,'Conteudo ficticio ja aprovado.',40)
+) as t(id, kind, title, status, priority, assignee, due_date, client_visible, description, position)
+where c.slug = 'cliente-demo'
+on conflict (id) do update set
+  client_id = excluded.client_id,
+  kind = excluded.kind,
+  title = excluded.title,
+  status = excluded.status,
+  priority = excluded.priority,
+  assignee = excluded.assignee,
+  due_date = excluded.due_date,
+  client_visible = excluded.client_visible,
+  description = excluded.description,
+  payload = excluded.payload,
+  position = excluded.position;

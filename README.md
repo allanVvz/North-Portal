@@ -2,14 +2,32 @@
 
 Aplicacao Next.js do Portal North para clientes, com rotas por slug, persistencia de briefing no Supabase e deploy na Vercel.
 
+## Reprodução, banco e deploy
+
+O procedimento canônico está em [docs/REPRODUCAO-DEPLOY.md](docs/REPRODUCAO-DEPLOY.md). Ele cobre variáveis, Supabase CLI, migrations, seed sanitizado, usuários demo, CI, Vercel, validação e rollback.
+
+Fluxo resumido para uma instalação nova:
+
+```bash
+npm ci
+# copie .env.example para .env.local e preencha sem versionar
+npm run db:migrate
+npm run db:seed
+npm run create:demo-users
+npm run check:deploy
+npm run dev
+```
+
+O Git contém código, migrations, RLS, scripts e dados fictícios. Segredos, usuários, estado do projeto Supabase e dados reais permanecem externos. As notas operacionais antigas abaixo não substituem o runbook canônico.
+
 ## Stack
 
 - Next.js 15 App Router
 - React 19
 - TypeScript strict
 - Zod
-- Supabase REST via Edge Route Handlers
-- Vercel Edge Runtime nas APIs
+- Supabase Auth + Postgres com RLS
+- Next.js Route Handlers no servidor
 - CSS global com paleta e tipografia North
 
 ## URLs
@@ -17,51 +35,49 @@ Aplicacao Next.js do Portal North para clientes, com rotas por slug, persistenci
 - Producao: `https://north-portal-navy.vercel.app`
 - Slug inicial: `/north`
 - Projeto Vercel: `north-portal`
-- Supabase Project ID: `svkogegypdqquzlfzaor`
-- Supabase URL: `https://svkogegypdqquzlfzaor.supabase.co`
+- Supabase Project ID/URL: externos; configure o alvo conforme o runbook
 
 ## Variaveis de ambiente
 
 Crie as variaveis abaixo em Production, Preview e Development na Vercel:
 
 ```txt
-NEXT_PUBLIC_SUPABASE_URL=https://svkogegypdqquzlfzaor.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-NORTH_ADMIN_TOKEN=
 ```
 
-Nao commitar `.env`, `.env.local`, service role keys ou tokens administrativos.
+Configure somente essas três variáveis na Vercel. Não commitar `.env`, `.env.local`, service role keys ou tokens administrativos.
 
 ## Rotas
 
 - `GET /api/client/[slug]`: carrega cliente, briefing, links e resultados.
 - `PATCH /api/client/[slug]/briefing`: salva o objeto completo de respostas do briefing.
-- `PATCH /api/admin/client/[slug]`: atualizacao administrativa protegida por `Authorization: Bearer <NORTH_ADMIN_TOKEN>`.
+- rotas `/api/admin/*`: protegidas por sessão Supabase e papel admin.
 - `/`: redireciona para `/north`.
 - `/[slug]`: portal do cliente.
 
 ## Supabase
 
-Tabelas utilizadas:
+O schema completo, incluindo tabelas, funções, triggers e RLS, é aplicado por todos os arquivos versionados em `supabase/migrations/`, em ordem lexical. O estado e os dados do projeto cloud não ficam no Git.
+
+Tabelas centrais incluem:
 
 - `clients`
+- `profiles`
+- `tasks`
 - `briefing_answers`
 - `client_drive_links`
 - `client_results`
 
-Migration aplicada:
-
-- `supabase/migrations/20260624000000_harden_client_portal.sql`
-
-A migration habilita RLS, remove politicas publicas de escrita e mantem leitura publica apenas dos dados de clientes ativos.
+O seed demonstrativo e sanitizado fica em `supabase/seed.sql`.
 
 ## Desenvolvimento
 
 Instale dependencias:
 
 ```bash
-npm install
+npm ci
 ```
 
 Rode localmente:
@@ -84,30 +100,9 @@ npm run test:e2e    # playwright — fluxo de aprovacao do cliente contra o back
 
 `test:e2e` sobe (ou reaproveita) o `next dev` local e usa `SUPABASE_SERVICE_ROLE_KEY`/`NEXT_PUBLIC_SUPABASE_*` de `.env.local` para semear tasks reais, logar como `cliente@karpinski.com` de verdade e limpar tudo no final — não usa mocks.
 
-## Administracao
+## Administração
 
-Exemplo de atualizacao administrativa:
-
-```bash
-curl -X PATCH \
-  "https://north-portal-navy.vercel.app/api/admin/client/north" \
-  -H "Authorization: Bearer $NORTH_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "brandUrl": "https://drive.google.com/...",
-    "productsUrl": "https://drive.google.com/...",
-    "uploadsUrl": "https://drive.google.com/..."
-  }'
-```
-
-Tambem existem scripts auxiliares:
-
-```bash
-npm run seed:client -- north "ADM NORTH"
-npm run update:client -- north '{"brandUrl":"https://drive.google.com/..."}'
-```
-
-Use `PORTAL_BASE_URL` para apontar os scripts para producao ou preview.
+O acesso administrativo usa Supabase Auth e é autorizado pelas informações de `profiles` e pelas políticas RLS. Crie os usuários demonstrativos pelo fluxo documentado no runbook; não use tokens administrativos em URLs, headers manuais ou arquivos versionados.
 
 ## Fluxo de Revisao e Aprovacao (Kanban)
 

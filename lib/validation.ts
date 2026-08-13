@@ -203,6 +203,16 @@ export const windsorSettingsPatchSchema = z.object({
 export const windsorTestSchema = z.object({
   apiKey: z.string().trim().min(8).max(200).optional(),
 });
+// PATCH semantics for the Meta integration: only the ad-account-per-client
+// mapping is ever written from the browser — the OAuth token itself is only
+// ever set by the server-side callback route, never via this schema.
+const metaAccountRefSchema = z.object({
+  accountId: z.string().min(1).max(120),
+  accountName: z.string().max(200),
+});
+export const metaAccountMapSchema = z.object({
+  accountMap: z.record(slugSchema, metaAccountRefSchema.nullable()),
+});
 export const performanceInsightsQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

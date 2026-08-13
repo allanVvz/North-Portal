@@ -101,10 +101,11 @@ export default function WindsorIntegration({ clients }: { clients: ClientLite[] 
 
   return (
     <div className="set-card">
-      <h2 className="set-h">Meta (Instagram/Facebook) via Windsor.ai</h2>
+      <h2 className="set-h">Windsor.ai (dados orgânicos + blended)</h2>
       <p className="admin-sub">
-        Conecta o dashboard de Performance aos dados reais das contas Meta. Crie uma conta em windsor.ai,
-        conecte as fontes Meta lá e cole a chave da API aqui.
+        Conecta o dashboard de Performance aos dados de Instagram/Facebook orgânico e blended via Windsor.ai — separado
+        da conexão direta com a Meta acima. Crie uma conta em windsor.ai, conecte as fontes lá e cole a chave da API
+        aqui.
         {settings.configured ? " Conectado." : " Sem a chave, o dashboard mostra dados de demonstração."}
       </p>
 

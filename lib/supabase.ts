@@ -33,6 +33,8 @@ import {
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
 import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
+import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
+import type { MetaAdAccount } from "./meta";
 
 type ContentRow = { data: Record<string, unknown> | null };
 type PrefsRow = { theme: string | null; avatar_style: number | null; display_name: string | null; username: string | null; manual_seen: boolean | null };
@@ -1586,13 +1588,13 @@ export async function deleteDocument(id: string): Promise<void> {
 
 // ---- Acessos & Pastas (platform credentials) -----------------------------------
 
-type CredentialRow = { platform: string; username: string; password: string; notes: string; updated_at: string };
+type CredentialRow = { platform: string; username: string; vault_secret_id: string | null; notes: string; updated_at: string };
 
 export async function listClientCredentials(clientId: string): Promise<CredentialSummary[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("client_platform_credentials")
-    .select("platform,username,password,notes,updated_at")
+    .select("platform,username,vault_secret_id,notes,updated_at")
     .eq("client_id", clientId);
   if (error) fail(error);
   const byPlatform = new Map((data as CredentialRow[] | null ?? []).map((r) => [r.platform, r]));
@@ -1601,7 +1603,7 @@ export async function listClientCredentials(clientId: string): Promise<Credentia
     return {
       platform: p.key,
       username: row?.username ?? "",
-      hasPassword: Boolean(row?.password),
+      hasPassword: Boolean(row?.vault_secret_id),
       notes: row?.notes ?? "",
       updatedAt: row?.updated_at ?? "",
     };
@@ -1611,7 +1613,9 @@ export async function listClientCredentials(clientId: string): Promise<Credentia
 // Upsert-by-(client,platform). A blank password keeps whatever was already
 // stored — password fields never round-trip plaintext to the client, so
 // "leave blank to keep the current password" is the only way to edit
-// everything else without forcing a re-entry of the secret.
+// everything else without forcing a re-entry of the secret. The password
+// itself lives only in the vault (vault_secret_id points at it); this table
+// never stores it directly.
 export async function upsertClientCredential(
   clientId: string,
   input: { platform: AccessPlatformKey; username: string; password?: string; notes?: string },
@@ -1619,12 +1623,18 @@ export async function upsertClientCredential(
   const supabase = await createClient();
   const { data: existing, error: readError } = await supabase
     .from("client_platform_credentials")
-    .select("password")
+    .select("vault_secret_id")
     .eq("client_id", clientId)
     .eq("platform", input.platform)
     .limit(1);
   if (readError) fail(readError);
-  const currentPassword = (existing?.[0] as { password: string } | undefined)?.password ?? "";
+  let vaultSecretId = (existing?.[0] as { vault_secret_id: string | null } | undefined)?.vault_secret_id ?? null;
+
+  const newPassword = input.password?.trim();
+  if (newPassword) {
+    if (vaultSecretId) await vaultUpdate(vaultSecretId, newPassword);
+    else vaultSecretId = await vaultSet(newPassword, `platform_credential_${clientId}_${input.platform}`);
+  }
 
   const { data, error } = await supabase
     .from("client_platform_credentials")
@@ -1633,18 +1643,18 @@ export async function upsertClientCredential(
         client_id: clientId,
         platform: input.platform,
         username: input.username,
-        password: input.password?.trim() ? input.password.trim() : currentPassword,
+        vault_secret_id: vaultSecretId,
         notes: input.notes ?? "",
         updated_at: new Date().toISOString(),
       },
       { onConflict: "client_id,platform" },
     )
-    .select("platform,username,password,notes,updated_at")
+    .select("platform,username,vault_secret_id,notes,updated_at")
     .limit(1);
   if (error) fail(error);
   const row = data?.[0] as CredentialRow | undefined;
   if (!row) throw new HttpError(503, "Nao foi possivel salvar o acesso.");
-  return { platform: row.platform as AccessPlatformKey, username: row.username, hasPassword: Boolean(row.password), notes: row.notes, updatedAt: row.updated_at };
+  return { platform: row.platform as AccessPlatformKey, username: row.username, hasPassword: Boolean(row.vault_secret_id), notes: row.notes, updatedAt: row.updated_at };
 }
 
 // Client-side "mark as read" — used by the Documentos viewer modal so Jornada
@@ -1798,23 +1808,35 @@ export async function savePlanoVisibility(enabled: boolean): Promise<boolean> {
 }
 
 // ---- Windsor.ai integration (Performance × Meta) --------------------------------
-// One site_settings row holds the whole config. The raw apiKey lives ONLY in
-// this jsonb value — every GET response goes through maskWindsorSettings so
+// One integration_credentials row (provider='windsor', scope='agency') holds
+// the whole config. The raw apiKey lives ONLY in the vault, referenced by
+// vault_secret_id — every GET response goes through maskWindsorSettings so
 // the key never reaches the browser.
 
-const WINDSOR_KEY = "windsor_integration";
+type WindsorMeta = { datasources?: Partial<WindsorSettings["datasources"]>; accountMap?: WindsorSettings["accountMap"] };
+type IntegrationCredentialRow = { id: string; vault_secret_id: string; meta: WindsorMeta | null };
+
+async function getWindsorRow(): Promise<IntegrationCredentialRow | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("integration_credentials")
+    .select("id,vault_secret_id,meta")
+    .eq("provider", "windsor")
+    .eq("scope", "agency")
+    .limit(1);
+  if (error) fail(error);
+  return (data?.[0] as IntegrationCredentialRow | undefined) ?? null;
+}
 
 export async function getWindsorSettings(): Promise<WindsorSettings> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("site_settings").select("value").eq("key", WINDSOR_KEY).limit(1);
-  if (error) fail(error);
-  const value = (data?.[0] as { value: Record<string, unknown> } | undefined)?.value ?? {};
-  const stored = value as Partial<WindsorSettings>;
+  const row = await getWindsorRow();
+  if (!row) return { ...WINDSOR_SETTINGS_DEFAULT };
+  const apiKey = await vaultRead(row.vault_secret_id);
+  const meta = row.meta ?? {};
   return {
-    ...WINDSOR_SETTINGS_DEFAULT,
-    ...stored,
-    datasources: { ...WINDSOR_SETTINGS_DEFAULT.datasources, ...(stored.datasources ?? {}) },
-    accountMap: stored.accountMap ?? {},
+    apiKey,
+    datasources: { ...WINDSOR_SETTINGS_DEFAULT.datasources, ...(meta.datasources ?? {}) },
+    accountMap: meta.accountMap ?? {},
   };
 }
 
@@ -1825,17 +1847,146 @@ export async function saveWindsorSettings(patch: {
   accountMap?: WindsorSettings["accountMap"];
 }): Promise<WindsorSettings> {
   const supabase = await createClient();
-  const current = await getWindsorSettings();
-  const next: WindsorSettings = {
-    apiKey: patch.clearApiKey ? "" : patch.apiKey ?? current.apiKey,
-    datasources: { ...current.datasources, ...(patch.datasources ?? {}) },
-    accountMap: patch.accountMap ?? current.accountMap,
-  };
-  const { error } = await supabase
-    .from("site_settings")
-    .upsert({ key: WINDSOR_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  const row = await getWindsorRow();
+  const currentApiKey = row ? await vaultRead(row.vault_secret_id) : "";
+  const currentMeta = row?.meta ?? {};
+  const nextApiKey = patch.clearApiKey ? "" : patch.apiKey ?? currentApiKey;
+  const nextDatasources = { ...WINDSOR_SETTINGS_DEFAULT.datasources, ...currentMeta.datasources, ...(patch.datasources ?? {}) };
+  const nextAccountMap = patch.accountMap ?? currentMeta.accountMap ?? {};
+  const nextMeta: WindsorMeta = { datasources: nextDatasources, accountMap: nextAccountMap };
+  const nextStatus = nextApiKey ? "connected" : "disconnected";
+
+  if (!row) {
+    const vaultSecretId = await vaultSet(nextApiKey, "windsor_integration_api_key");
+    const { error } = await supabase.from("integration_credentials").insert({
+      provider: "windsor",
+      scope: "agency",
+      label: "Windsor.ai",
+      vault_secret_id: vaultSecretId,
+      meta: nextMeta,
+      status: nextStatus,
+    });
+    if (error) fail(error);
+  } else {
+    if (patch.apiKey || patch.clearApiKey) await vaultUpdate(row.vault_secret_id, nextApiKey);
+    const { error } = await supabase
+      .from("integration_credentials")
+      .update({ meta: nextMeta, status: nextStatus })
+      .eq("id", row.id);
+    if (error) fail(error);
+  }
+
+  return { apiKey: nextApiKey, datasources: nextDatasources, accountMap: nextAccountMap };
+}
+
+// ---- Meta (Facebook) OAuth integration -----------------------------------------
+// One integration_credentials row (provider='meta', scope='agency') holds the
+// connection. The long-lived access token lives ONLY in the vault; GET
+// responses (getMetaSettings) never include it. Written only by the OAuth
+// callback route (saveMetaConnection) — never by a browser-supplied PATCH.
+
+type MetaMeta = {
+  businessName?: string;
+  adAccounts?: MetaAdAccount[];
+  accountMap?: Record<string, MetaAdAccount | null>;
+  expiresAt?: string | null;
+};
+type MetaCredentialRow = { id: string; vault_secret_id: string; meta: MetaMeta | null; status: string };
+
+export type MaskedMetaSettings = {
+  configured: boolean;
+  status: string;
+  businessName: string;
+  adAccounts: MetaAdAccount[];
+  accountMap: Record<string, MetaAdAccount | null>;
+  expiresAt: string | null;
+};
+
+async function getMetaRow(): Promise<MetaCredentialRow | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("integration_credentials")
+    .select("id,vault_secret_id,meta,status")
+    .eq("provider", "meta")
+    .eq("scope", "agency")
+    .limit(1);
   if (error) fail(error);
-  return next;
+  return (data?.[0] as MetaCredentialRow | undefined) ?? null;
+}
+
+export async function getMetaSettings(): Promise<MaskedMetaSettings> {
+  const row = await getMetaRow();
+  if (!row) return { configured: false, status: "disconnected", businessName: "", adAccounts: [], accountMap: {}, expiresAt: null };
+  const meta = row.meta ?? {};
+  return {
+    configured: row.status === "connected",
+    status: row.status,
+    businessName: meta.businessName ?? "",
+    adAccounts: meta.adAccounts ?? [],
+    accountMap: meta.accountMap ?? {},
+    expiresAt: meta.expiresAt ?? null,
+  };
+}
+
+// Called only by the OAuth callback route (app/api/admin/integrations/meta/callback) —
+// this is the sole writer of the token itself.
+export async function saveMetaConnection(input: {
+  token: string;
+  businessName: string;
+  adAccounts: MetaAdAccount[];
+  expiresAt: string | null;
+  connectedBy: string;
+}): Promise<void> {
+  const supabase = await createClient();
+  const row = await getMetaRow();
+  const meta: MetaMeta = {
+    businessName: input.businessName,
+    adAccounts: input.adAccounts,
+    accountMap: row?.meta?.accountMap ?? {},
+    expiresAt: input.expiresAt,
+  };
+  const now = new Date().toISOString();
+  if (!row) {
+    const vaultSecretId = await vaultSet(input.token, "meta_oauth_token");
+    const { error } = await supabase.from("integration_credentials").insert({
+      provider: "meta",
+      scope: "agency",
+      label: "Meta Ads",
+      vault_secret_id: vaultSecretId,
+      meta,
+      status: "connected",
+      connected_by: input.connectedBy,
+      connected_at: now,
+      last_verified_at: now,
+    });
+    if (error) fail(error);
+  } else {
+    await vaultUpdate(row.vault_secret_id, input.token);
+    const { error } = await supabase
+      .from("integration_credentials")
+      .update({ meta, status: "connected", connected_by: input.connectedBy, connected_at: now, last_verified_at: now })
+      .eq("id", row.id);
+    if (error) fail(error);
+  }
+}
+
+export async function updateMetaAccountMap(accountMap: Record<string, MetaAdAccount | null>): Promise<MaskedMetaSettings> {
+  const row = await getMetaRow();
+  if (!row) throw new HttpError(400, "Conecte a Meta antes de mapear contas.");
+  const supabase = await createClient();
+  const meta: MetaMeta = { ...(row.meta ?? {}), accountMap };
+  const { error } = await supabase.from("integration_credentials").update({ meta }).eq("id", row.id);
+  if (error) fail(error);
+  return getMetaSettings();
+}
+
+export async function disconnectMeta(): Promise<void> {
+  const row = await getMetaRow();
+  if (!row) return;
+  await vaultDelete(row.vault_secret_id);
+  const supabase = await createClient();
+  const { error } = await supabase.from("integration_credentials").delete().eq("id", row.id);
+  if (error) fail(error);
 }
 
 export type MaskedWindsorSettings = {

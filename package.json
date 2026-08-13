@@ -9,8 +9,16 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "env:check": "node scripts/validate-env.mjs app",
+    "env:check:cloud": "node scripts/validate-env.mjs cloud",
+    "repo:check": "node scripts/check-repository.mjs",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "check:deploy": "npm run env:check && npm run repo:check && npm run verify",
+    "supabase:link": "node scripts/supabase-cloud.mjs link",
+    "db:migrate": "node scripts/supabase-cloud.mjs migrate",
+    "db:seed": "node scripts/supabase-cloud.mjs seed",
+    "create:demo-users": "node scripts/create-demo-users.mjs",
     "test:e2e": "playwright test",
-    "seed:client": "node scripts/seed-client.mjs",
     "update:client": "node scripts/update-client.mjs",
     "create:user": "node scripts/create-user.mjs"
   },
@@ -30,6 +38,7 @@
     "@types/react-dom": "19.1.5",
     "eslint": "^9.30.0",
     "eslint-config-next": "15.5.7",
+    "supabase": "^2.113.0",
     "typescript": "5.8.3",
     "vitest": "^4.1.9"
   }

@@ -5,6 +5,7 @@ import type { AgencyProfile, CheckpointTemplate, LegalDoc, TeamMember } from "@/
 import { createClient } from "@/lib/supabase/client";
 import CheckpointTemplates from "./CheckpointTemplates";
 import EtapasPanel from "./EtapasPanel";
+import MetaIntegration from "./MetaIntegration";
 import WindsorIntegration from "./WindsorIntegration";
 import { useSidebarEnabledPref } from "../kanbanPrefs";
 
@@ -46,6 +47,11 @@ export default function SettingsPanel({
 }) {
   const [tab, setTab] = useState<Tab>("perfil");
 
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested && TABS.some((t) => t.key === requested)) setTab(requested as Tab);
+  }, []);
+
   return (
     <div className="set">
       <nav className="set-nav">
@@ -79,7 +85,12 @@ export default function SettingsPanel({
             <p className="admin-sub">Planos, faturas e método de pagamento. <span className="admin-soon">em breve</span></p>
           </div>
         ) : null}
-        {tab === "integracoes" ? <WindsorIntegration clients={clients} /> : null}
+        {tab === "integracoes" ? (
+          <>
+            <MetaIntegration clients={clients} />
+            <WindsorIntegration clients={clients} />
+          </>
+        ) : null}
       </div>
     </div>
   );
