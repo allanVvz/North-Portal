@@ -35,7 +35,7 @@ const CAPTIONS = [
   "Sexta-feira pede um conteúdo especial",
 ];
 
-const TYPES: MetaPostType[] = ["reel", "carrossel", "imagem", "video"];
+const TYPES: MetaPostType[] = ["reel", "carrossel", "imagem", "video", "story"];
 
 const isoDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

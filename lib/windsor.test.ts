@@ -12,6 +12,15 @@ describe("normalizeMediaType", () => {
     expect(normalizeMediaType("")).toBe("outro");
     expect(normalizeMediaType(undefined)).toBe("outro");
     expect(normalizeMediaType("status")).toBe("outro");
+    expect(normalizeMediaType("STORY")).toBe("story");
+  });
+
+  it("prefers media_product_type over media_type when both are present", () => {
+    // Graph API reports Reels/Stories as media_type=VIDEO — media_product_type
+    // is what actually distinguishes them from a regular feed video.
+    expect(normalizeMediaType("VIDEO", "STORY")).toBe("story");
+    expect(normalizeMediaType("VIDEO", "REELS")).toBe("reel");
+    expect(normalizeMediaType("VIDEO", "FEED")).toBe("video");
   });
 });
 
@@ -52,6 +61,11 @@ describe("normalizeWindsorRow · instagram_organic", () => {
     void _e;
     const p = normalizeWindsorRow(rest, "instagram_organic")!;
     expect(p.metrics.engajamento).toBe(50 + 5 + 2 + 8);
+  });
+
+  it("normalizes a Story reported as media_type=VIDEO + media_product_type=STORY", () => {
+    const p = normalizeWindsorRow({ ...base, media_type: "VIDEO", media_product_type: "STORY" }, "instagram_organic")!;
+    expect(p.type).toBe("story");
   });
 
   it("returns null for rows missing date, account or post id", () => {

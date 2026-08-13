@@ -31,7 +31,7 @@ function presetPeriod(days: PeriodPreset): Period {
 }
 
 const TYPE_LABEL: Record<MetaPostType, string> = {
-  reel: "Reel", carrossel: "Carrossel", imagem: "Imagem", video: "Vídeo", outro: "Outro",
+  reel: "Reel", carrossel: "Carrossel", imagem: "Imagem", video: "Vídeo", story: "Story", outro: "Outro",
 };
 
 // The analytics view of the Performance screen: KPIs with period-over-period

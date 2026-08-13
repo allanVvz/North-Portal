@@ -12,7 +12,7 @@ export const WINDSOR_DATASOURCES: { key: WindsorDatasource; label: string }[] = 
   { key: "facebook", label: "Facebook Ads (pago)" },
 ];
 
-export type MetaPostType = "imagem" | "video" | "carrossel" | "reel" | "outro";
+export type MetaPostType = "imagem" | "video" | "carrossel" | "reel" | "story" | "outro";
 
 export type MetaPostMetricKey =
   | "alcance" | "impressoes" | "likes" | "comentarios" | "compartilhamentos"
@@ -49,9 +49,18 @@ export const WINDSOR_SETTINGS_DEFAULT: WindsorSettings = {
 
 // ---- Normalization (pure) ------------------------------------------------------
 
-export function normalizeMediaType(raw: unknown): MetaPostType {
+// `productType` is the IG Graph API's separate media_product_type field
+// (AD/FEED/STORY/REELS) — Windsor sometimes exposes it alongside media_type
+// (IMAGE/VIDEO/CAROUSEL_ALBUM) instead of folding stories/reels into it.
+// Checked first since it disambiguates a feed video from a Reel/Story that
+// Graph API otherwise reports as media_type=VIDEO.
+export function normalizeMediaType(raw: unknown, productType?: unknown): MetaPostType {
+  const p = String(productType ?? "").toLowerCase();
+  if (p.includes("story") || p.includes("stories")) return "story";
+  if (p.includes("reel")) return "reel";
   const v = String(raw ?? "").toLowerCase();
   if (!v) return "outro";
+  if (v.includes("story") || v.includes("stories")) return "story";
   if (v.includes("reel")) return "reel";
   if (v.includes("carousel") || v.includes("album")) return "carrossel";
   if (v.includes("video")) return "video";
@@ -147,7 +156,7 @@ export function normalizeWindsorRow(row: Record<string, unknown>, ds: WindsorDat
     accountName,
     platform,
     source: "organic",
-    type: normalizeMediaType(row.media_type ?? row.type),
+    type: normalizeMediaType(row.media_type ?? row.type, row.media_product_type),
     caption: str(row.caption ?? row.message),
     permalink: str(row.permalink) || null,
     metrics,
@@ -158,7 +167,7 @@ export function normalizeWindsorRow(row: Record<string, unknown>, ds: WindsorDat
 
 const FIELDS: Record<WindsorDatasource, string> = {
   instagram_organic:
-    "date,account_id,account_name,post_id,media_type,caption,permalink,impressions,reach,likes,comments,shares,saved,video_views,engagement",
+    "date,account_id,account_name,post_id,media_type,media_product_type,caption,permalink,impressions,reach,likes,comments,shares,saved,video_views,engagement",
   facebook_organic:
     "date,account_id,account_name,post_id,type,message,permalink,impressions,reach,likes,comments,shares,engagement",
   facebook: "date,account_id,account_name,campaign,spend,clicks,impressions,ctr,cpc,actions",
