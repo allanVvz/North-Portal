@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, updateTaskGroup } from "@/lib/supabase";
+import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
@@ -29,7 +29,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID invalido.");
-    const { slug, assignee_profile_ids, ...patch } = taskPatchSchema.parse(await request.json());
+    const { slug, assignee_profile_ids, payload_patch, ...patch } = taskPatchSchema.parse(await request.json());
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
@@ -97,7 +97,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    const task = await updateTaskGroup(id, current, recurringActionPlanPatch(current, patch));
+    let task = await updateTaskGroup(id, current, recurringActionPlanPatch(current, patch));
+    if (payload_patch) task = await updateTaskPayloadPatch(id, payload_patch);
     if (assignee_profile_ids !== undefined) {
       await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
       const full = await getTaskById(task.id);

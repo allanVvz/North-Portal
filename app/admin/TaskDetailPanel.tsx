@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import CalendarPicker from "./CalendarPicker";
 import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
@@ -13,6 +13,7 @@ import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, kindDef, kindLabel } from "@/lib/taskCatalog";
 import { actionPlanIdOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
+import { useTaskAutosave } from "./useTaskAutosave";
 
 export default function TaskDetailPanel({
   task,
@@ -48,6 +49,13 @@ export default function TaskDetailPanel({
   const payload = (task.payload ?? {}) as Record<string, unknown>;
   const isPlan = kindDef(task.kind).isPlan;
   const comments = commentsOf(task);
+  const descriptionValues = useMemo(() => ({ description: description.trim() || null }), [description]);
+  const descriptionSaved = useCallback((updated: TaskRecord) => onChanged(updated), [onChanged]);
+  const autosave = useTaskAutosave({ taskId: task.id, values: descriptionValues, enabled: true, textKeys: ["description"], onSaved: descriptionSaved });
+
+  async function closeAfterSave(action = onClose) {
+    if (await autosave.flush()) action();
+  }
 
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
@@ -67,17 +75,20 @@ export default function TaskDetailPanel({
   async function sendComment() {
     const text = comment.trim();
     if (!text) return;
-    const next = [...comments, { author: currentUserName, text, at: new Date().toISOString() }];
     setComment("");
-    await patchPayload({ comments: next });
+    try {
+      const res = await fetch(`/api/admin/tasks/${task.id}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      if (!res.ok) throw new Error();
+      onChanged(await res.json());
+    } catch { setComment(text); }
   }
 
   return (
     <aside className="tdp">
       <div className="tdp-top">
         <div className="tdp-top-actions">
-          <button className="tdp-icon-btn" onClick={onExpand} aria-label="Expandir">↗</button>
-          <button className="tdp-icon-btn" onClick={onClose} aria-label="Fechar">✕</button>
+          <button className="tdp-icon-btn" onClick={() => void closeAfterSave(onExpand)} aria-label="Expandir">↗</button>
+          <button className="tdp-icon-btn" onClick={() => void closeAfterSave()} aria-label="Fechar">✕</button>
         </div>
       </div>
 
@@ -194,8 +205,11 @@ export default function TaskDetailPanel({
           value={description}
           placeholder="Sem descrição."
           onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => { if (description !== (task.description ?? "")) patch({ description: description.trim() || null }); }}
+          onBlur={() => void autosave.flush()}
         />
+        <span className={`tm-autosave tm-autosave-${autosave.state}`} role="status" aria-live="polite">
+          {autosave.state === "pending" ? "Alterações pendentes" : autosave.state === "saving" ? "Salvando…" : autosave.state === "error" ? <button type="button" onClick={() => void autosave.retry()}>Erro ao salvar — Tentar novamente</button> : "Salvo"}
+        </span>
       </div>
 
       <div className="tdp-section tdp-activity">

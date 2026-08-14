@@ -164,7 +164,17 @@ export const taskCreateSchema = z.object({
 // route resolves it to client_id since tasks has no slug column of its own.
 export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true }).extend({
   slug: slugSchema.nullable().optional(),
+  payload_patch: z.object({
+    barTone: taskTone.nullable().optional(),
+    statusLabel: z.string().max(80).nullable().optional(),
+    statusTone: taskTone.nullable().optional(),
+    formato: z.string().max(80).nullable().optional(),
+    plataforma: z.string().max(80).nullable().optional(),
+    hora: z.string().max(20).nullable().optional(),
+  }).strict().optional(),
 });
+
+export const taskCommentCreateSchema = z.object({ text: z.string().trim().min(1).max(2000) });
 
 /** Blocks only a *new* invalid Publicado combination. Historical rows that
  * already are non-Criativo + Publicado remain editable, so an unrelated save

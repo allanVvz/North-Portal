@@ -2559,6 +2559,10 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .tm-progress-hint { margin: 0; font-size: 12px; align-self: center; }
 
 .tm-commentsbox { display: flex; flex-direction: column; gap: 12px; }
+.tm-autosave { color: var(--a-sec); font-size: 12px; min-width: 48px; text-align: center; }
+.tdp-section > .tm-autosave { display: block; margin-top: 8px; width: 100%; }
+.tm-autosave-error, .tm-autosave-error button { color: #b42318; }
+.tm-autosave button { appearance: none; border: 0; background: none; cursor: pointer; font: inherit; padding: 0; }
 .tm-comments { display: flex; flex-direction: column; gap: 10px; max-height: 160px; min-width: 0; overflow-y: auto; overflow-x: hidden; }
 .tm-comment { display: flex; gap: 9px; }
 .tm-comment > div { flex: 1; min-width: 0; }
@@ -3120,7 +3124,10 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .tm-titlebox .tm-desc-input { margin-top: 10px; background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 10px; padding: 10px 12px; }
 .tm-desc-input { resize: none; overflow-y: auto; min-height: 68px; max-height: 220px; }
 .tm-main > .tm-box:has(.tm-desc-input) { margin-bottom: 24px; }
-.tm .kb-modal-actions { position: relative; z-index: 8; flex-shrink: 0; margin-top: 0; background: var(--a-surface); }
+.tm .kb-modal-actions { position: relative; z-index: 8; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); flex-shrink: 0; margin-top: 0; background: var(--a-surface); }
+.tm .kb-modal-actions > :first-child { justify-self: start; }
+.tm .kb-modal-actions > .tm-autosave { justify-self: center; }
+.tm .kb-modal-actions > .kb-modal-actions-right { justify-self: end; }
 
 .tm-typepicker-groups { display: flex; flex-direction: column; }
 .tm-typepicker-heading { margin: 20px 30px 0; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }

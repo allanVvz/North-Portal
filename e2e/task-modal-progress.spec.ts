@@ -120,9 +120,9 @@ test.describe("progresso do modal de tarefa", () => {
     await expect(modal.locator(".tm-head-progress b")).toHaveText("60%");
     await modal.getByRole("button", { name: "Concluído", exact: true }).click();
     await expect(modal.locator(".tm-head-progress b")).toHaveText("100%");
-    await modal.getByRole("button", { name: "Salvar card" }).click();
-    // The first PATCH route compilation in development can take several
-    // seconds; wait for the real save completion instead of aborting its body.
+    await expect(modal.getByRole("button", { name: "Salvar card" })).toHaveCount(0);
+    await expect(modal.getByRole("status")).toHaveText("Salvo", { timeout: 20_000 });
+    await modal.getByRole("button", { name: "Fechar", exact: true }).last().click();
     await expect(modal).toBeHidden({ timeout: 20_000 });
 
     const { data, error } = await sb.from("tasks").select("status").eq("id", taskId).single();

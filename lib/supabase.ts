@@ -7,7 +7,7 @@ import {
   recurringExecutionId,
 } from "./recurrence";
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
-import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch, replicatedExecutionPayload } from "./taskDateGrouping";
+import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
 import { actionPlanIdOf, actionPlanMembersOf, detachedTaskRelationPatch, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
 import {
@@ -1016,10 +1016,18 @@ function payloadRecord(value: unknown): Record<string, unknown> | null {
 
 async function replicateExplicitChildPayload(parentId: string, currentId: string, payload: Record<string, unknown> | null): Promise<void> {
   if (!payload) return;
-  const related = await listRelatedTasks(parentId);
-  await Promise.all(related
-    .filter((task) => task.id !== currentId)
-    .map((task) => updateTask(task.id, { payload: replicatedExecutionPayload(payload, task.payload) })));
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("propagate_explicit_group_payload", { p_parent_id: parentId, p_current_id: currentId, p_payload: payload });
+  if (error) fail(error);
+}
+
+export async function updateTaskPayloadPatch(id: string, payloadPatch: Record<string, unknown>): Promise<TaskRecord> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("merge_task_payload_patch", { p_task_id: id, p_patch: payloadPatch });
+  if (error) fail(error);
+  const task = await getTaskById(id);
+  if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
+  return task;
 }
 
 async function updateExplicitChildGroup(id: string, parent: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
@@ -1395,13 +1403,17 @@ export async function deleteTask(id: string): Promise<void> {
 export async function setTaskAssigneeProfiles(taskId: string, profileIds: string[]): Promise<void> {
   const supabase = await createClient();
   const unique = Array.from(new Set(profileIds));
-  const { error: delError } = await supabase.from("task_assignees").delete().eq("task_id", taskId);
-  if (delError) fail(delError);
-  if (!unique.length) return;
-  const { error: insError } = await supabase
-    .from("task_assignees")
-    .insert(unique.map((profile_id) => ({ task_id: taskId, profile_id })));
-  if (insError) fail(insError);
+  const { error } = await supabase.rpc("replace_task_assignees", { p_task_id: taskId, p_profile_ids: unique });
+  if (error) fail(error);
+}
+
+export async function appendTaskComment(taskId: string, authorId: string, text: string): Promise<TaskRecord> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("append_task_comment", { p_task_id: taskId, p_author_id: authorId, p_text: text });
+  if (error) fail(error);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new HttpError(404, "Tarefa não encontrada.");
+  return row as TaskRecord;
 }
 
 // ---- Revisões & Aprovações (admin) -------------------------------------------

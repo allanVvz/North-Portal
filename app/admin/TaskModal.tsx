@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AttrVisibilityPopover from "./AttrVisibilityPopover";
 import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
 import AssigneePicker from "./AssigneePicker";
@@ -19,6 +19,7 @@ import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLab
 import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
+import { useTaskAutosave } from "./useTaskAutosave";
 
 type Draft = {
   title: string;
@@ -404,6 +405,49 @@ export default function TaskModal({
     return true;
   });
 
+  const autosaveValues = useMemo<Record<string, unknown>>(() => {
+    const scheduledDate = (draft.start_date || draft.due_date).trim();
+    return {
+      title: draft.title.trim(), kind: draft.kind, subtype: draft.subtype || null,
+      status: draft.status, priority: draft.priority, assignee: draft.assignee.trim() || null,
+      assignee_profile_ids: draft.assignee_profile_ids,
+      reviewer_id: revisaoOff ? null : draft.reviewer_id || null,
+      approver_id: aprovacaoOff ? null : draft.approver_id || null,
+      plan_id: kd.isPlan ? null : draft.plan_id || null,
+      requires_review: revisaoOff ? false : Boolean(draft.reviewer_id),
+      requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
+      due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
+      start_date: draft.start_date.trim() || draft.due_date.trim() || null,
+      end_date: draft.end_date.trim() || null,
+      scheduled_start_at: scheduledDate && draft.hora.trim() ? `${scheduledDate}T${draft.hora.trim()}:00` : null,
+      recurrence_cadence: draft.recurrence_cadence,
+      recurrence_weekdays: draft.recurrence_cadence ? draft.recurrence_weekdays : [],
+      recurrence_day_of_month: draft.recurrence_cadence === "mensal" ? (draft.recurrence_day_of_month ?? 1) : null,
+      description: draft.description.trim() || null,
+      client_visible: planoVisibilityOn ? draft.client_visible : false,
+      slug: draft.clientSlug || null,
+      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, formato: draft.formato.trim() || null, plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
+    };
+  }, [aprovacaoOff, draft, kd.isPlan, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn, revisaoOff]);
+  const acceptAutosave = useCallback((updated: TaskRecord) => {
+    setLiveTask(updated);
+    onTaskPatchedRef.current?.(updated);
+  }, []);
+  const autosave = useTaskAutosave({ taskId: liveTask?.id ?? "", values: autosaveValues, enabled: mode === "edit" && Boolean(liveTask), textKeys: ["title", "description"], valid: Boolean(draft.title.trim()), onSaved: acceptAutosave });
+
+  async function closeAfterSave(action = onClose) {
+    if (mode === "new") { action(); return; }
+    if (!draft.title.trim()) { setError("Informe um título para fechar o card."); return; }
+    if (await autosave.flush()) action();
+  }
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") void closeAfterSave();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [closeAfterSave]);
+
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const comments = liveTask ? commentsOf(liveTask) : [];
   const onTaskPatchedRef = useRef(onTaskPatched);
@@ -595,15 +639,15 @@ export default function TaskModal({
   async function sendComment() {
     if (!liveTask || !comment.trim()) return;
     const text = comment.trim();
-    const next = [...comments, { author: currentUserName, text, at: new Date().toISOString() }];
     setComment("");
     try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload: { ...(liveTask.payload ?? {}), comments: next } }),
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
       });
-      if (res.ok) setLiveTask(await res.json());
-    } catch { /* comment stays unsent; user can retry */ }
+      if (!res.ok) throw new Error();
+      const updated = await res.json() as TaskRecord;
+      setLiveTask(updated); onTaskPatched?.(updated);
+    } catch { setComment(text); setError("Não foi possível enviar o comentário."); }
   }
 
   async function completeCycle(retried = false, cycleTask = liveTask): Promise<void> {
@@ -771,12 +815,12 @@ export default function TaskModal({
   const stepIdx = STATUS_ORDER.indexOf(draft.status);
 
   return (
-    <div className="kb-modal-backdrop" onClick={() => !busy && onClose()}>
+    <div className="kb-modal-backdrop" onClick={() => { if (!busy) void closeAfterSave(); }}>
       <div className={`tm tm-tone-${tone} tm-lg`} onClick={(e) => e.stopPropagation()}>
         {mode === "edit" ? (
           <div className={`tm-head tm-head-tone-${tone}`}>
             <div className="tm-head-identity">
-              {onBack ? <button type="button" className="tm-back" onClick={onBack} aria-label="Voltar para o card anterior" title="Voltar">←</button> : null}
+              {onBack ? <button type="button" className="tm-back" onClick={() => void closeAfterSave(onBack)} aria-label="Voltar para o card anterior" title="Voltar">←</button> : null}
               <span className="tm-head-ico" aria-hidden>{kindIcon(draft.kind)}</span>
               <div className="tm-head-text">
               <input
@@ -857,10 +901,7 @@ export default function TaskModal({
                 </div>
               ) : null}
               <AttrVisibilityPopover attrs={attrsForKind} />
-              <button type="button" className="tm-copylink" onClick={copyCardLink} title="Copiar link direto para este card">
-                {linkCopied ? "Link copiado" : "🔗 Copiar link"}
-              </button>
-              <button className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
+              <button className="kb-modal-close" onClick={() => void closeAfterSave()} aria-label="Fechar">✕</button>
             </div>
           </div>
         ) : (
@@ -887,7 +928,7 @@ export default function TaskModal({
               </div>
               <p className="admin-sub">Conte o essencial e escolha o tipo do card.</p>
             </div>
-            <button className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
+            <button className="kb-modal-close" onClick={() => void closeAfterSave()} aria-label="Fechar">✕</button>
           </div>
         )}
 
@@ -1233,12 +1274,18 @@ export default function TaskModal({
 
         <footer className="kb-modal-actions">
           {liveTask ? <button className="admin-btn ghost danger" onClick={remove} disabled={busy}>Excluir</button> : <span />}
+          {mode === "edit" ? <span className={`tm-autosave tm-autosave-${autosave.state}`} role="status" aria-live="polite">
+            {autosave.state === "pending" ? "Alterações pendentes" : autosave.state === "saving" ? "Salvando…" : autosave.state === "error" ? <button type="button" onClick={() => void autosave.retry()}>Erro ao salvar — Tentar novamente</button> : "Salvo"}
+          </span> : <span />}
           <div className="kb-modal-actions-right">
+            {liveTask ? <button type="button" className="admin-btn ghost tm-copylink" onClick={copyCardLink} title="Copiar link direto para este card">
+              {linkCopied ? "Link copiado" : "🔗 Copiar link"}
+            </button> : null}
             {liveTask?.recurrence_cadence ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
-            <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
-            <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
-              {busy ? "Salvando…" : mode === "new" ? "Criar card" : "Salvar card"}
-            </button>
+            {mode === "new" ? <button className="admin-btn ghost" onClick={() => void closeAfterSave()} disabled={busy}>Cancelar</button> : null}
+            {mode === "new" ? <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
+              {busy ? "Salvando…" : "Criar card"}
+            </button> : null}
           </div>
         </footer>
       </div>
