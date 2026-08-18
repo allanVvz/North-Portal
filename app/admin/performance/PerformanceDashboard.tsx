@@ -17,7 +17,7 @@ type InsightsResponse = {
   stale: boolean;
   error?: string;
   posts: MetaPost[];
-  datasources: Record<WindsorDatasource, boolean>;
+  datasources: Partial<Record<WindsorDatasource | "meta_ads", boolean>>;
   fetchedAt: string | null;
 };
 
@@ -73,7 +73,7 @@ export default function PerformanceDashboard({ clients }: { clients: ClientLite[
 
   useEffect(() => { void load(); }, [load]);
 
-  const paid = Boolean(data?.datasources.facebook) || Boolean(data?.demo);
+  const paid = Boolean(data?.datasources.facebook) || Boolean(data?.datasources.meta_ads) || Boolean(data?.demo);
   const availableMetrics = DASH_METRICS.filter((m) => paid || !m.paidOnly);
 
   const currentPosts = useMemo(() => {

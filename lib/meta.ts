@@ -4,7 +4,7 @@ import { HttpError } from "./validation";
 // "Facebook Login for Business". SERVER ONLY: app secret + access tokens must
 // never reach the browser. Mirrors the error-handling shape of lib/windsor.ts.
 
-const GRAPH_VERSION = "v21.0";
+export const GRAPH_VERSION = "v21.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 export const META_OAUTH_SCOPES = ["ads_management", "ads_read", "business_management", "pages_show_list"];
@@ -32,7 +32,7 @@ export function buildMetaAuthUrl(redirectUri: string, state: string): string {
   return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${qs}`;
 }
 
-async function graphGet(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
+export async function graphGet(path: string, params: Record<string, string>): Promise<Record<string, unknown>> {
   const qs = new URLSearchParams(params);
   let res: Response;
   try {

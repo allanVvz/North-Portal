@@ -32,6 +32,7 @@ import {
 } from "./validation";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
+import { META_ADS_DATASOURCE } from "./metaInsights";
 import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
@@ -1529,7 +1530,7 @@ export async function upsertTaskMetrics(
   taskId: string,
   clientId: string,
   metrics: Record<string, unknown>,
-  source: "manual" | "windsor" = "manual",
+  source: "manual" | "windsor" | "meta" = "manual",
 ): Promise<{ metrics: Record<string, string>; source: string; updated_at: string | null }> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -1926,6 +1927,14 @@ async function getMetaRow(): Promise<MetaCredentialRow | null> {
   return (data?.[0] as MetaCredentialRow | undefined) ?? null;
 }
 
+// Server-only: the token itself, for routes that call the Graph API directly
+// (app/api/admin/performance/insights). Never exposed via getMetaSettings().
+export async function getMetaAccessToken(): Promise<string | null> {
+  const row = await getMetaRow();
+  if (!row || row.status !== "connected") return null;
+  return (await vaultRead(row.vault_secret_id)) || null;
+}
+
 export async function getMetaSettings(): Promise<MaskedMetaSettings> {
   const row = await getMetaRow();
   if (!row) return { configured: false, status: "disconnected", businessName: "", adAccounts: [], accountMap: {}, expiresAt: null };
@@ -2022,7 +2031,7 @@ export function maskWindsorSettings(s: WindsorSettings): MaskedWindsorSettings {
 export type InsightsCacheRow = {
   client_id: string | null;
   account_id: string;
-  datasource: WindsorDatasource;
+  datasource: WindsorDatasource | typeof META_ADS_DATASOURCE;
   date_from: string;
   date_to: string;
   payload: MetaPost[];

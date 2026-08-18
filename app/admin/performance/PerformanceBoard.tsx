@@ -80,7 +80,7 @@ export default function PerformanceBoard({
   }
 
   // Pull the linked Meta post's metrics into the card via the sync route
-  // (gerente-only server-side; source becomes 'windsor').
+  // (gerente-only server-side; source becomes 'windsor' or 'meta').
   async function syncFromPost(task: PublishedTask, postId: string) {
     setBusy(task.id);
     try {
@@ -132,6 +132,7 @@ export default function PerformanceBoard({
                     Publicado{relTime(t.updated_at) ? ` · ${relTime(t.updated_at)}` : ""}
                     {t.metricsUpdatedAt ? ` · métricas atualizadas ${relTime(t.metricsUpdatedAt)}` : ""}
                     {t.metricsSource === "windsor" ? <span className="perf-windsor-badge"> via Windsor</span> : null}
+                    {t.metricsSource === "meta" ? <span className="perf-windsor-badge"> via Meta</span> : null}
                   </p>
                   {filled.length > 0 ? (
                     <p className="perf-metrics-line">
