@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  engagementMix, filterPosts, kpiSummary, postToTaskMetrics, previousPeriod, topPosts, trendSeries,
+  campaignSummaries, engagementMix, filterPosts, kpiSummary, postToTaskMetrics, previousPeriod,
+  topCampaigns, topPosts, trendSeries,
 } from "./insights";
 import type { MetaPost } from "@/lib/windsor";
 
@@ -76,6 +77,38 @@ describe("topPosts", () => {
   it("ranks organic posts only, both directions", () => {
     expect(topPosts(posts, "engajamento", 2, "top").map((p) => p.id)).toEqual(["b", "c"]);
     expect(topPosts(posts, "engajamento", 2, "bottom").map((p) => p.id)).toEqual(["a", "c"]);
+  });
+});
+
+describe("campaignSummaries / topCampaigns", () => {
+  const acc = "act123";
+  const posts = [
+    post({ id: `${acc}:cmp1:2026-07-01`, source: "paid", accountId: acc, accountName: "Conta Ads", caption: "Campanha A", metrics: { impressoes: 1000, cliques: 20, custo: 50 } }),
+    post({ id: `${acc}:cmp1:2026-07-02`, source: "paid", accountId: acc, accountName: "Conta Ads", caption: "Campanha A", metrics: { impressoes: 2000, cliques: 30, custo: 70 } }),
+    post({ id: `${acc}:cmp2:2026-07-01`, source: "paid", accountId: acc, accountName: "Conta Ads", caption: "Campanha B", metrics: { impressoes: 500, cliques: 5, custo: 200 } }),
+    post({ id: "org1", source: "organic", metrics: { alcance: 999 } }),
+  ];
+
+  it("groups paid rows by campaign (id sans trailing date), ignoring organic", () => {
+    const rows = campaignSummaries(posts);
+    expect(rows).toHaveLength(2);
+    const a = rows.find((r) => r.caption === "Campanha A")!;
+    expect(a.metrics.impressoes).toBe(3000);
+    expect(a.metrics.cliques).toBe(50);
+    expect(a.metrics.custo).toBe(120);
+  });
+
+  it("recomputes ctr/cpc from the summed totals, not an average of per-day ratios", () => {
+    const a = campaignSummaries(posts).find((r) => r.caption === "Campanha A")!;
+    expect(a.metrics.ctr).toBeCloseTo((50 / 3000) * 100, 2);
+    expect(a.metrics.cpc).toBeCloseTo(120 / 50, 2);
+  });
+
+  it("topCampaigns ranks by the given metric, real ads are visible even when no organic post exists", () => {
+    const top = topCampaigns(posts, "custo", 1);
+    expect(top).toHaveLength(1);
+    expect(top[0].caption).toBe("Campanha B");
+    expect(top[0].metrics.custo).toBe(200);
   });
 });
 

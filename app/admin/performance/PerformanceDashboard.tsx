@@ -6,7 +6,7 @@ import PostsBarChart from "./charts/PostsBarChart";
 import TrendChart from "./charts/TrendChart";
 import {
   DASH_METRICS, engagementMix, filterPosts, fmtCompact, inPeriod, kpiSummary,
-  metricLabel, previousPeriod, topPosts, trendSeries, type Period,
+  metricLabel, previousPeriod, topCampaigns, topPosts, trendSeries, type Period,
 } from "./insights";
 import type { MetaPost, MetaPostMetricKey, MetaPostType, WindsorDatasource } from "@/lib/windsor";
 
@@ -96,6 +96,7 @@ export default function PerformanceDashboard({ clients }: { clients: ClientLite[
   const top = useMemo(() => topPosts(currentPosts, metric, 8, "top"), [currentPosts, metric]);
   const mix = useMemo(() => engagementMix(currentPosts), [currentPosts]);
   const ranked = useMemo(() => topPosts(currentPosts, sortKey, 20, rankDir), [currentPosts, sortKey, rankDir]);
+  const campaigns = useMemo(() => topCampaigns(currentPosts, "custo", 20), [currentPosts]);
 
   const fmtDate = (iso: string) => {
     const [, m, d] = iso.split("-");
@@ -184,6 +185,45 @@ export default function PerformanceDashboard({ clients }: { clients: ClientLite[
           {mix.length ? <MixDonut slices={mix} /> : <p className="perf-empty">Sem interações no período.</p>}
         </div>
       </div>
+
+      {paid ? (
+        <div className="perf-card">
+          <div className="perf-card-head"><h3>Campanhas</h3></div>
+          <div className="admin-table-wrap perf-table-wrap">
+            <table className="admin-table perf-table">
+              <thead>
+                <tr>
+                  <th>Conta</th>
+                  <th>Campanha</th>
+                  <th>Impressões</th>
+                  <th>Cliques</th>
+                  <th>CTR</th>
+                  <th>CPC</th>
+                  <th>Custo</th>
+                  <th>Conversões</th>
+                </tr>
+              </thead>
+              <tbody>
+                {campaigns.map((c) => (
+                  <tr key={c.key}>
+                    <td className="admin-cell-muted">{c.accountName}</td>
+                    <td className="perf-td-caption">{c.caption || "—"}</td>
+                    <td>{fmtCompact(c.metrics.impressoes ?? 0)}</td>
+                    <td>{fmtCompact(c.metrics.cliques ?? 0)}</td>
+                    <td>{c.metrics.ctr !== undefined ? `${c.metrics.ctr.toLocaleString("pt-BR")}%` : "—"}</td>
+                    <td>{c.metrics.cpc !== undefined ? `R$ ${fmtCompact(c.metrics.cpc)}` : "—"}</td>
+                    <td>{c.metrics.custo !== undefined ? `R$ ${fmtCompact(c.metrics.custo)}` : "—"}</td>
+                    <td>{fmtCompact(c.metrics.conversoes ?? 0)}</td>
+                  </tr>
+                ))}
+                {campaigns.length === 0 ? (
+                  <tr><td colSpan={8} className="perf-empty">Nenhuma campanha com dados pagos no período.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="perf-card">
         <div className="perf-card-head">

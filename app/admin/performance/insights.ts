@@ -99,6 +99,55 @@ export function topPosts(posts: MetaPost[], metric: MetaPostMetricKey, n: number
   return (dir === "top" ? sorted : sorted.reverse()).slice(0, n);
 }
 
+export type CampaignSummary = {
+  key: string;
+  accountId: string;
+  accountName: string;
+  platform: MetaPost["platform"];
+  caption: string;
+  metrics: Partial<Record<MetaPostMetricKey, number>>;
+};
+
+// Paid rows are campaign-day rows (one per campaign per day, see lib/meta*
+// normalizers), not individual creatives — topPosts deliberately excludes
+// them (a campaign total isn't comparable to one post's numbers). This
+// aggregates them the other way: one row per campaign for the whole period,
+// summing volume metrics and recomputing ctr/cpc from the summed totals
+// (averaging per-day ratios would weight low-volume days too heavily).
+export function campaignSummaries(posts: MetaPost[]): CampaignSummary[] {
+  const byKey = new Map<string, CampaignSummary>();
+  for (const p of posts) {
+    if (p.source !== "paid") continue;
+    // MetaPost.id for paid rows is `${accountId}:${campaignId}:${date}`
+    // (both lib/windsor.ts and lib/metaInsights.ts follow this convention) —
+    // strip the trailing date segment to group a campaign across days.
+    const key = p.id.split(":").slice(0, -1).join(":") || p.id;
+    let row = byKey.get(key);
+    if (!row) {
+      row = { key, accountId: p.accountId, accountName: p.accountName, platform: p.platform, caption: p.caption, metrics: {} };
+      byKey.set(key, row);
+    }
+    for (const [metricKey, value] of Object.entries(p.metrics) as [MetaPostMetricKey, number | undefined][]) {
+      if (value === undefined || metricKey === "ctr" || metricKey === "cpc") continue;
+      row.metrics[metricKey] = (row.metrics[metricKey] ?? 0) + value;
+    }
+  }
+  for (const row of byKey.values()) {
+    const impressions = row.metrics.impressoes ?? 0;
+    const clicks = row.metrics.cliques ?? 0;
+    const spend = row.metrics.custo ?? 0;
+    if (impressions > 0) row.metrics.ctr = Math.round((clicks / impressions) * 10000) / 100;
+    if (clicks > 0) row.metrics.cpc = Math.round((spend / clicks) * 100) / 100;
+  }
+  return Array.from(byKey.values());
+}
+
+export function topCampaigns(posts: MetaPost[], metric: MetaPostMetricKey, n: number): CampaignSummary[] {
+  return campaignSummaries(posts)
+    .sort((a, b) => (b.metrics[metric] ?? 0) - (a.metrics[metric] ?? 0))
+    .slice(0, n);
+}
+
 export type MixSlice = { key: "likes" | "comentarios" | "compartilhamentos" | "salvos"; label: string; value: number };
 
 export function engagementMix(posts: MetaPost[]): MixSlice[] {
