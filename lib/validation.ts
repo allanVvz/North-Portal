@@ -229,6 +229,22 @@ export const performanceInsightsQuerySchema = z.object({
   client: slugSchema.optional(),
   refresh: z.coerce.boolean().optional(),
 });
+// Ad-level drill-down (one campaign at a time, fetched on demand).
+export const performanceAdInsightsQuerySchema = z.object({
+  account: z.string().min(1).max(120),
+  campaign: z.string().min(1).max(200),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  refresh: z.coerce.boolean().optional(),
+});
+// Shape-only validation — sanitizePerformanceViewPrefs (lib/performancePrefs)
+// does the actual whitelisting against known metric keys/periods.
+export const performanceViewPrefsSchema = z.object({
+  visibleColumns: z.array(z.string().max(40)).max(30).optional(),
+  sortKey: z.string().max(40).optional(),
+  sortDir: z.enum(["asc", "desc"]).optional(),
+  defaultPeriod: z.union([z.literal(7), z.literal(30), z.literal(90)]).optional(),
+});
 export const performanceSyncSchema = z.object({
   links: z.array(z.object({ taskId: z.string().uuid(), postId: z.string().min(1).max(200) })).min(1).max(100),
 });

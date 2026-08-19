@@ -17,19 +17,31 @@ export type MetaPostType = "imagem" | "video" | "carrossel" | "reel" | "story" |
 export type MetaPostMetricKey =
   | "alcance" | "impressoes" | "likes" | "comentarios" | "compartilhamentos"
   | "salvos" | "engajamento" | "videoViews" | "cliques" | "ctr" | "custo"
-  | "cpc" | "conversoes";
+  | "cpc" | "cpm" | "frequencia" | "cliquesUnicos" | "cliquesLink"
+  | "landingPageViews" | "leads" | "compras" | "mensagens" | "conversoes";
+
+export type MetaPlatform = "instagram" | "facebook" | "whatsapp" | "messenger" | "audience_network" | "unknown";
 
 export type MetaPost = {
   id: string;
   date: string; // YYYY-MM-DD
   accountId: string;
   accountName: string;
-  platform: "instagram" | "facebook";
+  platform: MetaPlatform;
   source: "organic" | "paid";
   type: MetaPostType;
   caption: string;
   permalink: string | null;
   metrics: Partial<Record<MetaPostMetricKey, number>>;
+  campaignId?: string;
+  objective?: string;
+  currency?: string;
+  schemaVersion?: number;
+  // Ad-level drill-down only (datasource "meta_ads_creative") — absent on
+  // campaign-level rows.
+  adId?: string;
+  adName?: string;
+  thumbnailUrl?: string | null;
 };
 
 export type WindsorAccountRef = { accountId: string; accountName: string };

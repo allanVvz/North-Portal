@@ -37,10 +37,18 @@ const CAPTIONS = [
 
 const TYPES: MetaPostType[] = ["reel", "carrossel", "imagem", "video", "story"];
 
+// Two campaigns across two platforms so demo mode exercises the same
+// filters/grouping as real Meta data (platform toggle, ad-level drill-down
+// disabled — demo has no per-ad breakdown — column set, objective label).
+export const DEMO_AD_CAMPAIGNS = [
+  { campaignId: "demo_cmp_trafego", caption: "Campanha Demo — Tráfego Loja", objective: "OUTCOME_TRAFFIC", platform: "facebook" as const, accountId: "demo_fb_ads", accountName: "Demo · Facebook Ads" },
+  { campaignId: "demo_cmp_leads", caption: "Campanha Demo — Geração de Leads", objective: "OUTCOME_LEADS", platform: "instagram" as const, accountId: "demo_fb_ads", accountName: "Demo · Facebook Ads" },
+];
+
 const isoDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-/** ~45 organic posts + a paid campaign series across the last 90 days. */
+/** ~45 organic posts + two paid campaign series across the last 90 days. */
 export function generateDemoPosts(today = new Date()): MetaPost[] {
   const rand = mulberry32(20260712);
   const posts: MetaPost[] = [];
@@ -81,29 +89,64 @@ export function generateDemoPosts(today = new Date()): MetaPost[] {
     });
   }
 
-  // Paid: one campaign reporting every ~3 days.
-  for (let i = 0; i < 30; i++) {
-    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i * 3);
+  // Paid: two campaigns, each reporting every ~3 days, covering every metric
+  // the real Meta connection can return (see MetaPostMetricKey).
+  for (let i = 0; i < 60; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - Math.floor(i / DEMO_AD_CAMPAIGNS.length) * 3);
+    const campaign = DEMO_AD_CAMPAIGNS[i % DEMO_AD_CAMPAIGNS.length];
     const impressoes = Math.round(3000 + rand() * 9000);
+    const alcance = Math.round(impressoes / (1.1 + rand() * 0.5));
+    const frequencia = Math.round((impressoes / alcance) * 100) / 100;
     const cliques = Math.round(impressoes * (0.01 + rand() * 0.03));
+    const cliquesUnicos = Math.round(cliques * (0.7 + rand() * 0.2));
+    const cliquesLink = Math.round(cliques * (0.6 + rand() * 0.3));
     const custo = Math.round((20 + rand() * 120) * 100) / 100;
+    const engajamento = Math.round(alcance * (0.02 + rand() * 0.05));
+    const likes = Math.round(engajamento * (0.5 + rand() * 0.2));
+    const comentarios = Math.round(engajamento * (0.05 + rand() * 0.1));
+    const compartilhamentos = Math.round(engajamento * (0.03 + rand() * 0.08));
+    const salvos = Math.round(engajamento * (0.05 + rand() * 0.1));
+    const videoViews = Math.round(alcance * (0.3 + rand() * 0.4));
+    const landingPageViews = Math.round(cliquesLink * (0.6 + rand() * 0.3));
+    const isLeadCampaign = campaign.objective === "OUTCOME_LEADS";
+    const leads = isLeadCampaign ? Math.round(cliquesLink * (0.1 + rand() * 0.15)) : 0;
+    const compras = isLeadCampaign ? 0 : Math.round(cliquesLink * (0.02 + rand() * 0.05));
+    const mensagens = Math.round(cliques * (0.01 + rand() * 0.02));
     posts.push({
       id: `demo_paid_${i}`,
       date: isoDay(d),
-      accountId: "demo_fb_ads",
-      accountName: "Demo · Facebook Ads",
-      platform: "facebook",
+      accountId: campaign.accountId,
+      accountName: campaign.accountName,
+      platform: campaign.platform,
       source: "paid",
       type: "outro",
-      caption: "Campanha Demo — Tráfego Loja",
+      caption: campaign.caption,
       permalink: null,
+      campaignId: campaign.campaignId,
+      objective: campaign.objective,
+      currency: "BRL",
       metrics: {
+        alcance,
         impressoes,
+        frequencia,
         cliques,
-        custo,
+        cliquesUnicos,
+        cliquesLink,
         ctr: Math.round((cliques / impressoes) * 10000) / 100,
         cpc: cliques > 0 ? Math.round((custo / cliques) * 100) / 100 : 0,
-        conversoes: Math.round(cliques * (0.05 + rand() * 0.15)),
+        cpm: impressoes > 0 ? Math.round((custo / impressoes) * 100000) / 100 : 0,
+        custo,
+        engajamento,
+        likes,
+        comentarios,
+        compartilhamentos,
+        salvos,
+        videoViews,
+        landingPageViews,
+        leads,
+        compras,
+        mensagens,
+        conversoes: leads + compras,
       },
     });
   }

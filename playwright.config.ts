@@ -18,10 +18,10 @@ export default defineConfig({
   retries: 0,
   reporter: "list",
   use: {
-    baseURL: `http://localhost:${process.env.E2E_PORT ?? "3000"}`,
+    baseURL: process.env.E2E_BASE_URL ?? `http://localhost:${process.env.E2E_PORT ?? "3000"}`,
     trace: "retain-on-failure",
   },
-  webServer: {
+  webServer: process.env.E2E_BASE_URL ? undefined : {
     command: `npm run dev -- -p ${process.env.E2E_PORT ?? "3000"}`,
     url: `http://localhost:${process.env.E2E_PORT ?? "3000"}`,
     reuseExistingServer: true,

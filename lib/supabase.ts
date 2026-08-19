@@ -32,7 +32,8 @@ import {
 } from "./validation";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
-import { META_ADS_DATASOURCE } from "./metaInsights";
+import { META_ADS_CREATIVE_DATASOURCE, META_ADS_DATASOURCE } from "./metaInsights";
+import { sanitizePerformanceViewPrefs, type PerformanceViewPrefs } from "./performancePrefs";
 import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
@@ -2031,7 +2032,7 @@ export function maskWindsorSettings(s: WindsorSettings): MaskedWindsorSettings {
 export type InsightsCacheRow = {
   client_id: string | null;
   account_id: string;
-  datasource: WindsorDatasource | typeof META_ADS_DATASOURCE;
+  datasource: WindsorDatasource | typeof META_ADS_DATASOURCE | typeof META_ADS_CREATIVE_DATASOURCE;
   date_from: string;
   date_to: string;
   payload: MetaPost[];
@@ -2042,7 +2043,11 @@ export async function getCachedInsights(): Promise<InsightsCacheRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("meta_insights_cache")
-    .select("client_id,account_id,datasource,date_from,date_to,payload,fetched_at");
+    .select("client_id,account_id,datasource,date_from,date_to,payload,fetched_at")
+    // Ad-level drill-down rows are fetched/cached on demand per campaign
+    // (see getCachedAdCreativeInsights) — excluded here so every full
+    // dashboard load doesn't also pull every expanded campaign's payload.
+    .neq("datasource", META_ADS_CREATIVE_DATASOURCE);
   // An un-migrated cache table should degrade to "no cache yet", not take the
   // whole performance dashboard down with a 503.
   if (isMissingOptionalTable(error, "meta_insights_cache")) return [];
@@ -2057,6 +2062,44 @@ export async function upsertInsightsCache(row: Omit<InsightsCacheRow, "fetched_a
     .upsert({ ...row, fetched_at: new Date().toISOString() }, { onConflict: "account_id,datasource" });
   if (isMissingOptionalTable(error, "meta_insights_cache")) return;
   if (error) fail(error);
+}
+
+// One (account, campaign) pair's ad-level cache row — looked up directly by
+// key instead of via getCachedInsights() (which excludes this datasource) so
+// expanding a campaign row costs one indexed lookup, not a full-table scan.
+export async function getCachedAdCreativeInsights(accountId: string, campaignId: string): Promise<InsightsCacheRow | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("meta_insights_cache")
+    .select("client_id,account_id,datasource,date_from,date_to,payload,fetched_at")
+    .eq("account_id", `${accountId}:${campaignId}`)
+    .eq("datasource", META_ADS_CREATIVE_DATASOURCE)
+    .limit(1);
+  if (isMissingOptionalTable(error, "meta_insights_cache")) return null;
+  if (error) fail(error);
+  return (data?.[0] as InsightsCacheRow | undefined) ?? null;
+}
+
+// ---- Performance dashboard view prefs (shared, site_settings-backed) ----------
+// Which "Campanhas" table columns show, sort order and default period —
+// agency-wide (any gerente can change it, everyone viewing Performance sees
+// the same config), so it lives in site_settings like admin_tabs_visibility.
+export async function getPerformanceViewPrefs(): Promise<PerformanceViewPrefs> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("site_settings").select("value").eq("key", "performance_view_prefs").limit(1);
+  if (error) fail(error);
+  return sanitizePerformanceViewPrefs((data?.[0] as { value: unknown } | undefined)?.value);
+}
+
+export async function savePerformanceViewPrefs(patch: Partial<PerformanceViewPrefs>): Promise<PerformanceViewPrefs> {
+  const current = await getPerformanceViewPrefs();
+  const next = sanitizePerformanceViewPrefs({ ...current, ...patch });
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("site_settings")
+    .upsert({ key: "performance_view_prefs", value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) fail(error);
+  return next;
 }
 
 export type AgencyProfile = { name: string; email: string; site: string; note: string };

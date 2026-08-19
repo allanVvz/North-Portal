@@ -3,7 +3,15 @@
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fmtCompact } from "../insights";
 import { tooltipStyle, useChartTheme } from "./chartTheme";
-import type { MetaPost } from "@/lib/windsor";
+import type { MetaPlatform, MetaPostMetricKey } from "@/lib/windsor";
+
+type BarPost = {
+  id?: string;
+  key?: string;
+  caption: string;
+  platform: MetaPlatform;
+  metrics: Partial<Record<MetaPostMetricKey, number>>;
+};
 
 // Horizontal top-posts comparison on the active metric. Instagram bars take
 // series slot 4 (purple) and Facebook slot 2 (blue) — same platform tones the
@@ -13,7 +21,7 @@ export default function PostsBarChart({
   metric,
   label,
 }: {
-  posts: MetaPost[];
+  posts: BarPost[];
   metric: string;
   label: string;
 }) {

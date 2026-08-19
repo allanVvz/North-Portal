@@ -5,7 +5,7 @@ import { getCachedInsights, getClient, getMetaAccessToken, getMetaSettings, getW
 import { requireAdmin } from "@/lib/supabase/auth";
 import { performanceInsightsQuerySchema } from "@/lib/validation";
 import { fetchWindsorPosts, type MetaPost, type WindsorDatasource } from "@/lib/windsor";
-import { fetchMetaAdsInsights, META_ADS_DATASOURCE } from "@/lib/metaInsights";
+import { fetchMetaAdsInsights, META_ADS_DATASOURCE, META_ADS_SCHEMA_VERSION } from "@/lib/metaInsights";
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h; ?refresh=1 bypasses
 const WINDOW_DAYS = 90; // always fetch a 90-day window so period switching is free
@@ -124,7 +124,11 @@ export async function GET(request: Request) {
         ? cache.filter((r) => r.datasource === provider.datasource)
         : cache.filter((r) => r.datasource === provider.datasource && r.account_id === provider.accountId);
       const fresh = dsRows.length > 0 &&
-        dsRows.every((r) => now - new Date(r.fetched_at).getTime() < CACHE_TTL_MS && r.date_from <= q.from);
+        dsRows.every((r) =>
+          now - new Date(r.fetched_at).getTime() < CACHE_TTL_MS &&
+          r.date_from <= q.from &&
+          (provider.datasource !== META_ADS_DATASOURCE || r.payload.every((p) => p.schemaVersion === META_ADS_SCHEMA_VERSION)),
+        );
 
       if (fresh && !q.refresh) {
         const posts: MetaPost[] = [];

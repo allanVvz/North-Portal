@@ -8,9 +8,8 @@ import type { PublishedTask } from "@/lib/supabase";
 type ClientLite = { slug: string; name: string };
 type View = "dashboard" | "cards";
 
-// Performance now has two views: the analytics Dashboard (Meta data via
-// Windsor, or demo data when not connected) and the original Cards list
-// (published tasks with manually-editable metrics), untouched.
+// Paid ads are the current analytics surface. Organic will become a separate
+// top-level view later; it is intentionally not mixed into this dashboard.
 export default function PerformanceScreen({
   initialTasks,
   clients,
@@ -25,11 +24,11 @@ export default function PerformanceScreen({
   return (
     <div className="perf-screen">
       <div className="kb-viewtabs perf-viewtabs">
-        <button className={view === "dashboard" ? "on" : ""} onClick={() => setView("dashboard")}>Dashboard</button>
+        <button className={view === "dashboard" ? "on" : ""} onClick={() => setView("dashboard")}>Anúncios</button>
         <button className={view === "cards" ? "on" : ""} onClick={() => setView("cards")}>Cards</button>
       </div>
       {view === "dashboard" ? (
-        <PerformanceDashboard clients={clients} />
+        <PerformanceDashboard clients={clients} canEdit={canEdit} />
       ) : (
         <PerformanceBoard initial={initialTasks} clients={clients} canEdit={canEdit} />
       )}
