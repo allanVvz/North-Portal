@@ -3,6 +3,8 @@
 import { useState } from "react";
 import type { AdminDocument } from "@/lib/supabase";
 import type { DocumentStatus, DocumentType } from "@/lib/validation";
+import { fileTypeLabel, formatFileSize } from "@/lib/documentFiles";
+import DocumentFilePreview from "@/app/DocumentFilePreview";
 
 const TYPE_LABEL: Record<DocumentType, string> = {
   contrato: "Contrato", proposta: "Proposta", relatorio: "Relatório", material: "Material",
@@ -59,7 +61,7 @@ export default function DocumentPreviewModal({
     <div className="kb-modal-backdrop" onClick={onClose}>
       <div className="docprev" onClick={(e) => e.stopPropagation()}>
         <div className="docprev-head">
-          <span className="doc-ico docprev-ico">PDF</span>
+          <span className="doc-ico docprev-ico">{fileTypeLabel(doc)}</span>
           <div className="docprev-headtext">
             <strong>{doc.name}</strong>
             <span className="admin-sub">{TYPE_LABEL[doc.doc_type]} · {fmtDate(doc.doc_date)}</span>
@@ -68,18 +70,7 @@ export default function DocumentPreviewModal({
         </div>
 
         <div className="docprev-body">
-          <div className="docprev-mock">
-            <div className="docprev-page">
-              <p className="docprev-page-title">{doc.name.toUpperCase()}</p>
-              <span className="docprev-line" style={{ width: "88%" }} />
-              <span className="docprev-line" style={{ width: "72%" }} />
-              <span className="docprev-line" style={{ width: "80%" }} />
-              <span className="docprev-line" style={{ width: "60%" }} />
-              <span className="docprev-gap" />
-              <span className="docprev-line" style={{ width: "84%" }} />
-              <span className="docprev-line" style={{ width: "68%" }} />
-            </div>
-          </div>
+          <DocumentFilePreview file={doc} />
 
           <div className="docprev-details">
             <p className="docprev-details-head">Detalhes</p>
@@ -87,6 +78,9 @@ export default function DocumentPreviewModal({
             <div className="docprev-row"><span>Cliente</span><b>{doc.clientName}</b></div>
             <div className="docprev-row"><span>Status</span><span className={`doc-status tone-${STATUS_TONE[doc.status]}`}>{STATUS_LABEL[doc.status]}</span></div>
             <div className="docprev-row"><span>Data</span><b>{fmtDate(doc.doc_date)}</b></div>
+            <div className="docprev-row"><span>Arquivo</span><b>{doc.original_file_name || "Link externo"}</b></div>
+            <div className="docprev-row"><span>Formato</span><b>{doc.mime_type || fileTypeLabel(doc)}</b></div>
+            {doc.size_bytes !== null ? <div className="docprev-row"><span>Tamanho</span><b>{formatFileSize(doc.size_bytes)}</b></div> : null}
           </div>
         </div>
 

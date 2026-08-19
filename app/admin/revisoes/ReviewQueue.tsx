@@ -30,11 +30,9 @@ function relTime(iso: string | null): string {
 export default function ReviewQueue({
   initial,
   clients,
-  currentUserId,
 }: {
   initial: ApprovalRecord[];
   clients: ClientLite[];
-  currentUserId: string;
 }) {
   const [items, setItems] = useState<ApprovalRecord[]>(initial);
   const [clientFilter, setClientFilter] = useState("");
@@ -85,8 +83,6 @@ export default function ReviewQueue({
           {rows.map((t) => {
             const comments = commentsOf(t.payload);
             const lastComment = comments[comments.length - 1];
-            const isMine = Boolean(t.reviewer_id && t.reviewer_id === currentUserId);
-            const canAct = isMine && busy !== t.id;
             return (
               <article className="ap-row" key={t.id}>
                 <span className={`ap-thumb tone-${tone(t)}`} aria-hidden />
@@ -106,22 +102,17 @@ export default function ReviewQueue({
                   {lastComment ? (
                     <p className="ap-comment-preview">"{lastComment.text}" <span>— {lastComment.author} · {formatCommentTime(lastComment.at)}</span></p>
                   ) : null}
-                  {!t.reviewer_id ? (
-                    <p className="admin-sub">Atribua um revisor a este card (no modal) antes de agir nele.</p>
-                  ) : !isMine ? (
-                    <p className="admin-sub">Apenas {t.reviewerName ?? "o revisor designado"} pode agir neste card.</p>
-                  ) : null}
                 </div>
                 <div className="ap-actions">
                   <button className="admin-btn ghost" onClick={() => setOpenTask(t)}>
                     Abrir card
                   </button>
-                  <button className="admin-btn ghost" disabled={!canAct} onClick={() => patch(t.id, { status: "em_producao" })}>
+                  <button className="admin-btn ghost" disabled={busy === t.id} onClick={() => patch(t.id, { status: "em_producao" })}>
                     Ajustes
                   </button>
                   <button
                     className="admin-btn primary"
-                    disabled={!canAct}
+                    disabled={busy === t.id}
                     onClick={() => patch(t.id, { status: "aprovacao" })}
                   >
                     Enviar para aprovação

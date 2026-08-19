@@ -1548,7 +1548,7 @@ export async function upsertTaskMetrics(
 
 // ---- Documents (admin) ------------------------------------------------------
 
-const DOC_COLUMNS = "id,client_id,name,doc_type,status,file_url,doc_date,read_at";
+const DOC_COLUMNS = "id,client_id,name,doc_type,status,file_url,storage_path,original_file_name,mime_type,size_bytes,doc_date,read_at";
 
 export type AdminDocument = DocumentRecord & { clientName: string; clientSlug: string };
 
@@ -1597,6 +1597,18 @@ export async function updateDocument(id: string, patch: Record<string, unknown>)
 
 export async function deleteDocument(id: string): Promise<void> {
   const supabase = await createClient();
+  const { data, error: readError } = await supabase
+    .from("documents")
+    .select("storage_path")
+    .eq("id", id)
+    .limit(1);
+  if (readError) fail(readError);
+  const row = data?.[0] as { storage_path: string | null } | undefined;
+  if (!row) throw new HttpError(404, "Documento nao encontrado.");
+  if (row.storage_path) {
+    const { error: storageError } = await supabase.storage.from("documents").remove([row.storage_path]);
+    if (storageError) fail(storageError);
+  }
   const { error } = await supabase.from("documents").delete().eq("id", id);
   if (error) fail(error);
 }

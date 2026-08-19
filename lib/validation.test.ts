@@ -3,7 +3,6 @@ import {
   TASK_STATUSES,
   anyClientHasFlowEnabled,
   canDecideApproval,
-  canLeaveRevisao,
   clientApprovalActionSchema,
   flowFlagsCascadeEffects,
   introducesInvalidPublishedState,
@@ -74,26 +73,6 @@ describe("requiresManagerApproval", () => {
   });
 });
 
-describe("canLeaveRevisao", () => {
-  it("blocks anyone other than the assigned reviewer from moving a card out of Revisão", () => {
-    expect(canLeaveRevisao("revisao", "user-a", "user-b")).toBe(false);
-    expect(canLeaveRevisao("revisao", "user-a", "user-a")).toBe(true);
-  });
-
-  it("regression: an unclaimed card (no reviewer yet) must not lock EVERY admin out, gerente included", () => {
-    // Live-reproduced prod bug: reviewer_id null failed `!== actingUserId`
-    // for every single admin, so an unassigned Revisão card could never be
-    // moved by anyone, including managers.
-    expect(canLeaveRevisao("revisao", null, "any-admin-id")).toBe(true);
-    expect(canLeaveRevisao("revisao", undefined, "any-admin-id")).toBe(true);
-  });
-
-  it("is a no-op for any status other than Revisão", () => {
-    expect(canLeaveRevisao("aprovacao", "user-a", "user-b")).toBe(true);
-    expect(canLeaveRevisao("em_producao", null, "any-admin-id")).toBe(true);
-  });
-});
-
 describe("canDecideApproval", () => {
   it("always allows a gerente, regardless of who the approver is", () => {
     expect(canDecideApproval("aprovacao", "aprovado", "user-a", "user-b", "gerente")).toBe(true);
@@ -109,9 +88,8 @@ describe("canDecideApproval", () => {
   });
 
   it("blocks any non-gerente when the card has no approver assigned yet", () => {
-    // Unlike canLeaveRevisao's unclaimed-card exception, an unassigned
-    // approver never opens the door — approving/reopening stays gerente-only
-    // until someone is explicitly designated.
+    // An unassigned approver never opens the door — approving/reopening
+    // stays gerente-only until someone is explicitly designated.
     expect(canDecideApproval("aprovacao", "aprovado", null, "user-b", "editor")).toBe(false);
   });
 

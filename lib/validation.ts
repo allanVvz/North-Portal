@@ -66,27 +66,11 @@ export function requiresManagerApproval(currentStatus: TaskStatus | undefined, n
   return nextStatus === "aprovado" || (currentStatus === "aprovado" && nextStatus === "aprovacao");
 }
 
-// Only the assigned reviewer may move a card out of Revisão — but when
-// nobody has been assigned yet (reviewer_id null), there's no exclusive
-// owner to protect, so any admin may act on it. Live-reproduced bug this
-// guards against: a null reviewer_id used to fail `reviewer_id !== userId`
-// for every single admin (managers included), permanently locking any
-// unclaimed card in Revisão.
-export function canLeaveRevisao(
-  currentStatus: TaskStatus | undefined,
-  reviewerId: string | null | undefined,
-  actingUserId: string,
-): boolean {
-  if (currentStatus !== "revisao") return true;
-  if (!reviewerId) return true;
-  return reviewerId === actingUserId;
-}
-
 // The gate for approving (→ aprovado) or reopening (aprovado → aprovacao) a
 // card: a gerente always decides, and now that the North team can also be an
 // approver (not just gerentes/clients), the specific approver_id assigned to
-// the card decides too — mirrors canLeaveRevisao's identity-based exception,
-// so an editor-level approver isn't locked out of their own assigned cards.
+// the card decides too, so an editor-level approver isn't locked out of their
+// own assigned cards.
 export function canDecideApproval(
   currentStatus: TaskStatus | undefined,
   nextStatus: TaskStatus | undefined,
@@ -380,15 +364,25 @@ export const DOCUMENT_STATUSES = ["enviada", "assinado", "aguardando_assinatura"
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
 
-export const documentCreateSchema = z.object({
+export const MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024;
+const storagePathSchema = z.string().min(1).max(MAX_TEXT_BYTES).refine(
+  (value) => !value.startsWith("/") && !value.split("/").includes("..") && value.split("/").length >= 3,
+  "Caminho de armazenamento inválido.",
+);
+const documentFieldsSchema = z.object({
   slug: slugSchema,
   name: z.string().min(1).max(MAX_TEXT_BYTES),
   doc_type: z.enum(DOCUMENT_TYPES).optional(),
   status: z.enum(DOCUMENT_STATUSES).optional(),
-  file_url: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
+  file_url: z.string().url().max(MAX_TEXT_BYTES).nullable().optional(),
+  storage_path: storagePathSchema.nullable().optional(),
+  original_file_name: z.string().min(1).max(MAX_TEXT_BYTES).nullable().optional(),
+  mime_type: z.string().min(1).max(255).nullable().optional(),
+  size_bytes: z.number().int().min(0).max(MAX_DOCUMENT_SIZE_BYTES).nullable().optional(),
   doc_date: z.string().max(40).nullable().optional(),
 });
-export const documentPatchSchema = documentCreateSchema.partial().omit({ slug: true });
+export const documentCreateSchema = documentFieldsSchema;
+export const documentPatchSchema = documentFieldsSchema.partial().omit({ slug: true });
 
 // ---- Commercial checkpoint templates -------------------------------------------
 export const checkpointTemplateCreateSchema = z.object({
@@ -406,6 +400,10 @@ export type DocumentRecord = {
   doc_type: DocumentType;
   status: DocumentStatus;
   file_url: string | null;
+  storage_path: string | null;
+  original_file_name: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
   doc_date: string | null;
   read_at: string | null;
 };

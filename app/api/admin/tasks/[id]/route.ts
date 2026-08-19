@@ -4,7 +4,7 @@ import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssignee
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
-import { HttpError, canLeaveRevisao, introducesInvalidPublishedState, taskPatchSchema } from "@/lib/validation";
+import { HttpError, introducesInvalidPublishedState, taskPatchSchema } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -26,7 +26,7 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireAdmin();
+    await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID invalido.");
     const { slug, assignee_profile_ids, payload_patch, ...patch } = taskPatchSchema.parse(await request.json());
@@ -71,14 +71,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       patch.recurrence_day_of_month = nextRecurrence === "mensal" ? Number(start.slice(8, 10)) : null;
       const end = patch.end_date !== undefined ? patch.end_date : current.end_date;
       if (!end || end < start) patch.end_date = start;
-    }
-
-    // Only the reviewer assigned on the card can move it out of Revisão —
-    // internal review is never a free-for-all across the whole admin team.
-    // An unclaimed card (no reviewer yet) has no exclusive owner to protect,
-    // so it doesn't lock everyone out.
-    if (patch.status && patch.status !== "revisao" && !canLeaveRevisao(current.status, current.reviewer_id, session.userId)) {
-      throw new HttpError(403, "Apenas o revisor designado pode mover este card para fora da Revisão.");
     }
 
     // Defense-in-depth: a client with a stage admin-disabled never carries a
