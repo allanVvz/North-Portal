@@ -117,7 +117,7 @@ function resizeTextarea(element: HTMLTextAreaElement | null): void {
   element.style.height = `${element.scrollHeight}px`;
 }
 
-function AutoGrowTextarea({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function AutoGrowTextarea({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => resizeTextarea(ref.current), [props.value]);
   return <textarea {...props} ref={ref} onChange={(event) => { onChange?.(event); resizeTextarea(event.currentTarget); }} />;
@@ -1259,10 +1259,13 @@ export default function TaskModal({
                   {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
                 </div>
                 <div className="tm-comment-input">
-                  <input
+                  <AutoGrowTextarea
+                    rows={1}
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void sendComment(); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendComment(); }
+                    }}
                     placeholder="Escrever comentário…"
                   />
                   <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim()}>Enviar</button>

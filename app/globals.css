@@ -1658,9 +1658,88 @@ body.menu-open {
 .admin-sidebar {
   position: sticky; top: 0; align-self: flex-start;
   width: 248px; height: calc(100vh / var(--ui-scale)); height: calc(100dvh / var(--ui-scale)); flex: 0 0 248px;
-  display: flex; flex-direction: column; gap: 6px;
   padding: 18px 16px; border-right: 1px solid var(--a-border);
   background: var(--a-surface);
+}
+.admin-sidebar-content { display: flex; flex-direction: column; gap: 6px; height: 100%; }
+
+/* auto-hide rail (desktop only — mobile keeps the static column layout from
+   the max-width: 720px block below). Floats as a vertically-centered dock
+   (not edge-to-edge top-to-bottom): at rest it's a compact icon-only strip
+   sized to its own content (never fully hidden); on hover/focus it widens to
+   the full 248px with labels revealed. overflow stays visible (not hidden)
+   so popovers anchored inside it — the notifications and account panels —
+   can escape past its edge instead of being clipped. */
+@media (min-width: 721px) {
+  .admin-sidebar {
+    position: fixed; left: 14px; top: 50%; transform: translateY(-50%); z-index: 50;
+    height: auto; max-height: calc(100dvh - 48px);
+    width: 76px; padding: 18px 10px; border-radius: 20px;
+    transition: width 0.2s ease, padding 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 10px 30px rgba(12, 44, 44, 0.12);
+  }
+  /* the dock hugs its own content height (topline + nav + account footer,
+     no forced stretch) — the mobile/base rule sets height:100% for the
+     always-expanded column layout below 721px, which does not apply here */
+  .admin-sidebar-content { height: auto; }
+  .admin-side-foot { margin-top: 18px; }
+  .admin-sidebar:hover,
+  .admin-sidebar:focus-within {
+    width: 248px; padding: 18px 16px;
+    box-shadow: 0 20px 48px rgba(12, 44, 44, 0.22);
+  }
+  .admin-shell[data-theme="dark"] .admin-sidebar {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+  .admin-shell[data-theme="dark"] .admin-sidebar:hover,
+  .admin-shell[data-theme="dark"] .admin-sidebar:focus-within {
+    box-shadow: 0 22px 52px rgba(0, 0, 0, 0.55);
+  }
+  /* icons (and the notifications bell/dot) stay visible at rest; only text
+     labels collapse to the compact strip */
+  .admin-sidebar .admin-word,
+  .admin-sidebar .admin-role,
+  .admin-sidebar .admin-nav-head,
+  .admin-sidebar .admin-nav-label,
+  .admin-sidebar .admin-usermeta,
+  .admin-sidebar .admin-usercard-caret {
+    display: none;
+  }
+  .admin-sidebar:hover .admin-word,
+  .admin-sidebar:hover .admin-role,
+  .admin-sidebar:hover .admin-nav-label,
+  .admin-sidebar:hover .admin-usercard-caret,
+  .admin-sidebar:focus-within .admin-word,
+  .admin-sidebar:focus-within .admin-role,
+  .admin-sidebar:focus-within .admin-nav-label,
+  .admin-sidebar:focus-within .admin-usercard-caret {
+    display: inline;
+  }
+  .admin-sidebar:hover .admin-nav-head,
+  .admin-sidebar:focus-within .admin-nav-head {
+    display: block;
+  }
+  .admin-sidebar:hover .admin-usermeta,
+  .admin-sidebar:focus-within .admin-usermeta {
+    display: flex;
+  }
+  /* topline stacks (mark above the bell) in the compact strip since there's
+     no horizontal room for both side by side; reverts to a row once wide */
+  .admin-sidebar .admin-topline { flex-direction: column; gap: 10px; padding: 2px 0 12px; }
+  .admin-sidebar .admin-brand { flex-direction: column; gap: 4px; }
+  .admin-sidebar .admin-topline-actions { margin-left: 0; }
+  .admin-sidebar:hover .admin-topline,
+  .admin-sidebar:focus-within .admin-topline {
+    flex-direction: row; align-items: center; gap: 10px; padding: 4px 6px 14px;
+  }
+  .admin-sidebar:hover .admin-brand,
+  .admin-sidebar:focus-within .admin-brand {
+    flex-direction: row; gap: 9px;
+  }
+  .admin-sidebar:hover .admin-topline-actions,
+  .admin-sidebar:focus-within .admin-topline-actions {
+    margin-left: auto;
+  }
 }
 .admin-topline { display: flex; align-items: center; gap: 10px; padding: 4px 6px 14px; }
 .admin-brand { display: inline-flex; align-items: center; gap: 9px; }
@@ -1688,7 +1767,7 @@ body.menu-open {
 }
 .admin-nav-item.muted { color: var(--a-muted); cursor: default; }
 .admin-nav-item.muted:hover { background: transparent; color: var(--a-muted); }
-.admin-nav-item .admin-nav-ico { width: 15px; text-align: center; opacity: 0.85; }
+.admin-nav-item .admin-nav-ico { width: 18px; flex: 0 0 18px; display: inline-flex; align-items: center; justify-content: center; opacity: 0.85; }
 .admin-nav-item .admin-soon { margin-left: auto; font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--a-muted); border: 1px solid var(--a-border); border-radius: 999px; padding: 1px 6px; }
 
 .admin-side-foot { margin-top: auto; padding-top: 12px; }
@@ -1708,12 +1787,23 @@ body.menu-open {
 
 /* ---- main / page ---- */
 .admin-main { flex: 1 1 auto; min-width: 0; overflow-x: hidden; }
+/* the sidebar is position: fixed above 720px (auto-hide rail) and floats
+   with a 14px left inset, so it no longer reserves layout width in flow —
+   pad well past its compact width (76px) so page content (and the rail's
+   own hover-reveal target) both get real breathing room, an "invisible
+   border" that keeps text from reading as flush against the dock. */
+@media (min-width: 721px) {
+  .admin-main { padding-left: 116px; }
+}
 /* Top padding trimmed on its own (was the same clamp() as the bottom) — that,
    plus dropping the header subtitles page by page, is what actually grows
    the visible content area; sides/bottom untouched. */
 .admin-page { max-width: 1180px; margin: 0 auto; padding: clamp(14px, 2vw, 24px) clamp(20px, 4vw, 44px) clamp(24px, 4vw, 44px); }
 .admin-narrow { max-width: 1180px; }
-.admin-page.kb-wide { max-width: none; }
+/* kb-wide (Tarefas board, Clientes/Rotinas) used to run fully edge-to-edge;
+   still gets far more room than the default page, but stays centered with a
+   cap instead of stretching into the far corner on ultra-wide screens. */
+.admin-page.kb-wide { max-width: 1680px; margin: 0 auto; }
 .admin-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .admin-head-actions { display: inline-flex; gap: 8px; }
 .admin-crumb { font-size: 13px; color: var(--a-muted); margin: 0 0 6px; }
@@ -1943,28 +2033,47 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .admin-shell[data-theme="dark"] .admin-card,
 .admin-shell[data-theme="dark"] .admin-summary { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 12px 30px rgba(0, 0, 0, 0.3); }
 
-/* theme toggle button (topline) */
-.admin-theme-toggle {
+/* topline icon button (notifications) */
+.admin-icon-btn {
+  position: relative;
   margin-left: auto; width: 30px; height: 30px; border-radius: 50%;
   display: grid; place-items: center; font-size: 14px; line-height: 1;
   border: 1px solid var(--a-border); background: var(--a-surface2); color: var(--a-sec);
   transition: background 0.16s, color 0.16s, border-color 0.16s;
 }
-.admin-theme-toggle:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
-
-/* sidebar collapse */
+.admin-icon-btn:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
 .admin-topline-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.admin-topline-actions .admin-theme-toggle { margin-left: 0; }
-.admin-sidebar-expand {
-  position: fixed; top: 18px; left: 16px; z-index: 40;
-  width: 34px; height: 34px; border-radius: 10px;
-  display: grid; place-items: center; font-size: 15px; line-height: 1;
-  border: 1px solid var(--a-border); background: var(--a-surface); color: var(--a-sec);
-  box-shadow: 0 4px 14px rgba(12,44,44,.12);
-  transition: background 0.16s, color 0.16s, border-color 0.16s;
+.admin-topline-actions .admin-icon-btn { margin-left: 0; }
+
+/* notifications: bell button opens a panel to the right of the rail */
+.admin-notif { position: relative; }
+.admin-notif-dot {
+  position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--a-danger); border: 1.5px solid var(--a-surface2);
+  animation: admin-notif-pulse 1.8s ease-out infinite;
 }
-.admin-sidebar-expand:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
-.admin-shell.sidebar-collapsed .admin-main { width: 100%; }
+@keyframes admin-notif-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(194, 96, 78, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(194, 96, 78, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(194, 96, 78, 0); }
+}
+.admin-shell[data-theme="dark"] .admin-notif-dot { border-color: var(--a-surface); }
+.admin-notif-panel {
+  position: absolute; top: -4px; left: calc(100% + 12px); z-index: 60; width: 280px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px;
+  padding: 8px; display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 12px 34px rgba(12, 44, 44, 0.18);
+}
+.admin-shell[data-theme="dark"] .admin-notif-panel { box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45); }
+.admin-notif-head {
+  padding: 6px 8px 10px; margin: 0 0 4px; border-bottom: 1px solid var(--a-border);
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--a-muted);
+}
+.admin-notif-item { display: flex; flex-direction: column; gap: 2px; padding: 9px 8px; border-radius: 8px; transition: background 0.16s; }
+.admin-notif-item:hover { background: var(--a-hover); }
+.admin-notif-text { font-size: 13.5px; line-height: 1.35; color: var(--a-ink); }
+.admin-notif-time { font-size: 11.5px; color: var(--a-muted); }
+.admin-notif-empty { margin: 0; padding: 16px 8px; text-align: center; font-size: 13px; color: var(--a-muted); }
 
 /* account: user card is a button; panel opens above it */
 .admin-account { position: relative; }
@@ -1972,7 +2081,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .admin-usercard:hover { border-color: var(--a-border-strong); }
 .admin-usercard-caret { margin-left: auto; color: var(--a-muted); font-size: 12px; }
 .admin-account-panel {
-  position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 30;
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; width: 240px;
   background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px;
   padding: 8px; display: flex; flex-direction: column; gap: 4px;
   box-shadow: 0 12px 34px rgba(12, 44, 44, 0.18);
@@ -1987,7 +2096,10 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   font-size: 14px; font-weight: 600; color: var(--a-ink); transition: background 0.16s, color 0.16s;
 }
 .admin-account-item:hover { background: var(--a-hover); color: var(--a-danger); }
-.admin-account-ico { width: 16px; text-align: center; opacity: 0.85; }
+.admin-account-ico { width: 16px; flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center; opacity: 0.85; }
+/* the theme row is a <button> (it toggles instead of navigating) — reset it
+   to look like the <a>/<Link> rows around it */
+.admin-account-theme { width: 100%; font: inherit; text-align: left; background: none; border: none; cursor: pointer; }
 
 /* ================================================================ */
 /* Portal cliente — Home (Bussola) fiel ao Figma 269:3 / 2146:2     */
@@ -2288,7 +2400,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .perf-hint { margin: 14px 30px 0; font-size: 12px; }
 .ap-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
 .ap-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--a-ink); color: var(--a-surface); font-size: 13.5px; padding: 11px 20px; border-radius: 999px; box-shadow: 0 10px 30px rgba(0,0,0,.25); z-index: 300; }
-.ap-filters { display: flex; gap: 10px; flex-wrap: wrap; }
+.ap-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ap-history { margin-top: 28px; display: flex; flex-direction: column; gap: 12px; }
 .ap-comment-modal { width: min(560px, 92vw); }
 .tone-red { background: rgba(194,96,78,.14); color: var(--a-danger); }
@@ -2461,9 +2573,9 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .tdp-comment-av { width: 26px; height: 26px; border-radius: 50%; background: var(--a-teal); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-grid; place-items: center; flex-shrink: 0; }
 .tdp-comment-meta { margin: 0; font-size: 12.5px; display: flex; gap: 7px; align-items: baseline; }
 .tdp-comment-meta small { color: var(--a-muted); font-weight: 400; }
-.tdp-comment-text { margin: 2px 0 0; font-size: 13px; color: var(--a-sec); line-height: 1.4; }
+.tdp-comment-text { margin: 2px 0 0; font-size: 13px; color: var(--a-sec); line-height: 1.4; white-space: pre-wrap; }
 .tdp-comment-input { display: flex; gap: 8px; margin-top: auto; }
-.tdp-comment-input input { flex: 1; }
+.tdp-comment-input input, .tdp-comment-input textarea { flex: 1; }
 
 /* ---- Task Modal (center, per-type) ---- */
 .tm { width: min(760px, 94vw); max-height: 92vh; overflow-y: auto; background: var(--a-surface); border-radius: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.32); display: flex; flex-direction: column; }
@@ -2595,7 +2707,7 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .tm-comment-text { max-width: 100%; margin: 2px 0 0; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 13px; color: var(--a-sec); line-height: 1.4; }
 .tm-comment-text a { overflow-wrap: anywhere; word-break: break-all; }
 .tm-comment-input { display: flex; gap: 8px; }
-.tm-comment-input input { flex: 1; background: var(--a-surface); }
+.tm-comment-input input, .tm-comment-input textarea { flex: 1; background: var(--a-surface); }
 .tone-btn-criativo { background: #8a6bcf; }
 .tone-btn-criativo:hover { background: #7a5abf; }
 .tone-btn-agendamento { background: #d4a33c; color: #2c2306; }
@@ -3175,10 +3287,13 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .tm-comment-input:focus-within, .tdp-comment-input:focus-within {
   border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft);
 }
-.tm-comment-input input, .tdp-comment-input input {
+.tm-comment-input input, .tdp-comment-input input,
+.tm-comment-input textarea, .tdp-comment-input textarea {
   flex: 1; min-width: 0; border: none; background: none; padding: 8px 0; font: inherit; font-size: 13.5px; color: var(--a-ink);
+  resize: none; max-height: 160px; overflow-y: auto; line-height: 1.4;
 }
-.tm-comment-input input:focus, .tdp-comment-input input:focus { outline: none; }
+.tm-comment-input input:focus, .tdp-comment-input input:focus,
+.tm-comment-input textarea:focus, .tdp-comment-input textarea:focus { outline: none; }
 .tm-comment-input button, .tdp-comment-input button { border-radius: 10px; flex-shrink: 0; }
 
 /* Prevent the modal's own grid content from ever forcing a horizontal
@@ -3358,7 +3473,6 @@ select.perf-select { width: auto; min-width: 170px; }
 /* Clientes · tarefas recorrentes (domínio independente de planos de ação) */
 .clients-workspace { display: flex; flex-direction: column; gap: 16px; }
 .clients-workspace > .admin-head { margin-bottom: 0; }
-.clients-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .clients-section-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--a-border); }
 .clients-section-tabs button {
   appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
@@ -3508,8 +3622,6 @@ select.perf-select { width: auto; min-width: 170px; }
   .rec-calendar-weekdays, .rec-calendar-grid { min-width: 760px; }
 }
 @media (max-width: 640px) {
-  .clients-head-actions { width: 100%; }
-  .clients-head-actions .admin-btn { flex: 1; justify-content: center; }
   .rec-toolbar > .kb-viewtabs, .rec-toolbar > .kb-modetoggle { width: 100%; }
   .rec-toolbar > .kb-viewtabs button, .rec-toolbar > .kb-modetoggle button { flex: 1; }
   .rec-toolbar .kb-newtask-btn { margin-left: auto; }

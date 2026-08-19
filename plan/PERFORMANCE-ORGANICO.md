@@ -23,3 +23,28 @@ Status: planejado, não implementado.
 - Não consultar nem exibir posts orgânicos.
 - Não derivar métricas orgânicas a partir de anúncios.
 - Não habilitar o botão `Orgânico` antes de a fonte e os testes reais estarem prontos.
+
+## Orgânico + Cards — vínculo de publicação real (2026-08-19)
+
+Status: planejado, não implementado. Roadmap futuro, sem prioridade imediata.
+
+Relacionado: [[AUTOMACOES-IA-HARNESS]] (seção "Agentes de IA planejados" — desenho
+completo dos agentes Bia/Copywriter e social media plan que alimentam este fluxo; este
+documento só amarra o lado de dados/telas de Performance, não repete o desenho do agente).
+
+- O toggle de nível superior em Performance (`.kb-viewtabs.perf-viewtabs`, hoje usado para
+  `Anúncios`/`Cards`) passa a ter 3 abas: **`Anúncios`** (já correto/implementado),
+  **`Orgânico`** (escopo já descrito no restante deste arquivo) e **`Cards`** (visão
+  operacional já existente, sem mudança de dado).
+- **`Orgânico` terá dois provedores de dado**: Meta (orgânico) e **Windsor** — mesmo padrão
+  de fonte dupla já usado em Anúncios (`lib/metaInsights.ts` + `lib/windsor.ts`), sem somar
+  dado pago com orgânico (regra já registrada acima).
+- **`Cards` representa os cards publicados** — cards de criativo movidos para o estado
+  "publicado" no fluxo do quadro.
+- **Vínculo de publicação real, ponta a ponta**: mover um card de criativo para
+  "publicado" deve poder disparar a publicação de fato (ads ou orgânico) na plataforma de
+  origem, com suporte para publicar diretamente por essa integração. É esse vínculo que
+  passa a alimentar as métricas exibidas nas abas `Cards`/`Orgânico` depois — origem do
+  dado rastreada até o card que a gerou (mesmo princípio arquitetural de
+  [[AUTOMACOES-IA-HARNESS]]: card de ads com origem de dado rastreada, coluna aditiva, sem
+  sistema paralelo).

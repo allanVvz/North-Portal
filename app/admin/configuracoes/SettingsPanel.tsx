@@ -5,6 +5,8 @@ import type { AgencyProfile, CheckpointTemplate, LegalDoc, TeamMember } from "@/
 import { createClient } from "@/lib/supabase/client";
 import CheckpointTemplates from "./CheckpointTemplates";
 import EtapasPanel from "./EtapasPanel";
+import AiProviderIntegration from "./AiProviderIntegration";
+import DriveIntegration from "./DriveIntegration";
 import MetaIntegration from "./MetaIntegration";
 import WindsorIntegration from "./WindsorIntegration";
 import { useSidebarEnabledPref } from "../kanbanPrefs";
@@ -89,6 +91,8 @@ export default function SettingsPanel({
           <>
             <MetaIntegration clients={clients} />
             <WindsorIntegration clients={clients} />
+            <AiProviderIntegration />
+            <DriveIntegration />
           </>
         ) : null}
       </div>

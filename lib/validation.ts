@@ -213,6 +213,13 @@ export const windsorSettingsPatchSchema = z.object({
 export const windsorTestSchema = z.object({
   apiKey: z.string().trim().min(8).max(200).optional(),
 });
+// PATCH semantics: apiKey omitted = keep the stored key; clearApiKey wipes it
+// (mirrors windsorSettingsPatchSchema above). vendor null clears the choice.
+export const aiProviderSettingsPatchSchema = z.object({
+  apiKey: z.string().trim().min(8).max(200).optional(),
+  clearApiKey: z.boolean().optional(),
+  vendor: z.enum(["anthropic", "chatgpt", "deepseek"]).nullable().optional(),
+});
 // PATCH semantics for the Meta integration: only the ad-account-per-client
 // mapping is ever written from the browser — the OAuth token itself is only
 // ever set by the server-side callback route, never via this schema.
@@ -451,6 +458,17 @@ export const agencyProfileSchema = z.object({
 export const meProfileSchema = z.object({
   full_name: z.string().trim().min(1).max(MAX_TEXT_BYTES),
 });
+
+// PATCH /api/admin/notifications — mark either an explicit id list, or the
+// whole unread inbox ("all"), read.
+export const notificationsMarkReadSchema = z
+  .object({
+    ids: z.array(z.string().uuid()).max(200).optional(),
+    all: z.literal(true).optional(),
+  })
+  .refine((v) => v.all === true || (v.ids !== undefined && v.ids.length > 0), {
+    message: "Informe ids ou all.",
+  });
 
 // ---- Client flow flags (Revisão/Aprovação safe-hide) ---------------------------
 // admin/cliente gate the reviewer/approver assignment + client-facing

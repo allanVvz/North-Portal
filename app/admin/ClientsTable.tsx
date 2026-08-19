@@ -85,6 +85,8 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
         </div>
         <ClientSearchBar q={q} onQChange={setQ} filters={filters} onFiltersChange={setFilters} />
         {msg ? <span className="set-msg">{msg}</span> : null}
+        <div className="kb-spacer" />
+        <Link href="/admin/novo" className="admin-btn primary kb-newtask-btn">+ Novo cliente</Link>
       </div>
 
       {view === "lista" ? (
