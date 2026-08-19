@@ -52,10 +52,13 @@ test.describe("upload real de documentos", () => {
     test.setTimeout(120_000);
     await login(page);
     await page.goto("/admin/documentos");
-    await page.getByRole("button", { name: /Enviar documento/ }).click();
+    // "Enviar documento" is now a drag-and-drop zone, not a button — picking a
+    // file directly on its (hidden) file input opens the same upload modal,
+    // pre-filled with that file, same as a real drop would.
+    await page.locator(".doc-dropzone-input").setInputFiles({ name: "contrato inicial.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF") });
 
     const modal = page.locator(".kb-modal");
-    await modal.locator('input[type="file"]').setInputFiles({ name: "contrato inicial.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF") });
+    await expect(modal).toBeVisible();
     await expect(modal.getByLabel("Nome")).toHaveValue("contrato inicial");
     await modal.getByLabel("Nome").fill(FIRST_TITLE);
     await modal.getByRole("button", { name: "Salvar" }).click();

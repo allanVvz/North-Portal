@@ -2,9 +2,11 @@
 
 import { useMemo, useState } from "react";
 import DocumentPreviewModal from "./DocumentPreviewModal";
+import DocumentDropZone from "./DocumentDropZone";
+import DocumentsFilterBar, { documentMatchesFilters, type DocActiveFilter } from "./DocumentsFilterBar";
 import type { AdminDocument } from "@/lib/supabase";
 import type { DocumentStatus, DocumentType } from "@/lib/validation";
-import { MAX_DOCUMENT_SIZE_BYTES, documentStoragePath, fileTypeLabel, formatFileSize, removeDocumentFile, uploadDocumentFile } from "@/lib/documentFiles";
+import { MAX_DOCUMENT_SIZE_BYTES, documentStoragePath, fileTypeLabel, formatFileSize, isHtmlDocument, removeDocumentFile, uploadDocumentFile } from "@/lib/documentFiles";
 
 type ClientLite = { slug: string; name: string };
 
@@ -18,13 +20,6 @@ const STATUS_LABEL: Record<DocumentStatus, string> = {
 const STATUS_TONE: Record<DocumentStatus, string> = {
   enviada: "blue", assinado: "green", aguardando_assinatura: "red", publicado: "green", compartilhado: "purple",
 };
-const FILTERS: { key: DocumentType | "all"; label: string }[] = [
-  { key: "all", label: "Todos" },
-  { key: "contrato", label: "Contratos" },
-  { key: "relatorio", label: "Relatórios" },
-  { key: "material", label: "Materiais" },
-  { key: "proposta", label: "Propostas" },
-];
 
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
@@ -51,10 +46,17 @@ type Draft = {
   doc_date: string;
 };
 
-export default function DocumentsTable({ initial, clients }: { initial: AdminDocument[]; clients: ClientLite[] }) {
+export default function DocumentsTable({
+  initial,
+  clients,
+  variant = "documentos",
+}: {
+  initial: AdminDocument[];
+  clients: ClientLite[];
+  variant?: "documentos" | "trilhas";
+}) {
   const [docs, setDocs] = useState<AdminDocument[]>(initial);
-  const [filter, setFilter] = useState<DocumentType | "all">("all");
-  const [clientFilter, setClientFilter] = useState("");
+  const [filters, setFilters] = useState<DocActiveFilter[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,14 +66,33 @@ export default function DocumentsTable({ initial, clients }: { initial: AdminDoc
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
 
+  const scoped = useMemo(
+    () => docs.filter((d) => isHtmlDocument(d) === (variant === "trilhas")),
+    [docs, variant],
+  );
   const rows = useMemo(
-    () => docs.filter((d) => (filter === "all" || d.doc_type === filter) && (!clientFilter || d.clientSlug === clientFilter)),
-    [docs, filter, clientFilter],
+    () => (variant === "trilhas" ? scoped : scoped.filter((d) => documentMatchesFilters(d, filters, TYPE_LABEL, STATUS_LABEL))),
+    [scoped, filters, variant],
   );
 
-  function newDoc() {
-    setSelectedFile(null); setReplacingFile(true); setUploadProgress(null); setNameTouched(false); setError("");
-    setDraft({ slug: clients[0]?.slug ?? "", name: "", doc_type: "contrato", status: "enviada", file_url: "", storage_path: "", original_file_name: "", mime_type: "", size_bytes: null, doc_date: "" });
+  function newDoc(fromFile?: File) {
+    setSelectedFile(fromFile ?? null);
+    setReplacingFile(true);
+    setUploadProgress(null);
+    setNameTouched(Boolean(fromFile));
+    setError("");
+    setDraft({
+      slug: clients[0]?.slug ?? "",
+      name: fromFile ? fromFile.name.replace(/\.[^.]+$/, "") || fromFile.name : "",
+      doc_type: "contrato",
+      status: "enviada",
+      file_url: "",
+      storage_path: "",
+      original_file_name: "",
+      mime_type: "",
+      size_bytes: null,
+      doc_date: "",
+    });
   }
   function editDoc(d: AdminDocument) {
     setSelectedFile(null); setReplacingFile(false); setUploadProgress(null); setNameTouched(true); setError("");
@@ -143,63 +164,84 @@ export default function DocumentsTable({ initial, clients }: { initial: AdminDoc
     setBusy(false);
   }
 
+  const isTrilhas = variant === "trilhas";
+
   return (
     <div className="doc">
-      <div className="doc-toolbar">
-        <div className="doc-filters">
-          {FILTERS.map((f) => (
-            <button key={f.key} className={`admin-chip ${filter === f.key ? "active" : ""}`} onClick={() => setFilter(f.key)}>
-              {f.label}
+      <DocumentDropZone
+        label={isTrilhas ? "Arraste uma apresentação HTML ou clique para enviar" : "Arraste um documento ou clique para enviar"}
+        hint={isTrilhas ? "HTML · máximo 50 MB" : "PDF e outros formatos · máximo 50 MB"}
+        accept={isTrilhas ? ".html,.htm,text/html" : undefined}
+        onFileSelected={(file) => newDoc(file)}
+      />
+
+      {!isTrilhas ? (
+        <div className="doc-toolbar">
+          <DocumentsFilterBar docs={scoped} filters={filters} onFiltersChange={setFilters} typeLabel={TYPE_LABEL} statusLabel={STATUS_LABEL} />
+        </div>
+      ) : null}
+
+      {error && !draft ? <p className="admin-error">{error}</p> : null}
+
+      {isTrilhas ? (
+        <div className="doc-grid">
+          {rows.map((d) => (
+            <button type="button" className="doc-grid-card" key={d.id} onClick={() => setPreviewDoc(d)}>
+              <span className="doc-ico">{fileTypeLabel(d)}</span>
+              <strong>{d.name}</strong>
+              <span className="doc-client"><span className="doc-avatar">{initials(d.clientName)}</span>{d.clientName}</span>
+              <span className="doc-grid-date">{fmtDate(d.doc_date)}</span>
+              <button
+                type="button"
+                className="doc-open-btn doc-grid-edit"
+                onClick={(e) => { e.stopPropagation(); editDoc(d); }}
+              >
+                Editar
+              </button>
             </button>
           ))}
-          <select className="doc-clientfilter" value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>
-            <option value="">Por cliente · todos</option>
-            {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-          </select>
+          {rows.length === 0 ? <p className="admin-empty">Nenhuma trilha enviada ainda.</p> : null}
         </div>
-        <button className="admin-btn primary" onClick={newDoc}>↑ Enviar documento</button>
-      </div>
-
-      {error ? <p className="admin-error">{error}</p> : null}
-
-      <div className="doc-table-wrap">
-        <table className="doc-table">
-          <thead>
-            <tr><th>Documento</th><th>Cliente</th><th>Tipo</th><th>Data</th><th>Status</th><th></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((d) => (
-              <tr key={d.id} onClick={() => setPreviewDoc(d)}>
-                <td>
-                  <span className="doc-name"><span className="doc-ico">{fileTypeLabel(d)}</span>{d.name}</span>
-                </td>
-                <td>
-                  <span className="doc-client"><span className="doc-avatar">{initials(d.clientName)}</span>{d.clientName}</span>
-                </td>
-                <td>{TYPE_LABEL[d.doc_type]}</td>
-                <td className="doc-date">{fmtDate(d.doc_date)}</td>
-                <td><span className={`doc-status tone-${STATUS_TONE[d.status]}`}>{STATUS_LABEL[d.status]}</span></td>
-                <td className="doc-open">
-                  <button
-                    type="button"
-                    className="doc-open-btn"
-                    onClick={(e) => { e.stopPropagation(); editDoc(d); }}
-                  >
-                    Editar
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 ? <tr><td colSpan={6} className="admin-empty" style={{ padding: 28 }}>Nenhum documento nesta visão.</td></tr> : null}
-          </tbody>
-        </table>
-      </div>
+      ) : (
+        <div className="doc-table-wrap">
+          <table className="doc-table">
+            <thead>
+              <tr><th>Documento</th><th>Cliente</th><th>Tipo</th><th>Data</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+              {rows.map((d) => (
+                <tr key={d.id} onClick={() => setPreviewDoc(d)}>
+                  <td>
+                    <span className="doc-name"><span className="doc-ico">{fileTypeLabel(d)}</span>{d.name}</span>
+                  </td>
+                  <td>
+                    <span className="doc-client"><span className="doc-avatar">{initials(d.clientName)}</span>{d.clientName}</span>
+                  </td>
+                  <td>{TYPE_LABEL[d.doc_type]}</td>
+                  <td className="doc-date">{fmtDate(d.doc_date)}</td>
+                  <td><span className={`doc-status tone-${STATUS_TONE[d.status]}`}>{STATUS_LABEL[d.status]}</span></td>
+                  <td className="doc-open">
+                    <button
+                      type="button"
+                      className="doc-open-btn"
+                      onClick={(e) => { e.stopPropagation(); editDoc(d); }}
+                    >
+                      Editar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 ? <tr><td colSpan={6} className="admin-empty" style={{ padding: 28 }}>Nenhum documento nesta visão.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {draft ? (
         <div className="kb-modal-backdrop" onClick={() => !busy && setDraft(null)}>
           <div className="kb-modal" onClick={(e) => e.stopPropagation()}>
             <div className="kb-modal-head">
-              <h2>{draft.id ? "Editar documento" : "Enviar documento"}</h2>
+              <h2>{draft.id ? "Editar documento" : isTrilhas ? "Enviar trilha" : "Enviar documento"}</h2>
               <button className="kb-modal-close" onClick={() => setDraft(null)} aria-label="Fechar">✕</button>
             </div>
             <label className="admin-field"><span>Nome</span>
@@ -234,7 +276,7 @@ export default function DocumentsTable({ initial, clients }: { initial: AdminDoc
               </div>
             ) : (
               <label className="admin-field doc-upload-field"><span>{draft.id ? "Novo arquivo" : "Arquivo"} · máximo 50 MB</span>
-                <input type="file" onChange={(e) => {
+                <input type="file" accept={isTrilhas ? ".html,.htm,text/html" : undefined} onChange={(e) => {
                   const file = e.target.files?.[0] ?? null;
                   setSelectedFile(file);
                   setError(file && file.size > MAX_DOCUMENT_SIZE_BYTES ? "O arquivo excede o limite de 50 MB." : "");

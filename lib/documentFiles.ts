@@ -54,8 +54,19 @@ export function documentPreviewKind(file: {
   if (mime.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"].includes(extension)) return "image";
   if (mime.startsWith("video/") || ["mp4", "webm", "ogv", "mov"].includes(extension)) return "video";
   if (mime.startsWith("audio/") || ["mp3", "wav", "ogg", "m4a", "aac", "flac"].includes(extension)) return "audio";
-  if (mime.startsWith("text/") || ["txt", "csv", "json", "xml", "md", "log"].includes(extension)) return "text";
+  if (mime.startsWith("text/") || ["txt", "csv", "json", "xml", "md", "log", "html", "htm"].includes(extension)) return "text";
   return "unsupported";
+}
+
+// A "Trilha" (Informações → Trilhas North) is just a regular document whose
+// file happens to be HTML — client-side distinction only, no schema change:
+// avoids a new doc_type/migration for what is, for now, purely a different
+// filtered view over the same `documents` table.
+export function isHtmlDocument(file: { original_file_name: string | null; mime_type: string | null }): boolean {
+  const mime = file.mime_type?.toLowerCase() ?? "";
+  const name = file.original_file_name ?? "";
+  const extension = name.split("?")[0].split(".").pop()?.toLowerCase() ?? "";
+  return mime === "text/html" || extension === "html" || extension === "htm";
 }
 
 export async function uploadDocumentFile(file: File, path: string, onProgress: (percent: number) => void): Promise<string> {
