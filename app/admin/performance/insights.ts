@@ -1,4 +1,4 @@
-import type { SortDir } from "@/lib/performancePrefs";
+import { customMetricIdOf, isCustomMetricRef, type CustomMetric, type CustomMetricOp, type MetricRef, type SortDir } from "@/lib/performancePrefs";
 import type { MetaPlatform, MetaPost, MetaPostMetricKey } from "@/lib/windsor";
 
 // Pure aggregation helpers behind the Performance dashboard — everything the
@@ -54,6 +54,45 @@ export function aggregateMetric(posts: MetaPost[], key: MetaPostMetricKey): numb
   return sumMetric(posts, key);
 }
 
+// ---- Configurable/custom metrics: one resolution path for built-in and
+// custom (metricA op metricB) refs, shared by KPI cards, Tendência, Top
+// campanhas and Engajamento so they never diverge in how a value is derived.
+
+export function applyOp(a: number, op: CustomMetricOp, b: number): number {
+  if (op === "+") return a + b;
+  if (op === "-") return a - b;
+  if (op === "×") return a * b;
+  return b !== 0 ? a / b : 0; // divide-by-zero: unavailable, not Infinity/NaN — same "0 when denominator is 0" convention aggregateMetric already uses for ctr/cpc/cpm.
+}
+
+function findCustomMetric(ref: MetricRef, customMetrics: CustomMetric[]): CustomMetric | undefined {
+  return customMetrics.find((m) => m.id === customMetricIdOf(ref));
+}
+
+export function resolveMetricValue(posts: MetaPost[], ref: MetricRef, customMetrics: CustomMetric[]): number {
+  if (isCustomMetricRef(ref)) {
+    const def = findCustomMetric(ref, customMetrics);
+    if (!def) return 0;
+    return applyOp(aggregateMetric(posts, def.a), def.op, aggregateMetric(posts, def.b));
+  }
+  return aggregateMetric(posts, ref);
+}
+
+export function metricRefLabel(ref: MetricRef, customMetrics: CustomMetric[]): string {
+  if (isCustomMetricRef(ref)) return findCustomMetric(ref, customMetrics)?.label ?? "Métrica removida";
+  return metricLabel(ref);
+}
+
+// A custom metric is only "available" (vs. rendering "—") when BOTH its
+// operands have data in this row set — same spirit as hasMetric for built-ins.
+export function metricRefAvailable(posts: MetaPost[], ref: MetricRef, customMetrics: CustomMetric[]): boolean {
+  if (isCustomMetricRef(ref)) {
+    const def = findCustomMetric(ref, customMetrics);
+    return Boolean(def) && hasMetric(posts, def!.a) && hasMetric(posts, def!.b);
+  }
+  return hasMetric(posts, ref);
+}
+
 export function previousPeriod(p: Period): Period {
   const from = new Date(`${p.from}T00:00:00`);
   const to = new Date(`${p.to}T00:00:00`);
@@ -87,40 +126,58 @@ export function filterPosts(posts: MetaPost[], f: PostFilters): MetaPost[] {
 
 export type Kpi = { key: MetaPostMetricKey; label: string; value: number; delta: number | null };
 
-// Headline tiles: 3 organic KPIs + (paid ? custo/cpc : média de engajamento).
+export type KpiCard = { metric: MetricRef; label: string; value: number; delta: number | null; available: boolean };
+
+// Headline tiles, one per visible KpiSlot (lib/performancePrefs) — replaces
+// the old fixed 3-base+paid/unpaid-4th set with a fully configurable one.
 // delta = % change vs the previous period; null when the previous period has
 // no data at all (a "+100%" against zero is noise, not signal).
-export function kpiSummary(posts: MetaPost[], prev: MetaPost[], paid: boolean): Kpi[] {
-  const mk = (key: MetaPostMetricKey, label: string): Kpi => {
-    const value = aggregateMetric(posts, key);
-    const before = aggregateMetric(prev, key);
-    return { key, label, value, delta: before > 0 ? Math.round(((value - before) / before) * 100) : null };
-  };
-  const kpis = [mk("alcance", "Alcance"), mk("impressoes", "Impressões"), mk("engajamento", "Engajamento")];
-  if (paid) kpis.push(
-    mk("likes", "Reações"),
-    mk("comentarios", "Comentários"),
-    mk("cliquesLink", "Cliques no link"),
-    mk("mensagens", "Conversas iniciadas"),
-    mk("custo", "Investimento"),
-  );
-  else kpis.push(mk("videoViews", "Views de vídeo"));
-  return kpis;
+export function kpiSummaryFromSlots(
+  posts: MetaPost[],
+  prev: MetaPost[],
+  slots: { visible: boolean; metric: MetricRef }[],
+  customMetrics: CustomMetric[],
+): KpiCard[] {
+  return slots.filter((s) => s.visible).map((s) => {
+    const available = metricRefAvailable(posts, s.metric, customMetrics);
+    const value = resolveMetricValue(posts, s.metric, customMetrics);
+    const before = resolveMetricValue(prev, s.metric, customMetrics);
+    return {
+      metric: s.metric,
+      label: metricRefLabel(s.metric, customMetrics),
+      value,
+      delta: before > 0 ? Math.round(((value - before) / before) * 100) : null,
+      available,
+    };
+  });
 }
 
 // Daily series for the trend chart, zero-filled so gaps read as real zeros
-// instead of the line skipping days.
-export function trendSeries(posts: MetaPost[], metric: MetaPostMetricKey, period: Period): { date: string; value: number }[] {
-  const byDay = new Map<string, number>();
-  for (const p of posts) byDay.set(p.date, (byDay.get(p.date) ?? 0) + (p.metrics[metric] ?? 0));
-  const out: { date: string; value: number }[] = [];
+// instead of the line skipping days. A custom metric is resolved PER DAY
+// (sum each operand for that day, then apply the operator) rather than
+// applying the operator to the whole-period totals — otherwise a daily CPC
+// trend would be flat-wrong (ratios don't distribute over a sum of days).
+export function trendSeries(posts: MetaPost[], metric: MetricRef, period: Period, customMetrics: CustomMetric[] = []): { date: string; value: number }[] {
+  const days: string[] = [];
   const from = new Date(`${period.from}T00:00:00`);
   const to = new Date(`${period.to}T00:00:00`);
-  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-    const key = isoDay(d);
-    out.push({ date: key, value: byDay.get(key) ?? 0 });
+  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) days.push(isoDay(d));
+
+  if (isCustomMetricRef(metric)) {
+    const def = findCustomMetric(metric, customMetrics);
+    if (!def) return days.map((date) => ({ date, value: 0 }));
+    const byDayA = new Map<string, number>();
+    const byDayB = new Map<string, number>();
+    for (const p of posts) {
+      byDayA.set(p.date, (byDayA.get(p.date) ?? 0) + (p.metrics[def.a] ?? 0));
+      byDayB.set(p.date, (byDayB.get(p.date) ?? 0) + (p.metrics[def.b] ?? 0));
+    }
+    return days.map((date) => ({ date, value: applyOp(byDayA.get(date) ?? 0, def.op, byDayB.get(date) ?? 0) }));
   }
-  return out;
+
+  const byDay = new Map<string, number>();
+  for (const p of posts) byDay.set(p.date, (byDay.get(p.date) ?? 0) + (p.metrics[metric] ?? 0));
+  return days.map((date) => ({ date, value: byDay.get(date) ?? 0 }));
 }
 
 export function topPosts(posts: MetaPost[], metric: MetaPostMetricKey, n: number, dir: "top" | "bottom"): MetaPost[] {
@@ -197,9 +254,21 @@ export function campaignSummaries(posts: MetaPost[]): CampaignSummary[] {
   return Array.from(byKey.values());
 }
 
-export function topCampaigns(posts: MetaPost[], metric: MetaPostMetricKey, n: number): CampaignSummary[] {
+// Resolves a metric value from an already-aggregated campaign/ad row's
+// summed totals (not raw posts) — reuses the same operator logic as
+// resolveMetricValue without re-summing per post.
+export function campaignMetricValue(row: { metrics: Partial<Record<MetaPostMetricKey, number>> }, ref: MetricRef, customMetrics: CustomMetric[]): number {
+  if (isCustomMetricRef(ref)) {
+    const def = findCustomMetric(ref, customMetrics);
+    if (!def) return 0;
+    return applyOp(row.metrics[def.a] ?? 0, def.op, row.metrics[def.b] ?? 0);
+  }
+  return row.metrics[ref] ?? 0;
+}
+
+export function topCampaigns(posts: MetaPost[], metric: MetricRef, n: number, customMetrics: CustomMetric[] = []): CampaignSummary[] {
   return campaignSummaries(posts)
-    .sort((a, b) => (b.metrics[metric] ?? 0) - (a.metrics[metric] ?? 0))
+    .sort((a, b) => campaignMetricValue(b, metric, customMetrics) - campaignMetricValue(a, metric, customMetrics))
     .slice(0, n);
 }
 
@@ -244,15 +313,14 @@ export function adSummaries(posts: MetaPost[]): AdSummary[] {
   return Array.from(byKey.values()).sort((a, b) => (b.metrics.custo ?? 0) - (a.metrics.custo ?? 0));
 }
 
-export type MixSlice = { key: "likes" | "comentarios" | "compartilhamentos" | "salvos"; label: string; value: number };
+export type MixSlice = { key: MetricRef; label: string; value: number };
 
-export function engagementMix(posts: MetaPost[]): MixSlice[] {
-  return [
-    { key: "likes" as const, label: "Curtidas", value: sumMetric(posts, "likes") },
-    { key: "comentarios" as const, label: "Comentários", value: sumMetric(posts, "comentarios") },
-    { key: "compartilhamentos" as const, label: "Compartilhamentos", value: sumMetric(posts, "compartilhamentos") },
-    { key: "salvos" as const, label: "Salvos", value: sumMetric(posts, "salvos") },
-  ].filter((s) => s.value > 0);
+const MIX_DEFAULT: [MetricRef, MetricRef, MetricRef, MetricRef] = ["likes", "comentarios", "compartilhamentos", "salvos"];
+
+export function engagementMix(posts: MetaPost[], refs: [MetricRef, MetricRef, MetricRef, MetricRef] = MIX_DEFAULT, customMetrics: CustomMetric[] = []): MixSlice[] {
+  return refs
+    .map((ref) => ({ key: ref, label: metricRefLabel(ref, customMetrics), value: resolveMetricValue(posts, ref, customMetrics) }))
+    .filter((s) => s.value > 0);
 }
 
 // MetaPost -> task_metrics values keyed by METRIC_DEFS (app/admin/metricDefs.ts).

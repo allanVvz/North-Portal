@@ -230,11 +230,24 @@ export const performanceAdInsightsQuerySchema = z.object({
 });
 // Shape-only validation — sanitizePerformanceViewPrefs (lib/performancePrefs)
 // does the actual whitelisting against known metric keys/periods.
+const metricRefSchema = z.string().max(80);
+const customMetricSchema = z.object({
+  id: z.string().min(1).max(80),
+  label: z.string().min(1).max(60),
+  a: z.string().max(40),
+  b: z.string().max(40),
+  op: z.enum(["+", "-", "×", "÷"]),
+});
 export const performanceViewPrefsSchema = z.object({
   visibleColumns: z.array(z.string().max(40)).max(30).optional(),
   sortKey: z.string().max(40).optional(),
   sortDir: z.enum(["asc", "desc"]).optional(),
   defaultPeriod: z.union([z.literal(7), z.literal(30), z.literal(90)]).optional(),
+  kpiSlots: z.array(z.object({ visible: z.boolean(), metric: metricRefSchema })).max(20).optional(),
+  trendMetric: metricRefSchema.optional(),
+  topCampaignsMetric: metricRefSchema.optional(),
+  mixMetric: z.array(metricRefSchema).max(4).optional(),
+  customMetrics: z.array(customMetricSchema).max(30).optional(),
 });
 export const performanceSyncSchema = z.object({
   links: z.array(z.object({ taskId: z.string().uuid(), postId: z.string().min(1).max(200) })).min(1).max(100),

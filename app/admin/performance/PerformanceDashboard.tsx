@@ -5,8 +5,8 @@ import MixDonut from "./charts/MixDonut";
 import PostsBarChart from "./charts/PostsBarChart";
 import TrendChart from "./charts/TrendChart";
 import {
-  adSummaries, campaignSummaries, DASH_METRICS, engagementMix, filterPosts, fmtCompact, hasMetric, inPeriod,
-  kpiSummary, metricLabel, previousPeriod, sortCampaigns, topCampaigns, trendSeries,
+  adSummaries, campaignMetricValue, campaignSummaries, DASH_METRICS, engagementMix, filterPosts, fmtCompact,
+  hasMetric, inPeriod, kpiSummaryFromSlots, metricLabel, previousPeriod, sortCampaigns, topCampaigns, trendSeries,
   type AdSummary, type CampaignSummary, type Period,
 } from "./insights";
 import {
@@ -208,7 +208,10 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
     if (availableMetrics.length && !availableMetrics.some((m) => m.key === metric)) setMetric(availableMetrics[0].key);
   }, [availableMetrics, metric]);
 
-  const kpis = useMemo(() => kpiSummary(currentRows, prevRows, true), [currentRows, prevRows]);
+  const kpis = useMemo(
+    () => kpiSummaryFromSlots(currentRows, prevRows, PERFORMANCE_VIEW_PREFS_DEFAULT.kpiSlots, []),
+    [currentRows, prevRows],
+  );
   const trend = useMemo(() => trendSeries(currentRows, metric, period), [currentRows, metric, period]);
   const top = useMemo(() => topCampaigns(currentRows, metric, 8), [currentRows, metric]);
   const mix = useMemo(() => engagementMix(currentRows), [currentRows]);
@@ -347,12 +350,12 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
 
       <div className="perf-kpis">
         {kpis.map((k) => {
-          const available = hasMetric(currentRows, k.key);
+          const available = k.available;
           return (
-            <div className="perf-kpi" key={k.key}>
+            <div className="perf-kpi" key={k.metric}>
               <span className="perf-kpi-label">{k.label}</span>
               <strong className="perf-kpi-value">
-                {available ? metricValue(k.value, k.key === "custo" ? "money" : "number", currentRows[0]?.currency) : "—"}
+                {available ? metricValue(k.value, k.metric === "custo" ? "money" : "number", currentRows[0]?.currency) : "—"}
               </strong>
               {available && k.delta !== null ? (
                 <span className={`perf-kpi-delta ${k.delta >= 0 ? "up" : "down"}`}>
@@ -383,7 +386,7 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
       <div className="perf-two-up">
         <div className="perf-card">
           <div className="perf-card-head"><h3>Top campanhas · {metricLabel(metric)}</h3></div>
-          {top.length ? <PostsBarChart posts={top} metric={metric} label={metricLabel(metric)} /> : <p className="perf-empty">Sem campanhas com essa métrica no período.</p>}
+          {top.length ? <PostsBarChart posts={top.map((c) => ({ key: c.key, caption: c.caption, platform: c.platform, value: campaignMetricValue(c, metric, []) }))} label={metricLabel(metric)} /> : <p className="perf-empty">Sem campanhas com essa métrica no período.</p>}
         </div>
         <div className="perf-card">
           <div className="perf-card-head"><h3>Engajamento dos anúncios</h3></div>

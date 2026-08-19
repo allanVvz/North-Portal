@@ -3,32 +3,32 @@
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fmtCompact } from "../insights";
 import { tooltipStyle, useChartTheme } from "./chartTheme";
-import type { MetaPlatform, MetaPostMetricKey } from "@/lib/windsor";
+import type { MetaPlatform } from "@/lib/windsor";
 
 type BarPost = {
   id?: string;
   key?: string;
   caption: string;
   platform: MetaPlatform;
-  metrics: Partial<Record<MetaPostMetricKey, number>>;
+  value: number;
 };
 
 // Horizontal top-posts comparison on the active metric. Instagram bars take
 // series slot 4 (purple) and Facebook slot 2 (blue) — same platform tones the
 // ranking table chips use, so color carries the same meaning everywhere.
+// `value` arrives pre-resolved (campaignMetricValue in insights.ts) so this
+// chart never needs to know whether the active metric is built-in or custom.
 export default function PostsBarChart({
   posts,
-  metric,
   label,
 }: {
   posts: BarPost[];
-  metric: string;
   label: string;
 }) {
   const t = useChartTheme();
   const data = posts.map((p) => ({
     name: p.caption ? (p.caption.length > 28 ? `${p.caption.slice(0, 28)}…` : p.caption) : p.id,
-    value: (p.metrics as Record<string, number | undefined>)[metric] ?? 0,
+    value: p.value,
     platform: p.platform,
   }));
   const height = Math.max(180, data.length * 34 + 24);

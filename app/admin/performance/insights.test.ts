@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  adSummaries, campaignSummaries, engagementMix, filterPosts, kpiSummary, postToTaskMetrics, previousPeriod,
-  sortCampaigns, topCampaigns, topPosts, trendSeries,
+  adSummaries, campaignMetricValue, campaignSummaries, engagementMix, filterPosts, kpiSummaryFromSlots,
+  metricRefAvailable, postToTaskMetrics, previousPeriod, resolveMetricValue, sortCampaigns, topCampaigns, topPosts,
+  trendSeries,
 } from "./insights";
+import type { CustomMetric } from "@/lib/performancePrefs";
 import type { MetaPost } from "@/lib/windsor";
 
 function post(overrides: Partial<MetaPost>): MetaPost {
@@ -28,24 +30,66 @@ describe("previousPeriod", () => {
   });
 });
 
-describe("kpiSummary", () => {
-  it("totals the period and computes % delta vs previous", () => {
+describe("kpiSummaryFromSlots", () => {
+  it("totals the period and computes % delta vs previous, only for visible slots", () => {
     const current = [post({ metrics: { alcance: 150 } }), post({ metrics: { alcance: 50 } })];
     const prev = [post({ metrics: { alcance: 100 } })];
-    const kpis = kpiSummary(current, prev, false);
-    const alcance = kpis.find((k) => k.key === "alcance")!;
-    expect(alcance.value).toBe(200);
-    expect(alcance.delta).toBe(100); // 100 -> 200 = +100%
+    const slots = [{ visible: true, metric: "alcance" as const }, { visible: false, metric: "engajamento" as const }];
+    const kpis = kpiSummaryFromSlots(current, prev, slots, []);
+    expect(kpis).toHaveLength(1);
+    expect(kpis[0]).toMatchObject({ metric: "alcance", value: 200, delta: 100, available: true }); // 100 -> 200 = +100%
   });
 
   it("delta is null when the previous period has no data (no fake +100%)", () => {
-    const kpis = kpiSummary([post({ metrics: { alcance: 10 } })], [], false);
-    expect(kpis.find((k) => k.key === "alcance")!.delta).toBeNull();
+    const kpis = kpiSummaryFromSlots([post({ metrics: { alcance: 10 } })], [], [{ visible: true, metric: "alcance" }], []);
+    expect(kpis[0].delta).toBeNull();
   });
 
-  it("swaps the 4th KPI: custo when paid, videoViews otherwise", () => {
-    expect(kpiSummary([], [], true).map((k) => k.key)).toContain("custo");
-    expect(kpiSummary([], [], false).map((k) => k.key)).toContain("videoViews");
+  it("resolves a custom-metric slot through the same path as a built-in one", () => {
+    const custom: CustomMetric[] = [{ id: "cpc2", label: "Custo por clique", a: "custo", b: "cliques", op: "÷" }];
+    const posts = [post({ metrics: { custo: 100, cliques: 20 } })];
+    const kpis = kpiSummaryFromSlots(posts, [], [{ visible: true, metric: "custom:cpc2" }], custom);
+    expect(kpis[0]).toMatchObject({ label: "Custo por clique", value: 5, available: true });
+  });
+});
+
+describe("resolveMetricValue / métricas customizadas", () => {
+  const custom: CustomMetric[] = [{ id: "c1", label: "Custo por clique", a: "custo", b: "cliques", op: "÷" }];
+  const posts = [post({ metrics: { custo: 100, cliques: 25 } })];
+
+  it("applies each of the 4 basic operators", () => {
+    const p = [post({ metrics: { alcance: 10, cliques: 4 } })];
+    expect(resolveMetricValue(p, "custom:add", [{ id: "add", label: "L", a: "alcance", b: "cliques", op: "+" }])).toBe(14);
+    expect(resolveMetricValue(p, "custom:sub", [{ id: "sub", label: "L", a: "alcance", b: "cliques", op: "-" }])).toBe(6);
+    expect(resolveMetricValue(p, "custom:mul", [{ id: "mul", label: "L", a: "alcance", b: "cliques", op: "×" }])).toBe(40);
+    expect(resolveMetricValue(p, "custom:div", [{ id: "div", label: "L", a: "alcance", b: "cliques", op: "÷" }])).toBe(2.5);
+  });
+
+  it("divide-by-zero resolves to 0, not Infinity/NaN", () => {
+    const p = [post({ metrics: { alcance: 10, cliques: 0 } })];
+    expect(resolveMetricValue(p, "custom:div0", [{ id: "div0", label: "L", a: "alcance", b: "cliques", op: "÷" }])).toBe(0);
+  });
+
+  it("falls back to a built-in metric for a plain MetricRef", () => {
+    expect(resolveMetricValue(posts, "custo", custom)).toBe(100);
+  });
+
+  it("metricRefAvailable requires BOTH operands to have data", () => {
+    expect(metricRefAvailable(posts, "custom:c1", custom)).toBe(true);
+    expect(metricRefAvailable([post({ metrics: { custo: 100 } })], "custom:c1", custom)).toBe(false);
+  });
+
+  it("an unknown custom metric id resolves to 0 instead of throwing", () => {
+    expect(resolveMetricValue(posts, "custom:missing", [])).toBe(0);
+  });
+});
+
+describe("campaignMetricValue", () => {
+  it("resolves a custom metric from an already-aggregated row's summed totals", () => {
+    const row = { metrics: { custo: 200, cliques: 50 } };
+    const custom: CustomMetric[] = [{ id: "cpc", label: "CPC", a: "custo", b: "cliques", op: "÷" }];
+    expect(campaignMetricValue(row, "custom:cpc", custom)).toBe(4);
+    expect(campaignMetricValue(row, "custo", custom)).toBe(200);
   });
 });
 

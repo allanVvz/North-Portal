@@ -4,12 +4,13 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { fmtCompact, type MixSlice } from "../insights";
 import { tooltipStyle, useChartTheme } from "./chartTheme";
 
-// Engagement-mix donut. Fixed slot order (curtidas→teal, comentários→blue,
-// compartilhamentos→gold, salvos→purple) with a labeled legend beside it —
-// identity is never carried by color alone.
+// Engagement-mix donut. Slot/color is positional now (slices are whatever 4
+// metrics — built-in or custom — the user configured), not keyed by a fixed
+// metric union; a labeled legend beside it still carries identity, color
+// alone is just a visual accent.
 export default function MixDonut({ slices }: { slices: MixSlice[] }) {
   const t = useChartTheme();
-  const SLOT: Record<MixSlice["key"], number> = { likes: 0, comentarios: 1, compartilhamentos: 2, salvos: 3 };
+  const slot = (key: MixSlice["key"]) => Math.max(0, slices.findIndex((s) => s.key === key));
   const total = slices.reduce((acc, s) => acc + s.value, 0);
   return (
     <div className="perf-donut">
@@ -30,7 +31,7 @@ export default function MixDonut({ slices }: { slices: MixSlice[] }) {
               endAngle={-270}
             >
               {slices.map((s) => (
-                <Cell key={s.key} fill={t.series[SLOT[s.key]]} />
+                <Cell key={s.key} fill={t.series[slot(s.key)]} />
               ))}
             </Pie>
           </PieChart>
@@ -43,7 +44,7 @@ export default function MixDonut({ slices }: { slices: MixSlice[] }) {
       <ul className="perf-donut-legend">
         {slices.map((s) => (
           <li key={s.key}>
-            <span className="perf-legend-dot" style={{ background: t.series[SLOT[s.key]] }} />
+            <span className="perf-legend-dot" style={{ background: t.series[slot(s.key)] }} />
             <span className="perf-legend-label">{s.label}</span>
             <b>{fmtCompact(s.value)}</b>
           </li>
