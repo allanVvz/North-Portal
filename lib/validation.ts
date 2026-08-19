@@ -452,6 +452,17 @@ export const meProfileSchema = z.object({
   full_name: z.string().trim().min(1).max(MAX_TEXT_BYTES),
 });
 
+// PATCH /api/admin/notifications — mark either an explicit id list, or the
+// whole unread inbox ("all"), read.
+export const notificationsMarkReadSchema = z
+  .object({
+    ids: z.array(z.string().uuid()).max(200).optional(),
+    all: z.literal(true).optional(),
+  })
+  .refine((v) => v.all === true || (v.ids !== undefined && v.ids.length > 0), {
+    message: "Informe ids ou all.",
+  });
+
 // ---- Client flow flags (Revisão/Aprovação safe-hide) ---------------------------
 // admin/cliente gate the reviewer/approver assignment + client-facing
 // visibility. The Kanban column itself is driven by "Ativo para Admin" too
