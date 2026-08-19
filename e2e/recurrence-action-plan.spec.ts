@@ -108,13 +108,17 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     expect(relinked.plan_id).toBe(parentId);
     expect(relinked.payload.action_plan_id).toBe(planId);
 
+    // These assertions all follow a fresh page navigation/fetch against the
+    // live DB — this suite has observed prod-network latency well past the
+    // default 5s (see the 15-45s timeouts elsewhere in this file), so give
+    // them real room instead of a tight default.
     await page.goto("/admin/plano");
     await page.getByRole("button", { name: "Lista", exact: true }).click();
     const planItem = page.locator(".plan-acc-item", { hasText: planTitle });
-    await expect(planItem).toBeVisible();
-    await expect(planItem.locator(".plan-acc-progress b")).toHaveText("60%");
+    await expect(planItem).toBeVisible({ timeout: 20_000 });
+    await expect(planItem.locator(".plan-acc-progress b")).toHaveText("60%", { timeout: 20_000 });
     await planItem.getByRole("button", { name: "Expandir" }).click();
-    await expect(planItem.locator(".plan-acc-list li")).toHaveCount(1);
+    await expect(planItem.locator(".plan-acc-list li")).toHaveCount(1, { timeout: 20_000 });
     await expect(planItem).toContainText(taskTitle);
 
     const completedResponse = await page.request.post(`/api/admin/tasks/${parentId}/complete-cycle`, {
@@ -133,21 +137,29 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     await page.goto(`/admin/kanban?task=${parentId}`);
     const modal = page.locator(".tm");
     await expect(modal).toBeVisible({ timeout: 20_000 });
-    await expect(modal.getByText(/Execuções da recorrência/)).toContainText("(2)");
+    await expect(modal.getByText(/Execuções da recorrência/)).toContainText("(2)", { timeout: 20_000 });
 
     await page.goto(`/admin/kanban?task=${first.id}`);
     const childModal = page.locator(".tm");
     await expect(childModal).toBeVisible({ timeout: 20_000 });
     const parentBox = childModal.locator(".tm-planmembers", { hasText: "Card pai (1)" });
-    await expect(parentBox).toContainText(parent.title);
+    // parentBox's title comes from a separate client-side fetch
+    // (TaskModal.tsx's recurrenceParent effect) that resolves after the modal
+    // itself is already visible — needs its own generous timeout.
+    await expect(parentBox).toContainText(parent.title, { timeout: 20_000 });
     await expect(parentBox.locator(".tm-member-unlink")).toHaveCount(1);
     await parentBox.locator(".tm-member-open").click();
-    await expect(page.locator(".tm").getByText(/Execuções da recorrência/)).toContainText("(2)");
+    await expect(page.locator(".tm").getByText(/Execuções da recorrência/)).toContainText("(2)", { timeout: 20_000 });
 
     await page.goto(`/admin/kanban?task=${first.id}`);
     const reopenedChild = page.locator(".tm");
     await reopenedChild.locator(".tm-planmembers", { hasText: "Card pai (1)" }).locator(".tm-member-unlink").click();
-    await expect(reopenedChild.locator(".tm-planmembers", { hasText: "Card pai (1)" })).toHaveCount(0);
+    // The unlink DELETE is a real round-trip against the live DB (first-compile
+    // of this route plus normal prod-network latency has been observed well
+    // past the default 5s in this suite — see the 15-45s timeouts already used
+    // elsewhere in this file for the same reason), so give it real room instead
+    // of a tight default.
+    await expect(reopenedChild.locator(".tm-planmembers", { hasText: "Card pai (1)" })).toHaveCount(0, { timeout: 45_000 });
     const standalone = await (await page.request.get(`/api/admin/tasks/${first.id}`)).json();
     expect(standalone.plan_id).toBeNull();
     expect(standalone.payload).not.toHaveProperty("recurrence_parent_id");
