@@ -32,6 +32,17 @@ const NAV_GROUPS: { head: string; items: { href: string; ico: string; label: str
 const ALL_HREFS = [...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href)), "/admin/configuracoes"];
 const SECTION_HREFS = ALL_HREFS.filter((h) => h !== "/admin");
 
+// Mock data for the notifications dropdown — a real backend/track is being
+// built in parallel; swap this constant out for that data source once it
+// lands. Keep it isolated here so the swap is a one-line change.
+type MockNotification = { id: string; text: string; time: string };
+const MOCK_NOTIFICATIONS: MockNotification[] = [
+  { id: "1", text: 'Tarefa "Revisar copy" está próxima do prazo', time: "há 12 min" },
+  { id: "2", text: "Pedro enviou uma tarefa para revisão", time: "há 1 h" },
+  { id: "3", text: "Cliente aprovou o Plano de Ação", time: "há 3 h" },
+  { id: "4", text: 'Novo comentário em "Campanha Agosto"', time: "ontem" },
+];
+
 export default function AdminShell({
   email,
   name,
@@ -55,13 +66,13 @@ export default function AdminShell({
   // worse than the brief flash it aimed to avoid. See docs/DIVERGENCIAS-FIGMA.md.
   const [theme, setTheme] = useState<Theme>("light");
   const [accountOpen, setAccountOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("admin-theme");
     if (saved === "dark" || saved === "light") setTheme(saved);
-    setCollapsed(window.localStorage.getItem("admin-sidebar-collapsed") === "1");
   }, []);
   useEffect(() => {
     window.localStorage.setItem("admin-theme", theme);
@@ -96,13 +107,25 @@ export default function AdminShell({
     };
   }, [accountOpen]);
 
-  function toggleCollapsed() {
-    setCollapsed((c) => {
-      const next = !c;
-      window.localStorage.setItem("admin-sidebar-collapsed", next ? "1" : "0");
-      return next;
-    });
-  }
+  // close the notifications panel on outside click / Escape (mirrors the
+  // account panel behavior above)
+  useEffect(() => {
+    if (!notifOpen) return;
+    function onDown(event: MouseEvent) {
+      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+        setNotifOpen(false);
+      }
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setNotifOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [notifOpen]);
 
   function isActive(href: string): boolean {
     if (href === "/admin") {
@@ -114,15 +137,9 @@ export default function AdminShell({
   }
 
   return (
-    <div className={`admin-shell ${collapsed ? "sidebar-collapsed" : ""}`} data-theme={theme} suppressHydrationWarning>
-      {collapsed ? (
-        <button type="button" className="admin-sidebar-expand" onClick={toggleCollapsed} aria-label="Mostrar menu" title="Mostrar menu">
-          ▸
-        </button>
-      ) : null}
-
-      {!collapsed ? (
-        <aside className="admin-sidebar">
+    <div className="admin-shell" data-theme={theme} suppressHydrationWarning>
+      <aside className="admin-sidebar">
+        <div className="admin-sidebar-content">
           <div className="admin-topline">
             <Link href="/admin/plano" className="admin-brand">
               <span className="admin-mark">N</span>
@@ -130,18 +147,36 @@ export default function AdminShell({
               <span className="admin-role">admin</span>
             </Link>
             <div className="admin-topline-actions">
-              <button
-                type="button"
-                className="admin-theme-toggle"
-                onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-                aria-label={theme === "light" ? "Ativar tema escuro" : "Ativar tema claro"}
-                title={theme === "light" ? "Tema escuro" : "Tema claro"}
-              >
-                {theme === "light" ? "☾" : "☀"}
-              </button>
-              <button type="button" className="admin-theme-toggle" onClick={toggleCollapsed} aria-label="Esconder menu" title="Esconder menu">
-                ◂
-              </button>
+              <div className="admin-notif" ref={notifRef}>
+                <button
+                  type="button"
+                  className="admin-icon-btn"
+                  onClick={() => setNotifOpen((open) => !open)}
+                  aria-haspopup="menu"
+                  aria-expanded={notifOpen}
+                  aria-label="Notificações"
+                  title="Notificações"
+                >
+                  🔔
+                  {MOCK_NOTIFICATIONS.length > 0 ? <span className="admin-notif-dot" aria-hidden /> : null}
+                </button>
+
+                {notifOpen ? (
+                  <div className="admin-notif-panel" role="menu">
+                    <p className="admin-notif-head">Notificações</p>
+                    {MOCK_NOTIFICATIONS.length > 0 ? (
+                      MOCK_NOTIFICATIONS.map((notif) => (
+                        <div className="admin-notif-item" key={notif.id} role="menuitem">
+                          <span className="admin-notif-text">{notif.text}</span>
+                          <span className="admin-notif-time">{notif.time}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="admin-notif-empty">Nenhuma notificação por aqui.</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -182,6 +217,17 @@ export default function AdminShell({
                       </span>
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    className="admin-account-item admin-account-theme"
+                    role="menuitem"
+                    onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+                  >
+                    <span className="admin-account-ico" aria-hidden>
+                      {theme === "light" ? "☾" : "☀"}
+                    </span>
+                    {theme === "light" ? "Modo escuro" : "Modo claro"}
+                  </button>
                   <Link className="admin-account-item" href="/admin/configuracoes" role="menuitem" onClick={() => setAccountOpen(false)}>
                     <span className="admin-account-ico" aria-hidden>
                       ⚙
@@ -217,8 +263,8 @@ export default function AdminShell({
               </button>
             </div>
           </div>
-        </aside>
-      ) : null}
+        </div>
+      </aside>
 
       <main className="admin-main">
         <CurrentUserProvider user={{ name, email, initials }}>{children}</CurrentUserProvider>
