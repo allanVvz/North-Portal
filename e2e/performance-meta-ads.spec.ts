@@ -323,9 +323,18 @@ test.describe("Performance · personalização da tela de Campanhas", () => {
 
     await page.locator(".perf-ads-table tbody tr").first().waitFor({ state: "attached", timeout: 15_000 });
     // Only rows sourced from the direct Meta connection (not Windsor) render
-    // the expand indicator (they carry a real campaignId).
+    // the expand indicator (they carry a real campaignId) — and the default
+    // sort is by spend, so a Windsor-heavy account can push every direct-Meta
+    // row past the first page. Page through "Carregar mais" before giving up.
     const expandableRow = page.locator(".perf-ads-table tbody tr").filter({ has: page.locator(".perf-expand-cell", { hasText: "▸" }) }).first();
-    test.skip((await expandableRow.count()) === 0, "nenhuma campanha com campaignId (conexão direta) no período");
+    const loadMore = page.getByRole("button", { name: /^Carregar mais/ });
+    let clicks = 0;
+    while ((await expandableRow.count()) === 0 && (await loadMore.count()) > 0 && clicks < 30) {
+      await loadMore.click();
+      await page.waitForTimeout(300);
+      clicks++;
+    }
+    test.skip((await expandableRow.count()) === 0, "nenhuma campanha com campaignId (conexão direta) no período, mesmo após paginar tudo");
 
     const adsResponsePromise = page.waitForResponse((res) => res.url().includes("/api/admin/performance/insights/ads"), { timeout: 60_000 });
     await expandableRow.click();
