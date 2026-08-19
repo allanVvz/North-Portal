@@ -1,0 +1,5 @@
+# Local-only scratch/handoff notes — not canonical docs.
+# See plan/*.md for curated, git-tracked roadmap documentation.
+memory.md
+.codex-run/
+*.log

@@ -1,0 +1,6 @@
+# Local-only scratch/handoff notes — not canonical docs.
+# Mirrors .claudeignore for parity with Claude Code. See plan/*.md for
+# curated, git-tracked roadmap documentation instead.
+memory.md
+.codex-run/
+*.log
