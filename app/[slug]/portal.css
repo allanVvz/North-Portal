@@ -605,6 +605,11 @@ body.np-menu-open { overflow: hidden; }
 .np-doc-empty { padding: 24px 0; text-align: center; color: var(--np-muted); font-size: 13.5px; }
 .np-empty-state { padding: 32px 24px; text-align: center; color: var(--np-muted); font-size: 14px; }
 .np-doc-modal .np-doc-badge { margin-bottom: 2px; }
+.np-doc-modal { width: min(900px, 100%); max-height: 90vh; overflow-y: auto; }
+.np-doc-modal .file-preview.compact { min-height: min(500px, 55vh); margin: 12px 0 18px; }
+.np-doc-modal .file-preview.compact iframe,
+.np-doc-modal .file-preview.compact img,
+.np-doc-modal .file-preview.compact video { min-height: min(500px, 55vh); }
 .np-doc-modal-status { display: flex; align-items: center; gap: 10px; margin: 14px 0 18px; font-size: 13.5px; color: var(--np-muted); }
 .np-doc-modal-empty { margin: 14px 0 0; color: var(--np-muted); font-size: 13.5px; }
 

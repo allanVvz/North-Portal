@@ -1,218 +1,40 @@
-"use client";
-
-import { useEffect, useState } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
+import LeadForm from "./components/LeadForm";
 
-const SLIDES = [
-  {
-    kicker: "Agência de marketing & tráfego",
-    title: ["Sua operação com ", "clareza"],
-    sub: "Briefing, criativos, aprovações e resultados — guiados como uma bússola.",
-    ctas: [
-      { label: "Começar agora", href: "/planos", variant: "light" },
-      { label: "Ver cases", href: "#cases", variant: "on-dark" },
-    ],
-  },
-  {
-    kicker: "Resultados que importam",
-    title: ["Marketing que vira ", "referência"],
-    sub: "Tráfego, conteúdo e produção medidos de ponta a ponta, sem achismo.",
-    ctas: [
-      { label: "Ver planos", href: "/planos", variant: "light" },
-      { label: "Como funciona", href: "/como-funciona", variant: "on-dark" },
-    ],
-  },
-  {
-    kicker: "Um portal, toda a operação",
-    title: ["Você sempre sabe ", "onde está"],
-    sub: "Do briefing ao dashboard, cada passo da sua conta em um só lugar.",
-    ctas: [
-      { label: "Começar agora", href: "/planos", variant: "light" },
-      { label: "Falar com a North", href: "mailto:contato@north.test", variant: "on-dark" },
-    ],
-  },
-] as const;
+export const metadata: Metadata = { title: "North · Marketing com direção para negócios locais", description: "Estratégia, conteúdo e performance conectados a uma operação clara para negócios locais premium.", alternates: { canonical: "/" }, openGraph: { title: "North · Marketing com direção", description: "Transforme marketing fragmentado em uma operação previsível.", type: "website" } };
 
-const SERVICES = [
-  { cat: "Captação & Conteúdo", icon: "📈", items: ["Diária de captação", "Orientação de story", "Atendimento comercial de leads", "Estratégia de conteúdo", "Google Meu Negócio"] },
-  { cat: "Produção de Conteúdo", icon: "📱", items: ["Roteiros de conteúdo", "Roteiros de anúncios", "Posts de feed", "Capas (destaque/feed)", "Layouts", "Edição de criativos", "Edição de Reels", "Flyers de eventos"] },
-  { cat: "Gestão & Performance", icon: "📊", items: ["Gestão de tráfego", "Gestão de perfil", "Análise de perfil", "Assessoria comercial", "Scripts de vendas"] },
-  { cat: "Planejamento & Organização", icon: "📅", items: ["Calendário editorial", "Aprovações no portal", "Pastas no Drive", "Dashboard de resultados"] },
+const CASES = [
+  { vertical: "Gastronomia & conveniência", name: "Baita", copy: "Conteúdo, mídia e rotina comercial conectados para transformar presença local em demanda.", tone: "sage" },
+  { vertical: "Estética automotiva", name: "Chris Car Care", copy: "Posicionamento premium e aquisição regional com uma operação que dá visibilidade à agenda.", tone: "sand" },
+  { vertical: "Serviços regionais", name: "Aurora", copy: "Estratégia e produção alinhadas à jornada real de quem pesquisa, compara e compra na região.", tone: "blue" },
+];
+const FAQ = [
+  ["A North atende apenas esses três segmentos?", "Não. Eles orientam nossa especialização inicial, mas o diagnóstico avalia negócios locais com operação, margem e ambição compatíveis com o método."],
+  ["Existe um plano pronto?", "Não começamos por um pacote. Mapeamos o momento do negócio e recomendamos o nível de parceria, as frentes e o ritmo de trabalho mais adequados."],
+  ["Quanto preciso investir?", "O formulário pergunta uma faixa para que a conversa seja objetiva. O investimento final depende da estrutura, da região, das metas e do escopo recomendado."],
+  ["Como acompanho o trabalho?", "Briefings, calendário, aprovações, documentos e indicadores ficam organizados no Portal North, com responsabilidades e próximos passos visíveis."],
+  ["Em quanto tempo começamos?", "Depois do diagnóstico e da definição do escopo, a imersão organiza acessos, contexto e prioridades antes da primeira produção."],
 ];
 
-const STATS = [
-  { num: "+238 mil", label: "Novos seguidores", desc: "conquistados nos últimos 12 meses" },
-  { num: "+73%", label: "Faturamento", desc: "melhorado e resolvido para clientes" },
-  { num: "24,6 mi", label: "Alcance em views", desc: "acumulados em vídeos e roteiros" },
-  { num: "+1.200", label: "Roteiros & vídeos", desc: "entregues com a operação North" },
-];
-
-const TESTIMONIALS = [
-  { quote: "A operação ficou clara. Cada semana sei exatamente o que está saindo.", name: "Rafael Beltrão", org: "Baita Conveniência", grad: "linear-gradient(135deg,#2f6f64,#12403a)" },
-  { quote: "Agenda cheia e criativos afiados. Virou nossa vantagem.", name: "Marina Cabral", org: "Prime Detailing", grad: "linear-gradient(135deg,#b79552,#7d5f2c)" },
-  { quote: "Transparência total no briefing e nos resultados. Recomendo.", name: "Diego Nunes", org: "Studio Norte", grad: "linear-gradient(135deg,#33607f,#1d3a4f)" },
-];
+function PortalDemo() { return <div className="portal-demo" aria-label="Demonstração ilustrativa do Portal North"><div className="demo-top"><span className="demo-logo">north</span><span>Visão da operação</span><i /></div><div className="demo-layout"><aside><b>Visão geral</b><span>Plano de ação</span><span>Produção</span><span>Aprovações</span><span>Performance</span></aside><div className="demo-main"><div className="demo-heading"><div><small>AGOSTO · CICLO 03</small><strong>A rota está clara.</strong></div><em>8 entregas ativas</em></div><div className="demo-kpis"><div><small>Prontas</small><b>12</b><i style={{width:"78%"}} /></div><div><small>Em aprovação</small><b>04</b><i style={{width:"45%"}} /></div><div><small>Próximo marco</small><b>19 ago</b><i style={{width:"62%"}} /></div></div><div className="demo-flow"><span>Briefing validado</span><i /><span>Produção em curso</span><i /><span>Resultados</span></div></div></div><span className="demo-note">DEMONSTRAÇÃO ILUSTRATIVA · DADOS NÃO REAIS</span></div>; }
 
 export default function LandingPage() {
-  const [slide, setSlide] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setSlide((s) => (s + 1) % SLIDES.length), 6000);
-    return () => window.clearInterval(id);
-  }, []);
-  const s = SLIDES[slide];
-  const move = (dir: 1 | -1) => setSlide((p) => (p + dir + SLIDES.length) % SLIDES.length);
+  return <>
+    <section className="hero-v2 dark-section"><div className="site-wrap hero-grid-v2"><div className="hero-copy-v2"><p className="eyebrow light">MARKETING PARA NEGÓCIOS LOCAIS PREMIUM</p><h1>Mais que presença.<br/><em>Direção para crescer.</em></h1><p>Unimos estratégia, conteúdo e performance em uma operação clara — para sua marca atrair as pessoas certas e transformar atenção em receita.</p><div className="hero-actions"><a href="#diagnostico" className="site-btn light" data-track="cta_hero">Solicitar diagnóstico <span>↗</span></a><Link href="/como-funciona" className="text-link light">Conhecer o método →</Link></div><small className="hero-proof">Diagnóstico estratégico · conversa direta · sem proposta genérica</small></div><div className="hero-visual"><div className="orbit" aria-hidden><span /><i /><b>N</b></div><PortalDemo /></div></div></section>
 
-  return (
-    <>
-      {/* HERO */}
-      <section className="site-wrap">
-        <div className="hero">
-          <div className="hero-card">
-            <span className="hero-kicker">{s.kicker}</span>
-            <h1 className="hero-title">
-              {s.title[0]}<em>{s.title[1]}</em>
-            </h1>
-            <p className="hero-sub">{s.sub}</p>
-            <div className="hero-ctas">
-              {s.ctas.map((c) => (
-                <Link key={c.label} href={c.href} className={`site-btn ${c.variant}`}>{c.label}</Link>
-              ))}
-            </div>
-            <div className="hero-dots" role="tablist" aria-label="Slides">
-              {SLIDES.map((_, i) => (
-                <i key={i} className={i === slide ? "on" : ""} onClick={() => setSlide(i)} role="tab" aria-selected={i === slide} />
-              ))}
-            </div>
-            <div className="hero-arrows">
-              <button className="hero-arrow" onClick={() => move(-1)} aria-label="Slide anterior">‹</button>
-              <button className="hero-arrow" onClick={() => move(1)} aria-label="Próximo slide">›</button>
-            </div>
-          </div>
-        </div>
-      </section>
+    <section className="site-section problem"><div className="site-wrap split-copy"><div><p className="eyebrow">QUANDO TUDO PARECE URGENTE</p><h2>Marketing sem operação vira <em>ruído.</em></h2></div><div><p>Ideias soltas, fornecedores desconectados, aprovações no WhatsApp e métricas sem contexto drenam tempo sem construir uma direção.</p><ul className="check-list"><li>Você não sabe o que priorizar</li><li>A produção depende de cobranças</li><li>O resultado não conversa com o negócio</li></ul></div></div></section>
 
-      {/* RESULTADOS */}
-      <section className="site-section" style={{ background: "var(--s-band)" }}>
-        <div className="site-wrap">
-          <p className="site-kicker">Resultados que importam</p>
-          <div className="stats-grid">
-            {STATS.map((st) => (
-              <div className="stat-card" key={st.label}>
-                <div className="stat-num">{st.num}</div>
-                <div className="stat-label">{st.label}</div>
-                <div className="stat-desc">{st.desc}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+    <section className="site-section method dark-section"><div className="site-wrap"><div className="section-heading light"><p className="eyebrow light">MÉTODO NORTH</p><h2>Clareza para decidir.<br/><em>Ritmo para executar.</em></h2><p>Uma rota única conecta intenção, produção e aprendizado.</p></div><div className="method-grid">{[["01","Imersão","Entendemos contexto, oferta, público e capacidade comercial."],["02","Direção","Definimos posicionamento, prioridades e indicadores que importam."],["03","Operação","Produzimos, aprovamos e publicamos em ciclos visíveis no portal."],["04","Evolução","Lemos os sinais, aprendemos e recalibramos a próxima rota."]].map(([n,t,d])=><article key={n}><span>{n}</span><h3>{t}</h3><p>{d}</p></article>)}</div><div className="portal-block"><div><p className="eyebrow light">PORTAL NORTH</p><h3>A estratégia não fica em uma apresentação.</h3><p>Ela vira rotina: responsáveis, aprovações, documentos e desempenho organizados em um só lugar.</p><Link href="/como-funciona" className="text-link light">Ver a operação por dentro →</Link></div><PortalDemo /></div></div></section>
 
-      {/* CASES */}
-      <section className="site-section" id="cases">
-        <div className="site-wrap">
-          <p className="site-kicker">Cases · resultados reais</p>
-          <h2 className="site-h2">Operações que viraram <em>referência</em></h2>
-          <div className="cases">
-            <div className="case-row">
-              <div className="case-copy">
-                <span className="case-tag">Conveniência · Delivery</span>
-                <h3 className="case-name">Baita <em>Conveniência</em></h3>
-                <p className="case-desc">Delivery e loja em 3 meses de operação North — pedidos, ticket e alcance em crescimento consistente.</p>
-                <div className="case-chips"><span>Tráfego pago</span><span>Social</span><span>Conteúdo</span></div>
-              </div>
-              <div className="case-mock">
-                <p className="mock-title">Resultados · Baita Conveniência</p>
-                <div className="mock-kpis">
-                  <div className="mock-kpi"><small>Pedidos/mês</small><b>+142%</b></div>
-                  <div className="mock-kpi tone-sand"><small>Ticket</small><b>R$ 38</b></div>
-                  <div className="mock-kpi tone-deep"><small>ROI</small><b>4,3x</b></div>
-                </div>
-                <div className="mock-bars">
-                  {[34, 38, 36, 42, 46, 44, 52, 58, 56, 64, 70, 76, 80, 88].map((h, i) => (
-                    <i key={i} style={{ height: `${h}%`, opacity: [0.25, 0.29, 0.33, 0.37][i % 4] }} />
-                  ))}
-                </div>
-              </div>
-            </div>
+    <section className="site-section cases-v2"><div className="site-wrap"><div className="section-heading"><p className="eyebrow">TRÊS CONTEXTOS, UMA DIREÇÃO</p><h2>Estratégia que respeita<br/><em>a realidade local.</em></h2><p>Exemplos estruturais de como o método se adapta a diferentes jornadas de compra.</p></div><div className="case-grid">{CASES.map((item)=><article className={`case-v2 ${item.tone}`} key={item.name}><div className="case-placeholder"><span>ESPAÇO RESERVADO PARA IMAGEM AUTORIZADA</span><i /></div><div><small>{item.vertical}</small><h3>{item.name}</h3><p>{item.copy}</p><span className="provisional">CASE ILUSTRATIVO · ATIVOS E RESULTADOS SOB APROVAÇÃO</span></div></article>)}</div></div></section>
 
-            <div className="case-row rev">
-              <div className="mock-app">
-                <div className="mock-side">
-                  <b>PRIME</b>
-                  <ul>
-                    <li>Início</li>
-                    <li className="on">Agenda</li>
-                    <li>Criativos</li>
-                    <li>Resultados</li>
-                  </ul>
-                </div>
-                <div className="mock-cal">
-                  <b>Agenda da semana</b>
-                  <div className="mock-week">
-                    {[
-                      { d: "SEG", tones: ["t", "s"] },
-                      { d: "TER", tones: ["s", "t", "s"] },
-                      { d: "QUA", tones: ["t", "s"] },
-                      { d: "QUI", tones: ["s", "t", "s"] },
-                      { d: "SEX", tones: ["t", "s"] },
-                    ].map((day) => (
-                      <div className="mock-day" key={day.d}>
-                        <small>{day.d}</small>
-                        {day.tones.map((tone, i) => <span key={i} className={tone} />)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="case-copy">
-                <span className="case-tag">Estética automotiva</span>
-                <h3 className="case-name">Prime <em>Detailing</em></h3>
-                <p className="case-desc">Estética automotiva premium — agenda cheia via tráfego pago e conteúdo que posiciona a marca.</p>
-                <div className="case-chips"><span>Tráfego pago</span><span>Social</span><span>Conteúdo</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+    <section className="site-section offer-band"><div className="site-wrap"><div className="section-heading"><p className="eyebrow">UMA PARCERIA, QUATRO FRENTES</p><h2>O que precisa andar,<br/><em>anda junto.</em></h2></div><div className="offer-grid">{[["Estratégia","Posicionamento, oferta, campanha e plano de ação."],["Conteúdo","Roteiro, captação, design, edição e calendário."],["Performance","Mídia paga, leitura de dados e otimização contínua."],["Operação","Briefing, aprovações, responsabilidades e governança."]].map(([t,d],i)=><article key={t}><span>0{i+1}</span><h3>{t}</h3><p>{d}</p></article>)}</div><div className="center"><Link className="site-btn ghost" href="/planos">Conhecer modelos de parceria</Link></div></div></section>
 
-      {/* SERVIÇOS (catálogo North) */}
-      <section className="site-section" style={{ background: "var(--s-band)" }}>
-        <div className="site-wrap">
-          <p className="site-kicker">Serviços · personalizável por cliente</p>
-          <h2 className="site-h2">Tudo que a sua conta <em>precisa</em></h2>
-          <p className="site-lead">Um catálogo montado sob medida — da captação ao calendário editorial.</p>
-          <div className="svc-grid">
-            {SERVICES.map((g) => (
-              <div className="svc-card" key={g.cat}>
-                <span className="svc-cat">{g.icon} {g.cat}</span>
-                <div className="svc-list">
-                  {g.items.map((it) => <span key={it}>{it}</span>)}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+    <section className="site-section social-proof"><div className="site-wrap"><p className="eyebrow">PROVAS EM VALIDAÇÃO</p><blockquote>“A North nos ajudou a enxergar marketing como operação, não como uma sequência de posts.”</blockquote><p className="provisional">DEPOIMENTO PROVISÓRIO · NOME, CARGO E EMPRESA PENDENTES DE AUTORIZAÇÃO</p></div></section>
 
-      {/* DEPOIMENTOS */}
-      <section className="site-section">
-        <div className="site-wrap">
-          <p className="site-kicker">Depoimentos</p>
-          <h2 className="site-h2">Quem opera com a <em>North</em></h2>
-          <div className="tst-grid">
-            {TESTIMONIALS.map((t) => (
-              <div className="tst-card" key={t.name}>
-                <span className="tst-stars">★★★★★</span>
-                <p className="tst-quote">“{t.quote}”</p>
-                <div className="tst-who">
-                  <span className="tst-av" style={{ background: t.grad }} />
-                  <span><b>{t.name}</b><small>{t.org}</small></span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-    </>
-  );
+    <section className="site-section faq-section"><div className="site-wrap faq-layout"><div><p className="eyebrow">PERGUNTAS FREQUENTES</p><h2>Antes de<br/><em>começar.</em></h2><p>Se a sua dúvida não estiver aqui, ela entra na conversa de diagnóstico.</p></div><div className="faq-list">{FAQ.map(([q,a],i)=><details key={q} open={i===0}><summary>{q}<span>+</span></summary><p>{a}</p></details>)}</div></div></section>
+
+    <section id="diagnostico" className="site-section lead-section dark-section"><div className="site-wrap lead-layout"><div><p className="eyebrow light">PRÓXIMA DIREÇÃO</p><h2>Vamos entender<br/><em>o seu momento.</em></h2><p>Conte o essencial. A North analisa o contexto e leva a conversa para o WhatsApp já com uma direção inicial.</p><ul><li>Leva cerca de 2 minutos</li><li>Sem compromisso ou proposta automática</li><li>Seus dados ficam protegidos</li></ul></div><LeadForm /></div></section>
+  </>;
 }

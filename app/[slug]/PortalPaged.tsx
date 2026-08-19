@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import CommentText from "@/app/CommentText";
 import { commentsOf, extractLatestLink, formatCommentTime } from "@/lib/comments";
 import { ACCESS_PLATFORMS, type ClientTask, type CredentialSummary, type DocumentRecord, type PortalPayload, type PortalPrefs } from "@/lib/validation";
+import { fileTypeLabel, formatFileSize } from "@/lib/documentFiles";
+import DocumentFilePreview from "@/app/DocumentFilePreview";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { briefSteps, folders } from "./content";
 import ManualDoCliente from "./ManualDoCliente";
@@ -1601,8 +1603,8 @@ function DocumentosPage(props: { ctx: PageCtx; documents?: DocumentRecord[] }) {
         <ul className="np-docs">
           {items.map((doc) => (
             <li key={doc.id}>
-              <span className={`np-doc-badge tone-${DOC_TONE[doc.doc_type]}`}>PDF</span>
-              <div className="np-doc-text"><strong>{doc.name}</strong><em>{DOC_CATEGORY[doc.doc_type]} · {fmtDocDate(doc.doc_date)}</em></div>
+              <span className={`np-doc-badge tone-${DOC_TONE[doc.doc_type]}`}>{fileTypeLabel(doc)}</span>
+              <div className="np-doc-text"><strong>{doc.name}</strong><em>{DOC_CATEGORY[doc.doc_type]} · {fmtDocDate(doc.doc_date)}{doc.size_bytes !== null ? ` · ${formatFileSize(doc.size_bytes)}` : ""}</em></div>
               <span className={`np-pill ${doc.read_at ? "green" : DOC_TONE[doc.doc_type]}`}>{doc.read_at ? "Lido" : DOC_STATUS_LABEL[doc.status]}</span>
               <button className="np-btn ghost sm" onClick={() => setOpenDoc(doc)}>{doc.read_at ? "Reabrir" : "Ler"}</button>
             </li>
@@ -1628,11 +1630,12 @@ function DocumentViewerModal(props: { doc: DocumentRecord; onRead: (id: string) 
     <div className="np-modal-backdrop" onClick={onClose}>
       <div className="np-modal np-doc-modal" onClick={(e) => e.stopPropagation()}>
         <div className="np-modal-head">
-          <span className={`np-doc-badge tone-${DOC_TONE[doc.doc_type]}`}>PDF</span>
-          <div className="np-doc-text"><strong>{doc.name}</strong><em>{DOC_CATEGORY[doc.doc_type]} · {fmtDocDate(doc.doc_date)}</em></div>
+          <span className={`np-doc-badge tone-${DOC_TONE[doc.doc_type]}`}>{fileTypeLabel(doc)}</span>
+          <div className="np-doc-text"><strong>{doc.name}</strong><em>{doc.original_file_name || DOC_CATEGORY[doc.doc_type]} · {doc.mime_type || fileTypeLabel(doc)}{doc.size_bytes !== null ? ` · ${formatFileSize(doc.size_bytes)}` : ""}</em></div>
           <button className="np-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
         </div>
         <p className="np-doc-modal-status"><span className="np-pill green">Lido</span> Confirmamos o recebimento deste documento.</p>
+        <DocumentFilePreview file={doc} compact />
         {doc.file_url ? (
           <a className="np-btn primary" href={doc.file_url} target="_blank" rel="noopener noreferrer">Abrir arquivo ↗</a>
         ) : (
