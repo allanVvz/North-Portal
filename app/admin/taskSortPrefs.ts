@@ -17,7 +17,8 @@ export type SortScope =
   | "clientes.prazo"
   | "clientes.cliente"
   | "clientes.responsavel"
-  | "clientes.lista";
+  | "clientes.lista"
+  | "plano.lista";
 
 // Cada visão abre na ordem que responde a pergunta que se faz nela:
 // no quadro por etapa, "o que mexeu agora"; agrupado por pessoa ou por prazo,
@@ -30,6 +31,7 @@ export const SORT_DEFAULTS: Record<SortScope, SortPref> = {
   "clientes.cliente": { key: "edicao", dir: "desc" },
   "clientes.responsavel": { key: "edicao", dir: "desc" },
   "clientes.lista": { key: "data", dir: "asc" },
+  "plano.lista": { key: "data", dir: "asc" },
 };
 
 const STORAGE_KEY = "kb-sort";

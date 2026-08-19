@@ -8,6 +8,9 @@ import { STATUS_LABEL } from "../kanbanShared";
 import PlanSearchBar from "./PlanSearchBar";
 import StrategicView, { fmtDate } from "./StrategicView";
 import TaskKindIcon from "../TaskKindIcon";
+import SortMenu from "../SortMenu";
+import { sortItems } from "../taskSort";
+import { useSortPref } from "../taskSortPrefs";
 import type { ActionPlan } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -31,24 +34,6 @@ function planMatches(p: ActionPlan, needle: string): boolean {
   );
 }
 
-// Plano de Ação é ordenado por prioridade, não por ordem de criação: o que a
-// tela responde é "no que a agência precisa se concentrar". Desempate pelo
-// prazo (fim do plano, ou o prazo solto quando não há fim), com quem não tem
-// data no fim — mesma regra do resto do admin —, e por fim a última edição.
-const PRIORITY_RANK: Record<string, number> = { alta: 0, media: 1, baixa: 2 };
-
-function sortPlansByPriority(plans: ActionPlan[]): ActionPlan[] {
-  return [...plans].sort((a, b) => {
-    const rank = (PRIORITY_RANK[a.priority] ?? 3) - (PRIORITY_RANK[b.priority] ?? 3);
-    if (rank !== 0) return rank;
-    const aDate = a.end_date ?? a.due_date;
-    const bDate = b.end_date ?? b.due_date;
-    if (Boolean(aDate) !== Boolean(bDate)) return aDate ? -1 : 1;
-    if (aDate && bDate && aDate !== bDate) return aDate < bDate ? -1 : 1;
-    return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
-  });
-}
-
 export default function ActionPlansBoard({
   initial,
   clients,
@@ -70,6 +55,9 @@ export default function ActionPlansBoard({
   // (false) so a brand-new plan never silently persists client_visible:true
   // before the fetch resolves. Same fix as CardModalLauncher.tsx.
   const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
+  // Mesmo mecanismo de ordenação de Tarefas e Clientes (SortMenu + preferência
+  // por escopo) — ver taskSortPrefs.ts.
+  const { sort, setSort } = useSortPref("plano.lista");
 
   useEffect(() => {
     let cancelled = false;
@@ -83,8 +71,13 @@ export default function ActionPlansBoard({
   const plans = useMemo(() => {
     const needle = q.trim();
     const matching = needle ? initial.filter((p) => planMatches(p, needle)) : initial;
-    return sortPlansByPriority(matching);
-  }, [initial, q]);
+    return sortItems(matching, sort.key, sort.dir, (p) => ({
+      title: p.title,
+      updatedAt: p.updated_at,
+      dueDate: p.end_date ?? p.due_date,
+      position: p.position,
+    }));
+  }, [initial, q, sort]);
 
   // The plan card as a TaskRecord for the editor modal.
   const asTask = (p: ActionPlan): TaskRecord => {
@@ -110,7 +103,6 @@ export default function ActionPlansBoard({
           <p className="admin-kicker">Operação</p>
           <h1 className="admin-title">Plano de Ação</h1>
         </div>
-        <button type="button" className="admin-btn primary" onClick={() => setCreating(true)}>+ Novo plano</button>
       </header>
       <div className="ap-filters">
         <div className="kb-viewtabs">
@@ -118,6 +110,9 @@ export default function ActionPlansBoard({
           <button className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
         </div>
         <PlanSearchBar q={q} onQChange={setQ} plans={initial} />
+        <div className="kb-spacer" />
+        <button type="button" className="admin-btn primary kb-newtask-btn" onClick={() => setCreating(true)}>+ Plano</button>
+        {view === "lista" ? <SortMenu sort={sort} onChange={setSort} /> : null}
       </div>
 
       {view === "estrategica" ? (

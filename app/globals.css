@@ -2336,7 +2336,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .perf-hint { margin: 14px 30px 0; font-size: 12px; }
 .ap-actions { display: inline-flex; gap: 8px; flex-shrink: 0; }
 .ap-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--a-ink); color: var(--a-surface); font-size: 13.5px; padding: 11px 20px; border-radius: 999px; box-shadow: 0 10px 30px rgba(0,0,0,.25); z-index: 300; }
-.ap-filters { display: flex; gap: 10px; flex-wrap: wrap; }
+.ap-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ap-history { margin-top: 28px; display: flex; flex-direction: column; gap: 12px; }
 .ap-comment-modal { width: min(560px, 92vw); }
 .tone-red { background: rgba(194,96,78,.14); color: var(--a-danger); }
@@ -3409,7 +3409,6 @@ select.perf-select { width: auto; min-width: 170px; }
 /* Clientes · tarefas recorrentes (domínio independente de planos de ação) */
 .clients-workspace { display: flex; flex-direction: column; gap: 16px; }
 .clients-workspace > .admin-head { margin-bottom: 0; }
-.clients-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .clients-section-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--a-border); }
 .clients-section-tabs button {
   appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
@@ -3559,8 +3558,6 @@ select.perf-select { width: auto; min-width: 170px; }
   .rec-calendar-weekdays, .rec-calendar-grid { min-width: 760px; }
 }
 @media (max-width: 640px) {
-  .clients-head-actions { width: 100%; }
-  .clients-head-actions .admin-btn { flex: 1; justify-content: center; }
   .rec-toolbar > .kb-viewtabs, .rec-toolbar > .kb-modetoggle { width: 100%; }
   .rec-toolbar > .kb-viewtabs button, .rec-toolbar > .kb-modetoggle button { flex: 1; }
   .rec-toolbar .kb-newtask-btn { margin-left: auto; }
