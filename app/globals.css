@@ -1604,6 +1604,8 @@ body.menu-open {
 }
 .nf-content .auth-title { margin-top: -34px; }
 .auth-pagefoot { position: absolute; left: 24px; bottom: 20px; z-index: 2; color: var(--l-muted); font-size: 12.5px; }
+.auth-back { position: absolute; left: 24px; top: 22px; z-index: 3; color: var(--l-muted); font-size: 12.5px; text-decoration: none; }
+.auth-back:hover { color: var(--l-teal); }
 
 /* ================= Header actions / logout ================= */
 .header-actions { display: inline-flex; align-items: center; gap: 12px; }
@@ -2157,9 +2159,21 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-card-progress-track { flex: 1; height: 5px; border-radius: 999px; background: var(--a-inset); overflow: hidden; }
 .kb-card-progress-fill { height: 100%; background: var(--a-teal); border-radius: 999px; }
 .kb-card-progress span { font-size: 10.5px; color: var(--a-muted); flex-shrink: 0; }
-.kb-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.kb-card-foot-right { display: inline-flex; align-items: center; gap: 8px; }
-.kb-assignee { font-size: 11px; font-weight: 700; color: var(--a-teal-text); background: var(--a-teal-soft); width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; }
+.kb-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.kb-card-foot-right { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* Nome do responsável por extenso (era um avatar de iniciais), igual ao card de
+   Clientes. A coluna tem 240px, então o nome trunca e o valor completo fica no
+   title — nunca empurrando o rodapé para fora do card. */
+.kb-assignee {
+  min-width: 0; overflow: hidden; color: var(--a-teal-text); font-size: 11px; font-weight: 600;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+/* Prazo e período do card. O card de Tarefas não mostrava data nenhuma — sem
+   isso a tag "Atrasado" não teria a que se referir. */
+.kb-card-dates { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+/* Só existe quando início e fim são datas diferentes — ver taskDates.ts. */
+.kb-card-periodrow { margin-top: 4px; }
+.kb-card-due, .kb-card-period { color: var(--a-muted); font-size: 10.5px; }
 .kb-updated { font-size: 11px; color: var(--a-muted); }
 .kb-comments { font-size: 11px; color: var(--a-sec); background: var(--a-inset); padding: 2px 7px; border-radius: 999px; font-weight: 600; }
 .kb-prio { font-size: 11px; color: var(--a-muted); }
@@ -2305,6 +2319,15 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .doc-open a { color: var(--a-teal-text); font-weight: 600; text-decoration: none; }
 .doc-open a:hover { text-decoration: underline; }
 .doc-open-muted { color: var(--a-muted); }
+.doc-upload-current { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid var(--a-border); border-radius: 11px; background: var(--a-inset); }
+.doc-upload-current > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.doc-upload-current strong { color: var(--a-ink); font-size: 13.5px; overflow-wrap: anywhere; }
+.doc-upload-current span, .doc-upload-meta { color: var(--a-muted); font-size: 12px; overflow-wrap: anywhere; }
+.doc-upload-field input[type="file"] { cursor: pointer; padding: 8px; }
+.doc-upload-progress { display: flex; align-items: center; gap: 10px; color: var(--a-sec); font-size: 12px; }
+.doc-upload-progress > div { height: 7px; flex: 1; overflow: hidden; border-radius: 999px; background: var(--a-inset); }
+.doc-upload-progress > div > span { display: block; height: 100%; border-radius: inherit; background: var(--a-teal); transition: width .15s ease; }
+.doc-upload-progress b { min-width: 34px; text-align: right; }
 
 /* ---- Onboarding: real checkpoint progress bar ---- */
 .ob-progress { display: flex; align-items: center; gap: 10px; min-width: 140px; }
@@ -2673,17 +2696,22 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .meta-scopes code { font-size: 11px; color: var(--a-muted); background: var(--a-inset); padding: 1px 6px; border-radius: 6px; }
 
 /* ---- Document preview modal ---- */
-.docprev { width: min(760px, 94vw); max-height: 88vh; overflow-y: auto; background: var(--a-surface); border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.3); }
+.docprev { width: min(980px, 94vw); max-height: 90vh; overflow-y: auto; background: var(--a-surface); border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.3); }
 .docprev-head { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--a-border); }
 .docprev-ico { font-size: 11px; }
 .docprev-headtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .docprev-headtext strong { font-size: 15px; color: var(--a-ink); }
-.docprev-body { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; padding: 20px 22px; }
-.docprev-mock { background: var(--a-inset); border-radius: 14px; display: flex; align-items: center; justify-content: center; padding: 24px; }
-.docprev-page { width: 100%; max-width: 260px; background: var(--a-surface); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.1); padding: 20px 18px; display: flex; flex-direction: column; gap: 9px; }
-.docprev-page-title { margin: 0 0 6px; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--a-ink); }
-.docprev-line { display: block; height: 7px; border-radius: 4px; background: var(--a-border-strong); opacity: .55; }
-.docprev-gap { height: 10px; }
+.docprev-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(230px, 1fr); gap: 18px; padding: 20px 22px; }
+.file-preview { position: relative; min-width: 0; min-height: 510px; overflow: hidden; display: grid; place-items: center; background: var(--a-inset, var(--np-surface-2)); border: 1px solid var(--a-border, var(--np-border)); border-radius: 14px; }
+.file-preview iframe, .file-preview img, .file-preview video { display: block; width: 100%; height: 100%; min-height: 510px; border: 0; object-fit: contain; background: #fff; }
+.file-preview-loading { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: var(--a-inset, var(--np-surface-2)); color: var(--a-muted, var(--np-muted)); font-size: 13px; }
+.file-preview-fallback { min-height: 240px; padding: 28px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; text-align: center; color: var(--a-muted, var(--np-muted)); }
+.file-preview-fallback > span, .file-preview-audio > span { min-width: 52px; height: 52px; padding: 0 8px; border-radius: 12px; display: grid; place-items: center; background: var(--a-surface, var(--np-surface)); border: 1px solid var(--a-border, var(--np-border)); color: var(--a-teal-text, var(--np-green-ink)); font-size: 11px; font-weight: 800; }
+.file-preview-fallback strong { max-width: 100%; color: var(--a-ink, var(--np-ink)); overflow-wrap: anywhere; }
+.file-preview-fallback p { margin: 0; font-size: 13px; }
+.file-preview-fallback small { font-size: 12px; }
+.file-preview-audio { width: min(420px, calc(100% - 40px)); display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.file-preview-audio audio { width: 100%; }
 .docprev-details { display: flex; flex-direction: column; }
 .docprev-details-head { margin: 0 0 10px; font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--a-muted); }
 .docprev-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--a-border); font-size: 13px; }
@@ -2697,6 +2725,7 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 @media (max-width: 640px) {
   .docprev-body { grid-template-columns: 1fr; }
   .docprev-foot { flex-wrap: wrap; }
+  .file-preview, .file-preview iframe, .file-preview img, .file-preview video { min-height: 390px; }
 }
 
 @media (max-width: 980px) {
@@ -2811,13 +2840,22 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
   padding-bottom: 8px; border-bottom: 1px solid var(--a-border);
 }
 .plan-strat-groupitems { display: flex; flex-direction: column; gap: 14px; }
-.plan-strat-card { border: 1px solid var(--a-border); border-radius: 18px; background: var(--a-surface); padding: 18px 20px 20px; box-shadow: 0 10px 30px rgba(12,44,44,.045); }
-.plan-strat-headrow {
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; width: 100%;
+/* Recolhido é o estado normal: só o cabeçalho. O padding de baixo só aparece
+   quando há corpo, senão o card fica com um vão morto embaixo do título. */
+.plan-strat-card { border: 1px solid var(--a-border); border-radius: 18px; background: var(--a-surface); padding: 18px 20px; box-shadow: 0 10px 30px rgba(12,44,44,.045); }
+.plan-strat-card.open { padding-bottom: 20px; }
+/* Deixou de ser um botão: agora é a linha que contém o toggle (título) e o
+   botão "Abrir" — um botão dentro do outro seria HTML inválido. */
+.plan-strat-headrow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; width: 100%; }
+.plan-strat-headtoggle {
+  display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 180px;
   border: none; background: none; cursor: pointer; font: inherit; text-align: left; padding: 4px; margin: -4px; border-radius: 10px;
 }
-.plan-strat-headrow:hover { background: var(--a-hover); }
-.plan-strat-headtext { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 180px; }
+.plan-strat-headtoggle:hover { background: var(--a-hover); }
+.plan-strat-headtoggle > .plan-acc-caret { margin-top: 2px; }
+.plan-strat-open { flex-shrink: 0; }
+.plan-strat-count { color: var(--a-muted); font-size: 12px; }
+.plan-strat-headtext { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .plan-strat-headtext strong { font-size: 15.5px; color: var(--a-ink); }
 .plan-strat-description { max-width: 820px; color: var(--a-sec); font-size: 13px; line-height: 1.5; }
 .plan-strat-headtext em { font-style: normal; font-size: 12.5px; color: var(--a-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -3040,6 +3078,36 @@ select.doc-clientfilter { width: auto; min-width: 170px; }
 .attrvis-ico { width: 22px; height: 22px; border-radius: 6px; background: var(--a-inset); display: inline-grid; place-items: center; font-size: 10.5px; font-weight: 700; color: var(--a-sec); flex-shrink: 0; }
 .attrvis-label { flex: 1; font-size: 13px; color: var(--a-ink); }
 .attrvis-toggle { flex-shrink: 0; }
+
+/* ---- Menu de ordenação (Tarefas e Clientes) ---- */
+.kb-sortmenu { position: relative; display: inline-flex; }
+.kb-sort-btn { display: inline-grid; place-items: center; padding-left: 10px; padding-right: 10px; }
+/* Os 3 traços empilhados de larguras decrescentes: lê como "ordenar", não como
+   um menu hambúrguer. */
+.kb-sort-btn svg { stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.kb-sortmenu-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; width: 250px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.18); padding: 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.kb-sortmenu-head { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--a-muted); }
+.kb-sortmenu-row {
+  display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 7px 6px; border: 0; border-radius: 8px;
+  background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left;
+}
+.kb-sortmenu-row:hover { background: var(--a-hover); }
+.kb-sortmenu-row.on { background: var(--a-teal-soft); }
+.kb-sortmenu-mark { flex-shrink: 0; margin-top: 1px; color: var(--a-teal-text); font-size: 10px; }
+.kb-sortmenu-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.kb-sortmenu-text strong { color: var(--a-ink); font-size: 13px; font-weight: 600; }
+.kb-sortmenu-text small { color: var(--a-muted); font-size: 10.5px; line-height: 1.35; }
+.kb-sortmenu-dirs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--a-border); }
+.kb-sortmenu-dirs button {
+  padding: 7px 6px; border: 1px solid var(--a-border); border-radius: 999px; background: transparent;
+  color: var(--a-sec); cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+}
+.kb-sortmenu-dirs button:hover { border-color: var(--a-teal); color: var(--a-teal-text); }
+.kb-sortmenu-dirs button.on { border-color: var(--a-teal-strong); color: var(--a-teal-text); background: var(--a-teal-soft); }
 
 /* ---- Task modal v2: larger, two-column edit layout ---- */
 .tm-lg {
@@ -3341,11 +3409,14 @@ select.perf-select { width: auto; min-width: 170px; }
 .rec-card:hover { border-color: var(--a-teal); box-shadow: 0 6px 18px rgba(12,44,44,.09); transform: translateY(-1px); }
 .rec-card:has(.rec-card-open:focus-visible) { outline: 3px solid var(--a-teal-soft); border-color: var(--a-teal-strong); }
 .rec-card-topline { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-.rec-state { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }
-.rec-state.active { color: var(--a-teal-text); background: var(--a-teal-soft); }
-.rec-state.paused { color: var(--a-muted); background: var(--a-surface2); }
-.rec-state.complete { color: #4e5f78; background: #edf1f7; }
-.rec-state.overdue { color: #a94332; background: #fff0eb; }
+/* Tag de estado — compartilhada entre o card de Rotinas (.rec-state) e o card
+   de Tarefas (.kb-state), para "Atrasado" ter exatamente o mesmo vermelho nas
+   duas telas em vez de duas definições que envelhecem separadas. */
+.rec-state, .kb-state { flex: 0 0 auto; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.rec-state.active, .kb-state.active { color: var(--a-teal-text); background: var(--a-teal-soft); }
+.rec-state.paused, .kb-state.paused { color: var(--a-muted); background: var(--a-surface2); }
+.rec-state.complete, .kb-state.complete { color: #4e5f78; background: #edf1f7; }
+.rec-state.overdue, .kb-state.overdue { color: #a94332; background: #fff0eb; }
 .rec-card-open > strong { display: block; font-size: 13.5px; line-height: 1.35; }
 .rec-card-description { display: -webkit-box; overflow: hidden; margin-top: 5px; color: var(--a-sec); font-size: 12px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .rec-card-meta { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-top: 11px; color: var(--a-muted); font-size: 10.5px; }
@@ -3377,6 +3448,10 @@ select.perf-select { width: auto; min-width: 170px; }
 .rec-list-title small { color: var(--a-muted); font-size: 10.5px; }
 .rec-list-due.overdue { color: #a94332; font-weight: 700; }
 .rec-list-due.complete { color: #4e5f78; }
+/* Início → fim da agenda, abaixo da próxima execução: a data da linha é um
+   período, não um ponto. Herdar a cor do estado deixaria o período vermelho
+   junto com a data atrasada. */
+.rec-list-period { display: block; margin-top: 2px; color: var(--a-muted); font-size: 10px; font-weight: 400; }
 
 .rec-calendar { overflow: hidden; border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-surface); }
 .rec-calendar-weekdays, .rec-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(105px, 1fr)); }

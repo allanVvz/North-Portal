@@ -31,6 +31,24 @@ function planMatches(p: ActionPlan, needle: string): boolean {
   );
 }
 
+// Plano de Ação é ordenado por prioridade, não por ordem de criação: o que a
+// tela responde é "no que a agência precisa se concentrar". Desempate pelo
+// prazo (fim do plano, ou o prazo solto quando não há fim), com quem não tem
+// data no fim — mesma regra do resto do admin —, e por fim a última edição.
+const PRIORITY_RANK: Record<string, number> = { alta: 0, media: 1, baixa: 2 };
+
+function sortPlansByPriority(plans: ActionPlan[]): ActionPlan[] {
+  return [...plans].sort((a, b) => {
+    const rank = (PRIORITY_RANK[a.priority] ?? 3) - (PRIORITY_RANK[b.priority] ?? 3);
+    if (rank !== 0) return rank;
+    const aDate = a.end_date ?? a.due_date;
+    const bDate = b.end_date ?? b.due_date;
+    if (Boolean(aDate) !== Boolean(bDate)) return aDate ? -1 : 1;
+    if (aDate && bDate && aDate !== bDate) return aDate < bDate ? -1 : 1;
+    return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
+  });
+}
+
 export default function ActionPlansBoard({
   initial,
   clients,
@@ -41,7 +59,9 @@ export default function ActionPlansBoard({
   assignees: string[];
 }) {
   const router = useRouter();
-  const [view, setView] = useState<View>("estrategica");
+  // Lista é a visão principal — a Estratégica é a leitura de planejamento, não
+  // a tela de trabalho do dia.
+  const [view, setView] = useState<View>("lista");
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingTarget | null>(null);
@@ -62,7 +82,8 @@ export default function ActionPlansBoard({
 
   const plans = useMemo(() => {
     const needle = q.trim();
-    return needle ? initial.filter((p) => planMatches(p, needle)) : initial;
+    const matching = needle ? initial.filter((p) => planMatches(p, needle)) : initial;
+    return sortPlansByPriority(matching);
   }, [initial, q]);
 
   // The plan card as a TaskRecord for the editor modal.
@@ -93,8 +114,8 @@ export default function ActionPlansBoard({
       </header>
       <div className="ap-filters">
         <div className="kb-viewtabs">
-          <button className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
           <button className={view === "lista" ? "on" : ""} onClick={() => setView("lista")}>Lista</button>
+          <button className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
         </div>
         <PlanSearchBar q={q} onQChange={setQ} plans={initial} />
       </div>

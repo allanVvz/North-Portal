@@ -81,8 +81,8 @@ test.describe("Planos de Ação — dois clientes (e2e contra o backend real)", 
     await page.waitForURL(/\/admin/, { timeout: 15_000 });
 
     await page.goto("/admin/plano");
-    // The strategic view is now the default; switch explicitly to the
-    // accordion list whose structure this regression test validates.
+    // Lista is the default view, but click it explicitly so this regression
+    // test keeps asserting the accordion structure even if the default moves.
     await page.getByRole("button", { name: "Lista", exact: true }).click();
 
     // Karpinski plan: header shows 65%, expanding lists its 2 activities.

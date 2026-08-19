@@ -10,7 +10,12 @@ import TaskModal from "./TaskModal";
 import TaskKindIcon from "./TaskKindIcon";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
-import { COLUMNS, PRIORITY_LABEL, commentsOf, initials, statusAfterKanbanDrop, taskTone, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
+import SortMenu from "./SortMenu";
+import { sortItems } from "./taskSort";
+import { useSortPref } from "./taskSortPrefs";
+import { formatPeriod, formatShortDate, isOverdue, relativeDue } from "./taskDates";
+import { todayInTimezone } from "./recurringState";
+import { COLUMNS, PRIORITY_LABEL, commentsOf, statusAfterKanbanDrop, taskTone, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
 import { formatCommentTime } from "@/lib/comments";
 import { kindDef, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
@@ -110,6 +115,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const [q, setQ] = useState("");
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
   const today = useMemo(() => new Date(), []);
+  // "Hoje" no fuso da agência, para a tag de atraso e o texto relativo do card.
+  // `today` acima é um Date local usado pela grade do calendário; misturar os
+  // dois faria um card que vence hoje aparecer atrasado a partir das 21h BRT.
+  const todayIso = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
   const [cal, setCal] = useState(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
   const [calMode, setCalMode] = useState<"mes" | "semana">("mes");
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
@@ -181,15 +190,31 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // the portal (or another admin tab moves a card), without a manual refresh.
   useTaskRealtime(useCallback(() => { void load(); }, [load]));
 
+  // Uma preferência por visão: o Quadro por etapa abre em "última edição", o
+  // mesmo Quadro agrupado por pessoa abre em "prazo mais próximo", e a Tabela
+  // guarda a sua. O Calendário é posicionado por data e não ordena.
+  const sortScope = view === "tabela"
+    ? "tarefas.tabela"
+    : boardMode === "status" ? "tarefas.quadro.status" : "tarefas.quadro.responsavel";
+  const { sort, setSort } = useSortPref(sortScope);
+
   const taskScreenTasks = useMemo(() => tasks.filter(belongsToTaskScreen), [tasks]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return taskScreenTasks.filter((t) => {
+    const matching = taskScreenTasks.filter((t) => {
       if (!taskMatchesFilters(t, activeFilters)) return false;
       if (needle && !(`${t.title} ${t.assignee ?? ""} ${t.description ?? ""}`.toLowerCase().includes(needle))) return false;
       return true;
     });
-  }, [taskScreenTasks, activeFilters, q]);
+    // Ordenar aqui alcança Quadro (ambos os modos) e Tabela de uma vez; o
+    // Calendário reordena por horário logo depois, então não é afetado.
+    return sortItems(matching, sort.key, sort.dir, (t) => ({
+      title: t.title,
+      updatedAt: t.updated_at,
+      dueDate: t.due_date,
+      position: t.position,
+    }));
+  }, [taskScreenTasks, activeFilters, q, sort]);
 
   const tasksInStatusColumn = useCallback(
     (status: TaskStatus) => tasksForKanbanColumn(filtered, status, publicadoOn),
@@ -338,8 +363,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   }
 
   // Drops the dragged card into `status`, inserted just before `beforeTaskId`
-  // (or appended to the end when omitted). Renumbers that column with clean
-  // integer gaps and PATCHes only the tasks whose status/position actually changed.
+  // (or appended to the end when omitted). In manual order it renumbers that
+  // column with clean integer gaps; in any automatic order it only moves the
+  // card between stages (see below). Either way it PATCHes only the tasks whose
+  // status/position actually changed.
   const dropInColumn = useCallback(async (status: TaskStatus, beforeTaskId?: string) => {
     const draggedId = dragId;
     setDragId(null);
@@ -348,15 +375,24 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     if (!dragged) return;
     const before = tasks;
 
-    const columnTasks = tasksInStatusColumn(status).filter((t) => t.id !== draggedId);
-    const insertAt = beforeTaskId ? columnTasks.findIndex((t) => t.id === beforeTaskId) : -1;
-    const at = insertAt === -1 ? columnTasks.length : insertAt;
-    const reordered = [...columnTasks.slice(0, at), dragged, ...columnTasks.slice(at)];
-    const withPositions = reordered.map((t, i) => ({
-      ...t,
-      status: statusAfterKanbanDrop(t.status, status, publicadoOn),
-      position: i * 10,
-    }));
+    // A renumeração só é honesta quando a ordem exibida É a ordem manual. Com
+    // "última edição"/"alfabético"/"data" ativos, a posição na tela não vem de
+    // `position`, e renumerar a coluna a partir dela sobrescreveria a ordem
+    // arrastada pelo usuário com a ordem de updated_at. Nesses casos o drop faz
+    // só o que o gesto significa sem ambiguidade: mover de etapa.
+    const withPositions = sort.key === "manual"
+      ? (() => {
+          const columnTasks = tasksInStatusColumn(status).filter((t) => t.id !== draggedId);
+          const insertAt = beforeTaskId ? columnTasks.findIndex((t) => t.id === beforeTaskId) : -1;
+          const at = insertAt === -1 ? columnTasks.length : insertAt;
+          const reordered = [...columnTasks.slice(0, at), dragged, ...columnTasks.slice(at)];
+          return reordered.map((t, i) => ({
+            ...t,
+            status: statusAfterKanbanDrop(t.status, status, publicadoOn),
+            position: i * 10,
+          }));
+        })()
+      : [{ ...dragged, status: statusAfterKanbanDrop(dragged.status, status, publicadoOn) }];
 
     const changed = withPositions.filter((t) => {
       const prior = tasks.find((r) => r.id === t.id);
@@ -382,7 +418,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
       setTasks(before);
       setError("Não foi possível mover o card — verifique sua conexão.");
     }
-  }, [dragId, tasks, tasksInStatusColumn, publicadoOn]);
+  }, [dragId, tasks, tasksInStatusColumn, publicadoOn, sort.key]);
 
   // Responsável mode: dropping a card onto a person's column just reassigns
   // it — no reordering/position touch, so it can't disturb the status-based
@@ -487,6 +523,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     const plataforma = payloadStr(t, "plataforma");
     const showFormato = visible("formato") && Boolean(formato);
     const showPlataforma = visible("plataforma") && Boolean(plataforma);
+    const overdue = isOverdue(t.due_date, todayIso, t.status);
+    const dueRelative = relativeDue(t.due_date, todayIso);
+    const period = formatPeriod(t.start_date, t.end_date);
     return (
       <article
         className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
@@ -514,6 +553,11 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         {!publicadoOn && t.status === "concluido" ? (
           <div className="kb-card-meta"><span className="kb-card-pill kb-published-mark">Publicado</span></div>
         ) : null}
+        <div className="kb-card-dates">
+          {overdue ? <span className="kb-state overdue">Atrasado</span> : null}
+          <span className="kb-card-due">◷ {formatShortDate(t.due_date)}{dueRelative ? ` · ${dueRelative}` : ""}</span>
+        </div>
+        {period ? <div className="kb-card-periodrow"><span className="kb-card-period">▦ {period}</span></div> : null}
         {visible("progress") ? (
           <div className="kb-card-progress">
             <div className="kb-card-progress-track"><div className="kb-card-progress-fill" style={{ width: `${progressOf(t)}%` }} /></div>
@@ -521,7 +565,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           </div>
         ) : null}
         <div className="kb-card-foot">
-          {t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : <span />}
+          {t.assignee ? <span className="kb-assignee" title={t.assignee}>● {t.assignee}</span> : <span />}
           <span className="kb-card-foot-right">
             <span className="kb-updated" title="Última atualização">{formatCommentTime(t.updated_at)}</span>
             {commentsOf(t).length > 0 ? (
@@ -570,6 +614,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         >
           + Tarefa
         </button>
+        {view !== "calendario" ? (
+          <SortMenu sort={sort} onChange={setSort} allowManual={view === "quadro" && boardMode === "status"} />
+        ) : null}
         <button className="admin-btn ghost kb-attrs-gear" onClick={() => setAttrCfgOpen(true)} aria-label="Atributos" title="Atributos">⚙</button>
       </div>
 
@@ -814,7 +861,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                       </td>
                       <td><TaskKindIcon kind={t.kind} /></td>
                       {visible("status") ? <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td> : null}
-                      {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>{initials(t.assignee)}</span> : "—"}</td> : null}
+                      {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>● {t.assignee}</span> : "—"}</td> : null}
                       <td>{fmtDue(t.due_date)}</td>
                       {visible("progress") ? (
                         <td>

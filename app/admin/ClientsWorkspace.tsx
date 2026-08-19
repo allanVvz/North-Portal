@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RecurringTask } from "@/lib/supabase";
 import ClientsTable, { type ClientRow } from "./ClientsTable";
@@ -13,7 +13,11 @@ import TaskModal from "./TaskModal";
 import { PRIORITY_LABEL } from "./kanbanShared";
 import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, todayInTimezone, type RecurringState } from "./recurringState";
 import { recurringOccurrences } from "./recurringOccurrences";
-import { RECURRING_GROUP_BY_LABEL, compareByUrgency, groupRecurring, type RecurringGroupBy } from "./recurringGrouping";
+import { RECURRING_GROUP_BY_LABEL, groupRecurring, type RecurringGroupBy } from "./recurringGrouping";
+import SortMenu from "./SortMenu";
+import { sortItems } from "./taskSort";
+import { useSortPref, type SortScope } from "./taskSortPrefs";
+import { formatPeriod, formatShortDate, relativeDue } from "./taskDates";
 import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "./calendarUtils";
 import TaskKindIcon from "./TaskKindIcon";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
@@ -30,29 +34,8 @@ const CADENCE_LABEL: Record<RecurringTask["cadence"], string> = {
 
 const GROUP_BY_OPTIONS: RecurringGroupBy[] = ["prazo", "cliente", "responsavel"];
 
-function parseDate(value: string | null): Date | null {
-  if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-}
-
-function formatDate(value: string | null): string {
-  const date = parseDate(value);
-  return date ? date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "Sem data";
-}
-
-/** "hoje" / "amanhã" / "há 3 dias" — an absolute date alone makes you count in your head. */
-function relativeDue(value: string | null, today: string): string | null {
-  if (!value) return null;
-  const days = Math.round((Date.parse(`${value}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
-  if (days === 0) return "hoje";
-  if (days === 1) return "amanhã";
-  if (days === -1) return "ontem";
-  if (days < 0) return `há ${Math.abs(days)} dias`;
-  if (days <= 30) return `em ${days} dias`;
-  return null;
-}
+// formatDate/relativeDue viviam aqui e por isso o card de Tarefas não tinha
+// data nenhuma — agora são compartilhados em taskDates.ts.
 
 function RecurrenceCard({
   task,
@@ -70,6 +53,10 @@ function RecurrenceCard({
   const state = recurringState(task, today);
   const tone = RECURRING_STATE_TONE[state];
   const relative = relativeDue(task.next_due_date, today);
+  // Numa rotina, start_date é a âncora e end_date o limite da agenda: mostrar
+  // as duas é "a informação completa" de uma data que na verdade é um período,
+  // e não só a próxima execução.
+  const period = formatPeriod(task.start_date, task.end_date);
 
   return (
     <article className={`rec-card ${compact ? "compact" : ""}`}>
@@ -84,7 +71,8 @@ function RecurrenceCard({
       {!compact && task.description ? <span className="rec-card-description">{task.description}</span> : null}
       <span className="rec-card-meta">
         <span>↻ {CADENCE_LABEL[task.cadence]}</span>
-        <span>◷ {formatDate(task.next_due_date)}{relative ? ` · ${relative}` : ""}</span>
+        <span>◷ {formatShortDate(task.next_due_date)}{relative ? ` · ${relative}` : ""}</span>
+        {period ? <span>▦ {period}</span> : null}
         {task.assignee ? <span>● {task.assignee}</span> : null}
       </span>
       </button>
@@ -129,17 +117,35 @@ export default function ClientsWorkspace({
     return () => { cancelled = true; };
   }, []);
 
+  // Cada visão tem a sua preferência: agrupado por prazo abre no que vence
+  // primeiro; por cliente ou por pessoa, no que mudou por último.
+  const sortScope: SortScope = view === "colunas" ? `clientes.${groupBy}` : "clientes.lista";
+  const { sort, setSort } = useSortPref(sortScope);
+
+  // Em rotinas a data que importa é a próxima execução, não `due_date`.
+  const sortRecurring = useCallback(
+    (items: RecurringTask[]) => sortItems(items, sort.key, sort.dir, (task) => ({
+      title: task.title,
+      updatedAt: task.updated_at,
+      dueDate: task.next_due_date,
+      position: task.position,
+    })),
+    [sort],
+  );
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("pt-BR");
-    return recurringTasks
-      .filter((task) => {
-        if (!recurringMatchesFilters(task, filters, today)) return false;
-        return !needle || recurringSearchText(task).includes(needle);
-      })
-      .sort(compareByUrgency);
-  }, [filters, query, recurringTasks, today]);
+    const matching = recurringTasks.filter((task) => {
+      if (!recurringMatchesFilters(task, filters, today)) return false;
+      return !needle || recurringSearchText(task).includes(needle);
+    });
+    return sortRecurring(matching);
+  }, [filters, query, recurringTasks, today, sortRecurring]);
 
-  const columns = useMemo(() => groupRecurring(filtered, groupBy, today), [filtered, groupBy, today]);
+  const columns = useMemo(
+    () => groupRecurring(filtered, groupBy, today, sortRecurring),
+    [filtered, groupBy, today, sortRecurring],
+  );
 
   const monthRange = useMemo(() => {
     const cells = calendarMonthCells(month.getFullYear(), month.getMonth(), 1).filter((cell): cell is Date => cell !== null);
@@ -268,6 +274,8 @@ export default function ClientsWorkspace({
             {recurringStorageAvailable ? (
               <button type="button" className="admin-btn primary kb-newtask-btn" onClick={() => setSelected(null)}>+ Tarefa</button>
             ) : null}
+            {/* O calendário é posicionado por data; ordenar ali não significa nada. */}
+            {view !== "calendario" ? <SortMenu sort={sort} onChange={setSort} /> : null}
           </div>
 
           <div className="kb-toparea">
@@ -305,6 +313,7 @@ export default function ClientsWorkspace({
               <div className="rec-list-head"><span>Tarefa recorrente</span><span>Cliente</span><span>Frequência</span><span>Próxima execução</span><span>Prioridade</span><span>Ação</span></div>
               {filtered.map((task) => {
                 const state = recurringState(task, today);
+                const period = formatPeriod(task.start_date, task.end_date);
                 return (
                   <div className="rec-list-row-wrap" key={task.id}>
                     <button type="button" className="rec-list-row" onClick={() => setSelected(task)}>
@@ -314,7 +323,10 @@ export default function ClientsWorkspace({
                     </span>
                     <span>{task.clientName}</span>
                     <span>{CADENCE_LABEL[task.cadence]}</span>
-                    <span className={`rec-list-due ${RECURRING_STATE_TONE[state]}`}>{formatDate(task.next_due_date)}</span>
+                    <span className={`rec-list-due ${RECURRING_STATE_TONE[state]}`}>
+                      {formatShortDate(task.next_due_date)}
+                      {period ? <small className="rec-list-period">{period}</small> : null}
+                    </span>
                     <span>{PRIORITY_LABEL[task.priority]}</span>
                     </button>
                     {task.active ? <button type="button" className="rec-list-complete" onClick={() => void completeCycle(task)}>✓ Concluir ciclo</button> : <span className="rec-list-complete">Histórico</span>}

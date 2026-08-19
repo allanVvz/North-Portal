@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { STATUS_LABEL, TONES, initials } from "../kanbanShared";
 import type { ActionPlan, PlanActivity } from "@/lib/supabase";
 import { parseAssignees } from "@/lib/assignees";
@@ -41,6 +42,17 @@ export default function StrategicView({
   onOpenPlan: (plan: ActionPlan) => void;
   onOpenActivity: (plan: ActionPlan, activityId: string) => void;
 }) {
+  // Todo plano nasce recolhido — a tela abria como uma parede de swimlanes de
+  // todos os clientes ao mesmo tempo. Um Set (e não um único id) porque
+  // comparar dois planos lado a lado é o uso normal desta visão.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((open) => {
+      const next = new Set(open);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
   if (plans.length === 0) {
     return <p className="admin-empty">Nenhum plano de ação ainda. Crie um card do tipo “Plano de Ação” no Kanban.</p>;
   }
@@ -83,19 +95,37 @@ export default function StrategicView({
                 return a.localeCompare(b);
               });
 
+              const open = expanded.has(p.id);
+
               return (
-                <div className="plan-strat-card" key={p.id}>
-                  <button type="button" className="plan-strat-headrow" onClick={() => onOpenPlan(p)}>
-                    <div className="plan-strat-headtext">
-                      <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} size="lg" /><strong>{p.title}</strong></span>
-                      <span className="plan-strat-description">{p.description || "Descreva o motivo, o resultado esperado e como saberemos que o plano funcionou."}</span>
-                    </div>
+                <div className={`plan-strat-card ${open ? "open" : ""}`} key={p.id}>
+                  {/* O cabeçalho alterna a expansão (é o gesto pedido); abrir o
+                      plano no modal continua acessível pelo botão "Abrir" ao
+                      lado do progresso — aninhar um botão dentro do outro seria
+                      HTML inválido. */}
+                  <div className="plan-strat-headrow">
+                    <button
+                      type="button"
+                      className="plan-strat-headtoggle"
+                      aria-expanded={open}
+                      onClick={() => toggle(p.id)}
+                    >
+                      <span className={`plan-acc-caret ${open ? "on" : ""}`} aria-hidden>▸</span>
+                      <span className="plan-strat-headtext">
+                        <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} size="lg" /><strong>{p.title}</strong></span>
+                        <span className="plan-strat-count">{p.activities.length} atividade{p.activities.length === 1 ? "" : "s"}</span>
+                        <span className="plan-strat-description">{p.description || "Descreva o motivo, o resultado esperado e como saberemos que o plano funcionou."}</span>
+                      </span>
+                    </button>
                     <span className="plan-strat-progress">
                       <span className="plan-strat-bar"><span className="plan-strat-fill" style={{ width: `${p.progress}%` }} /></span>
                       <b>{p.progress}%</b>
                     </span>
-                  </button>
+                    <button type="button" className="admin-btn ghost plan-strat-open" onClick={() => onOpenPlan(p)}>Abrir</button>
+                  </div>
 
+                  {open ? (
+                  <>
                   <div className="plan-strat-questions">
                     <div><span>Quem</span><strong>{p.assignee || "Responsáveis das atividades"}</strong></div>
                     <div><span>Quando</span><strong>{fmtDate(p.start_date)} → {fmtDate(p.end_date)}</strong></div>
@@ -137,6 +167,8 @@ export default function StrategicView({
                       ))}
                     </div>
                   )}
+                  </>
+                  ) : null}
                 </div>
               );
             })}

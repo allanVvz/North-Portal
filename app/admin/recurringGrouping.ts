@@ -64,8 +64,20 @@ export function compareByUrgency(a: RecurringTask, b: RecurringTask): number {
   return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
 }
 
-export function groupRecurring(tasks: RecurringTask[], groupBy: RecurringGroupBy, today: string): RecurringGroup[] {
-  const sorted = [...tasks].sort(compareByUrgency);
+/**
+ * `sort` recebe a lista inteira (e não um comparador) porque a ordenação da
+ * tela não é expressável como comparação par a par: "sem data sempre por
+ * último, nas duas direções" e a estabilidade do empate dependem de conhecer o
+ * conjunto — ver taskSort.ts:sortItems. É opcional de propósito: sem ele o
+ * quadro mantém exatamente o comportamento histórico (urgência).
+ */
+export function groupRecurring(
+  tasks: RecurringTask[],
+  groupBy: RecurringGroupBy,
+  today: string,
+  sort: (tasks: RecurringTask[]) => RecurringTask[] = (items) => [...items].sort(compareByUrgency),
+): RecurringGroup[] {
+  const sorted = sort(tasks);
 
   if (groupBy === "prazo") {
     return PRAZO_BUCKETS.map((bucket) => ({
