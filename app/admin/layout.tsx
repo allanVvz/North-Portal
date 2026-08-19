@@ -24,6 +24,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       email={email}
       name={name}
       initials={initials}
+      userId={session.userId}
       revisoesTabVisible={tabsVisibility.revisoesTabVisible}
       aprovacoesTabVisible={tabsVisibility.aprovacoesTabVisible}
     >

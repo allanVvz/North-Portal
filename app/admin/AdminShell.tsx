@@ -36,6 +36,7 @@ export default function AdminShell({
   email,
   name,
   initials,
+  userId,
   revisoesTabVisible,
   aprovacoesTabVisible,
   children,
@@ -43,6 +44,7 @@ export default function AdminShell({
   email: string;
   name: string;
   initials: string;
+  userId: string;
   revisoesTabVisible: boolean;
   aprovacoesTabVisible: boolean;
   children: React.ReactNode;
@@ -221,7 +223,7 @@ export default function AdminShell({
       ) : null}
 
       <main className="admin-main">
-        <CurrentUserProvider user={{ name, email, initials }}>{children}</CurrentUserProvider>
+        <CurrentUserProvider user={{ name, email, initials, userId }}>{children}</CurrentUserProvider>
       </main>
     </div>
   );
