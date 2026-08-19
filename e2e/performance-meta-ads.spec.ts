@@ -200,6 +200,9 @@ test.describe("Performance · personalização da tela de Campanhas", () => {
     if (!metaRow || metaRow.status !== "connected") {
       throw new Error("Conexão com a Meta não está conectada — conecte antes de rodar este teste.");
     }
+    // Start from a clean shared-prefs slate regardless of what a previous
+    // (possibly interrupted) run left behind.
+    await sb.from("site_settings").delete().eq("key", "performance_view_prefs");
 
     const { data: created, error: createError } = await sb.auth.admin.createUser({
       email: GERENTE_EMAIL,
@@ -273,10 +276,18 @@ test.describe("Performance · personalização da tela de Campanhas", () => {
     // "Investimento" is now definitely the active sort column, so the second
     // click is a plain toggle of whatever the first click landed on.
     const afterSecondClick = afterFirstClick === "descending" ? "ascending" : "descending";
+    const prefsSavedPromise = page.waitForResponse(
+      (res) => res.url().includes("/api/admin/performance/prefs") && res.request().method() === "PUT",
+      { timeout: 5_000 },
+    );
     await header.click();
     await expect(header).toHaveAttribute("aria-sort", afterSecondClick);
     const firstAfterTwoClicks = await page.locator(".perf-ads-table tbody tr").first().locator("td").allTextContents();
     expect(firstAfterOneClick).not.toEqual(firstAfterTwoClicks);
+    // The sort PUT is debounced (600ms) — wait for it to actually land before
+    // the page closes, so a later test in this file reads the final toggled
+    // state from the shared prefs row instead of an in-flight intermediate one.
+    await prefsSavedPromise.catch(() => null);
   });
 
   test("colunas configuráveis: ocultar uma coluna some da tabela e persiste no backend", async ({ page }) => {
@@ -318,8 +329,13 @@ test.describe("Performance · personalização da tela de Campanhas", () => {
   test("expandir uma campanha da conexão direta com a Meta carrega o detalhamento por anúncio", async ({ page }) => {
     test.setTimeout(120_000);
     await loginGerente(page);
+    const insightsResPromise = page.waitForResponse((res) => res.url().includes("/api/admin/performance/insights") && !res.url().includes("/insights/ads"), { timeout: 90_000 });
     await page.goto("/admin/performance");
-    await page.waitForResponse((res) => res.url().includes("/api/admin/performance/insights") && !res.url().includes("/insights/ads"), { timeout: 90_000 });
+    await insightsResPromise;
+    // Table render lags the response by a tick (React state update + a
+    // sequential-run browser under load) — the row assertions below were
+    // intermittently racing ahead of it without this settle.
+    await page.waitForTimeout(800);
 
     await page.locator(".perf-ads-table tbody tr").first().waitFor({ state: "attached", timeout: 15_000 });
     // Only rows sourced from the direct Meta connection (not Windsor) render
