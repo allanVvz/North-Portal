@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CalendarPicker from "./CalendarPicker";
+import { AutoGrowTextarea } from "./TaskModal";
 import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
@@ -227,10 +228,13 @@ export default function TaskDetailPanel({
           {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
         </div>
         <div className="tdp-comment-input">
-          <input
+          <AutoGrowTextarea
+            rows={1}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void sendComment(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendComment(); }
+            }}
             placeholder="Adicionar comentário…"
           />
           <button className="admin-btn ghost" onClick={sendComment} disabled={!comment.trim() || busy}>Enviar</button>
