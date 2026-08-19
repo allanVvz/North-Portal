@@ -1658,9 +1658,36 @@ body.menu-open {
 .admin-sidebar {
   position: sticky; top: 0; align-self: flex-start;
   width: 248px; height: calc(100vh / var(--ui-scale)); height: calc(100dvh / var(--ui-scale)); flex: 0 0 248px;
-  display: flex; flex-direction: column; gap: 6px;
   padding: 18px 16px; border-right: 1px solid var(--a-border);
   background: var(--a-surface);
+}
+.admin-sidebar-content { display: flex; flex-direction: column; gap: 6px; height: 100%; }
+
+/* auto-hide rail (desktop only — mobile keeps the static column layout from
+   the max-width: 720px block below). The rail sits mostly off-screen, with a
+   thin strip left visible as a hover target, and slides in on hover/focus. */
+@media (min-width: 721px) {
+  .admin-sidebar {
+    position: fixed; top: 0; left: 0; z-index: 50;
+    height: 100vh; height: 100dvh;
+    transform: translateX(calc(-100% + 8px));
+    transition: transform 0.22s ease, box-shadow 0.22s ease;
+    box-shadow: none;
+  }
+  .admin-sidebar:hover,
+  .admin-sidebar:focus-within {
+    transform: translateX(0);
+    box-shadow: 6px 0 28px rgba(12, 44, 44, 0.18);
+  }
+  .admin-shell[data-theme="dark"] .admin-sidebar:hover,
+  .admin-shell[data-theme="dark"] .admin-sidebar:focus-within {
+    box-shadow: 6px 0 32px rgba(0, 0, 0, 0.5);
+  }
+  .admin-sidebar-content { opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
+  .admin-sidebar:hover .admin-sidebar-content,
+  .admin-sidebar:focus-within .admin-sidebar-content {
+    opacity: 1; pointer-events: auto; transition-delay: 0.05s;
+  }
 }
 .admin-topline { display: flex; align-items: center; gap: 10px; padding: 4px 6px 14px; }
 .admin-brand { display: inline-flex; align-items: center; gap: 9px; }
@@ -1708,6 +1735,12 @@ body.menu-open {
 
 /* ---- main / page ---- */
 .admin-main { flex: 1 1 auto; min-width: 0; overflow-x: hidden; }
+/* the sidebar is position: fixed above 720px (auto-hide rail), so it no
+   longer reserves layout width — give content a little breathing room past
+   the always-visible hover strip. */
+@media (min-width: 721px) {
+  .admin-main { padding-left: 14px; }
+}
 /* Top padding trimmed on its own (was the same clamp() as the bottom) — that,
    plus dropping the header subtitles page by page, is what actually grows
    the visible content area; sides/bottom untouched. */
@@ -1943,28 +1976,40 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .admin-shell[data-theme="dark"] .admin-card,
 .admin-shell[data-theme="dark"] .admin-summary { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 12px 30px rgba(0, 0, 0, 0.3); }
 
-/* theme toggle button (topline) */
-.admin-theme-toggle {
+/* topline icon button (notifications) */
+.admin-icon-btn {
+  position: relative;
   margin-left: auto; width: 30px; height: 30px; border-radius: 50%;
   display: grid; place-items: center; font-size: 14px; line-height: 1;
   border: 1px solid var(--a-border); background: var(--a-surface2); color: var(--a-sec);
   transition: background 0.16s, color 0.16s, border-color 0.16s;
 }
-.admin-theme-toggle:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
-
-/* sidebar collapse */
+.admin-icon-btn:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
 .admin-topline-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.admin-topline-actions .admin-theme-toggle { margin-left: 0; }
-.admin-sidebar-expand {
-  position: fixed; top: 18px; left: 16px; z-index: 40;
-  width: 34px; height: 34px; border-radius: 10px;
-  display: grid; place-items: center; font-size: 15px; line-height: 1;
-  border: 1px solid var(--a-border); background: var(--a-surface); color: var(--a-sec);
-  box-shadow: 0 4px 14px rgba(12,44,44,.12);
-  transition: background 0.16s, color 0.16s, border-color 0.16s;
+.admin-topline-actions .admin-icon-btn { margin-left: 0; }
+
+/* notifications: bell button opens a panel to the right of the rail */
+.admin-notif { position: relative; }
+.admin-notif-dot {
+  position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--a-danger); border: 1.5px solid var(--a-surface2);
 }
-.admin-sidebar-expand:hover { color: var(--a-ink); border-color: var(--a-border-strong); }
-.admin-shell.sidebar-collapsed .admin-main { width: 100%; }
+.admin-notif-panel {
+  position: absolute; top: -4px; left: calc(100% + 12px); z-index: 60; width: 280px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px;
+  padding: 8px; display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 12px 34px rgba(12, 44, 44, 0.18);
+}
+.admin-shell[data-theme="dark"] .admin-notif-panel { box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45); }
+.admin-notif-head {
+  padding: 6px 8px 10px; margin: 0 0 4px; border-bottom: 1px solid var(--a-border);
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--a-muted);
+}
+.admin-notif-item { display: flex; flex-direction: column; gap: 2px; padding: 9px 8px; border-radius: 8px; transition: background 0.16s; }
+.admin-notif-item:hover { background: var(--a-hover); }
+.admin-notif-text { font-size: 13.5px; line-height: 1.35; color: var(--a-ink); }
+.admin-notif-time { font-size: 11.5px; color: var(--a-muted); }
+.admin-notif-empty { margin: 0; padding: 16px 8px; text-align: center; font-size: 13px; color: var(--a-muted); }
 
 /* account: user card is a button; panel opens above it */
 .admin-account { position: relative; }
@@ -1988,6 +2033,9 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 }
 .admin-account-item:hover { background: var(--a-hover); color: var(--a-danger); }
 .admin-account-ico { width: 16px; text-align: center; opacity: 0.85; }
+/* the theme row is a <button> (it toggles instead of navigating) — reset it
+   to look like the <a>/<Link> rows around it */
+.admin-account-theme { width: 100%; font: inherit; text-align: left; background: none; border: none; cursor: pointer; }
 
 /* ================================================================ */
 /* Portal cliente — Home (Bussola) fiel ao Figma 269:3 / 2146:2     */
