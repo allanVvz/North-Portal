@@ -315,9 +315,9 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
           ))}
         </div>
         <div className="perf-daterange">
-          <input type="date" aria-label="De" value={customFrom} min={earliestCachedDay()} max={isoDay(new Date())} onChange={(e) => setCustomFrom(e.target.value)} />
+          <input type="date" aria-label="Período customizado: de" value={customFrom} min={earliestCachedDay()} max={isoDay(new Date())} onChange={(e) => setCustomFrom(e.target.value)} />
           <span>até</span>
-          <input type="date" aria-label="Até" value={customTo} min={customFrom || earliestCachedDay()} max={isoDay(new Date())} onChange={(e) => setCustomTo(e.target.value)} />
+          <input type="date" aria-label="Período customizado: até" value={customTo} min={customFrom || earliestCachedDay()} max={isoDay(new Date())} onChange={(e) => setCustomTo(e.target.value)} />
           {customRangeValid ? <button className="admin-btn ghost small" onClick={clearCustomRange}>Limpar</button> : null}
         </div>
         <select className="perf-select" value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>

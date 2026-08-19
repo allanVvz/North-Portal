@@ -242,8 +242,8 @@ test.describe("Performance · personalização da tela de Campanhas", () => {
       (res) => res.url().includes("/api/admin/performance/insights") && res.url().includes(`to=${to}`),
       { timeout: 60_000 },
     );
-    await page.getByLabel("De").fill(from);
-    await page.getByLabel("Até").fill(to);
+    await page.getByLabel("Período customizado: de", { exact: true }).fill(from);
+    await page.getByLabel("Período customizado: até", { exact: true }).fill(to);
     const res = await customResponsePromise;
     expect(res.ok(), "requisição com período customizado falhou").toBe(true);
     // Custom range replaces the preset toggle — none of 7/30/90 stay highlighted
@@ -261,13 +261,22 @@ test.describe("Performance · personalização da tela de Campanhas", () => {
 
     const header = page.getByRole("columnheader", { name: /Investimento/ });
     await expect(header).toBeVisible();
+    // "Investimento" (custo) is the shared default sort column, so it may
+    // already be sorted desc or asc depending on what a prior gerente last
+    // set — read the starting state instead of assuming it, then assert the
+    // click toggles to the opposite state and back.
+    const initialSort = await header.getAttribute("aria-sort");
+    const afterFirstClick = initialSort === "descending" ? "ascending" : "descending";
     await header.click();
-    await expect(header).toHaveAttribute("aria-sort", "descending");
-    const firstDesc = await page.locator(".perf-ads-table tbody tr").first().locator("td").allTextContents();
+    await expect(header).toHaveAttribute("aria-sort", afterFirstClick);
+    const firstAfterOneClick = await page.locator(".perf-ads-table tbody tr").first().locator("td").allTextContents();
+    // "Investimento" is now definitely the active sort column, so the second
+    // click is a plain toggle of whatever the first click landed on.
+    const afterSecondClick = afterFirstClick === "descending" ? "ascending" : "descending";
     await header.click();
-    await expect(header).toHaveAttribute("aria-sort", "ascending");
-    const firstAsc = await page.locator(".perf-ads-table tbody tr").first().locator("td").allTextContents();
-    expect(firstDesc).not.toEqual(firstAsc);
+    await expect(header).toHaveAttribute("aria-sort", afterSecondClick);
+    const firstAfterTwoClicks = await page.locator(".perf-ads-table tbody tr").first().locator("td").allTextContents();
+    expect(firstAfterOneClick).not.toEqual(firstAfterTwoClicks);
   });
 
   test("colunas configuráveis: ocultar uma coluna some da tabela e persiste no backend", async ({ page }) => {
