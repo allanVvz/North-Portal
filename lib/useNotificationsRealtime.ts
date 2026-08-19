@@ -10,11 +10,9 @@ import { createClient } from "@/lib/supabase/client";
 // for the same reason: a batch of writes (e.g. "mark all read") should only
 // trigger one refetch.
 //
-// Not wired to any UI yet. The admin bell/dropdown
-// (app/admin/AdminShell.tsx's .admin-topline-actions) currently renders
-// hardcoded mock data from a separate in-progress pass — once it reads from
-// GET /api/admin/notifications, point its refetch at this hook the same way
-// the Kanban/Feedbacks screens use useTaskRealtime.
+// Wired to the admin bell/dropdown in app/admin/AdminShell.tsx, which reads
+// from GET /api/admin/notifications and points its refetch at this hook the
+// same way the Kanban/Feedbacks screens use useTaskRealtime.
 export function useNotificationsRealtime(profileId: string, onChange: () => void) {
   const cbRef = useRef(onChange);
   cbRef.current = onChange;

@@ -1664,29 +1664,81 @@ body.menu-open {
 .admin-sidebar-content { display: flex; flex-direction: column; gap: 6px; height: 100%; }
 
 /* auto-hide rail (desktop only — mobile keeps the static column layout from
-   the max-width: 720px block below). The rail sits mostly off-screen, with a
-   thin strip left visible as a hover target, and slides in on hover/focus. */
+   the max-width: 720px block below). Floats as a vertically-centered dock
+   (not edge-to-edge top-to-bottom): at rest it's a compact icon-only strip
+   sized to its own content (never fully hidden); on hover/focus it widens to
+   the full 248px with labels revealed. overflow stays visible (not hidden)
+   so popovers anchored inside it — the notifications and account panels —
+   can escape past its edge instead of being clipped. */
 @media (min-width: 721px) {
   .admin-sidebar {
-    position: fixed; top: 0; left: 0; z-index: 50;
-    height: 100vh; height: 100dvh;
-    transform: translateX(calc(-100% + 8px));
-    transition: transform 0.22s ease, box-shadow 0.22s ease;
-    box-shadow: none;
+    position: fixed; left: 14px; top: 50%; transform: translateY(-50%); z-index: 50;
+    height: auto; max-height: calc(100dvh - 48px);
+    width: 76px; padding: 18px 10px; border-radius: 20px;
+    transition: width 0.2s ease, padding 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 10px 30px rgba(12, 44, 44, 0.12);
   }
+  /* the dock hugs its own content height (topline + nav + account footer,
+     no forced stretch) — the mobile/base rule sets height:100% for the
+     always-expanded column layout below 721px, which does not apply here */
+  .admin-sidebar-content { height: auto; }
+  .admin-side-foot { margin-top: 18px; }
   .admin-sidebar:hover,
   .admin-sidebar:focus-within {
-    transform: translateX(0);
-    box-shadow: 6px 0 28px rgba(12, 44, 44, 0.18);
+    width: 248px; padding: 18px 16px;
+    box-shadow: 0 20px 48px rgba(12, 44, 44, 0.22);
+  }
+  .admin-shell[data-theme="dark"] .admin-sidebar {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   }
   .admin-shell[data-theme="dark"] .admin-sidebar:hover,
   .admin-shell[data-theme="dark"] .admin-sidebar:focus-within {
-    box-shadow: 6px 0 32px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 22px 52px rgba(0, 0, 0, 0.55);
   }
-  .admin-sidebar-content { opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
-  .admin-sidebar:hover .admin-sidebar-content,
-  .admin-sidebar:focus-within .admin-sidebar-content {
-    opacity: 1; pointer-events: auto; transition-delay: 0.05s;
+  /* icons (and the notifications bell/dot) stay visible at rest; only text
+     labels collapse to the compact strip */
+  .admin-sidebar .admin-word,
+  .admin-sidebar .admin-role,
+  .admin-sidebar .admin-nav-head,
+  .admin-sidebar .admin-nav-label,
+  .admin-sidebar .admin-usermeta,
+  .admin-sidebar .admin-usercard-caret {
+    display: none;
+  }
+  .admin-sidebar:hover .admin-word,
+  .admin-sidebar:hover .admin-role,
+  .admin-sidebar:hover .admin-nav-label,
+  .admin-sidebar:hover .admin-usercard-caret,
+  .admin-sidebar:focus-within .admin-word,
+  .admin-sidebar:focus-within .admin-role,
+  .admin-sidebar:focus-within .admin-nav-label,
+  .admin-sidebar:focus-within .admin-usercard-caret {
+    display: inline;
+  }
+  .admin-sidebar:hover .admin-nav-head,
+  .admin-sidebar:focus-within .admin-nav-head {
+    display: block;
+  }
+  .admin-sidebar:hover .admin-usermeta,
+  .admin-sidebar:focus-within .admin-usermeta {
+    display: flex;
+  }
+  /* topline stacks (mark above the bell) in the compact strip since there's
+     no horizontal room for both side by side; reverts to a row once wide */
+  .admin-sidebar .admin-topline { flex-direction: column; gap: 10px; padding: 2px 0 12px; }
+  .admin-sidebar .admin-brand { flex-direction: column; gap: 4px; }
+  .admin-sidebar .admin-topline-actions { margin-left: 0; }
+  .admin-sidebar:hover .admin-topline,
+  .admin-sidebar:focus-within .admin-topline {
+    flex-direction: row; align-items: center; gap: 10px; padding: 4px 6px 14px;
+  }
+  .admin-sidebar:hover .admin-brand,
+  .admin-sidebar:focus-within .admin-brand {
+    flex-direction: row; gap: 9px;
+  }
+  .admin-sidebar:hover .admin-topline-actions,
+  .admin-sidebar:focus-within .admin-topline-actions {
+    margin-left: auto;
   }
 }
 .admin-topline { display: flex; align-items: center; gap: 10px; padding: 4px 6px 14px; }
@@ -1715,7 +1767,7 @@ body.menu-open {
 }
 .admin-nav-item.muted { color: var(--a-muted); cursor: default; }
 .admin-nav-item.muted:hover { background: transparent; color: var(--a-muted); }
-.admin-nav-item .admin-nav-ico { width: 15px; text-align: center; opacity: 0.85; }
+.admin-nav-item .admin-nav-ico { width: 18px; flex: 0 0 18px; display: inline-flex; align-items: center; justify-content: center; opacity: 0.85; }
 .admin-nav-item .admin-soon { margin-left: auto; font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--a-muted); border: 1px solid var(--a-border); border-radius: 999px; padding: 1px 6px; }
 
 .admin-side-foot { margin-top: auto; padding-top: 12px; }
@@ -1735,18 +1787,23 @@ body.menu-open {
 
 /* ---- main / page ---- */
 .admin-main { flex: 1 1 auto; min-width: 0; overflow-x: hidden; }
-/* the sidebar is position: fixed above 720px (auto-hide rail), so it no
-   longer reserves layout width — give content a little breathing room past
-   the always-visible hover strip. */
+/* the sidebar is position: fixed above 720px (auto-hide rail) and floats
+   with a 14px left inset, so it no longer reserves layout width in flow —
+   pad well past its compact width (76px) so page content (and the rail's
+   own hover-reveal target) both get real breathing room, an "invisible
+   border" that keeps text from reading as flush against the dock. */
 @media (min-width: 721px) {
-  .admin-main { padding-left: 14px; }
+  .admin-main { padding-left: 116px; }
 }
 /* Top padding trimmed on its own (was the same clamp() as the bottom) — that,
    plus dropping the header subtitles page by page, is what actually grows
    the visible content area; sides/bottom untouched. */
 .admin-page { max-width: 1180px; margin: 0 auto; padding: clamp(14px, 2vw, 24px) clamp(20px, 4vw, 44px) clamp(24px, 4vw, 44px); }
 .admin-narrow { max-width: 1180px; }
-.admin-page.kb-wide { max-width: none; }
+/* kb-wide (Tarefas board, Clientes/Rotinas) used to run fully edge-to-edge;
+   still gets far more room than the default page, but stays centered with a
+   cap instead of stretching into the far corner on ultra-wide screens. */
+.admin-page.kb-wide { max-width: 1680px; margin: 0 auto; }
 .admin-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .admin-head-actions { display: inline-flex; gap: 8px; }
 .admin-crumb { font-size: 13px; color: var(--a-muted); margin: 0 0 6px; }
@@ -1993,7 +2050,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .admin-notif-dot {
   position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%;
   background: var(--a-danger); border: 1.5px solid var(--a-surface2);
+  animation: admin-notif-pulse 1.8s ease-out infinite;
 }
+@keyframes admin-notif-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(194, 96, 78, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(194, 96, 78, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(194, 96, 78, 0); }
+}
+.admin-shell[data-theme="dark"] .admin-notif-dot { border-color: var(--a-surface); }
 .admin-notif-panel {
   position: absolute; top: -4px; left: calc(100% + 12px); z-index: 60; width: 280px;
   background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px;
@@ -2017,7 +2081,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .admin-usercard:hover { border-color: var(--a-border-strong); }
 .admin-usercard-caret { margin-left: auto; color: var(--a-muted); font-size: 12px; }
 .admin-account-panel {
-  position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 30;
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; width: 240px;
   background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px;
   padding: 8px; display: flex; flex-direction: column; gap: 4px;
   box-shadow: 0 12px 34px rgba(12, 44, 44, 0.18);
@@ -2032,7 +2096,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   font-size: 14px; font-weight: 600; color: var(--a-ink); transition: background 0.16s, color 0.16s;
 }
 .admin-account-item:hover { background: var(--a-hover); color: var(--a-danger); }
-.admin-account-ico { width: 16px; text-align: center; opacity: 0.85; }
+.admin-account-ico { width: 16px; flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center; opacity: 0.85; }
 /* the theme row is a <button> (it toggles instead of navigating) — reset it
    to look like the <a>/<Link> rows around it */
 .admin-account-theme { width: 100%; font: inherit; text-align: left; background: none; border: none; cursor: pointer; }

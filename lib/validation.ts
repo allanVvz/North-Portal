@@ -213,6 +213,13 @@ export const windsorSettingsPatchSchema = z.object({
 export const windsorTestSchema = z.object({
   apiKey: z.string().trim().min(8).max(200).optional(),
 });
+// PATCH semantics: apiKey omitted = keep the stored key; clearApiKey wipes it
+// (mirrors windsorSettingsPatchSchema above). vendor null clears the choice.
+export const aiProviderSettingsPatchSchema = z.object({
+  apiKey: z.string().trim().min(8).max(200).optional(),
+  clearApiKey: z.boolean().optional(),
+  vendor: z.enum(["anthropic", "chatgpt", "deepseek"]).nullable().optional(),
+});
 // PATCH semantics for the Meta integration: only the ad-account-per-client
 // mapping is ever written from the browser — the OAuth token itself is only
 // ever set by the server-side callback route, never via this schema.

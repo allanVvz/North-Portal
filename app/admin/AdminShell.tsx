@@ -1,28 +1,149 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CurrentUserProvider } from "./CurrentUserContext";
+import { formatCommentTime } from "@/lib/comments";
+import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
+import type { NotificationRecord } from "@/lib/notifications";
 
 type Theme = "light" | "dark";
 
-const NAV_GROUPS: { head: string; items: { href: string; ico: string; label: string; hidden?: boolean }[] }[] = [
+// Line-icon set in the Lucide/Feather stroke convention (24x24, round caps/
+// joins, fill:none) — picked per nav item for recognizability rather than
+// the previous generic Unicode glyphs (◎ ◈ ▤ …, several duplicated).
+type IconName =
+  | "users"
+  | "target"
+  | "listChecks"
+  | "eye"
+  | "checkCircle"
+  | "barChart"
+  | "fileText"
+  | "bell"
+  | "moon"
+  | "sun"
+  | "settings"
+  | "logOut"
+  | "chevronDown";
+
+const ICON_PATHS: Record<IconName, React.ReactNode> = {
+  users: (
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </>
+  ),
+  target: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    </>
+  ),
+  listChecks: (
+    <>
+      <path d="m3 6 1.5 1.5L7 5" />
+      <path d="m3 13 1.5 1.5L7 12" />
+      <path d="M11 6h10" />
+      <path d="M11 13h10" />
+      <path d="M11 20h10" />
+      <path d="m3 19.5 1.5 1.5L7 18.5" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2 12s3.4-7 10-7 10 7 10 7-3.4 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  checkCircle: (
+    <>
+      <path d="M21.8 10.5A10 10 0 1 1 17 3.4" />
+      <path d="m9 11 3 3L22 4" />
+    </>
+  ),
+  barChart: (
+    <>
+      <line x1="5" y1="20" x2="5" y2="14" />
+      <line x1="12" y1="20" x2="12" y2="6" />
+      <line x1="19" y1="20" x2="19" y2="10" />
+    </>
+  ),
+  fileText: (
+    <>
+      <path d="M14 2.5H7a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2.5V8h5.5" />
+      <line x1="9" y1="13" x2="15" y2="13" />
+      <line x1="9" y1="17" x2="15" y2="17" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </>
+  ),
+  moon: <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />,
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.5v2.4M12 19.1v2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7" />
+    </>
+  ),
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2.6a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.2 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H8.6a1.65 1.65 0 0 0 1-1.51V2.6a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V8.6a1.65 1.65 0 0 0 1.51 1h.09a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </>
+  ),
+  logOut: (
+    <>
+      <path d="M9 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3" />
+      <polyline points="15 17 20 12 15 7" />
+      <line x1="20" y1="12" x2="8" y2="12" />
+    </>
+  ),
+  chevronDown: <polyline points="6 9 12 15 18 9" />,
+};
+
+function Icon({ name, size = 17 }: { name: IconName; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+const NAV_GROUPS: { head: string; items: { href: string; ico: IconName; label: string; hidden?: boolean }[] }[] = [
   {
     head: "Operação",
     items: [
-      { href: "/admin", ico: "◎", label: "Clientes" },
-      { href: "/admin/plano", ico: "◈", label: "Plano de Ação" },
-      { href: "/admin/kanban", ico: "▤", label: "Tarefas" },
-      { href: "/admin/revisoes", ico: "◑", label: "Revisões" },
-      { href: "/admin/aprovacoes", ico: "✓", label: "Aprovações" },
+      { href: "/admin", ico: "users", label: "Clientes" },
+      { href: "/admin/plano", ico: "target", label: "Plano de Ação" },
+      { href: "/admin/kanban", ico: "listChecks", label: "Tarefas" },
+      { href: "/admin/revisoes", ico: "eye", label: "Revisões" },
+      { href: "/admin/aprovacoes", ico: "checkCircle", label: "Aprovações" },
     ],
   },
   {
     head: "Dados",
     items: [
-      { href: "/admin/performance", ico: "▤", label: "Performance" },
-      { href: "/admin/documentos", ico: "▦", label: "Informações" },
+      { href: "/admin/performance", ico: "barChart", label: "Performance" },
+      { href: "/admin/documentos", ico: "fileText", label: "Informações" },
     ],
   },
 ];
@@ -31,17 +152,6 @@ const NAV_GROUPS: { head: string; items: { href: string; ico: string; label: str
 // stay highlighted when a more specific section is active.
 const ALL_HREFS = [...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href)), "/admin/configuracoes"];
 const SECTION_HREFS = ALL_HREFS.filter((h) => h !== "/admin");
-
-// Mock data for the notifications dropdown — a real backend/track is being
-// built in parallel; swap this constant out for that data source once it
-// lands. Keep it isolated here so the swap is a one-line change.
-type MockNotification = { id: string; text: string; time: string };
-const MOCK_NOTIFICATIONS: MockNotification[] = [
-  { id: "1", text: 'Tarefa "Revisar copy" está próxima do prazo', time: "há 12 min" },
-  { id: "2", text: "Pedro enviou uma tarefa para revisão", time: "há 1 h" },
-  { id: "3", text: "Cliente aprovou o Plano de Ação", time: "há 3 h" },
-  { id: "4", text: 'Novo comentário em "Campanha Agosto"', time: "ontem" },
-];
 
 export default function AdminShell({
   email,
@@ -69,8 +179,37 @@ export default function AdminShell({
   const [theme, setTheme] = useState<Theme>("light");
   const [accountOpen, setAccountOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const accountRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const unreadCount = notifications.filter((n) => !n.read_at).length;
+
+  const refetchNotifications = useCallback(() => {
+    fetch("/api/admin/notifications")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { notifications: NotificationRecord[] } | null) => {
+        if (data) setNotifications(data.notifications);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refetchNotifications();
+  }, [refetchNotifications]);
+  useNotificationsRealtime(userId, refetchNotifications);
+
+  // opening the bell marks the whole inbox read (optimistic locally, fire-
+  // and-forget PATCH) — same "read on view" idiom as a typical inbox
+  useEffect(() => {
+    if (!notifOpen || unreadCount === 0) return;
+    setNotifications((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: new Date().toISOString() })));
+    fetch("/api/admin/notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true }),
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifOpen]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("admin-theme");
@@ -159,18 +298,18 @@ export default function AdminShell({
                   aria-label="Notificações"
                   title="Notificações"
                 >
-                  🔔
-                  {MOCK_NOTIFICATIONS.length > 0 ? <span className="admin-notif-dot" aria-hidden /> : null}
+                  <Icon name="bell" size={16} />
+                  {unreadCount > 0 ? <span className="admin-notif-dot" aria-hidden /> : null}
                 </button>
 
                 {notifOpen ? (
                   <div className="admin-notif-panel" role="menu">
                     <p className="admin-notif-head">Notificações</p>
-                    {MOCK_NOTIFICATIONS.length > 0 ? (
-                      MOCK_NOTIFICATIONS.map((notif) => (
+                    {notifications.length > 0 ? (
+                      notifications.map((notif) => (
                         <div className="admin-notif-item" key={notif.id} role="menuitem">
-                          <span className="admin-notif-text">{notif.text}</span>
-                          <span className="admin-notif-time">{notif.time}</span>
+                          <span className="admin-notif-text">{notif.message}</span>
+                          <span className="admin-notif-time">{formatCommentTime(notif.created_at)}</span>
                         </div>
                       ))
                     ) : (
@@ -198,8 +337,10 @@ export default function AdminShell({
                     href={item.href}
                     className={`admin-nav-item ${isActive(item.href) ? "active" : ""}`}
                   >
-                    <span className="admin-nav-ico">{item.ico}</span>
-                    {item.label}
+                    <span className="admin-nav-ico">
+                      <Icon name={item.ico} />
+                    </span>
+                    <span className="admin-nav-label">{item.label}</span>
                   </Link>
                 ))}
               </div>
@@ -226,19 +367,19 @@ export default function AdminShell({
                     onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
                   >
                     <span className="admin-account-ico" aria-hidden>
-                      {theme === "light" ? "☾" : "☀"}
+                      <Icon name={theme === "light" ? "moon" : "sun"} size={15} />
                     </span>
                     {theme === "light" ? "Modo escuro" : "Modo claro"}
                   </button>
                   <Link className="admin-account-item" href="/admin/configuracoes" role="menuitem" onClick={() => setAccountOpen(false)}>
                     <span className="admin-account-ico" aria-hidden>
-                      ⚙
+                      <Icon name="settings" size={15} />
                     </span>
                     Configurações
                   </Link>
                   <a className="admin-account-item" href="/logout" role="menuitem">
                     <span className="admin-account-ico" aria-hidden>
-                      ⎋
+                      <Icon name="logOut" size={15} />
                     </span>
                     Sair
                   </a>
@@ -260,7 +401,7 @@ export default function AdminShell({
                   </span>
                 </span>
                 <span className="admin-usercard-caret" aria-hidden>
-                  ⌄
+                  <Icon name="chevronDown" size={14} />
                 </span>
               </button>
             </div>

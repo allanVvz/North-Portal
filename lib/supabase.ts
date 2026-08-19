@@ -32,6 +32,7 @@ import {
 } from "./validation";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
+import { AI_PROVIDER_SETTINGS_DEFAULT, type AiProviderSettings, type AiVendor } from "./aiProviders";
 import { META_ADS_CREATIVE_DATASOURCE, META_ADS_DATASOURCE } from "./metaInsights";
 import { sanitizePerformanceViewPrefs, type PerformanceViewPrefs } from "./performancePrefs";
 import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
@@ -1891,6 +1892,85 @@ export async function saveWindsorSettings(patch: {
   }
 
   return { apiKey: nextApiKey, datasources: nextDatasources, accountMap: nextAccountMap };
+}
+
+// ---- AI provider integration (Configurações → Integrações) ----------------------
+// One integration_credentials row (provider='ai', scope='agency') holds the
+// whole config, same shape as Windsor above. The raw apiKey lives ONLY in the
+// vault; every GET response goes through maskAiProviderSettings so the key
+// never reaches the browser. Only one AI vendor is ever active at a time —
+// which one is stored in `meta.vendor`, not as a separate provider row.
+
+type AiProviderMeta = { vendor?: AiVendor | null };
+type AiProviderCredentialRow = { id: string; vault_secret_id: string; meta: AiProviderMeta | null };
+
+async function getAiProviderRow(): Promise<AiProviderCredentialRow | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("integration_credentials")
+    .select("id,vault_secret_id,meta")
+    .eq("provider", "ai")
+    .eq("scope", "agency")
+    .limit(1);
+  if (error) fail(error);
+  return (data?.[0] as AiProviderCredentialRow | undefined) ?? null;
+}
+
+export async function getAiProviderSettings(): Promise<AiProviderSettings> {
+  const row = await getAiProviderRow();
+  if (!row) return { ...AI_PROVIDER_SETTINGS_DEFAULT };
+  const apiKey = await vaultRead(row.vault_secret_id);
+  return { apiKey, vendor: row.meta?.vendor ?? null };
+}
+
+export async function saveAiProviderSettings(patch: {
+  apiKey?: string;
+  clearApiKey?: boolean;
+  vendor?: AiVendor | null;
+}): Promise<AiProviderSettings> {
+  const supabase = await createClient();
+  const row = await getAiProviderRow();
+  const currentApiKey = row ? await vaultRead(row.vault_secret_id) : "";
+  const nextApiKey = patch.clearApiKey ? "" : patch.apiKey ?? currentApiKey;
+  const nextVendor = patch.vendor !== undefined ? patch.vendor : row?.meta?.vendor ?? null;
+  const nextMeta: AiProviderMeta = { vendor: nextVendor };
+  const nextStatus = nextApiKey ? "connected" : "disconnected";
+
+  if (!row) {
+    const vaultSecretId = await vaultSet(nextApiKey, "ai_provider_api_key");
+    const { error } = await supabase.from("integration_credentials").insert({
+      provider: "ai",
+      scope: "agency",
+      label: "Provedor de IA",
+      vault_secret_id: vaultSecretId,
+      meta: nextMeta,
+      status: nextStatus,
+    });
+    if (error) fail(error);
+  } else {
+    if (patch.apiKey || patch.clearApiKey) await vaultUpdate(row.vault_secret_id, nextApiKey);
+    const { error } = await supabase
+      .from("integration_credentials")
+      .update({ meta: nextMeta, status: nextStatus })
+      .eq("id", row.id);
+    if (error) fail(error);
+  }
+
+  return { apiKey: nextApiKey, vendor: nextVendor };
+}
+
+export type MaskedAiProviderSettings = {
+  configured: boolean;
+  apiKeyLast4: string;
+  vendor: AiVendor | null;
+};
+
+export function maskAiProviderSettings(s: AiProviderSettings): MaskedAiProviderSettings {
+  return {
+    configured: s.apiKey.length > 0,
+    apiKeyLast4: s.apiKey.slice(-4),
+    vendor: s.vendor,
+  };
 }
 
 // ---- Meta (Facebook) OAuth integration -----------------------------------------

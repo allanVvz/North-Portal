@@ -1,53 +1,101 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { AI_VENDORS, type AiVendor } from "@/lib/aiProviders";
+import type { MaskedAiProviderSettings } from "@/lib/supabase";
 
-type AiProvider = "anthropic" | "chatgpt" | "deepseek";
-
-const AI_PROVIDERS: { key: AiProvider; label: string; models: string[] }[] = [
-  { key: "anthropic", label: "Anthropic", models: ["Claude Sonnet 5", "Claude Opus 5"] },
-  { key: "chatgpt", label: "ChatGPT", models: ["GPT-5", "GPT-5 mini"] },
-  { key: "deepseek", label: "DeepSeek", models: ["DeepSeek V4"] },
-];
-
-// Configurações → Integrações: mock only. The credential vault's `provider`
-// CHECK constraint (public.integration_credentials) doesn't yet allow AI
-// providers, so this deliberately does NOT call any save/vault API — it's
-// local component state standing in for the real thing until that lands.
+// Configurações → Integrações: Provedor de IA setup. Same vault-backed
+// pattern as WindsorIntegration — the API key is write-only from the
+// browser's point of view; GET only ever returns configured/last4.
 export default function AiProviderIntegration() {
-  const [provider, setProvider] = useState<AiProvider | "">("");
+  const [settings, setSettings] = useState<MaskedAiProviderSettings | null>(null);
+  const [vendor, setVendor] = useState<AiVendor | "">("");
   const [apiKey, setApiKey] = useState("");
-  const [connected, setConnected] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  const selected = AI_PROVIDERS.find((p) => p.key === provider) ?? null;
+  useEffect(() => {
+    // Ignore a response that arrives after the user has already picked a
+    // vendor (or after Strict Mode's dev-only double-effect fires this fetch
+    // twice) — otherwise a late GET clobbers a fresher selection/save with
+    // stale data, silently unmounting the key input + Salvar button under it.
+    let cancelled = false;
+    fetch("/api/admin/settings/ai-provider")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: MaskedAiProviderSettings | null) => {
+        if (cancelled) return;
+        setSettings(data);
+        setVendor(data?.vendor ?? "");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  function handleProviderChange(value: string) {
-    setProvider(value as AiProvider | "");
-    setApiKey("");
-    setConnected(false);
+  const selected = AI_VENDORS.find((p) => p.key === vendor) ?? null;
+
+  // Vendor-only saves (fired the instant the dropdown changes) must NOT
+  // touch the apiKey input — that field is edited independently and a slow
+  // in-flight vendor save resolving after the user already started typing a
+  // key would otherwise wipe it out from under them.
+  async function save(patch: Record<string, unknown>, touchesKey = false) {
+    setBusy(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/admin/settings/ai-provider", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error();
+      const data: MaskedAiProviderSettings = await res.json();
+      setSettings(data);
+      if (touchesKey) setApiKey("");
+      setMsg("Salvo.");
+    } catch {
+      setMsg("Não foi possível salvar.");
+    }
+    setBusy(false);
   }
 
-  function save() {
-    setConnected(true);
+  function handleVendorChange(value: string) {
+    const next = (value || null) as AiVendor | null;
+    setVendor(next ?? "");
+    void save({ vendor: next });
+  }
+
+  function saveKey() {
+    if (!apiKey.trim()) return;
+    void save({ apiKey: apiKey.trim(), vendor: vendor || undefined }, true);
+  }
+
+  if (!settings) {
+    return (
+      <div className="set-card">
+        <h2 className="set-h">Provedor de IA</h2>
+        <p className="admin-sub">Carregando…</p>
+      </div>
+    );
   }
 
   return (
     <div className="set-card">
       <h2 className="set-h">
         Provedor de IA{" "}
-        {connected ? <span className="set-badge publicada">Configurado</span> : null}
+        {settings.configured ? <span className="set-badge publicada">Configurado</span> : null}
       </h2>
       <p className="admin-sub">
-        Escolha um provedor de IA e informe a chave da API. <span className="admin-soon">em breve</span> — por
-        enquanto isso é apenas uma prévia da interface, sem conexão real.
+        Escolha um provedor de IA e informe a chave da API.
+        {settings.configured ? " Conectado." : " Sem a chave, as automações de IA não têm acesso a um modelo."}
       </p>
 
       <div className="set-grid">
         <label className="admin-field">
           <span>Provedor</span>
-          <select value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
+          <select value={vendor} onChange={(e) => handleVendorChange(e.target.value)} disabled={busy}>
             <option value="">— Selecione —</option>
-            {AI_PROVIDERS.map((p) => (
+            {AI_VENDORS.map((p) => (
               <option key={p.key} value={p.key}>{p.label}</option>
             ))}
           </select>
@@ -62,8 +110,8 @@ export default function AiProviderIntegration() {
               <input
                 type="password"
                 value={apiKey}
-                onChange={(e) => { setApiKey(e.target.value); setConnected(false); }}
-                placeholder={`Cole a API key da ${selected.label}`}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={settings.configured ? `••••••••${settings.apiKeyLast4}` : `Cole a API key da ${selected.label}`}
                 autoComplete="off"
               />
             </label>
@@ -79,10 +127,18 @@ export default function AiProviderIntegration() {
             ))}
           </div>
 
+          <div className="set-actions" style={{ justifyContent: "flex-start", gap: 8 }}>
+            {settings.configured ? (
+              <button className="admin-btn ghost danger" onClick={() => void save({ clearApiKey: true }, true)} disabled={busy}>
+                Remover chave
+              </button>
+            ) : null}
+          </div>
+
           <div className="set-actions">
-            {connected ? <span className="set-msg">Configurado.</span> : <span />}
-            <button className="admin-btn primary" onClick={save} disabled={!apiKey.trim()}>
-              Salvar
+            {msg ? <span className="set-msg">{msg}</span> : <span />}
+            <button className="admin-btn primary" onClick={saveKey} disabled={busy || !apiKey.trim()}>
+              {busy ? "Salvando…" : "Salvar"}
             </button>
           </div>
         </>
