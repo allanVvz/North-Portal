@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RecurringTask } from "@/lib/supabase";
@@ -221,9 +220,6 @@ export default function ClientsWorkspace({
           <p className="admin-kicker">Operação</p>
           <h1 className="admin-title">Clientes</h1>
           <p className="admin-sub">Cadastros e rotinas dos clientes em um só lugar.</p>
-        </div>
-        <div className="clients-head-actions">
-          <Link href="/admin/novo" className="admin-btn ghost">+ Novo cliente</Link>
         </div>
       </header>
 
