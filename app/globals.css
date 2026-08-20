@@ -2418,8 +2418,8 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 /* Centered drag-and-drop upload entry point, shared by Documentos and
    Trilhas North — same position/size in both, only label/accept differ. */
 .doc-dropzone {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  text-align: center; padding: 30px 24px; border: 1.5px dashed var(--a-border-strong);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  text-align: center; padding: 46px 32px; border: 1.5px dashed var(--a-border-strong);
   border-radius: 16px; background: var(--a-surface); cursor: pointer; transition: border-color .16s, background .16s;
 }
 .doc-dropzone:hover, .doc-dropzone:focus-visible { border-color: var(--a-teal); background: var(--a-teal-soft); outline: none; }
@@ -2438,6 +2438,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   cursor: pointer; font: inherit; box-shadow: 0 1px 2px rgba(12,44,44,.04);
 }
 .doc-grid-card:hover { background: var(--a-hover); }
+.doc-grid-card:focus-visible { outline: 2px solid var(--a-teal-text); outline-offset: 2px; }
 .doc-grid-card strong { color: var(--a-ink); font-size: 14px; overflow-wrap: anywhere; }
 .doc-grid-date { color: var(--a-muted); font-size: 12px; }
 .doc-grid-edit { margin-top: 4px; }
@@ -2490,6 +2491,8 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   .info-panel { padding: 20px 16px 24px; }
 }
 .info-onboarding-wide .info-panel { max-width: 1100px; }
+.info-onboarding-panel .cli-pipeline { margin-top: 4px; }
+.info-onboarding-etapas-head { margin-top: 30px; padding-top: 26px; border-top: 1px solid var(--a-border); }
 
 /* ---- Configurações ---- */
 .set { display: grid; grid-template-columns: 220px 1fr; gap: 28px; align-items: start; }
@@ -3500,7 +3503,7 @@ select.perf-select { width: auto; min-width: 170px; }
 /* Clientes · tarefas recorrentes (domínio independente de planos de ação) */
 .clients-workspace { display: flex; flex-direction: column; gap: 16px; }
 .clients-workspace > .admin-head { margin-bottom: 0; }
-.clients-section-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--a-border); }
+.clients-section-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--a-border); margin-bottom: 20px; }
 .clients-section-tabs button {
   appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
   padding: 0 2px 12px; color: var(--a-muted); cursor: pointer; font: inherit; font-size: 14px; font-weight: 600;

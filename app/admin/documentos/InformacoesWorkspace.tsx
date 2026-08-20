@@ -3,6 +3,8 @@
 import { useState } from "react";
 import DocumentsTable from "./DocumentsTable";
 import OnboardingTable from "../onboarding/OnboardingTable";
+import ClientPipelineBoard from "../ClientPipelineBoard";
+import type { ClientRow } from "../ClientsTable";
 import type { AdminBriefingRow, AdminDocument } from "@/lib/supabase";
 import { isHtmlDocument } from "@/lib/documentFiles";
 
@@ -13,10 +15,12 @@ export default function InformacoesWorkspace({
   documents,
   clients,
   briefings,
+  clientRows,
 }: {
   documents: AdminDocument[];
   clients: ClientLite[];
   briefings: AdminBriefingRow[];
+  clientRows: ClientRow[];
 }) {
   const [section, setSection] = useState<Section>("documentos");
   const docCount = documents.filter((d) => !isHtmlDocument(d)).length;
@@ -30,25 +34,32 @@ export default function InformacoesWorkspace({
         <button type="button" className={section === "onboarding" ? "on" : ""} onClick={() => setSection("onboarding")}>Onboarding <span>{briefings.length}</span></button>
       </nav>
 
-      {section === "documentos" ? (
-        <DocumentsTable initial={documents} clients={clients} variant="documentos" />
-      ) : null}
+      <div className="info-content">
+        {section === "documentos" ? (
+          <DocumentsTable initial={documents} clients={clients} variant="documentos" />
+        ) : null}
 
-      {section === "trilhas" ? (
-        <DocumentsTable initial={documents} clients={clients} variant="trilhas" />
-      ) : null}
+        {section === "trilhas" ? (
+          <DocumentsTable initial={documents} clients={clients} variant="trilhas" />
+        ) : null}
 
-      {section === "onboarding" ? (
-        <div className="info-section-centered info-onboarding-wide">
-          <div className="info-panel">
-            <div className="info-section-head">
-              <p className="info-eyebrow">Onboarding</p>
-              <h2>Etapas por cliente</h2>
+        {section === "onboarding" ? (
+          <div className="info-section-centered info-onboarding-wide">
+            <div className="info-panel info-onboarding-panel">
+              <div className="info-section-head">
+                <p className="info-eyebrow">Onboarding</p>
+                <h2>Pipeline de clientes</h2>
+              </div>
+              <ClientPipelineBoard clients={clientRows} />
+
+              <div className="info-section-head info-onboarding-etapas-head">
+                <h2>Etapas por cliente</h2>
+              </div>
+              <OnboardingTable rows={briefings} />
             </div>
-            <OnboardingTable rows={briefings} />
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </>
   );
 }

@@ -4,12 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ClientSearchBar, { clientMatchesFilters, type ClientActiveFilter } from "./ClientSearchBar";
-import { STAGE_LABEL, STAGE_ORDER, type ClientStage } from "./clientPipeline";
+import type { ClientStage } from "./clientPipeline";
 import type { AdminClientSummary } from "@/lib/supabase";
 
 export type ClientRow = AdminClientSummary & { checkpointsPct: number; stage: ClientStage };
-
-type View = "lista" | "pipeline";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -34,7 +32,6 @@ function formatDate(value: string | null): string {
 // plus the new Desabilitado attribute for the soft-delete feature.
 export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
   const router = useRouter();
-  const [view, setView] = useState<View>("lista");
   const [q, setQ] = useState("");
   const [filters, setFilters] = useState<ClientActiveFilter[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -79,18 +76,13 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
   return (
     <>
       <div className="cli-toolbar">
-        <div className="kb-modetoggle">
-          <button className={view === "lista" ? "on" : ""} onClick={() => setView("lista")}>Lista</button>
-          <button className={view === "pipeline" ? "on" : ""} onClick={() => setView("pipeline")}>Pipeline</button>
-        </div>
         <ClientSearchBar q={q} onQChange={setQ} filters={filters} onFiltersChange={setFilters} />
         {msg ? <span className="set-msg">{msg}</span> : null}
         <div className="kb-spacer" />
         <Link href="/admin/novo" className="admin-btn primary kb-newtask-btn">+ Novo cliente</Link>
       </div>
 
-      {view === "lista" ? (
-        <div className="admin-table-wrap">
+      <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
               <tr>
@@ -150,44 +142,7 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
               ) : null}
             </tbody>
           </table>
-        </div>
-      ) : (
-        <div className="cli-pipeline">
-          {STAGE_ORDER.map((stage) => {
-            const stageClients = filtered.filter((c) => c.stage === stage);
-            return (
-              <div className="cli-pipeline-col" key={stage}>
-                <div className="kb-col-head">
-                  <span>{STAGE_LABEL[stage]}</span>
-                  <em>{stageClients.length}</em>
-                </div>
-                <div className="cli-pipeline-body">
-                  {stageClients.map((c) => (
-                    <div className="cli-card" key={c.id}>
-                      <div className="cli-card-top">
-                        <span className="admin-avatar">{initials(c.name)}</span>
-                        <span className="cli-card-name">{c.name}</span>
-                      </div>
-                      <code className="admin-slug">{c.slug}</code>
-                      <div className="cli-card-meta">
-                        <span className={`admin-pill ${c.briefing_submitted ? "on" : "muted"}`}>
-                          {c.briefing_submitted ? "Briefing enviado" : "Briefing pendente"}
-                        </span>
-                        {stage !== "criacao" ? <span className="cli-card-pct">{c.checkpointsPct}%</span> : null}
-                      </div>
-                      <div className="cli-card-actions">
-                        <Link href={`/admin/${c.slug}`} className="admin-btn ghost sm">Editar</Link>
-                        <Link href={`/${c.slug}`} className="admin-btn ghost sm" target="_blank">Portal ↗</Link>
-                      </div>
-                    </div>
-                  ))}
-                  {stageClients.length === 0 ? <p className="kb-empty">Nenhum cliente aqui</p> : null}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      </div>
     </>
   );
 }

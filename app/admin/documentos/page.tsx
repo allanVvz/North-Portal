@@ -1,14 +1,22 @@
 import { listAllBriefings, listClients, listDocuments } from "@/lib/supabase";
+import { clientStageFor } from "../clientPipeline";
+import type { ClientRow } from "../ClientsTable";
 import InformacoesWorkspace from "./InformacoesWorkspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function DocumentosPage() {
-  const [documents, clients, briefings] = await Promise.all([
+  const [documents, clientSummaries, briefings] = await Promise.all([
     listDocuments(),
-    listClients(),
+    listClients({ includeDisabled: true }),
     listAllBriefings(),
   ]);
+
+  const checkpointsBySlug = new Map(briefings.map((b) => [b.slug, b.checkpointsPct]));
+  const clientRows: ClientRow[] = clientSummaries.map((c) => {
+    const checkpointsPct = checkpointsBySlug.get(c.slug) ?? 0;
+    return { ...c, checkpointsPct, stage: clientStageFor(c.briefing_submitted, checkpointsPct) };
+  });
 
   return (
     <section className="admin-page">
@@ -21,8 +29,9 @@ export default async function DocumentosPage() {
 
       <InformacoesWorkspace
         documents={documents}
-        clients={clients.map((c) => ({ slug: c.slug, name: c.name }))}
+        clients={clientSummaries.map((c) => ({ slug: c.slug, name: c.name }))}
         briefings={briefings}
+        clientRows={clientRows}
       />
     </section>
   );

@@ -186,7 +186,14 @@ export default function DocumentsTable({
       {isTrilhas ? (
         <div className="doc-grid">
           {rows.map((d) => (
-            <button type="button" className="doc-grid-card" key={d.id} onClick={() => setPreviewDoc(d)}>
+            <div
+              className="doc-grid-card"
+              key={d.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setPreviewDoc(d)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPreviewDoc(d); } }}
+            >
               <span className="doc-ico">{fileTypeLabel(d)}</span>
               <strong>{d.name}</strong>
               <span className="doc-client"><span className="doc-avatar">{initials(d.clientName)}</span>{d.clientName}</span>
@@ -198,7 +205,7 @@ export default function DocumentsTable({
               >
                 Editar
               </button>
-            </button>
+            </div>
           ))}
           {rows.length === 0 ? <p className="admin-empty">Nenhuma trilha enviada ainda.</p> : null}
         </div>
