@@ -4,14 +4,18 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import MixDonut from "./charts/MixDonut";
 import PostsBarChart from "./charts/PostsBarChart";
 import TrendChart from "./charts/TrendChart";
+import CustomMetricsPanel from "./CustomMetricsPanel";
+import DateRangeField from "../DateRangeField";
+import PerformanceFilterBar, { type PerfActiveFilter, type PerfCategory } from "./PerformanceFilterBar";
 import {
-  adSummaries, campaignMetricValue, campaignSummaries, DASH_METRICS, engagementMix, filterPosts, fmtCompact,
-  hasMetric, inPeriod, kpiSummaryFromSlots, metricLabel, previousPeriod, sortCampaigns, topCampaigns, trendSeries,
+  DASH_METRICS, adSummaries, campaignMetricValue, campaignSummaries, engagementMix, filterPosts, fmtCompact,
+  hasMetric, inPeriod, metricRefAvailable, metricRefLabel, previousPeriod, resolveMetricValue, sortCampaigns,
+  topCampaigns, trendSeries,
   type AdSummary, type CampaignSummary, type Period,
 } from "./insights";
 import {
-  CAMPAIGN_METRIC_COLUMNS, PERFORMANCE_VIEW_PREFS_DEFAULT,
-  type PeriodPreset, type PerformanceViewPrefs, type SortDir,
+  CAMPAIGN_METRIC_COLUMNS, PERFORMANCE_VIEW_PREFS_DEFAULT, isCustomMetricRef,
+  type CustomMetric, type KpiSlot, type MetricRef, type PeriodPreset, type PerformanceViewPrefs, type SortDir,
 } from "@/lib/performancePrefs";
 import type { MetaPlatform, MetaPost, MetaPostMetricKey, WindsorDatasource } from "@/lib/windsor";
 
@@ -25,6 +29,7 @@ type InsightsResponse = {
   fetchedAt: string | null;
 };
 type AdRowsState = { loading: boolean; error: string; ads: AdSummary[] };
+type AmbosSource = "paid" | "organic";
 
 const PLATFORM_LABEL: Record<MetaPlatform, string> = {
   instagram: "Instagram",
@@ -54,6 +59,7 @@ const COLUMN_KIND: Partial<Record<MetaPostMetricKey, "money" | "percent" | "deci
 };
 
 const PAGE_SIZE = 25;
+const DATE_PRESETS = [7, 30, 90];
 
 const isoDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -62,13 +68,6 @@ function presetPeriod(days: PeriodPreset): Period {
   const today = new Date();
   const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
   return { from: isoDay(from), to: isoDay(today) };
-}
-
-// The insights route always fetches/caches a trailing 90-day window — a
-// custom range starting earlier than that will come back empty.
-function earliestCachedDay(): string {
-  const today = new Date();
-  return isoDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 89));
 }
 
 function platformTone(platform: MetaPlatform): string {
@@ -95,13 +94,19 @@ function csvCell(value: string): string {
   return /[;"\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
+function metricRefOptions(posts: MetaPost[], customMetrics: CustomMetric[]): { ref: MetricRef; label: string }[] {
+  const built = DASH_METRICS.filter((m) => hasMetric(posts, m.key)).map((m) => ({ ref: m.key as MetricRef, label: m.label }));
+  const customs = customMetrics
+    .filter((m) => metricRefAvailable(posts, `custom:${m.id}`, customMetrics))
+    .map((m) => ({ ref: `custom:${m.id}` as MetricRef, label: m.label }));
+  return [...built, ...customs];
+}
+
 export default function PerformanceDashboard({ clients, canEdit }: { clients: ClientLite[]; canEdit: boolean }) {
   const [preset, setPreset] = useState<PeriodPreset>(PERFORMANCE_VIEW_PREFS_DEFAULT.defaultPeriod);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [clientFilter, setClientFilter] = useState("");
-  const [platform, setPlatform] = useState<"" | MetaPlatform>("");
-  const [metric, setMetric] = useState<MetaPostMetricKey>("engajamento");
+  const [filters, setFilters] = useState<PerfActiveFilter[]>([]);
   const [data, setData] = useState<InsightsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -114,6 +119,19 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adRows, setAdRows] = useState<Record<string, AdRowsState>>({});
 
+  const [kpiSlots, setKpiSlots] = useState<KpiSlot[]>(PERFORMANCE_VIEW_PREFS_DEFAULT.kpiSlots);
+  const [kpiMenuOpen, setKpiMenuOpen] = useState(false);
+  const [trendMetric, setTrendMetric] = useState<MetricRef>(PERFORMANCE_VIEW_PREFS_DEFAULT.trendMetric);
+  const [topCampaignsMetric, setTopCampaignsMetric] = useState<MetricRef>(PERFORMANCE_VIEW_PREFS_DEFAULT.topCampaignsMetric);
+  const [mixMetric, setMixMetric] = useState<[MetricRef, MetricRef, MetricRef, MetricRef]>(PERFORMANCE_VIEW_PREFS_DEFAULT.mixMetric);
+  const [mixMenuOpen, setMixMenuOpen] = useState(false);
+  const [customMetrics, setCustomMetrics] = useState<CustomMetric[]>(PERFORMANCE_VIEW_PREFS_DEFAULT.customMetrics);
+  const [customMetricsOpen, setCustomMetricsOpen] = useState(false);
+  // "Ambos" per-card Pago/Orgânico toggle — session-only (not persisted),
+  // keyed by a small card id ("trend"/"mix"/"kpi:<metric>"). Missing entry
+  // defaults to "paid" — every card starts on Pago when Ambos is selected.
+  const [ambosSource, setAmbosSource] = useState<Record<string, AmbosSource>>({});
+
   const prefsAppliedRef = useRef(false);
   const pendingPrefsPatchRef = useRef<Partial<PerformanceViewPrefs>>({});
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,6 +142,10 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
     [customRangeValid, customFrom, customTo, preset],
   );
   const prevPeriodRange = useMemo(() => previousPeriod(period), [period]);
+
+  const clientFilterValue = useMemo(() => filters.find((f) => f.attr === "cliente")?.value ?? "", [filters]);
+  const category = useMemo<PerfCategory>(() => (filters.find((f) => f.attr === "categoria")?.value as PerfCategory) ?? "ads", [filters]);
+  const platformFilterValue = useMemo(() => (filters.find((f) => f.attr === "rede")?.value as MetaPlatform | undefined) ?? "", [filters]);
 
   // Shared prefs (site_settings, gerente-editable) — applied once on load so
   // a later refetch (e.g. after a gerente elsewhere changes them) doesn't
@@ -140,6 +162,11 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
         setSortDir(body.sortDir);
         setVisibleColumns(body.visibleColumns);
         setPreset(body.defaultPeriod);
+        setKpiSlots(body.kpiSlots);
+        setTrendMetric(body.trendMetric);
+        setTopCampaignsMetric(body.topCampaignsMetric);
+        setMixMetric(body.mixMetric);
+        setCustomMetrics(body.customMetrics);
       } catch {
         // Shared prefs are an enhancement — defaults already rendered.
       }
@@ -166,7 +193,7 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
     setError("");
     try {
       const params = new URLSearchParams({ from: prevPeriodRange.from, to: period.to });
-      if (clientFilter) params.set("client", clientFilter);
+      if (clientFilterValue) params.set("client", clientFilterValue);
       if (refresh) params.set("refresh", "1");
       const res = await fetch(`/api/admin/performance/insights?${params}`, { cache: "no-store" });
       const body = await res.json();
@@ -176,52 +203,85 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
       setError(e instanceof Error && e.message ? e.message : "Não foi possível carregar os dados.");
     }
     setLoading(false);
-  }, [prevPeriodRange.from, period.to, clientFilter]);
+  }, [prevPeriodRange.from, period.to, clientFilterValue]);
 
   useEffect(() => { void load(); }, [load]);
 
   const paidConnected = Boolean(data?.datasources.facebook) || Boolean(data?.datasources.meta_ads) || Boolean(data?.demo);
   const paidRows = useMemo(() => data?.posts.filter((p) => p.source === "paid") ?? [], [data]);
+  const organicRows = useMemo(() => data?.posts.filter((p) => p.source === "organic") ?? [], [data]);
   const platformOptions = useMemo(
-    () => [...new Set(paidRows.map((p) => p.platform))].sort((a, b) => PLATFORM_LABEL[a].localeCompare(PLATFORM_LABEL[b], "pt-BR")),
-    [paidRows],
+    () => [...new Set((data?.posts ?? []).map((p) => p.platform))].sort((a, b) => PLATFORM_LABEL[a].localeCompare(PLATFORM_LABEL[b], "pt-BR")),
+    [data],
   );
   useEffect(() => {
-    if (platform && !platformOptions.includes(platform)) setPlatform("");
-  }, [platform, platformOptions]);
+    if (platformFilterValue && !platformOptions.includes(platformFilterValue)) {
+      setFilters((f) => f.filter((x) => x.attr !== "rede"));
+    }
+  }, [platformFilterValue, platformOptions]);
 
-  const currentRows = useMemo(() => {
-    const base = paidRows.filter((p) => inPeriod(p, period));
-    return filterPosts(base, { platform: platform || undefined });
-  }, [paidRows, period, platform]);
-
-  const prevRows = useMemo(() => {
-    const base = paidRows.filter((p) => inPeriod(p, prevPeriodRange));
-    return filterPosts(base, { platform: platform || undefined });
-  }, [paidRows, prevPeriodRange, platform]);
-
-  const availableMetrics = useMemo(
-    () => DASH_METRICS.filter((m) => hasMetric(currentRows, m.key)),
-    [currentRows],
+  const currentPaidRows = useMemo(
+    () => filterPosts(paidRows.filter((p) => inPeriod(p, period)), { platform: platformFilterValue || undefined }),
+    [paidRows, period, platformFilterValue],
   );
+  const prevPaidRows = useMemo(
+    () => filterPosts(paidRows.filter((p) => inPeriod(p, prevPeriodRange)), { platform: platformFilterValue || undefined }),
+    [paidRows, prevPeriodRange, platformFilterValue],
+  );
+  const currentOrganicRows = useMemo(
+    () => filterPosts(organicRows.filter((p) => inPeriod(p, period)), { platform: platformFilterValue || undefined }),
+    [organicRows, period, platformFilterValue],
+  );
+  const prevOrganicRows = useMemo(
+    () => filterPosts(organicRows.filter((p) => inPeriod(p, prevPeriodRange)), { platform: platformFilterValue || undefined }),
+    [organicRows, prevPeriodRange, platformFilterValue],
+  );
+
+  // Which row set a given card should read from — "Categoria: Ads/Orgânico"
+  // is uniform for every card; "Ambos" defers to that card's own toggle
+  // (default Pago) so paid and organic numbers never get summed together.
+  const rowsFor = useCallback((cardKey: string): { current: MetaPost[]; prev: MetaPost[] } => {
+    if (category === "organico") return { current: currentOrganicRows, prev: prevOrganicRows };
+    if (category === "ambos") {
+      const source = ambosSource[cardKey] ?? "paid";
+      return source === "paid" ? { current: currentPaidRows, prev: prevPaidRows } : { current: currentOrganicRows, prev: prevOrganicRows };
+    }
+    return { current: currentPaidRows, prev: prevPaidRows };
+  }, [category, ambosSource, currentPaidRows, prevPaidRows, currentOrganicRows, prevOrganicRows]);
+
+  function setAmbosCardSource(cardKey: string, source: AmbosSource) {
+    setAmbosSource((m) => ({ ...m, [cardKey]: source }));
+  }
+
+  // Trend/Mix can independently read paid or organic (Ambos), so their pill/
+  // select lists show a metric if it's available in EITHER row set. Top
+  // campanhas and the Campanhas table are always paid — "campanha" is an ads
+  // concept — so they use a paid-only option list.
+  const allCurrentRows = useMemo(() => [...currentPaidRows, ...currentOrganicRows], [currentPaidRows, currentOrganicRows]);
+  const metricPillOptions = useMemo(() => metricRefOptions(allCurrentRows, customMetrics), [allCurrentRows, customMetrics]);
+  const paidMetricPillOptions = useMemo(() => metricRefOptions(currentPaidRows, customMetrics), [currentPaidRows, customMetrics]);
+
   useEffect(() => {
-    if (availableMetrics.length && !availableMetrics.some((m) => m.key === metric)) setMetric(availableMetrics[0].key);
-  }, [availableMetrics, metric]);
+    if (metricPillOptions.length && !metricPillOptions.some((m) => m.ref === trendMetric)) setTrendMetric(metricPillOptions[0].ref);
+  }, [metricPillOptions, trendMetric]);
+  useEffect(() => {
+    if (paidMetricPillOptions.length && !paidMetricPillOptions.some((m) => m.ref === topCampaignsMetric)) {
+      setTopCampaignsMetric(paidMetricPillOptions[0].ref);
+    }
+  }, [paidMetricPillOptions, topCampaignsMetric]);
 
-  const kpis = useMemo(
-    () => kpiSummaryFromSlots(currentRows, prevRows, PERFORMANCE_VIEW_PREFS_DEFAULT.kpiSlots, []),
-    [currentRows, prevRows],
-  );
-  const trend = useMemo(() => trendSeries(currentRows, metric, period), [currentRows, metric, period]);
-  const top = useMemo(() => topCampaigns(currentRows, metric, 8), [currentRows, metric]);
-  const mix = useMemo(() => engagementMix(currentRows), [currentRows]);
+  const trendRows = rowsFor("trend");
+  const mixRows = rowsFor("mix");
+  const trend = useMemo(() => trendSeries(trendRows.current, trendMetric, period, customMetrics), [trendRows.current, trendMetric, period, customMetrics]);
+  const top = useMemo(() => topCampaigns(currentPaidRows, topCampaignsMetric, 8, customMetrics), [currentPaidRows, topCampaignsMetric, customMetrics]);
+  const mix = useMemo(() => engagementMix(mixRows.current, mixMetric, customMetrics), [mixRows.current, mixMetric, customMetrics]);
 
   const campaignsAll = useMemo(
-    () => sortCampaigns(campaignSummaries(currentRows), sortKey, sortDir),
-    [currentRows, sortKey, sortDir],
+    () => sortCampaigns(campaignSummaries(currentPaidRows), sortKey, sortDir),
+    [currentPaidRows, sortKey, sortDir],
   );
   const campaigns = useMemo(() => campaignsAll.slice(0, visibleCount), [campaignsAll, visibleCount]);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [period.from, period.to, clientFilter, platform]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [period.from, period.to, clientFilterValue, platformFilterValue]);
 
   const columns = useMemo(
     () => CAMPAIGN_METRIC_COLUMNS.filter((c) => visibleColumns.includes(c.key)),
@@ -235,9 +295,9 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
     persistPrefs({ defaultPeriod: days });
   }
 
-  function clearCustomRange() {
-    setCustomFrom("");
-    setCustomTo("");
+  function setCustomRange(from: string, to: string) {
+    setCustomFrom(from);
+    setCustomTo(to);
   }
 
   function toggleSort(key: MetaPostMetricKey) {
@@ -254,6 +314,59 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
       persistPrefs({ visibleColumns: ordered });
       return ordered;
     });
+  }
+
+  function isKpiActive(ref: MetricRef): boolean {
+    return kpiSlots.some((s) => s.metric === ref && s.visible);
+  }
+  function toggleKpiMetric(ref: MetricRef) {
+    setKpiSlots((slots) => {
+      const idx = slots.findIndex((s) => s.metric === ref);
+      const next = idx === -1
+        ? [...slots, { visible: true, metric: ref }]
+        : slots.map((s, i) => (i === idx ? { ...s, visible: !s.visible } : s));
+      persistPrefs({ kpiSlots: next });
+      return next;
+    });
+  }
+
+  function pickTrendMetric(ref: MetricRef) { setTrendMetric(ref); persistPrefs({ trendMetric: ref }); }
+  function pickTopCampaignsMetric(ref: MetricRef) { setTopCampaignsMetric(ref); persistPrefs({ topCampaignsMetric: ref }); }
+  function pickMixMetric(index: 0 | 1 | 2 | 3, ref: MetricRef) {
+    setMixMetric((current) => {
+      const next = [...current] as [MetricRef, MetricRef, MetricRef, MetricRef];
+      next[index] = ref;
+      persistPrefs({ mixMetric: next });
+      return next;
+    });
+  }
+
+  function saveCustomMetric(newMetric: CustomMetric) {
+    setCustomMetrics((current) => {
+      const next = [...current, newMetric];
+      persistPrefs({ customMetrics: next });
+      return next;
+    });
+  }
+  function deleteCustomMetric(id: string) {
+    const ref: MetricRef = `custom:${id}`;
+    const patch: Partial<PerformanceViewPrefs> = {};
+    setCustomMetrics((current) => {
+      patch.customMetrics = current.filter((m) => m.id !== id);
+      return patch.customMetrics;
+    });
+    setKpiSlots((slots) => {
+      patch.kpiSlots = slots.filter((s) => s.metric !== ref);
+      return patch.kpiSlots;
+    });
+    if (trendMetric === ref) { setTrendMetric(PERFORMANCE_VIEW_PREFS_DEFAULT.trendMetric); patch.trendMetric = PERFORMANCE_VIEW_PREFS_DEFAULT.trendMetric; }
+    if (topCampaignsMetric === ref) { setTopCampaignsMetric(PERFORMANCE_VIEW_PREFS_DEFAULT.topCampaignsMetric); patch.topCampaignsMetric = PERFORMANCE_VIEW_PREFS_DEFAULT.topCampaignsMetric; }
+    if (mixMetric.includes(ref)) {
+      const nextMix = mixMetric.map((m, i) => (m === ref ? PERFORMANCE_VIEW_PREFS_DEFAULT.mixMetric[i] : m)) as [MetricRef, MetricRef, MetricRef, MetricRef];
+      setMixMetric(nextMix);
+      patch.mixMetric = nextMix;
+    }
+    persistPrefs(patch);
   }
 
   function exportCsv() {
@@ -309,35 +422,37 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
     }
   }
 
+  function AmbosToggle({ cardKey }: { cardKey: string }) {
+    if (category !== "ambos") return null;
+    const source = ambosSource[cardKey] ?? "paid";
+    return (
+      <div className="perf-ambos-toggle" role="group" aria-label="Fonte dos dados">
+        <button type="button" className={source === "paid" ? "on" : ""} onClick={() => setAmbosCardSource(cardKey, "paid")}>Pago</button>
+        <button type="button" className={source === "organic" ? "on" : ""} onClick={() => setAmbosCardSource(cardKey, "organic")}>Orgânico</button>
+      </div>
+    );
+  }
+
   return (
     <div className="perf-dash">
       <div className="perf-filters">
-        <div className="kb-modetoggle">
-          {([7, 30, 90] as PeriodPreset[]).map((d) => (
-            <button key={d} className={!customRangeValid && preset === d ? "on" : ""} onClick={() => choosePreset(d)}>{d} dias</button>
-          ))}
-        </div>
-        <div className="perf-daterange">
-          <input type="date" aria-label="Período customizado: de" value={customFrom} min={earliestCachedDay()} max={isoDay(new Date())} onChange={(e) => setCustomFrom(e.target.value)} />
-          <span>até</span>
-          <input type="date" aria-label="Período customizado: até" value={customTo} min={customFrom || earliestCachedDay()} max={isoDay(new Date())} onChange={(e) => setCustomTo(e.target.value)} />
-          {customRangeValid ? <button className="admin-btn ghost small" onClick={clearCustomRange}>Limpar</button> : null}
-        </div>
-        <select className="perf-select" value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>
-          <option value="">Todos os clientes</option>
-          {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-        </select>
-        <div className="kb-modetoggle" aria-label="Filtrar anúncios por plataforma">
-          <button className={platform === "" ? "on" : ""} onClick={() => setPlatform("")}>Todas</button>
-          {platformOptions.map((item) => (
-            <button key={item} className={platform === item ? "on" : ""} onClick={() => setPlatform(item)}>
-              {PLATFORM_LABEL[item]}
-            </button>
-          ))}
-        </div>
+        <DateRangeField
+          from={period.from}
+          to={period.to}
+          onChange={setCustomRange}
+          presets={DATE_PRESETS}
+          activePreset={customRangeValid ? null : preset}
+          onPreset={(days) => choosePreset(days as PeriodPreset)}
+        />
+        <PerformanceFilterBar
+          clients={clients}
+          platformOptions={platformOptions}
+          platformLabel={PLATFORM_LABEL}
+          filters={filters}
+          onFiltersChange={setFilters}
+        />
         <span className={`kb-loadspin ${loading ? "on" : ""}`} role="status" aria-hidden={!loading} />
         <div className="kb-spacer" />
-        <span className="perf-source-chip">Meta Ads</span>
         {data?.demo ? <span className="perf-demo-chip">Dados de demonstração</span> : null}
         {data?.stale ? <span className="perf-demo-chip perf-stale-chip" title={data.error}>Dados desatualizados</span> : null}
         <button className="admin-btn ghost" onClick={() => void load(true)} disabled={loading || Boolean(data?.demo)}>
@@ -348,55 +463,129 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
       {error ? <p className="admin-error">{error}</p> : null}
       {!loading && !error && !paidConnected ? <p className="admin-error">Conecte uma conta Meta Ads para carregar dados pagos reais.</p> : null}
 
+      <div className="perf-kpis-head">
+        <p className="perf-kpis-title">KPIs</p>
+        <div className="perf-kpis-head-actions">
+          <button className="admin-btn ghost small" onClick={() => setCustomMetricsOpen(true)}>+ Métrica personalizada</button>
+          <div className="perf-columns-menu">
+            <button className="admin-btn ghost small" onClick={() => setKpiMenuOpen((v) => !v)}>⚙ KPIs</button>
+            {kpiMenuOpen ? (
+              <div className="perf-columns-dropdown">
+                {DASH_METRICS.map((m) => (
+                  <label key={m.key} className="perf-columns-item">
+                    <input type="checkbox" checked={isKpiActive(m.key)} onChange={() => toggleKpiMetric(m.key)} />
+                    {m.label}
+                  </label>
+                ))}
+                {customMetrics.length ? <hr className="perf-columns-sep" /> : null}
+                {customMetrics.map((m) => (
+                  <label key={m.id} className="perf-columns-item">
+                    <input type="checkbox" checked={isKpiActive(`custom:${m.id}`)} onChange={() => toggleKpiMetric(`custom:${m.id}`)} />
+                    {m.label}
+                  </label>
+                ))}
+                <button className="admin-btn ghost small perf-columns-close" onClick={() => setKpiMenuOpen(false)}>Fechar</button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
       <div className="perf-kpis">
-        {kpis.map((k) => {
-          const available = k.available;
+        {kpiSlots.filter((s) => s.visible).map((slot, idx) => {
+          const cardKey = `kpi:${slot.metric}`;
+          const rows = rowsFor(cardKey);
+          const available = metricRefAvailable(rows.current, slot.metric, customMetrics);
+          const value = resolveMetricValue(rows.current, slot.metric, customMetrics);
+          const before = resolveMetricValue(rows.prev, slot.metric, customMetrics);
+          const delta = before > 0 ? Math.round(((value - before) / before) * 100) : null;
           return (
-            <div className="perf-kpi" key={k.metric}>
-              <span className="perf-kpi-label">{k.label}</span>
+            <div className="perf-kpi" key={`${slot.metric}-${idx}`}>
+              <div className="perf-kpi-headrow">
+                <span className="perf-kpi-label">{metricRefLabel(slot.metric, customMetrics)}</span>
+                <button type="button" className="perf-kpi-hide" aria-label={`Esconder KPI ${metricRefLabel(slot.metric, customMetrics)}`} onClick={() => toggleKpiMetric(slot.metric)}>✕</button>
+              </div>
               <strong className="perf-kpi-value">
-                {available ? metricValue(k.value, k.metric === "custo" ? "money" : "number", currentRows[0]?.currency) : "—"}
+                {available ? metricValue(value, !isCustomMetricRef(slot.metric) && slot.metric === "custo" ? "money" : "number", rows.current[0]?.currency) : "—"}
               </strong>
-              {available && k.delta !== null ? (
-                <span className={`perf-kpi-delta ${k.delta >= 0 ? "up" : "down"}`}>
-                  {k.delta >= 0 ? "▲" : "▼"} {Math.abs(k.delta)}% vs período anterior
+              {available && delta !== null ? (
+                <span className={`perf-kpi-delta ${delta >= 0 ? "up" : "down"}`}>
+                  {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}% vs período anterior
                 </span>
               ) : (
                 <span className="perf-kpi-delta muted">— sem comparação disponível</span>
               )}
+              <AmbosToggle cardKey={cardKey} />
             </div>
           );
         })}
+        {kpiSlots.every((s) => !s.visible) ? <p className="perf-empty">Nenhum KPI selecionado — use "⚙ KPIs" para escolher.</p> : null}
       </div>
 
       <div className="perf-card perf-trend">
         <div className="perf-card-head">
           <div><h3>Tendência diária dos anúncios</h3><p className="perf-card-sub">Somente dados pagos retornados pela Meta.</p></div>
           <div className="perf-metric-pills">
-            {availableMetrics.map((m) => (
-              <button key={m.key} className={`kb-chip ${metric === m.key ? "on" : ""}`} onClick={() => setMetric(m.key)}>
+            {metricPillOptions.map((m) => (
+              <button key={m.ref} className={`kb-chip ${trendMetric === m.ref ? "on" : ""}`} onClick={() => pickTrendMetric(m.ref)}>
                 {m.label}
               </button>
             ))}
           </div>
         </div>
-        <TrendChart data={trend} label={metricLabel(metric)} />
+        <AmbosToggle cardKey="trend" />
+        <TrendChart data={trend} label={metricRefLabel(trendMetric, customMetrics)} />
       </div>
 
       <div className="perf-two-up">
         <div className="perf-card">
-          <div className="perf-card-head"><h3>Top campanhas · {metricLabel(metric)}</h3></div>
-          {top.length ? <PostsBarChart posts={top.map((c) => ({ key: c.key, caption: c.caption, platform: c.platform, value: campaignMetricValue(c, metric, []) }))} label={metricLabel(metric)} /> : <p className="perf-empty">Sem campanhas com essa métrica no período.</p>}
+          <div className="perf-card-head">
+            <div><h3>Top campanhas · {metricRefLabel(topCampaignsMetric, customMetrics)}</h3>{category !== "ads" ? <p className="perf-card-sub">Campanha é um conceito de mídia paga — esta lista continua sempre em Ads.</p> : null}</div>
+            <div className="perf-metric-pills">
+              {paidMetricPillOptions.map((m) => (
+                <button key={m.ref} className={`kb-chip ${topCampaignsMetric === m.ref ? "on" : ""}`} onClick={() => pickTopCampaignsMetric(m.ref)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {top.length ? <PostsBarChart posts={top.map((c) => ({ key: c.key, caption: c.caption, platform: c.platform, value: campaignMetricValue(c, topCampaignsMetric, customMetrics) }))} label={metricRefLabel(topCampaignsMetric, customMetrics)} /> : <p className="perf-empty">Sem campanhas com essa métrica no período.</p>}
         </div>
         <div className="perf-card">
-          <div className="perf-card-head"><h3>Engajamento dos anúncios</h3></div>
+          <div className="perf-card-head">
+            <h3>Engajamento dos anúncios</h3>
+            <div className="perf-columns-menu">
+              <button className="admin-btn ghost small" onClick={() => setMixMenuOpen((v) => !v)}>⚙ Métricas</button>
+              {mixMenuOpen ? (
+                <div className="perf-columns-dropdown perf-mix-dropdown">
+                  {([0, 1, 2, 3] as const).map((i) => (
+                    <label key={i} className="perf-mix-slot">
+                      <span>Fatia {i + 1}</span>
+                      <select value={mixMetric[i]} onChange={(e) => pickMixMetric(i, e.target.value as MetricRef)}>
+                        {DASH_METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                        {customMetrics.map((m) => <option key={m.id} value={`custom:${m.id}`}>{m.label}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                  <button className="admin-btn ghost small perf-columns-close" onClick={() => setMixMenuOpen(false)}>Fechar</button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <AmbosToggle cardKey="mix" />
           {mix.length ? <MixDonut slices={mix} /> : <p className="perf-empty">A Meta não retornou interações no período.</p>}
         </div>
       </div>
 
       <div className="perf-card">
         <div className="perf-card-head">
-          <div><h3>Campanhas</h3><p className="perf-card-sub">{campaignsAll.length} campanha{campaignsAll.length === 1 ? "" : "s"} por plataforma no período</p></div>
+          <div>
+            <h3>Campanhas</h3>
+            <p className="perf-card-sub">
+              {campaignsAll.length} campanha{campaignsAll.length === 1 ? "" : "s"} por plataforma no período
+              {category !== "ads" ? " · sempre em Ads (campanha é um conceito de mídia paga)" : ""}
+            </p>
+          </div>
           <div className="perf-table-actions">
             <div className="perf-columns-menu">
               <button className="admin-btn ghost small" onClick={() => setColumnsMenuOpen((v) => !v)}>Colunas ({columns.length})</button>
@@ -500,6 +689,14 @@ export default function PerformanceDashboard({ clients, canEdit }: { clients: Cl
           </div>
         ) : null}
       </div>
+
+      <CustomMetricsPanel
+        open={customMetricsOpen}
+        onClose={() => setCustomMetricsOpen(false)}
+        customMetrics={customMetrics}
+        onSave={saveCustomMetric}
+        onDelete={deleteCustomMetric}
+      />
     </div>
   );
 }
