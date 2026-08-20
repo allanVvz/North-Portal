@@ -21,6 +21,9 @@ export const DASH_METRICS: { key: MetaPostMetricKey; label: string; paidOnly: bo
   { key: "cliques", label: "Cliques (todos)", paidOnly: true },
   { key: "cliquesLink", label: "Cliques no link", paidOnly: true },
   { key: "landingPageViews", label: "Visitas à página", paidOnly: true },
+  { key: "profileVisits", label: "Visitas ao perfil", paidOnly: false },
+  { key: "followers", label: "Seguidores", paidOnly: false },
+  { key: "followersGained", label: "Novos seguidores", paidOnly: false },
   { key: "mensagens", label: "Conversas iniciadas", paidOnly: true },
   { key: "leads", label: "Leads", paidOnly: true },
   { key: "compras", label: "Compras", paidOnly: true },
@@ -311,6 +314,49 @@ export function adSummaries(posts: MetaPost[]): AdSummary[] {
   }
   for (const row of byKey.values()) recomputeRatios(row.metrics);
   return Array.from(byKey.values()).sort((a, b) => (b.metrics.custo ?? 0) - (a.metrics.custo ?? 0));
+}
+
+export type PerformanceEntitySummary = {
+  key: string;
+  id: string;
+  name: string;
+  level: "adset" | "ad";
+  accountId: string;
+  accountName: string;
+  campaignId: string;
+  campaignName: string;
+  adsetId?: string;
+  adsetName?: string;
+  platform: MetaPost["platform"];
+  thumbnailUrl: string | null;
+  objective?: string;
+  currency?: string;
+  metrics: Partial<Record<MetaPostMetricKey, number>>;
+};
+
+export function performanceEntitySummaries(posts: MetaPost[], level: "adset" | "ad"): PerformanceEntitySummary[] {
+  const byKey = new Map<string, PerformanceEntitySummary>();
+  for (const post of posts) {
+    if (post.source !== "paid") continue;
+    const id = level === "adset" ? post.adsetId : post.adId;
+    if (!id) continue;
+    const key = `${post.accountId}:${id}:${post.platform}`;
+    let row = byKey.get(key);
+    if (!row) {
+      row = {
+        key, id, level, accountId: post.accountId, accountName: post.accountName,
+        campaignId: post.campaignId ?? "", campaignName: post.campaignName ?? post.campaignId ?? "—",
+        adsetId: post.adsetId, adsetName: post.adsetName,
+        name: level === "adset" ? post.adsetName ?? post.caption : post.adName ?? post.caption,
+        platform: post.platform, thumbnailUrl: post.thumbnailUrl ?? null,
+        objective: post.objective, currency: post.currency, metrics: {},
+      };
+      byKey.set(key, row);
+    }
+    sumMetricsInto(row.metrics, post.metrics);
+  }
+  for (const row of byKey.values()) recomputeRatios(row.metrics);
+  return [...byKey.values()].sort((a, b) => (b.metrics.custo ?? 0) - (a.metrics.custo ?? 0));
 }
 
 export type MixSlice = { key: MetricRef; label: string; value: number };

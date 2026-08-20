@@ -23,6 +23,8 @@ export const CAMPAIGN_METRIC_COLUMNS: { key: MetaPostMetricKey; label: string }[
   { key: "videoViews", label: "Views vídeo" },
   { key: "cliquesLink", label: "Cliques link" },
   { key: "landingPageViews", label: "Visitas página" },
+  { key: "profileVisits", label: "Visitas ao perfil" },
+  { key: "followersGained", label: "Novos seguidores" },
   { key: "mensagens", label: "Conversas" },
   { key: "leads", label: "Leads" },
   { key: "compras", label: "Compras" },
@@ -42,6 +44,7 @@ const ALL_METRIC_KEYS: MetaPostMetricKey[] = [
   "salvos", "engajamento", "videoViews", "cliques", "ctr", "custo",
   "cpc", "cpm", "frequencia", "cliquesUnicos", "cliquesLink",
   "landingPageViews", "leads", "compras", "mensagens", "conversoes",
+  "profileVisits", "followers", "followersGained",
 ];
 const VALID_METRIC_KEYS = new Set(ALL_METRIC_KEYS);
 const VALID_COLUMN_KEYS = new Set(CAMPAIGN_METRIC_COLUMNS.map((c) => c.key));
@@ -50,12 +53,14 @@ const VALID_PERIODS = new Set<PeriodPreset>([7, 30, 90]);
 // ---- Configurable metrics (KPI cards + Tendência/Top campanhas/Engajamento) ----
 
 export type CustomMetricOp = "+" | "-" | "×" | "÷";
+export type CustomMetricFormat = "number" | "money" | "percent";
 export type CustomMetric = {
   id: string;
   label: string;
   a: MetaPostMetricKey;
   b: MetaPostMetricKey;
   op: CustomMetricOp;
+  format?: CustomMetricFormat;
 };
 // A built-in metric key, or a reference to one of PerformanceViewPrefs's own
 // customMetrics by id. Operands of a CustomMetric are always built-in keys —
@@ -131,7 +136,8 @@ export function sanitizePerformanceViewPrefs(raw: unknown): PerformanceViewPrefs
         && typeof m.label === "string" && m.label.trim().length > 0 && m.label.length <= 60
         && VALID_METRIC_KEYS.has(m.a as MetaPostMetricKey)
         && VALID_METRIC_KEYS.has(m.b as MetaPostMetricKey)
-        && (["+", "-", "×", "÷"] as CustomMetricOp[]).includes(m.op as CustomMetricOp))
+        && (["+", "-", "×", "÷"] as CustomMetricOp[]).includes(m.op as CustomMetricOp)
+        && (m.format === undefined || (["number", "money", "percent"] as CustomMetricFormat[]).includes(m.format)))
     : [];
   const customIds = new Set(customMetrics.map((m) => m.id));
 

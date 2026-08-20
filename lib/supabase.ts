@@ -33,8 +33,13 @@ import {
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
 import { AI_PROVIDER_SETTINGS_DEFAULT, type AiProviderSettings, type AiVendor } from "./aiProviders";
-import { META_ADS_CREATIVE_DATASOURCE, META_ADS_DATASOURCE } from "./metaInsights";
+import { META_ADS_ADSET_DATASOURCE, META_ADS_CREATIVE_DATASOURCE, META_ADS_DATASOURCE } from "./metaInsights";
 import { sanitizePerformanceViewPrefs, type PerformanceViewPrefs } from "./performancePrefs";
+import {
+  sanitizePerformanceTemplateConfig,
+  type PerformanceTemplate,
+  type PerformanceTemplateConfig,
+} from "./performanceTemplates";
 import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
@@ -2124,7 +2129,7 @@ export function maskWindsorSettings(s: WindsorSettings): MaskedWindsorSettings {
 export type InsightsCacheRow = {
   client_id: string | null;
   account_id: string;
-  datasource: WindsorDatasource | typeof META_ADS_DATASOURCE | typeof META_ADS_CREATIVE_DATASOURCE;
+  datasource: WindsorDatasource | typeof META_ADS_DATASOURCE | typeof META_ADS_CREATIVE_DATASOURCE | typeof META_ADS_ADSET_DATASOURCE;
   date_from: string;
   date_to: string;
   payload: MetaPost[];
@@ -2139,7 +2144,7 @@ export async function getCachedInsights(): Promise<InsightsCacheRow[]> {
     // Ad-level drill-down rows are fetched/cached on demand per campaign
     // (see getCachedAdCreativeInsights) — excluded here so every full
     // dashboard load doesn't also pull every expanded campaign's payload.
-    .neq("datasource", META_ADS_CREATIVE_DATASOURCE);
+    .not("datasource", "in", `(${META_ADS_CREATIVE_DATASOURCE},${META_ADS_ADSET_DATASOURCE})`);
   // An un-migrated cache table should degrade to "no cache yet", not take the
   // whole performance dashboard down with a 503.
   if (isMissingOptionalTable(error, "meta_insights_cache")) return [];
@@ -2160,12 +2165,20 @@ export async function upsertInsightsCache(row: Omit<InsightsCacheRow, "fetched_a
 // key instead of via getCachedInsights() (which excludes this datasource) so
 // expanding a campaign row costs one indexed lookup, not a full-table scan.
 export async function getCachedAdCreativeInsights(accountId: string, campaignId: string): Promise<InsightsCacheRow | null> {
+  return getCachedMetaEntityInsights(accountId, campaignId, META_ADS_CREATIVE_DATASOURCE);
+}
+
+export async function getCachedMetaEntityInsights(
+  accountId: string,
+  campaignId: string,
+  datasource: typeof META_ADS_CREATIVE_DATASOURCE | typeof META_ADS_ADSET_DATASOURCE,
+): Promise<InsightsCacheRow | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("meta_insights_cache")
     .select("client_id,account_id,datasource,date_from,date_to,payload,fetched_at")
     .eq("account_id", `${accountId}:${campaignId}`)
-    .eq("datasource", META_ADS_CREATIVE_DATASOURCE)
+    .eq("datasource", datasource)
     .limit(1);
   if (isMissingOptionalTable(error, "meta_insights_cache")) return null;
   if (error) fail(error);
@@ -2192,6 +2205,94 @@ export async function savePerformanceViewPrefs(patch: Partial<PerformanceViewPre
     .upsert({ key: "performance_view_prefs", value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) fail(error);
   return next;
+}
+
+type PerformanceTemplateRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_profile_id: string | null;
+  scope: "personal" | "agency";
+  config: unknown;
+  updated_at: string | null;
+};
+
+function mapPerformanceTemplate(row: PerformanceTemplateRow): PerformanceTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? "",
+    scope: row.scope,
+    ownerProfileId: row.owner_profile_id,
+    config: sanitizePerformanceTemplateConfig(row.config),
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function listPerformanceTemplates(): Promise<PerformanceTemplate[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("performance_templates")
+    .select("id,name,description,owner_profile_id,scope,config,updated_at")
+    .order("updated_at", { ascending: false });
+  if (error) fail(error);
+  return ((data as PerformanceTemplateRow[] | null) ?? []).map(mapPerformanceTemplate);
+}
+
+export async function createPerformanceTemplate(input: {
+  name: string;
+  description: string;
+  scope: "personal" | "agency";
+  ownerProfileId: string;
+  config: unknown;
+}): Promise<PerformanceTemplate> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("performance_templates")
+    .insert({
+      name: input.name.trim(),
+      description: input.description.trim(),
+      scope: input.scope,
+      owner_profile_id: input.scope === "personal" ? input.ownerProfileId : null,
+      config: sanitizePerformanceTemplateConfig(input.config),
+      schema_version: 1,
+    })
+    .select("id,name,description,owner_profile_id,scope,config,updated_at")
+    .single();
+  if (error) fail(error);
+  return mapPerformanceTemplate(data as PerformanceTemplateRow);
+}
+
+export async function updatePerformanceTemplate(id: string, patch: {
+  name?: string;
+  description?: string;
+  scope?: "personal" | "agency";
+  ownerProfileId: string;
+  config?: unknown;
+}): Promise<PerformanceTemplate> {
+  const supabase = await createClient();
+  const values: Record<string, unknown> = {};
+  if (patch.name !== undefined) values.name = patch.name.trim();
+  if (patch.description !== undefined) values.description = patch.description.trim();
+  if (patch.scope !== undefined) {
+    values.scope = patch.scope;
+    values.owner_profile_id = patch.scope === "personal" ? patch.ownerProfileId : null;
+  }
+  if (patch.config !== undefined) values.config = sanitizePerformanceTemplateConfig(patch.config);
+  const { data, error } = await supabase
+    .from("performance_templates")
+    .update(values)
+    .eq("id", id)
+    .select("id,name,description,owner_profile_id,scope,config,updated_at")
+    .single();
+  if (error) fail(error);
+  return mapPerformanceTemplate(data as PerformanceTemplateRow);
+}
+
+export async function deletePerformanceTemplate(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("performance_templates").delete().eq("id", id);
+  if (error) fail(error);
 }
 
 export type AgencyProfile = { name: string; email: string; site: string; note: string };

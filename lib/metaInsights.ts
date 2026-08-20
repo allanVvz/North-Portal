@@ -10,7 +10,8 @@ export const META_ADS_DATASOURCE = "meta_ads" as const;
 // fetched on demand when a campaign row is expanded. Shares the campaign
 // datasource's schema version — both come from normalizeAdsMetrics below.
 export const META_ADS_CREATIVE_DATASOURCE = "meta_ads_creative" as const;
-export const META_ADS_SCHEMA_VERSION = 2;
+export const META_ADS_ADSET_DATASOURCE = "meta_ads_adset" as const;
+export const META_ADS_SCHEMA_VERSION = 3;
 
 function num(raw: unknown): number | undefined {
   if (raw === null || raw === undefined || raw === "") return undefined;
@@ -130,13 +131,31 @@ export function normalizeMetaAdsRow(row: Record<string, unknown>, adAccountId: s
     permalink: null,
     metrics: normalizeAdsMetrics(row),
     campaignId,
+    campaignName: str(row.campaign_name) || campaignId,
     objective: str(row.objective) || undefined,
     currency: str(row.account_currency) || undefined,
     schemaVersion: META_ADS_SCHEMA_VERSION,
   };
 }
 
-export type AdCreativeMeta = { name: string; thumbnailUrl: string | null };
+export type AdCreativeMeta = { name: string; thumbnailUrl: string | null; creativeId?: string | null };
+
+export function normalizeMetaAdsetRow(row: Record<string, unknown>, adAccountId: string, accountName: string): MetaPost | null {
+  const date = str(row.date_start).slice(0, 10);
+  const campaignId = str(row.campaign_id);
+  const adsetId = str(row.adset_id);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !campaignId || !adsetId) return null;
+  const platform = normalizePublisherPlatform(row.publisher_platform);
+  const adsetName = str(row.adset_name) || adsetId;
+  return {
+    id: `${adAccountId}:${campaignId}:${adsetId}:${platform}:${date}`,
+    date, accountId: adAccountId, accountName, platform, source: "paid", type: "outro",
+    caption: adsetName, permalink: null, metrics: normalizeAdsMetrics(row), campaignId,
+    campaignName: str(row.campaign_name) || campaignId, adsetId, adsetName,
+    objective: str(row.objective) || undefined, currency: str(row.account_currency) || undefined,
+    schemaVersion: META_ADS_SCHEMA_VERSION,
+  };
+}
 
 // One /insights row at level="ad" (ad + publisher platform + day) -> MetaPost.
 // `creatives` supplies the ad's display name/thumbnail (a separate /ads call —
@@ -167,9 +186,13 @@ export function normalizeMetaAdRow(
     permalink: null,
     metrics: normalizeAdsMetrics(row),
     campaignId,
+    campaignName: str(row.campaign_name) || campaignId,
+    adsetId: str(row.adset_id) || undefined,
+    adsetName: str(row.adset_name) || undefined,
     adId,
     adName,
     thumbnailUrl: creative?.thumbnailUrl ?? null,
+    creativeId: creative?.creativeId ?? undefined,
     objective: str(row.objective) || undefined,
     currency: str(row.account_currency) || undefined,
     schemaVersion: META_ADS_SCHEMA_VERSION,
@@ -182,7 +205,8 @@ const ADS_FIELDS = [
   "inline_link_clicks", "inline_post_engagement", "ctr", "cpc", "cpm", "actions",
 ].join(",");
 
-const AD_INSIGHTS_FIELDS = ["ad_id", "ad_name", ADS_FIELDS].join(",");
+const ADSET_INSIGHTS_FIELDS = ["adset_id", "adset_name", ADS_FIELDS].join(",");
+const AD_INSIGHTS_FIELDS = ["ad_id", "ad_name", "adset_id", "adset_name", ADS_FIELDS].join(",");
 
 const MAX_PAGES = 40;
 
@@ -234,7 +258,7 @@ export async function fetchMetaAdsInsights(
 // media, so this is a separate call against the /ads edge, merged by ad_id.
 async function fetchAdCreatives(userToken: string, adAccountId: string, filtering: string): Promise<Map<string, AdCreativeMeta>> {
   const qs = new URLSearchParams({
-    fields: "id,name,creative{thumbnail_url,image_url}",
+    fields: "id,name,creative{id,thumbnail_url,image_url}",
     filtering,
     limit: "200",
     access_token: userToken,
@@ -247,9 +271,33 @@ async function fetchAdCreatives(userToken: string, adAccountId: string, filterin
     if (!id) continue;
     const creative = row.creative as Record<string, unknown> | undefined;
     const thumbnailUrl = creative ? str(creative.thumbnail_url) || str(creative.image_url) || null : null;
-    map.set(id, { name: str(row.name) || id, thumbnailUrl });
+    map.set(id, { name: str(row.name) || id, thumbnailUrl, creativeId: creative ? str(creative.id) || null : null });
   }
   return map;
+}
+
+export async function fetchMetaAdsetInsights(
+  userToken: string,
+  adAccountId: string,
+  accountName: string,
+  campaignId: string,
+  dateFrom: string,
+  dateTo: string,
+): Promise<MetaPost[]> {
+  const filtering = JSON.stringify([{ field: "campaign.id", operator: "EQUAL", value: campaignId }]);
+  const qs = new URLSearchParams({
+    level: "adset",
+    time_range: JSON.stringify({ since: dateFrom, until: dateTo }),
+    time_increment: "1",
+    breakdowns: "publisher_platform",
+    action_breakdowns: "action_type",
+    fields: ADSET_INSIGHTS_FIELDS,
+    filtering,
+    limit: "100",
+    access_token: userToken,
+  });
+  const rows = await fetchAllPages(`https://graph.facebook.com/${GRAPH_VERSION}/act_${adAccountId}/insights?${qs}`);
+  return rows.map((row) => normalizeMetaAdsetRow(row, adAccountId, accountName)).filter((post): post is MetaPost => post !== null);
 }
 
 // Ad-level drill-down for one campaign: daily rows per (ad, publisher

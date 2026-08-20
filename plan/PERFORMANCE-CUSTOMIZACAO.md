@@ -1,6 +1,8 @@
 # Performance — calendário composto e customização do painel
 
-Status: planejado, não implementado.
+Status: base implementada em produção em 2026-08-19. A próxima fase de
+templates, hierarquia Campanha → Conjunto → Criativo e seleção global está em
+`PERFORMANCE-TEMPLATES-HIERARQUIA.md`.
 
 Relacionado: [[PERFORMANCE-ORGANICO]] (aba Orgânico), e as fases 2-4 já descritas em
 `memory.md` (handoff de 2026-08-18: período exato reaproveitando `CalendarPicker.tsx`,
@@ -88,7 +90,8 @@ Amplia a fase 3 do handoff (`PerformanceViewSettings`, persistida em `site_setti
 - O overlay se adapta ao critério de métrica escolhido (item de customização acima) —
   trocar a métrica visível também troca o que é destacado no overlay.
 
-## Roadmap — não prioridade agora
+## Roadmap — promovido para próxima fase
 
 Criar integração para templates de painel customizáveis (o usuário monta e salva um layout
-próprio) fica registrado como item de roadmap, **não prioridade** desta rodada.
+próprio) tornou-se prioridade em 2026-08-20. O desenho completo está em
+`PERFORMANCE-TEMPLATES-HIERARQUIA.md`.

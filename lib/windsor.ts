@@ -18,7 +18,8 @@ export type MetaPostMetricKey =
   | "alcance" | "impressoes" | "likes" | "comentarios" | "compartilhamentos"
   | "salvos" | "engajamento" | "videoViews" | "cliques" | "ctr" | "custo"
   | "cpc" | "cpm" | "frequencia" | "cliquesUnicos" | "cliquesLink"
-  | "landingPageViews" | "leads" | "compras" | "mensagens" | "conversoes";
+  | "landingPageViews" | "leads" | "compras" | "mensagens" | "conversoes"
+  | "profileVisits" | "followers" | "followersGained";
 
 export type MetaPlatform = "instagram" | "facebook" | "whatsapp" | "messenger" | "audience_network" | "unknown";
 
@@ -34,6 +35,9 @@ export type MetaPost = {
   permalink: string | null;
   metrics: Partial<Record<MetaPostMetricKey, number>>;
   campaignId?: string;
+  campaignName?: string;
+  adsetId?: string;
+  adsetName?: string;
   objective?: string;
   currency?: string;
   schemaVersion?: number;
@@ -41,6 +45,7 @@ export type MetaPost = {
   // campaign-level rows.
   adId?: string;
   adName?: string;
+  creativeId?: string;
   thumbnailUrl?: string | null;
 };
 

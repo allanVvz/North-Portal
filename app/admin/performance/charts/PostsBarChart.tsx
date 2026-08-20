@@ -21,9 +21,11 @@ type BarPost = {
 export default function PostsBarChart({
   posts,
   label,
+  formatValue = fmtCompact,
 }: {
   posts: BarPost[];
   label: string;
+  formatValue?: (value: number) => string;
 }) {
   const t = useChartTheme();
   const data = posts.map((p) => ({
@@ -47,7 +49,7 @@ export default function PostsBarChart({
           />
           <Tooltip
             contentStyle={tooltipStyle(t)}
-            formatter={(value) => [fmtCompact(Number(value)), label]}
+            formatter={(value) => [formatValue(Number(value)), label]}
             cursor={{ fill: t.grid, opacity: 0.35 }}
           />
           <Bar dataKey="value" barSize={18} radius={[0, 4, 4, 0]}>
@@ -57,7 +59,7 @@ export default function PostsBarChart({
             <LabelList
               dataKey="value"
               position="right"
-              formatter={(v: React.ReactNode) => fmtCompact(Number(v))}
+              formatter={(v: React.ReactNode) => formatValue(Number(v))}
               style={{ fill: t.ink, fontSize: 12 }}
             />
           </Bar>

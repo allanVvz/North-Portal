@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMetaAdRow, normalizeMetaAdsRow, normalizePublisherPlatform } from "./metaInsights";
+import { normalizeMetaAdRow, normalizeMetaAdsRow, normalizeMetaAdsetRow, normalizePublisherPlatform } from "./metaInsights";
 
 describe("normalizeMetaAdsRow", () => {
   const base = {
@@ -66,7 +66,7 @@ describe("normalizeMetaAdsRow", () => {
     });
     expect(p.objective).toBe("OUTCOME_LEADS");
     expect(p.currency).toBe("BRL");
-    expect(p.schemaVersion).toBe(2);
+    expect(p.schemaVersion).toBe(3);
   });
 
   it("does not double count aliases or add engagement actions to conversions", () => {
@@ -130,6 +130,20 @@ describe("normalizeMetaAdRow", () => {
   it("returns null when the row has no ad id", () => {
     const { ad_id: _adId, ...rest } = adRow;
     expect(normalizeMetaAdRow(rest, "act1", "Conta", new Map())).toBeNull();
+  });
+});
+
+describe("normalizeMetaAdsetRow", () => {
+  it("preserves the explicit campaign → adset relationship", () => {
+    const post = normalizeMetaAdsetRow({
+      campaign_id: "cmp1", campaign_name: "Campanha", adset_id: "set1", adset_name: "Público quente",
+      date_start: "2026-08-01", spend: "21.50", reach: "900", publisher_platform: "instagram",
+    }, "act1", "Conta")!;
+    expect(post.campaignId).toBe("cmp1");
+    expect(post.campaignName).toBe("Campanha");
+    expect(post.adsetId).toBe("set1");
+    expect(post.adsetName).toBe("Público quente");
+    expect(post.metrics.custo).toBe(21.5);
   });
 });
 

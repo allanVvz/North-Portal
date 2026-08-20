@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { getCachedAdCreativeInsights, getMetaAccessToken, getMetaSettings, upsertInsightsCache } from "@/lib/supabase";
+import { getCachedMetaEntityInsights, getMetaAccessToken, getMetaSettings, upsertInsightsCache } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, performanceAdInsightsQuerySchema } from "@/lib/validation";
-import { fetchMetaAdCreativeInsights, META_ADS_CREATIVE_DATASOURCE, META_ADS_SCHEMA_VERSION } from "@/lib/metaInsights";
+import { fetchMetaAdCreativeInsights, fetchMetaAdsetInsights, META_ADS_ADSET_DATASOURCE, META_ADS_CREATIVE_DATASOURCE, META_ADS_SCHEMA_VERSION } from "@/lib/metaInsights";
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h; ?refresh=1 bypasses
 
@@ -23,12 +23,13 @@ export async function GET(request: Request) {
     if (!meta.configured || !accountRef) {
       // No live Meta connection for this account — nothing to drill into
       // (demo mode has no per-ad breakdown; the campaign row simply won't expand usefully).
-      return NextResponse.json({ demo: true, stale: false, ads: [] });
+      return NextResponse.json({ demo: true, stale: false, ads: [], rows: [], level: q.level });
     }
     const token = await getMetaAccessToken();
-    if (!token) return NextResponse.json({ demo: true, stale: false, ads: [] });
+    if (!token) return NextResponse.json({ demo: true, stale: false, ads: [], rows: [], level: q.level });
 
-    const cached = await getCachedAdCreativeInsights(q.account, q.campaign);
+    const datasource = q.level === "adset" ? META_ADS_ADSET_DATASOURCE : META_ADS_CREATIVE_DATASOURCE;
+    const cached = await getCachedMetaEntityInsights(q.account, q.campaign, datasource);
     const now = Date.now();
     const fresh = Boolean(
       cached &&
@@ -39,31 +40,39 @@ export async function GET(request: Request) {
     );
 
     if (fresh && !q.refresh) {
+      const rows = cached!.payload.filter((p) => p.date >= q.from && p.date <= q.to);
       return NextResponse.json({
         demo: false,
         stale: false,
-        ads: cached!.payload.filter((p) => p.date >= q.from && p.date <= q.to),
+        ads: rows,
+        rows,
+        level: q.level,
       });
     }
 
     try {
-      const rows = await fetchMetaAdCreativeInsights(token, q.account, accountRef.accountName, q.campaign, q.from, q.to);
+      const rows = q.level === "adset"
+        ? await fetchMetaAdsetInsights(token, q.account, accountRef.accountName, q.campaign, q.from, q.to)
+        : await fetchMetaAdCreativeInsights(token, q.account, accountRef.accountName, q.campaign, q.from, q.to);
       await upsertInsightsCache({
         client_id: null,
         account_id: `${q.account}:${q.campaign}`,
-        datasource: META_ADS_CREATIVE_DATASOURCE,
+        datasource,
         date_from: q.from,
         date_to: q.to,
         payload: rows,
       });
-      return NextResponse.json({ demo: false, stale: false, ads: rows });
+      return NextResponse.json({ demo: false, stale: false, ads: rows, rows, level: q.level });
     } catch (error) {
       if (cached) {
+        const rows = cached.payload.filter((p) => p.date >= q.from && p.date <= q.to);
         return NextResponse.json({
           demo: false,
           stale: true,
           error: error instanceof Error ? error.message : "Falha ao atualizar dados.",
-          ads: cached.payload.filter((p) => p.date >= q.from && p.date <= q.to),
+          ads: rows,
+          rows,
+          level: q.level,
         });
       }
       throw error instanceof HttpError ? error : new HttpError(502, "Nao foi possivel buscar os anuncios da campanha.");

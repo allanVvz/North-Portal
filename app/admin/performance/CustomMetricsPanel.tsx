@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { DASH_METRICS } from "./insights";
-import type { CustomMetric, CustomMetricOp } from "@/lib/performancePrefs";
+import type { CustomMetric, CustomMetricFormat, CustomMetricOp } from "@/lib/performancePrefs";
 import type { MetaPostMetricKey } from "@/lib/windsor";
 
 const OPS: CustomMetricOp[] = ["+", "-", "×", "÷"];
@@ -24,12 +24,13 @@ export default function CustomMetricsPanel({
   const [a, setA] = useState<MetaPostMetricKey>("custo");
   const [op, setOp] = useState<CustomMetricOp>("÷");
   const [b, setB] = useState<MetaPostMetricKey>("cliques");
+  const [format, setFormat] = useState<CustomMetricFormat>("number");
 
   if (!open) return null;
 
   function save() {
     if (!label.trim()) return;
-    onSave({ id: crypto.randomUUID(), label: label.trim(), a, op, b });
+    onSave({ id: crypto.randomUUID(), label: label.trim(), a, op, b, format });
     setLabel("");
   }
 
@@ -57,6 +58,13 @@ export default function CustomMetricsPanel({
               {DASH_METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </div>
+          <label className="admin-field"><span>Formato do resultado</span>
+            <select value={format} onChange={(e) => setFormat(e.target.value as CustomMetricFormat)}>
+              <option value="number">Número</option>
+              <option value="money">Moeda (R$)</option>
+              <option value="percent">Percentual (%)</option>
+            </select>
+          </label>
           <button className="admin-btn primary" onClick={save} disabled={!label.trim()}>Salvar métrica</button>
         </div>
 
@@ -64,7 +72,7 @@ export default function CustomMetricsPanel({
           <ul className="perf-custommetric-list">
             {customMetrics.map((m) => (
               <li key={m.id}>
-                <span><strong>{m.label}</strong><small>{DASH_METRICS.find((d) => d.key === m.a)?.label ?? m.a} {m.op} {DASH_METRICS.find((d) => d.key === m.b)?.label ?? m.b}</small></span>
+                <span><strong>{m.label}</strong><small>{DASH_METRICS.find((d) => d.key === m.a)?.label ?? m.a} {m.op} {DASH_METRICS.find((d) => d.key === m.b)?.label ?? m.b} · {m.format === "money" ? "Moeda" : m.format === "percent" ? "Percentual" : "Número"}</small></span>
                 <button type="button" className="admin-btn ghost danger small" onClick={() => onDelete(m.id)}>Excluir</button>
               </li>
             ))}

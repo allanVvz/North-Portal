@@ -107,10 +107,13 @@ export default function PerformanceBoard({
   return (
     <div className="ap">
       <div className="ap-filters">
-        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="ap-clientfilter">
-          <option value="">Todos os clientes</option>
-          {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
-        </select>
+        <label className="ap-clientfilter"><span>Cliente</span>
+          <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>
+            <option value="">Todos os clientes</option>
+            {clients.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+          </select>
+        </label>
+        <span className="ap-results-count">{rows.length} card{rows.length === 1 ? "" : "s"} publicado{rows.length === 1 ? "" : "s"}</span>
       </div>
 
       {rows.length === 0 ? (

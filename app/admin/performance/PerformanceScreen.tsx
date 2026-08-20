@@ -24,8 +24,8 @@ export default function PerformanceScreen({
   return (
     <div className="perf-screen">
       <div className="kb-viewtabs perf-viewtabs">
-        <button className={view === "dashboard" ? "on" : ""} onClick={() => setView("dashboard")}>Anúncios</button>
-        <button className={view === "cards" ? "on" : ""} onClick={() => setView("cards")}>Cards</button>
+        <button className={view === "dashboard" ? "on" : ""} onClick={() => setView("dashboard")}>Analytics</button>
+        <button className={view === "cards" ? "on" : ""} onClick={() => setView("cards")}>Cards publicados</button>
       </div>
       {view === "dashboard" ? (
         <PerformanceDashboard clients={clients} canEdit={canEdit} />

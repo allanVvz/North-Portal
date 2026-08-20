@@ -86,6 +86,7 @@ export function tooltipStyle(t: ChartTheme): React.CSSProperties {
     border: `1px solid ${t.border}`,
     borderRadius: 10,
     fontSize: 12.5,
+    fontFamily: 'Inter, "Segoe UI", Arial, sans-serif',
     color: t.ink,
     boxShadow: "0 8px 24px rgba(0,0,0,.12)",
   };

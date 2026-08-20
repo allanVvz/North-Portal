@@ -8,7 +8,7 @@ export default async function PerformancePage() {
   const [tasks, clients, session] = await Promise.all([listPublishedTasks(), listClients(), getSession()]);
   const canEdit = session?.level === "gerente";
   return (
-    <section className="admin-page">
+    <section className="admin-page kb-wide performance-page">
       <header className="admin-head">
         <div>
           <p className="admin-kicker">Dados</p>

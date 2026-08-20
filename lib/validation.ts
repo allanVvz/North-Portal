@@ -227,6 +227,7 @@ export const performanceAdInsightsQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   refresh: z.coerce.boolean().optional(),
+  level: z.enum(["adset", "ad"]).default("ad"),
 });
 // Shape-only validation — sanitizePerformanceViewPrefs (lib/performancePrefs)
 // does the actual whitelisting against known metric keys/periods.
@@ -249,6 +250,14 @@ export const performanceViewPrefsSchema = z.object({
   mixMetric: z.array(metricRefSchema).max(4).optional(),
   customMetrics: z.array(customMetricSchema).max(30).optional(),
 });
+export const performanceTemplateCreateSchema = z.object({
+  name: z.string().trim().min(2).max(60),
+  description: z.string().trim().max(240).default(""),
+  config: z.record(z.string(), z.unknown()),
+});
+export const performanceTemplatePatchSchema = performanceTemplateCreateSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, { message: "Informe ao menos uma alteração." });
 export const performanceSyncSchema = z.object({
   links: z.array(z.object({ taskId: z.string().uuid(), postId: z.string().min(1).max(200) })).min(1).max(100),
 });
