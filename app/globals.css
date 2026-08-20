@@ -2738,6 +2738,11 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-comment-text a { overflow-wrap: anywhere; word-break: break-all; }
 .tm-comment-input { display: flex; gap: 8px; }
 .tm-comment-input input, .tm-comment-input textarea { flex: 1; background: var(--a-surface); }
+.tm-comment-attach { flex-shrink: 0; }
+.tm-comment-attach .tm-headpick-trigger { border: 1px solid var(--a-border); border-radius: 10px; padding: 8px 10px; background: var(--a-surface); }
+.tm-comment-attach .tm-headpick-trigger:hover { background: var(--a-hover); }
+.tm-comment-attach .tm-headpick-caret { display: none; }
+.tm-comment-attach .tm-headpick-panel { top: auto; bottom: calc(100% + 6px); width: 260px; }
 .tone-btn-criativo { background: #8a6bcf; }
 .tone-btn-criativo:hover { background: #7a5abf; }
 .tone-btn-agendamento { background: #d4a33c; color: #2c2306; }

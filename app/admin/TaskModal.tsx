@@ -18,6 +18,8 @@ import { formatCommentTime } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
+import { isHtmlDocument } from "@/lib/documentFiles";
+import type { AdminDocument } from "@/lib/supabase";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
 
@@ -343,6 +345,21 @@ export default function TaskModal({
   const recurrenceParentId = liveTask && !isRecurringParent ? recurrenceParentIdOf(liveTask) : null;
   const [recurrenceParent, setRecurrenceParent] = useState<TaskRecord | null>(() => recurrenceParentOf(recurrenceParentId, clientTasks));
   const [comment, setComment] = useState("");
+  // Documents attachable to a comment — pdf/other files, not Trilhas HTML
+  // decks. Lazily fetched once per edit session (small, agency-wide list;
+  // same "all documents" endpoint Informações uses).
+  const [attachableDocs, setAttachableDocs] = useState<AdminDocument[]>([]);
+  useEffect(() => {
+    if (mode !== "edit") return;
+    let cancelled = false;
+    fetch("/api/admin/documents")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { documents: AdminDocument[] } | null) => {
+        if (!cancelled && data) setAttachableDocs(data.documents.filter((d) => !isHtmlDocument(d)));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [mode]);
   const { name: currentUserName } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -450,6 +467,15 @@ export default function TaskModal({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const comments = liveTask ? commentsOf(liveTask) : [];
+  // Same client first (most relevant), other clients' documents below —
+  // never hidden entirely, since a comment can reasonably reference either.
+  const commentDocs = draft.clientSlug
+    ? [...attachableDocs.filter((d) => d.clientSlug === draft.clientSlug), ...attachableDocs.filter((d) => d.clientSlug !== draft.clientSlug)]
+    : attachableDocs;
+  function attachDocToComment(doc: AdminDocument) {
+    const link = doc.file_url ? `📎 ${doc.name} — ${doc.file_url}` : `📎 ${doc.name}`;
+    setComment((current) => (current.trim() ? `${current}\n${link}` : link));
+  }
   const onTaskPatchedRef = useRef(onTaskPatched);
   useEffect(() => { onTaskPatchedRef.current = onTaskPatched; }, [onTaskPatched]);
 
@@ -1259,6 +1285,17 @@ export default function TaskModal({
                   {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
                 </div>
                 <div className="tm-comment-input">
+                  <HeadDropdown className="tm-comment-attach" trigger={<span aria-hidden>📎</span>}>
+                    {commentDocs.length === 0 ? (
+                      <p className="tm-member-search-empty">Nenhum documento para anexar.</p>
+                    ) : (
+                      commentDocs.map((d) => (
+                        <button type="button" key={d.id} className="tm-headpick-option" onClick={() => attachDocToComment(d)}>
+                          {d.name}
+                        </button>
+                      ))
+                    )}
+                  </HeadDropdown>
                   <AutoGrowTextarea
                     rows={1}
                     value={comment}
