@@ -2837,13 +2837,16 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .meta-scopes li { padding: 10px 12px; border: 1px solid var(--a-border); border-radius: 10px; font-size: 13px; color: var(--a-ink); }
 .meta-scopes code { font-size: 11px; color: var(--a-muted); background: var(--a-inset); padding: 1px 6px; border-radius: 6px; }
 
-/* ---- Document preview modal ---- */
-.docprev { width: min(980px, 94vw); max-height: 90vh; overflow-y: auto; background: var(--a-surface); border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.3); }
-.docprev-head { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--a-border); }
-.docprev-ico { font-size: 11px; }
-.docprev-headtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.docprev-headtext strong { font-size: 15px; color: var(--a-ink); }
-.docprev-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(230px, 1fr); gap: 18px; padding: 20px 22px; }
+/* ---- Document preview modal (reuses the TaskModal .tm/.tm-head/.tm-layout/
+   .tm-side/.tm-cell shell — see app/admin/TaskModal.tsx — so the two modals
+   read as the same family instead of two different designs) ---- */
+.docprev-tm { width: min(980px, 94vw); }
+.docprev-tm .tm-head-ico { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; }
+.docprev-title { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 18px; color: var(--a-ink); overflow-wrap: anywhere; }
+.docprev-cellbox { flex: 1; }
+.docprev-cells { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.docprev-cell-wrap { overflow-wrap: anywhere; }
+.tm-main:has(.file-preview) { padding: 20px 0 20px 30px; }
 .file-preview { position: relative; min-width: 0; min-height: 510px; overflow: hidden; display: grid; place-items: center; background: var(--a-inset, var(--np-surface-2)); border: 1px solid var(--a-border, var(--np-border)); border-radius: 14px; }
 .file-preview iframe, .file-preview img, .file-preview video { display: block; width: 100%; height: 100%; min-height: 510px; border: 0; object-fit: contain; background: #fff; }
 .file-preview-loading { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: var(--a-inset, var(--np-surface-2)); color: var(--a-muted, var(--np-muted)); font-size: 13px; }
@@ -2854,19 +2857,11 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .file-preview-fallback small { font-size: 12px; }
 .file-preview-audio { width: min(420px, calc(100% - 40px)); display: flex; flex-direction: column; align-items: center; gap: 22px; }
 .file-preview-audio audio { width: 100%; }
-.docprev-details { display: flex; flex-direction: column; }
-.docprev-details-head { margin: 0 0 10px; font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--a-muted); }
-.docprev-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--a-border); font-size: 13px; }
-.docprev-row:last-child { border-bottom: none; }
-.docprev-row > span:first-child { color: var(--a-muted); }
-.docprev-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 22px 20px; border-top: 1px solid var(--a-border); }
-.docprev-foot-left { display: inline-flex; gap: 8px; }
 .doc-open-btn { border: none; background: none; color: var(--a-teal-text); font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
 .doc-open-btn:hover { text-decoration: underline; }
 
 @media (max-width: 640px) {
-  .docprev-body { grid-template-columns: 1fr; }
-  .docprev-foot { flex-wrap: wrap; }
+  .tm-main:has(.file-preview) { padding: 16px; }
   .file-preview, .file-preview iframe, .file-preview img, .file-preview video { min-height: 390px; }
 }
 
@@ -2907,6 +2902,8 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-head-tone-blue .tm-head-ico    { color: var(--a-blue-text); }
 .tm-head-tone-neutral { background: linear-gradient(180deg, rgba(120,120,120,.10), rgba(120,120,120,.03)); }
 .tm-head-tone-neutral .tm-head-ico { color: var(--a-muted); }
+.tm-head-tone-red     { background: linear-gradient(180deg, rgba(194,96,78,.14), rgba(194,96,78,.04)); }
+.tm-head-tone-red .tm-head-ico     { color: var(--a-danger); }
 
 /* New-task kind picker selected state */
 .tm-typecard-tone-green.on   { border-color: var(--a-teal); background: var(--a-teal-soft); }

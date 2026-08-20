@@ -13,6 +13,7 @@ const STATUS_LABEL: Record<DocumentStatus, string> = {
   enviada: "Enviada", assinado: "Assinado", aguardando_assinatura: "Aguardando assinatura",
   publicado: "Publicado", compartilhado: "Compartilhado",
 };
+// Same tone vocabulary TaskModal uses for its header (tm-head-tone-*).
 const STATUS_TONE: Record<DocumentStatus, string> = {
   enviada: "blue", assinado: "green", aguardando_assinatura: "red", publicado: "green", compartilhado: "purple",
 };
@@ -59,40 +60,50 @@ export default function DocumentPreviewModal({
 
   return (
     <div className="kb-modal-backdrop" onClick={onClose}>
-      <div className="docprev" onClick={(e) => e.stopPropagation()}>
-        <div className="docprev-head">
-          <span className="doc-ico docprev-ico">{fileTypeLabel(doc)}</span>
-          <div className="docprev-headtext">
-            <strong>{doc.name}</strong>
+      <div className="tm docprev-tm" onClick={(e) => e.stopPropagation()}>
+        <div className={`tm-head tm-head-tone-${STATUS_TONE[doc.status]}`}>
+          <span className="tm-head-ico" aria-hidden>{fileTypeLabel(doc)}</span>
+          <div className="tm-head-text">
+            <strong className="docprev-title">{doc.name}</strong>
             <span className="admin-sub">{TYPE_LABEL[doc.doc_type]} · {fmtDate(doc.doc_date)}</span>
           </div>
           <button className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button>
         </div>
 
-        <div className="docprev-body">
-          <DocumentFilePreview file={doc} />
+        <div className="tm-layout">
+          <div className="tm-main">
+            <DocumentFilePreview file={doc} />
+          </div>
 
-          <div className="docprev-details">
-            <p className="docprev-details-head">Detalhes</p>
-            <div className="docprev-row"><span>Tipo</span><b>{TYPE_LABEL[doc.doc_type]}</b></div>
-            <div className="docprev-row"><span>Cliente</span><b>{doc.clientName}</b></div>
-            <div className="docprev-row"><span>Status</span><span className={`doc-status tone-${STATUS_TONE[doc.status]}`}>{STATUS_LABEL[doc.status]}</span></div>
-            <div className="docprev-row"><span>Data</span><b>{fmtDate(doc.doc_date)}</b></div>
-            <div className="docprev-row"><span>Arquivo</span><b>{doc.original_file_name || "Link externo"}</b></div>
-            <div className="docprev-row"><span>Formato</span><b>{doc.mime_type || fileTypeLabel(doc)}</b></div>
-            {doc.size_bytes !== null ? <div className="docprev-row"><span>Tamanho</span><b>{formatFileSize(doc.size_bytes)}</b></div> : null}
+          <div className="tm-side">
+            <div className="tm-box tm-commentsbox docprev-cellbox">
+              <p className="tm-box-label">Detalhes</p>
+              <div className="docprev-cells">
+                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◆</span><div className="tm-cell-body"><span className="tm-cell-label">Tipo</span><span className="tm-cell-static">{TYPE_LABEL[doc.doc_type]}</span></div></div>
+                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◔</span><div className="tm-cell-body"><span className="tm-cell-label">Cliente</span><span className="tm-cell-static">{doc.clientName}</span></div></div>
+                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>⚑</span><div className="tm-cell-body"><span className="tm-cell-label">Status</span><span className={`doc-status tone-${STATUS_TONE[doc.status]}`}>{STATUS_LABEL[doc.status]}</span></div></div>
+                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>▦</span><div className="tm-cell-body"><span className="tm-cell-label">Data</span><span className="tm-cell-static">{fmtDate(doc.doc_date)}</span></div></div>
+                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>▤</span><div className="tm-cell-body"><span className="tm-cell-label">Arquivo</span><span className="tm-cell-static docprev-cell-wrap">{doc.original_file_name || "Link externo"}</span></div></div>
+                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◧</span><div className="tm-cell-body"><span className="tm-cell-label">Formato</span><span className="tm-cell-static">{doc.mime_type || fileTypeLabel(doc)}</span></div></div>
+                {doc.size_bytes !== null ? (
+                  <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◈</span><div className="tm-cell-body"><span className="tm-cell-label">Tamanho</span><span className="tm-cell-static">{formatFileSize(doc.size_bytes)}</span></div></div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="docprev-foot">
-          <div className="docprev-foot-left">
+        <footer className="kb-modal-actions">
+          <span />
+          <span />
+          <div className="kb-modal-actions-right">
             {doc.file_url ? <a className="admin-btn ghost" href={doc.file_url} target="_blank" rel="noopener noreferrer">↓ Baixar</a> : null}
             <button className="admin-btn ghost" onClick={share} disabled={!doc.file_url}>{copied ? "Link copiado ✓" : "Compartilhar"}</button>
+            <button className="admin-btn primary" onClick={approve} disabled={busy || doc.status === "publicado"}>
+              {doc.status === "publicado" ? "Publicado ✓" : busy ? "Aprovando…" : "Aprovar documento"}
+            </button>
           </div>
-          <button className="admin-btn primary" onClick={approve} disabled={busy || doc.status === "publicado"}>
-            {doc.status === "publicado" ? "Publicado ✓" : busy ? "Aprovando…" : "Aprovar documento"}
-          </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

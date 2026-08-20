@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { documentPreviewKind, fileTypeLabel, formatFileSize } from "@/lib/documentFiles";
+import { documentPreviewKind, fileTypeLabel, formatFileSize, isHtmlDocument } from "@/lib/documentFiles";
 
 type PreviewDocument = {
   file_url: string | null;
@@ -9,6 +9,28 @@ type PreviewDocument = {
   mime_type: string | null;
   size_bytes: number | null;
 };
+
+// Supabase Storage always serves .html objects as `Content-Type: text/plain`
+// (a stored-XSS mitigation applied at the platform level, not something this
+// app's upload can override) — loading that URL as an iframe `src` renders
+// the raw markup as text instead of a page. Fetching the bytes and handing
+// them to the iframe via `srcDoc` sidesteps the served content-type entirely
+// while keeping the same empty `sandbox` (no scripts, no same-origin).
+function HtmlDocFrame({ url, title, onLoad, onError }: { url: string; title: string; onLoad: () => void; onError: () => void }) {
+  const [html, setHtml] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setHtml(null);
+    fetch(url)
+      .then((res) => (res.ok ? res.text() : Promise.reject()))
+      .then((text) => { if (!cancelled) { setHtml(text); onLoad(); } })
+      .catch(() => { if (!cancelled) onError(); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+  if (html === null) return null;
+  return <iframe srcDoc={html} title={title} sandbox="" />;
+}
 
 export default function DocumentFilePreview({ file, compact = false }: { file: PreviewDocument; compact?: boolean }) {
   const [failed, setFailed] = useState(false);
@@ -33,6 +55,8 @@ export default function DocumentFilePreview({ file, compact = false }: { file: P
     <video src={file.file_url} controls preload="metadata" onLoadedData={done} onError={fail} />
   ) : !failed && kind === "audio" ? (
     <div className="file-preview-audio"><span>{fileTypeLabel(file)}</span><audio src={file.file_url} controls preload="metadata" onLoadedData={done} onError={fail} /></div>
+  ) : !failed && kind === "text" && isHtmlDocument(file) ? (
+    <HtmlDocFrame url={file.file_url} title={`Preview de ${file.original_file_name || "apresentação HTML"}`} onLoad={done} onError={fail} />
   ) : !failed && kind === "text" ? (
     <iframe src={file.file_url} title={`Preview de ${file.original_file_name || "arquivo de texto"}`} sandbox="" onLoad={done} />
   ) : null;
