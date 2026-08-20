@@ -75,7 +75,9 @@ export function customMetricIdOf(ref: MetricRef): string {
   return ref.startsWith("custom:") ? ref.slice(7) : ref;
 }
 
-function isValidMetricRef(ref: unknown, customIds: Set<string>): ref is MetricRef {
+// Exported for lib/acquisitionPrefs.ts, which needs the same built-in/custom
+// MetricRef whitelist check for its own slot arrays.
+export function isValidMetricRef(ref: unknown, customIds: Set<string>): ref is MetricRef {
   if (typeof ref !== "string") return false;
   if (ref.startsWith("custom:")) return customIds.has(ref.slice(7));
   return VALID_METRIC_KEYS.has(ref as MetaPostMetricKey);

@@ -40,25 +40,32 @@ test("dashboard de aquisição preserva hierarquia, comparativo e estados vazios
 
   const dashboard = page.getByTestId("acquisition-dashboard");
   await expect(dashboard).toBeVisible();
-  await expect(dashboard.getByText("Investimento x mensagens")).toBeVisible();
+  // "Evolução" title agora é composto a partir das métricas selecionadas
+  // (default custo+mensagens = "Investimento x Conversas iniciadas") em vez
+  // de um texto fixo.
+  await expect(dashboard.getByText("Investimento x Conversas iniciadas")).toBeVisible();
   await expect(dashboard.getByText("Funil de aquisição")).toBeVisible();
   await expect(dashboard.locator(".acq-object-wrap img")).toBeVisible();
 
-  const dateField = dashboard.locator(".perf-daterange-trigger");
+  // Topo (data + filtro composto) agora é compartilhado com Analytics —
+  // renderizado uma vez fora da div de teste do dashboard de Aquisição.
+  const dateField = page.locator(".perf-daterange-trigger");
   await expect(dateField).toHaveCount(1);
-  await expect(dashboard.locator("input[type=date]")).toHaveCount(0);
+  await expect(page.locator("input[type=date]")).toHaveCount(0);
 
-  const composite = dashboard.locator(".acq-composite-filter");
+  const composite = page.locator(".perf-analysis-filterbar");
   await composite.locator(".kb-searchbar-box").click();
   await composite.getByRole("button", { name: "Campanha", exact: true }).click();
-  await expect(dashboard.getByRole("searchbox", { name: "Buscar Campanha" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Buscar campanha" })).toBeVisible();
   const campaignChecks = composite.locator(".acq-filter-option input[type=checkbox]");
   await expect(campaignChecks.first()).toBeVisible({ timeout: 60_000 });
   await expect(campaignChecks.first()).toBeChecked();
   await page.keyboard.press("Escape");
 
-  await expect(dashboard.getByRole("columnheader", { name: "Criativo" })).toHaveCount(0);
-  await expect(dashboard.getByText(/Selecione uma campanha|conta Meta conectada/)).toBeVisible();
+  // A tabela Campanhas/Conjuntos/Criativos agora é compartilhada com
+  // Analytics e vive fora da div de teste do dashboard de Aquisição; no
+  // nível padrão "Campanhas" ela nunca mostra a coluna "Criativo".
+  await expect(page.getByRole("columnheader", { name: "Criativo" })).toHaveCount(0);
   await expect(dashboard.locator(".acq-gauge-card")).toHaveCount(3);
   await expect(dashboard.locator(".acq-flow-stage")).toHaveCount(3);
   await expect(dashboard.locator(".acq-flow-arrow")).toHaveCount(2);
@@ -119,12 +126,16 @@ test("filtros multi de campanha e conjunto atualizam KPIs, gráfico e criativos"
   await page.goto("/admin/performance");
   await page.getByRole("button", { name: "Aquisição", exact: true }).click();
   const dashboard = page.getByTestId("acquisition-dashboard");
-  const composite = dashboard.locator(".acq-composite-filter");
+  // Filtro composto (Campanha/Conjunto) agora é compartilhado com Analytics
+  // e vive fora da div de teste do dashboard de Aquisição.
+  const composite = page.locator(".perf-analysis-filterbar");
   const compositeBox = composite.locator(".kb-searchbar-box");
   await compositeBox.click();
   await composite.getByRole("button", { name: "Campanha", exact: true }).click();
-  await dashboard.getByText("Campanha Alfa", { exact: true }).click();
-  await dashboard.getByText("Campanha Beta", { exact: true }).click();
+  // Escopado ao painel do filtro composto — o texto também pode aparecer na
+  // tabela compartilhada de campanhas, agora sempre renderizada.
+  await composite.getByText("Campanha Alfa", { exact: true }).click();
+  await composite.getByText("Campanha Beta", { exact: true }).click();
   await expect(compositeBox).toContainText("2 selecionadas");
   await page.keyboard.press("Escape");
 
@@ -132,8 +143,8 @@ test("filtros multi de campanha e conjunto atualizam KPIs, gráfico e criativos"
   const adset = composite.getByRole("button", { name: "Conjunto de anúncios", exact: true });
   await expect(adset).toBeEnabled({ timeout: 30_000 });
   await adset.click();
-  await dashboard.getByText("Conjunto Alfa", { exact: true }).click();
-  await dashboard.getByText("Conjunto Beta", { exact: true }).click();
+  await composite.getByText("Conjunto Alfa", { exact: true }).click();
+  await composite.getByText("Conjunto Beta", { exact: true }).click();
   await expect(compositeBox).toContainText("2 selecionados");
   await page.keyboard.press("Escape");
 

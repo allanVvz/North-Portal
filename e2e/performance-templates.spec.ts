@@ -62,12 +62,15 @@ test.describe("Performance · templates e seleção hierárquica", () => {
     test.setTimeout(180_000);
     await login(page);
     await page.goto("/admin/performance");
+    // Aquisição é a primeira tela por padrão — este teste exercita o
+    // gráfico de Tendência e a comparação hierárquica, que são do Analytics.
+    await page.getByRole("button", { name: "Analytics", exact: true }).click();
 
     const filterBox = page.locator(".perf-analysis-filterbar .kb-searchbar-box");
-    await expect(filterBox).toContainText("Template: Crescimento do perfil", { timeout: 45_000 });
+    await expect(filterBox).toContainText("Template: Funil completo", { timeout: 45_000 });
     await filterBox.click();
     await page.getByRole("button", { name: "Template", exact: true }).click();
-    await page.getByRole("option", { name: /Conversas no WhatsApp/ }).click();
+    await page.getByRole("option", { name: /Fundo de funil/ }).click();
     await expect(page.getByText("Custo por conversa", { exact: true }).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Salvar template", exact: true }).click();

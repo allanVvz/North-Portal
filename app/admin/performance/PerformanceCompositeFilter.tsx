@@ -7,7 +7,8 @@ import type { MetaPlatform } from "@/lib/windsor";
 export type PerfCategory = "ads" | "organico" | "ambos";
 export type PerfFilterAttr = "cliente" | "categoria" | "rede" | "objetivo";
 export type PerfActiveFilter = { attr: PerfFilterAttr; value: string; label: string };
-type PerfMenuAttr = "template" | "cliente" | "categoria" | "rede";
+export type ChecklistOption = { key: string; label: string };
+type PerfMenuAttr = "template" | "cliente" | "categoria" | "rede" | "objetivo" | "campanha" | "conjunto";
 
 const CATEGORY_OPTIONS: { value: PerfCategory; label: string }[] = [
   { value: "ads", label: "Ads" },
@@ -20,6 +21,9 @@ const ATTR_DEFS: { key: PerfMenuAttr; label: string; icon: string }[] = [
   { key: "cliente", label: "Cliente", icon: "◔" },
   { key: "categoria", label: "Categoria", icon: "◧" },
   { key: "rede", label: "Rede", icon: "◑" },
+  { key: "objetivo", label: "Objetivo", icon: "◎" },
+  { key: "campanha", label: "Campanha", icon: "◫" },
+  { key: "conjunto", label: "Conjunto de anúncios", icon: "▦" },
 ];
 const FILTER_LABEL: Record<PerfFilterAttr, string> = {
   cliente: "Cliente",
@@ -28,12 +32,26 @@ const FILTER_LABEL: Record<PerfFilterAttr, string> = {
   objetivo: "Objetivo",
 };
 
-export default function PerformanceFilterBar({
+// Single composite filter bar shared by Analytics e Aquisição: junta o
+// padrão single-value por chip (template/cliente/categoria/rede/objetivo)
+// com o padrão multi-select por checkbox que a Aquisição já usava para
+// campanha/conjunto — os dois passam a viver na mesma caixa/estado
+// compartilhado (usePerformanceWorkspace).
+export default function PerformanceCompositeFilter({
   clients,
   platformOptions,
   platformLabel,
+  objectiveOptions,
+  objectiveLabel,
   filters,
   onFiltersChange,
+  campaignOptions,
+  adsetOptions,
+  campaignSelected,
+  adsetSelected,
+  onCampaignChange,
+  onAdsetChange,
+  adsetDisabled,
   templates,
   activeTemplateId,
   templateDirty,
@@ -46,8 +64,17 @@ export default function PerformanceFilterBar({
   clients: { slug: string; name: string }[];
   platformOptions: MetaPlatform[];
   platformLabel: Record<MetaPlatform, string>;
+  objectiveOptions: string[];
+  objectiveLabel: Record<string, string>;
   filters: PerfActiveFilter[];
   onFiltersChange: (next: PerfActiveFilter[]) => void;
+  campaignOptions: ChecklistOption[];
+  adsetOptions: ChecklistOption[];
+  campaignSelected: string[];
+  adsetSelected: string[];
+  onCampaignChange: (next: string[]) => void;
+  onAdsetChange: (next: string[]) => void;
+  adsetDisabled: boolean;
   templates: PerformanceTemplate[];
   activeTemplateId: string;
   templateDirty: boolean;
@@ -60,6 +87,7 @@ export default function PerformanceFilterBar({
   const [open, setOpen] = useState(false);
   const [pendingAttr, setPendingAttr] = useState<PerfMenuAttr | null>(null);
   const [templateQuery, setTemplateQuery] = useState("");
+  const [checklistQuery, setChecklistQuery] = useState("");
   const [saveOpen, setSaveOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [saved, setSaved] = useState(false);
@@ -113,6 +141,8 @@ export default function PerformanceFilterBar({
     return [];
   }, [pendingAttr, clients, platformOptions, platformLabel]);
 
+  const objectiveValues = useMemo(() => filters.find((f) => f.attr === "objetivo")?.value.split(",").filter(Boolean) ?? [], [filters]);
+
   const visibleTemplates = useMemo(() => {
     const query = templateQuery.trim().toLocaleLowerCase("pt-BR");
     return query
@@ -120,10 +150,33 @@ export default function PerformanceFilterBar({
       : templates;
   }, [templateQuery, templates]);
 
-  const availableAttrs = ATTR_DEFS.filter((attr) => attr.key === "template" || !filters.some((filter) => filter.attr === attr.key));
+  const visibleObjectives = useMemo(() => {
+    const query = checklistQuery.trim().toLocaleLowerCase("pt-BR");
+    return objectiveOptions.filter((value) => !query || (objectiveLabel[value] ?? value).toLocaleLowerCase("pt-BR").includes(query));
+  }, [checklistQuery, objectiveOptions, objectiveLabel]);
+
+  const visibleCampaigns = useMemo(() => {
+    const query = checklistQuery.trim().toLocaleLowerCase("pt-BR");
+    return campaignOptions.filter((option) => !query || option.label.toLocaleLowerCase("pt-BR").includes(query));
+  }, [checklistQuery, campaignOptions]);
+  const visibleAdsets = useMemo(() => {
+    const query = checklistQuery.trim().toLocaleLowerCase("pt-BR");
+    return adsetOptions.filter((option) => !query || option.label.toLocaleLowerCase("pt-BR").includes(query));
+  }, [checklistQuery, adsetOptions]);
+
+  const singleValueAttrs: PerfFilterAttr[] = ["cliente", "categoria", "rede"];
+  const availableAttrs = ATTR_DEFS.filter((attr) => {
+    if (attr.key === "template" || attr.key === "objetivo" || attr.key === "campanha" || attr.key === "conjunto") return true;
+    return !filters.some((filter) => filter.attr === (attr.key as PerfFilterAttr) && singleValueAttrs.includes(attr.key as PerfFilterAttr));
+  });
   const canOverwrite = Boolean(activeTemplate && activeTemplate.scope !== "builtin" && canSaveTemplate);
 
-  function addFilter(attr: Exclude<PerfMenuAttr, "template">, value: string, label: string) {
+  function openMenu(attr: PerfMenuAttr) {
+    setPendingAttr(attr);
+    setChecklistQuery("");
+  }
+
+  function addFilter(attr: Exclude<PerfFilterAttr, "objetivo">, value: string, label: string) {
     onFiltersChange([...filters.filter((filter) => filter.attr !== attr), { attr, value, label }]);
     setPendingAttr(null);
     setOpen(false);
@@ -131,6 +184,18 @@ export default function PerformanceFilterBar({
 
   function removeFilter(attr: PerfFilterAttr) {
     onFiltersChange(filters.filter((filter) => filter.attr !== attr));
+  }
+
+  function toggleObjective(value: string) {
+    const next = objectiveValues.includes(value) ? objectiveValues.filter((item) => item !== value) : [...objectiveValues, value];
+    const others = filters.filter((filter) => filter.attr !== "objetivo");
+    if (!next.length) { onFiltersChange(others); return; }
+    const labels = next.map((item) => objectiveLabel[item] ?? item);
+    onFiltersChange([...others, { attr: "objetivo", value: next.join(","), label: labels.length > 2 ? `${labels.slice(0, 2).join(", ")} +${labels.length - 2}` : labels.join(", ") }]);
+  }
+
+  function toggleChecklist(current: string[], onChange: (next: string[]) => void, key: string) {
+    onChange(current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
   }
 
   function chooseTemplate(template: PerformanceTemplate) {
@@ -149,6 +214,10 @@ export default function PerformanceFilterBar({
     savedTimerRef.current = window.setTimeout(() => setSaved(false), 2400);
   }
 
+  const chipLabel = (items: string[], source: ChecklistOption[], plural: string) => items.length === 1
+    ? source.find((option) => option.key === items[0])?.label ?? "1 selecionado"
+    : `${items.length} ${plural}`;
+
   return (
     <div className="kb-searchbar perf-filterbar perf-analysis-filterbar" ref={ref}>
       <div className="kb-searchbar-box" onClick={() => setOpen(true)}>
@@ -163,7 +232,11 @@ export default function PerformanceFilterBar({
             <button type="button" aria-label={`Remover filtro ${FILTER_LABEL[filter.attr]}`} onClick={(event) => { event.stopPropagation(); removeFilter(filter.attr); }}>✕</button>
           </span>
         ))}
-        {!activeTemplate && filters.length === 0 ? <span className="doc-filterbar-placeholder">Template, cliente, categoria ou rede…</span> : null}
+        {campaignSelected.length ? <span className="kb-filterchip"><b>Campanha:</b> {chipLabel(campaignSelected, campaignOptions, "selecionadas")}<button type="button" aria-label="Limpar campanhas" onClick={(event) => { event.stopPropagation(); onCampaignChange([]); }}>✕</button></span> : null}
+        {adsetSelected.length ? <span className="kb-filterchip"><b>Conjunto:</b> {chipLabel(adsetSelected, adsetOptions, "selecionados")}<button type="button" aria-label="Limpar conjuntos de anúncios" onClick={(event) => { event.stopPropagation(); onAdsetChange([]); }}>✕</button></span> : null}
+        {!activeTemplate && filters.length === 0 && !campaignSelected.length && !adsetSelected.length ? (
+          <span className="doc-filterbar-placeholder">Template, cliente, categoria, rede, objetivo, campanha…</span>
+        ) : null}
       </div>
 
       {open ? (
@@ -175,7 +248,7 @@ export default function PerformanceFilterBar({
                 <span>Template</span>
               </div>
               <input className="perf-analysis-search" value={templateQuery} onChange={(event) => setTemplateQuery(event.target.value)} placeholder="Buscar template…" aria-label="Buscar template" />
-              <div className="perf-composite-template-list" role="listbox" aria-label="Templates de Analytics">
+              <div className="perf-composite-template-list" role="listbox" aria-label="Templates de Performance">
                 {visibleTemplates.map((template) => (
                   <button key={template.id} type="button" role="option" aria-selected={template.id === activeTemplateId} className={template.id === activeTemplateId ? "on" : ""} onClick={() => chooseTemplate(template)}>
                     <span className="perf-template-radio" aria-hidden />
@@ -200,6 +273,46 @@ export default function PerformanceFilterBar({
                 )}
               </div>
             </>
+          ) : pendingAttr === "objetivo" ? (
+            <>
+              <div className="kb-searchbar-panelhead">
+                <button type="button" className="kb-searchbar-back" onClick={() => setPendingAttr(null)}>‹ Voltar</button>
+                <span>Objetivo</span>
+              </div>
+              <input className="acq-filter-search" autoFocus type="search" value={checklistQuery} onChange={(event) => setChecklistQuery(event.target.value)} placeholder="Buscar objetivo…" aria-label="Buscar objetivo" />
+              <div className="acq-filter-options">
+                {visibleObjectives.map((value) => (
+                  <label className="acq-filter-option" key={value}><input type="checkbox" checked={objectiveValues.includes(value)} onChange={() => toggleObjective(value)} /><span>{objectiveLabel[value] ?? value}</span></label>
+                ))}
+                {!visibleObjectives.length ? <div className="acq-filter-empty">Nenhum objetivo com dados no período.</div> : null}
+              </div>
+            </>
+          ) : pendingAttr === "campanha" ? (
+            <>
+              <div className="kb-searchbar-panelhead">
+                <button type="button" className="kb-searchbar-back" onClick={() => setPendingAttr(null)}>‹ Voltar</button>
+                <span>Campanha</span>
+              </div>
+              <input className="acq-filter-search" autoFocus type="search" value={checklistQuery} onChange={(event) => setChecklistQuery(event.target.value)} placeholder="Buscar campanha…" aria-label="Buscar campanha" />
+              <div className="acq-filter-options">
+                <label className="acq-filter-option"><input type="checkbox" checked={campaignSelected.length === 0} onChange={() => onCampaignChange([])} /><span>Todas as campanhas</span></label>
+                {visibleCampaigns.map((option) => <label className="acq-filter-option" key={option.key}><input type="checkbox" checked={campaignSelected.includes(option.key)} onChange={() => toggleChecklist(campaignSelected, onCampaignChange, option.key)} /><span>{option.label}</span></label>)}
+                {!visibleCampaigns.length ? <div className="acq-filter-empty">Nenhum resultado.</div> : null}
+              </div>
+            </>
+          ) : pendingAttr === "conjunto" ? (
+            <>
+              <div className="kb-searchbar-panelhead">
+                <button type="button" className="kb-searchbar-back" onClick={() => setPendingAttr(null)}>‹ Voltar</button>
+                <span>Conjunto de anúncios</span>
+              </div>
+              <input className="acq-filter-search" autoFocus type="search" value={checklistQuery} onChange={(event) => setChecklistQuery(event.target.value)} placeholder="Buscar conjunto…" aria-label="Buscar conjunto de anúncios" />
+              <div className="acq-filter-options">
+                <label className="acq-filter-option"><input type="checkbox" checked={adsetSelected.length === 0} onChange={() => onAdsetChange([])} /><span>Todos os conjuntos</span></label>
+                {visibleAdsets.map((option) => <label className="acq-filter-option" key={option.key}><input type="checkbox" checked={adsetSelected.includes(option.key)} onChange={() => toggleChecklist(adsetSelected, onAdsetChange, option.key)} /><span>{option.label}</span></label>)}
+                {!visibleAdsets.length ? <div className="acq-filter-empty">Nenhum resultado.</div> : null}
+              </div>
+            </>
           ) : pendingAttr ? (
             <>
               <div className="kb-searchbar-panelhead">
@@ -208,7 +321,7 @@ export default function PerformanceFilterBar({
               </div>
               <div className="kb-searchbar-chips">
                 {valueOptions.map((option) => (
-                  <button type="button" key={option.value} className="kb-chip" onClick={() => addFilter(pendingAttr, option.value, option.label)}>{option.label}</button>
+                  <button type="button" key={option.value} className="kb-chip" onClick={() => addFilter(pendingAttr as Exclude<PerfFilterAttr, "objetivo">, option.value, option.label)}>{option.label}</button>
                 ))}
                 {valueOptions.length === 0 ? <p className="admin-sub kb-searchbar-empty">Nenhum valor disponível.</p> : null}
               </div>
@@ -218,8 +331,15 @@ export default function PerformanceFilterBar({
               <div className="kb-searchbar-panelhead"><span>Filtrar por atributo</span></div>
               <div className="kb-searchbar-attrlist">
                 {availableAttrs.map((attr) => (
-                  <button type="button" key={attr.key} className="kb-searchbar-attr" onClick={() => setPendingAttr(attr.key)}>
+                  <button
+                    type="button"
+                    key={attr.key}
+                    className="kb-searchbar-attr"
+                    disabled={attr.key === "conjunto" && adsetDisabled}
+                    onClick={() => openMenu(attr.key)}
+                  >
                     <span aria-hidden>{attr.icon}</span>{attr.label}
+                    {attr.key === "conjunto" && adsetDisabled ? <small>{campaignSelected.length ? "Carregando…" : "Selecione uma campanha"}</small> : null}
                   </button>
                 ))}
               </div>

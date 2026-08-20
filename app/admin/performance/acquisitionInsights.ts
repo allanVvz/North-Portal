@@ -1,3 +1,5 @@
+import { applyOp } from "./insights";
+import { customMetricIdOf, isCustomMetricRef, type CustomMetric, type MetricRef } from "@/lib/performancePrefs";
 import type { MetaPost, MetaPostMetricKey } from "@/lib/windsor";
 
 export type NullableMetric = number | null;
@@ -100,6 +102,59 @@ export function filterAcquisitionPosts(posts: MetaPost[], campaignId: string, ad
     (!campaignId || post.campaignId === campaignId) &&
     (!adsetId || post.adsetId === adsetId),
   );
+}
+
+// ---- Configurable metrics for Aquisição's cards (Parte 5a) — null-conscious
+// counterparts of insights.ts's resolveMetricValue/trendSeries. Never
+// fabricate a 0 for missing data and never average a ratio per-day; ratio
+// metrics are always derived from summed volume, same rule as
+// summarizeAcquisition above (ctr/cpm/cpc via totalWhenPresent + ratio()).
+
+function resolveBuiltinAcquisitionMetric(posts: MetaPost[], key: MetaPostMetricKey): NullableMetric {
+  if (key === "ctr") return ratio(totalWhenPresent(posts, "cliques"), totalWhenPresent(posts, "impressoes"), 100);
+  if (key === "cpc") return ratio(totalWhenPresent(posts, "custo"), totalWhenPresent(posts, "cliques"));
+  if (key === "cpm") return ratio(totalWhenPresent(posts, "custo"), totalWhenPresent(posts, "impressoes"), 1000);
+  if (key === "frequencia") return ratio(totalWhenPresent(posts, "impressoes"), totalWhenPresent(posts, "alcance"));
+  return totalWhenPresent(posts, key);
+}
+
+function findCustomMetric(ref: MetricRef, customMetrics: CustomMetric[]): CustomMetric | undefined {
+  return customMetrics.find((metric) => metric.id === customMetricIdOf(ref));
+}
+
+export function resolveAcquisitionMetric(posts: MetaPost[], ref: MetricRef, customMetrics: CustomMetric[]): NullableMetric {
+  if (isCustomMetricRef(ref)) {
+    const def = findCustomMetric(ref, customMetrics);
+    if (!def) return null;
+    const a = resolveBuiltinAcquisitionMetric(posts, def.a);
+    const b = resolveBuiltinAcquisitionMetric(posts, def.b);
+    if (a === null || b === null) return null;
+    return applyOp(a, def.op, b);
+  }
+  return resolveBuiltinAcquisitionMetric(posts, ref);
+}
+
+export function acquisitionMetricAvailable(posts: MetaPost[], ref: MetricRef, customMetrics: CustomMetric[]): boolean {
+  return resolveAcquisitionMetric(posts, ref, customMetrics) !== null;
+}
+
+export function acquisitionMetricLabel(ref: MetricRef, customMetrics: CustomMetric[], builtinLabel: (key: MetaPostMetricKey) => string): string {
+  if (isCustomMetricRef(ref)) return findCustomMetric(ref, customMetrics)?.label ?? "Métrica removida";
+  return builtinLabel(ref);
+}
+
+// Same day-then-derive approach as insights.ts's trendSeries fix — a ratio
+// metric is never averaged/summed per day, it's recomputed from that day's
+// summed components.
+export function acquisitionMetricSeries(posts: MetaPost[], ref: MetricRef, from: string, to: string, customMetrics: CustomMetric[]): { date: string; value: NullableMetric }[] {
+  const days: string[] = [];
+  for (let cursor = new Date(`${from}T00:00:00`), end = new Date(`${to}T00:00:00`); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+    days.push(isoDay(cursor));
+  }
+  return days.map((date) => {
+    const rows = posts.filter((post) => post.date === date);
+    return { date, value: resolveAcquisitionMetric(rows, ref, customMetrics) };
+  });
 }
 
 export function creativePerformanceRows(posts: MetaPost[]): CreativePerformanceRow[] {

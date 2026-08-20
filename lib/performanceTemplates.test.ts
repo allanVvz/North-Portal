@@ -2,13 +2,24 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_PERFORMANCE_TEMPLATES, sanitizePerformanceTemplateConfig } from "./performanceTemplates";
 
 describe("performance templates", () => {
-  it("ships the two required built-in templates", () => {
+  it("ships the three funnel-stage built-in templates, funil completo first", () => {
     expect(BUILTIN_PERFORMANCE_TEMPLATES.map((template) => template.name)).toEqual([
-      "Crescimento do perfil",
-      "Conversas no WhatsApp",
+      "Funil completo",
+      "Topo de funil",
+      "Fundo de funil",
     ]);
-    const whatsapp = BUILTIN_PERFORMANCE_TEMPLATES[1].config.prefs.customMetrics[0];
-    expect(whatsapp).toMatchObject({ label: "Custo por conversa", format: "money" });
+    const bottomFunnel = BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === "builtin-bottom-funnel")!;
+    expect(bottomFunnel.config.prefs.customMetrics.find((m) => m.id === "native_cost_per_lead")).toMatchObject({ label: "Custo por lead", format: "money" });
+  });
+
+  it("every builtin also carries an Aquisição slice (Parte 5a) so templates drive both screens", () => {
+    for (const template of BUILTIN_PERFORMANCE_TEMPLATES) {
+      expect(template.config.acquisition.kpiSlots.length).toBeGreaterThan(0);
+      expect(template.config.acquisition.funnelStages.length).toBeGreaterThanOrEqual(2);
+    }
+    const topFunnel = BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === "builtin-top-funnel")!;
+    expect(topFunnel.config.acquisition.funnelStages).toEqual(["alcance", "impressoes", "cliques"]);
+    expect(topFunnel.config.acquisition.showMessageBranch).toBe(false);
   });
 
   it("sanitizes all shared settings without persisting the client", () => {

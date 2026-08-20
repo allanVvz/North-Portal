@@ -169,6 +169,11 @@ export function trendSeries(posts: MetaPost[], metric: MetricRef, period: Period
   if (isCustomMetricRef(metric)) {
     const def = findCustomMetric(metric, customMetrics);
     if (!def) return days.map((date) => ({ date, value: 0 }));
+    // If an operand is itself a ratio metric (ctr/cpc/cpm/frequencia), this
+    // still sums it directly per day instead of recomputing from volume —
+    // same class of bug as the built-in branch below, just not fixed here:
+    // doing it correctly needs the full 4-component decomposition per
+    // operand, which is out of scope for this pass. Documented limitation.
     const byDayA = new Map<string, number>();
     const byDayB = new Map<string, number>();
     for (const p of posts) {
@@ -176,6 +181,26 @@ export function trendSeries(posts: MetaPost[], metric: MetricRef, period: Period
       byDayB.set(p.date, (byDayB.get(p.date) ?? 0) + (p.metrics[def.b] ?? 0));
     }
     return days.map((date) => ({ date, value: applyOp(byDayA.get(date) ?? 0, def.op, byDayB.get(date) ?? 0) }));
+  }
+
+  // Ratio metrics (ctr/cpc/cpm/frequencia) can't be summed per day like a
+  // plain count — 3 campaigns each at ctr=2% on the same day would wrongly
+  // plot 6%. Sum the underlying volume components for that day instead and
+  // derive the ratio afterward, same approach campaignSummaries/adSummaries
+  // already use via sumMetricsInto + recomputeRatios.
+  if (RATIO_METRIC_KEYS.has(metric as MetaPostMetricKey)) {
+    const byDay = new Map<string, Partial<Record<MetaPostMetricKey, number>>>();
+    for (const p of posts) {
+      const entry = byDay.get(p.date) ?? {};
+      sumMetricsInto(entry, p.metrics);
+      byDay.set(p.date, entry);
+    }
+    return days.map((date) => {
+      const entry = byDay.get(date);
+      if (!entry) return { date, value: 0 };
+      recomputeRatios(entry);
+      return { date, value: entry[metric as MetaPostMetricKey] ?? 0 };
+    });
   }
 
   const byDay = new Map<string, number>();
@@ -201,6 +226,8 @@ function sumMetricsInto(target: Partial<Record<MetaPostMetricKey, number>>, metr
     target[metricKey] = (target[metricKey] ?? 0) + value;
   }
 }
+
+const RATIO_METRIC_KEYS = new Set<MetaPostMetricKey>(["ctr", "cpc", "cpm", "frequencia"]);
 
 function recomputeRatios(metrics: Partial<Record<MetaPostMetricKey, number>>) {
   const impressions = metrics.impressoes ?? 0;

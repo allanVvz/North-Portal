@@ -108,6 +108,36 @@ describe("trendSeries", () => {
     const posts = [post({ date: "2026-07-01", metrics: { alcance: 5 } }), post({ date: "2026-07-01", metrics: { alcance: 3 } })];
     expect(trendSeries(posts, "alcance", { from: "2026-07-01", to: "2026-07-01" })[0].value).toBe(8);
   });
+
+  it("recomputes ratio metrics from summed daily volume instead of summing the ratio itself", () => {
+    // 2 campaigns same day: 1000 impressoes/20 cliques (ctr 2%) and 2000
+    // impressoes/20 cliques (ctr 1%) — naively summing ctr would wrongly
+    // read 3%; the real daily ctr is 40/3000 ≈ 1.33%.
+    const posts = [
+      post({ date: "2026-07-01", metrics: { impressoes: 1000, cliques: 20, ctr: 2 } }),
+      post({ date: "2026-07-01", metrics: { impressoes: 2000, cliques: 20, ctr: 1 } }),
+    ];
+    const series = trendSeries(posts, "ctr", { from: "2026-07-01", to: "2026-07-01" });
+    expect(series[0].value).toBeCloseTo(1.33, 2);
+  });
+
+  it("recomputes cpc/cpm/frequencia the same way", () => {
+    const posts = [
+      post({ date: "2026-07-01", metrics: { custo: 100, cliques: 20, impressoes: 1000, alcance: 500 } }),
+      post({ date: "2026-07-01", metrics: { custo: 50, cliques: 5, impressoes: 500, alcance: 250 } }),
+    ];
+    const series = { from: "2026-07-01", to: "2026-07-01" };
+    expect(trendSeries(posts, "cpc", series)[0].value).toBeCloseTo(150 / 25, 2);
+    expect(trendSeries(posts, "cpm", series)[0].value).toBeCloseTo((150 / 1500) * 1000, 2);
+    expect(trendSeries(posts, "frequencia", series)[0].value).toBeCloseTo(1500 / 750, 2);
+  });
+
+  it("a ratio metric on a day with zero denominator yields 0, not NaN/Infinity", () => {
+    const posts = [post({ date: "2026-07-01", metrics: { custo: 100, cliques: 0, impressoes: 0 } })];
+    const series = trendSeries(posts, "ctr", { from: "2026-07-01", to: "2026-07-01" });
+    expect(series[0].value).toBe(0);
+    expect(Number.isFinite(series[0].value)).toBe(true);
+  });
 });
 
 describe("topPosts", () => {

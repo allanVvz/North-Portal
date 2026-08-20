@@ -1,4 +1,9 @@
 import {
+  ACQUISITION_VIEW_PREFS_DEFAULT,
+  sanitizeAcquisitionViewPrefs,
+  type AcquisitionViewPrefs,
+} from "./acquisitionPrefs";
+import {
   PERFORMANCE_VIEW_PREFS_DEFAULT,
   sanitizePerformanceViewPrefs,
   type MetricRef,
@@ -17,6 +22,9 @@ export type PerformanceTemplateFilters = {
 export type PerformanceTemplateConfig = {
   version: 1;
   prefs: PerformanceViewPrefs;
+  // Aquisição's own configurable slots (Parte 5a) — additive field, so
+  // templates saved before this shipped sanitize cleanly to the default.
+  acquisition: AcquisitionViewPrefs;
   filters: PerformanceTemplateFilters;
   dateRange: { from: string; to: string } | null;
   cardSources: Record<string, "paid" | "organic">;
@@ -62,6 +70,7 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
   const value = (raw ?? {}) as Partial<PerformanceTemplateConfig>;
   const filters = (value.filters ?? {}) as Partial<PerformanceTemplateFilters>;
   const prefs = sanitizePerformanceViewPrefs(value.prefs);
+  const acquisition = sanitizeAcquisitionViewPrefs(value.acquisition, prefs.customMetrics);
   const customRefs = new Set(prefs.customMetrics.map((metric) => `custom:${metric.id}`));
   const trendMetrics = stringList(value.trendMetrics, 3).filter((metric): metric is MetricRef => {
     if (metric.startsWith("custom:")) return customRefs.has(metric);
@@ -70,6 +79,7 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
   return {
     version: 1,
     prefs,
+    acquisition,
     filters: {
       // Templates são compartilhados pela agência. Cliente é sempre um
       // contexto local da consulta e nunca pode vazar para a configuração.
@@ -90,34 +100,67 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
 
 const COST_PER_MESSAGE_ID = "native_cost_per_message";
 const COST_PER_FOLLOWER_ID = "native_cost_per_follower";
-const growthPrefs = sanitizePerformanceViewPrefs({
+const COST_PER_LEAD_ID = "native_cost_per_lead";
+const costPerLeadMetric = { id: COST_PER_LEAD_ID, label: "Custo por lead", a: "custo" as const, b: "leads" as const, op: "÷" as const, format: "money" as const };
+const costPerMessageMetric = { id: COST_PER_MESSAGE_ID, label: "Custo por conversa", a: "custo" as const, b: "mensagens" as const, op: "÷" as const, format: "money" as const };
+
+// 3 builtins organized by funnel stage (topo/fundo/completo), replacing the
+// previous "Crescimento do perfil"/"Conversas no WhatsApp" pair — both had
+// drifted into mixing top-of-funnel and bottom-of-funnel metrics together
+// (e.g. WhatsApp mixed in alcance; profile-growth locked to Instagram-only
+// and pulled in mensagens). Each template now also carries an `acquisition`
+// slice (Parte 5a) so picking a template changes both screens' cards.
+const topFunnelPrefs = sanitizePerformanceViewPrefs({
   ...PERFORMANCE_VIEW_PREFS_DEFAULT,
   defaultPeriod: 30,
-  kpiSlots: ["custo", "profileVisits", "cliquesLink", "followersGained", `custom:${COST_PER_FOLLOWER_ID}`, "mensagens"].map((metric) => ({ visible: true, metric })),
-  trendMetric: "followersGained",
-  topCampaignsMetric: `custom:${COST_PER_FOLLOWER_ID}`,
-  visibleColumns: ["custo", "profileVisits", "cliquesLink", "followersGained", "mensagens", "ctr", "cpc", "frequencia"],
-  customMetrics: [{ id: COST_PER_FOLLOWER_ID, label: "Custo por seguidor", a: "custo", b: "followersGained", op: "÷", format: "money" }],
+  kpiSlots: ["alcance", "impressoes", "cpm", "frequencia", "profileVisits", "followersGained"].map((metric) => ({ visible: true, metric })),
+  trendMetric: "alcance",
+  topCampaignsMetric: "alcance",
+  visibleColumns: ["alcance", "impressoes", "frequencia", "profileVisits", "followersGained", "ctr", "cpm"],
+  customMetrics: [],
 });
-const whatsappPrefs = sanitizePerformanceViewPrefs({
+const bottomFunnelPrefs = sanitizePerformanceViewPrefs({
   ...PERFORMANCE_VIEW_PREFS_DEFAULT,
   defaultPeriod: 30,
-  kpiSlots: ["custo", "alcance", "mensagens", `custom:${COST_PER_MESSAGE_ID}`, "profileVisits", "followersGained"].map((metric) => ({ visible: true, metric })),
-  trendMetric: "custo",
-  topCampaignsMetric: `custom:${COST_PER_MESSAGE_ID}`,
-  visibleColumns: ["custo", "alcance", "mensagens", "profileVisits", "followersGained", "ctr", "cpc"],
-  customMetrics: [{ id: COST_PER_MESSAGE_ID, label: "Custo por conversa", a: "custo", b: "mensagens", op: "÷", format: "money" }],
+  kpiSlots: ["custo", "cliquesLink", "leads", `custom:${COST_PER_LEAD_ID}`, "mensagens", `custom:${COST_PER_MESSAGE_ID}`].map((metric) => ({ visible: true, metric })),
+  trendMetric: "leads",
+  topCampaignsMetric: `custom:${COST_PER_LEAD_ID}`,
+  visibleColumns: ["custo", "cliquesLink", "leads", "mensagens", "ctr", "cpc", "cpm"],
+  customMetrics: [costPerLeadMetric, costPerMessageMetric],
 });
+const fullFunnelPrefs = sanitizePerformanceViewPrefs({
+  ...PERFORMANCE_VIEW_PREFS_DEFAULT,
+  defaultPeriod: 30,
+  kpiSlots: ["alcance", "impressoes", "cliquesLink", "leads", "custo", `custom:${COST_PER_LEAD_ID}`].map((metric) => ({ visible: true, metric })),
+  trendMetric: "alcance",
+  topCampaignsMetric: "leads",
+  visibleColumns: ["alcance", "impressoes", "cliquesLink", "leads", "custo", "ctr", "cpc", "cpm"],
+  customMetrics: [costPerLeadMetric],
+});
+
+const topFunnelAcquisition: AcquisitionViewPrefs = {
+  kpiSlots: ["alcance", "impressoes", "custo"],
+  volumeSlots: ["impressoes", "cliques"],
+  gaugeSlots: ["cpm", "ctr", "frequencia"],
+  funnelStages: ["alcance", "impressoes", "cliques"],
+  showMessageBranch: false,
+  trendMetrics: ["alcance", "impressoes"],
+};
 
 export const BUILTIN_PERFORMANCE_TEMPLATES: PerformanceTemplate[] = [
   {
-    id: "builtin-profile-growth", name: "Crescimento do perfil",
-    description: "Investimento, visitas, cliques e aquisição de seguidores.", scope: "builtin", ownerProfileId: null, updatedAt: null,
-    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: growthPrefs, filters: { clientSlug: "", category: "ads", platforms: ["instagram"], objectives: ["OUTCOME_TRAFFIC", "OUTCOME_ENGAGEMENT"] }, level: "campaign", trendMetrics: ["followersGained", "custo"] }),
+    id: "builtin-full-funnel", name: "Funil completo",
+    description: "Alcance, cliques, leads e investimento — visão de ponta a ponta.", scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: fullFunnelPrefs, acquisition: ACQUISITION_VIEW_PREFS_DEFAULT, filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] }, level: "campaign", trendMetrics: ["alcance", "leads"] }),
   },
   {
-    id: "builtin-whatsapp-conversations", name: "Conversas no WhatsApp",
-    description: "Investimento, alcance, conversas e custo por conversa.", scope: "builtin", ownerProfileId: null, updatedAt: null,
-    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: whatsappPrefs, filters: { clientSlug: "", category: "ads", platforms: [], objectives: ["OUTCOME_ENGAGEMENT"] }, level: "campaign", trendMetrics: ["custo", "mensagens"] }),
+    id: "builtin-top-funnel", name: "Topo de funil",
+    description: "Alcance, impressões e frequência — reconhecimento e engajamento.", scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: topFunnelPrefs, acquisition: topFunnelAcquisition, filters: { clientSlug: "", category: "ads", platforms: [], objectives: ["OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT"] }, level: "campaign", trendMetrics: ["alcance", "impressoes"] }),
+  },
+  {
+    id: "builtin-bottom-funnel", name: "Fundo de funil",
+    description: "Leads, custo por lead e conversas — conversão e intenção de compra.", scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: bottomFunnelPrefs, acquisition: ACQUISITION_VIEW_PREFS_DEFAULT, filters: { clientSlug: "", category: "ads", platforms: [], objectives: ["OUTCOME_LEADS", "OUTCOME_SALES"] }, level: "campaign", trendMetrics: ["leads", "custo"] }),
   },
 ];
