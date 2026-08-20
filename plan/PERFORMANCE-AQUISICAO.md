@@ -14,15 +14,16 @@ Conectar a leitura de mídia (CPM, CPC, CTR, impressões e cliques) à leitura c
 - Leitura lateral: impressões, cliques e conversão de clique para lead.
 - Série temporal de investimento e mensagens iniciadas, com eixos independentes e tipografia Inter.
 - CPM, CPC e CTR comparados apenas ao período anterior. Os arcos não usam benchmark inventado.
-- Funil Alcance → Cliques → Leads, seguido de CPA. Alcance é explicitamente rotulado como diário acumulado.
-- Bloco Clique → Mensagem com o objeto roxo recortado no centro.
+- Card central consolidado: funil Alcance → Cliques → Leads, seguido de CPA, com Alcance explicitamente rotulado como diário acumulado.
+- Mensagens aparecem no mesmo card como uma ramificação paralela dos cliques; a taxa prioriza cliques no link e nunca é calculada como Leads → Mensagens.
+- O objeto roxo transparente fica centralizado e invertido para a leitura visual largo → estreito.
 - Tabela de criativos com cliques, leads, CPA e CTR, carregada sob demanda pela campanha.
 
 ## Semântica dos dados
 
 - Métrica ausente é `null` e aparece como `—`; zero só aparece quando veio como zero da fonte.
 - Divisão por zero ou por métrica ausente retorna `—`, nunca `Infinity`, `NaN` ou zero artificial.
-- Oportunidade significa `lead` reportado pela Meta; mensagens permanecem uma etapa intermediária separada.
+- Oportunidade significa `lead` reportado pela Meta; mensagens são uma ramificação paralela de intenção, não uma etapa posterior ao lead.
 - Alcance agregado soma o alcance diário retornado pela fonte. Ele não representa pessoas únicas no período inteiro.
 
 ## Verificação
