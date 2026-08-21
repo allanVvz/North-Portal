@@ -51,7 +51,10 @@ export const adminPatchSchema = z.object({
 });
 
 // ---- Tasks / Kanban -----------------------------------------------------------
-export const TASK_STATUSES = ["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "concluido"] as const;
+// "parada" is a lateral halt state (automation error needing human
+// attention), reachable from any status — not a funnel step. Kept last so it
+// never gets mistaken for "further along" by ordinal comparisons elsewhere.
+export const TASK_STATUSES = ["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "concluido", "parada"] as const;
 export const TASK_PRIORITIES = ["baixa", "media", "alta"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
@@ -352,6 +355,29 @@ export const recurringGenerateSchema = z.object({
   occurrenceDate: isoDateSchema.optional(),
 });
 
+// ---- Automations (Configurações → Automações) ----------------------------------
+// v2: one row per registered automation instance, always bound to a target
+// card (cadence/execution date come from that card — see
+// plan/AUTOMACOES-RELATORIO-TRAFEGO.md). No more agency/client scope.
+const automationKeySchema = z.enum(["relatorio_trafego_semanal", "provisionar_card_metricas"]);
+export const automationConfigCreateSchema = z.object({
+  automationKey: automationKeySchema,
+  targetTaskId: z.string().uuid(),
+  // Only meaningful for relatorio_trafego_semanal — either a real template
+  // uuid or a builtin's string id (e.g. "builtin-full-funnel"), see
+  // supabase/migrations/20260821030010_automations_v2.sql.
+  performanceTemplateId: z.string().min(1).max(80).nullable().optional(),
+  active: z.boolean().optional(),
+});
+export const automationConfigPatchSchema = z.object({
+  targetTaskId: z.string().uuid().optional(),
+  performanceTemplateId: z.string().min(1).max(80).nullable().optional(),
+  active: z.boolean().optional(),
+});
+export const automationProvisionSchema = z.object({
+  templateTaskId: z.string().uuid(),
+});
+
 export type RecurringTaskRecord = {
   id: string;
   client_id: string;
@@ -418,6 +444,9 @@ export const checkpointTemplatePatchSchema = checkpointTemplateCreateSchema.part
 export type DocumentRecord = {
   id: string;
   client_id: string;
+  // The Kanban card that produced this document (e.g. an automation's PDF
+  // report), if any — null for documents uploaded independently of a card.
+  task_id: string | null;
   name: string;
   doc_type: DocumentType;
   status: DocumentStatus;

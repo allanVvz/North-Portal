@@ -21,6 +21,7 @@ type IconName =
   | "checkCircle"
   | "barChart"
   | "fileText"
+  | "bot"
   | "bell"
   | "moon"
   | "sun"
@@ -79,6 +80,16 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
       <path d="M14 2.5V8h5.5" />
       <line x1="9" y1="13" x2="15" y2="13" />
       <line x1="9" y1="17" x2="15" y2="17" />
+    </>
+  ),
+  bot: (
+    <>
+      <path d="M12 8V4H8" />
+      <rect x="4" y="8" width="16" height="12" rx="2" />
+      <path d="M2 14h2" />
+      <path d="M20 14h2" />
+      <circle cx="9" cy="13" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="13" r="1" fill="currentColor" stroke="none" />
     </>
   ),
   bell: (
@@ -144,6 +155,7 @@ const NAV_GROUPS: { head: string; items: { href: string; ico: IconName; label: s
     items: [
       { href: "/admin/performance", ico: "barChart", label: "Performance" },
       { href: "/admin/documentos", ico: "fileText", label: "Informações" },
+      { href: "/admin/automacoes", ico: "bot", label: "Automações" },
     ],
   },
 ];

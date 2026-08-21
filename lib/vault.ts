@@ -1,4 +1,5 @@
 import { createClient } from "./supabase/server";
+import { createAdminClient } from "./supabase/admin";
 import { HttpError } from "./validation";
 
 // Thin wrapper around the vault_* SQL functions (supabase/migrations/20260813000001_credential_vault.sql).
@@ -37,4 +38,16 @@ export async function vaultDelete(id: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("vault_delete_secret", { p_id: id });
   if (error) failVault("delete", error);
+}
+
+// Service-role read — for callers with no session (the automations cron
+// route), where createAdminClient() bypasses RLS and vault_authorized()
+// grants access via auth.role() = 'service_role'
+// (supabase/migrations/20260820000002_automations.sql). Never call this from
+// a session-scoped route; use vaultRead() there instead.
+export async function vaultReadService(id: string): Promise<string> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc("vault_read_secret", { p_id: id });
+  if (error) failVault("read (service)", error);
+  return (data as string | null) ?? "";
 }

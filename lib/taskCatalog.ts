@@ -75,6 +75,7 @@ export const TASK_KINDS: Record<TaskKind, KindDef> = {
     blurb: "Tarefa interna, sem revisão/aprovação",
     workflow: "simples",
     performance: false,
+    subtypes: ["relatorio_trafego"],
   },
   checkpoint_comercial: {
     label: "Checkpoint Comercial",
@@ -102,6 +103,8 @@ export const SUBTYPE_LABEL: Record<string, string> = {
   // canonical specializations
   roteiro: "Roteiro",
   gravacao: "Gravação",
+  // operacional
+  relatorio_trafego: "Relatório de tráfego",
 };
 
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];
@@ -153,11 +156,22 @@ function workflowPct(workflow: WorkflowKey, status: TaskStatus): number {
   return 0;
 }
 
-type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight"> & { recurrence_cadence?: TaskRecord["recurrence_cadence"] };
+type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight"> & {
+  recurrence_cadence?: TaskRecord["recurrence_cadence"];
+  payload?: TaskRecord["payload"];
+};
+
+/** Key an automation writes into payload when it halts a card into `parada`,
+ * so progress can stay frozen at its pre-halt value instead of falling
+ * through to whatever workflowPct's index-based fallback would pick (wrong,
+ * since `parada` sits last in TASK_STATUSES). See lib/automations/errorHandling.ts. */
+export const PRE_PARADA_STATUS_KEY = "pre_parada_status";
 
 /**
  * Single source of truth for a card's progress (0–100).
  * - Plan cards (isPlan): weighted rollup of their member tasks.
+ * - `parada` (automation halted the card): frozen at the percentage of
+ *   whatever status it was in right before halting (payload.pre_parada_status).
  * - Everything else: the workflow percentage for the card's current status.
  * Pass `members` (tasks whose plan_id === this card's id) for plan rollups.
  */
@@ -169,6 +183,13 @@ export function taskProgress(task: ProgressTask, members: ProgressTask[] = []): 
     if (totalWeight === 0) return 0;
     const weighted = members.reduce((s, m) => s + taskProgress(m) * (m.progress_weight || 1), 0);
     return Math.round(weighted / totalWeight);
+  }
+  if (task.status === "parada") {
+    const frozen = task.payload?.[PRE_PARADA_STATUS_KEY];
+    if (typeof frozen === "string" && (TASK_STATUSES as readonly string[]).includes(frozen)) {
+      return workflowPct(def.workflow, frozen as TaskStatus);
+    }
+    return 0;
   }
   return workflowPct(def.workflow, task.status);
 }

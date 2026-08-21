@@ -47,7 +47,7 @@ import type { MetaAdAccount } from "./meta";
 type ContentRow = { data: Record<string, unknown> | null };
 type PrefsRow = { theme: string | null; avatar_style: number | null; display_name: string | null; username: string | null; manual_seen: boolean | null };
 
-const TASK_COLUMNS =
+export const TASK_COLUMNS =
   "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at";
 
 // Responsável linked to a real account (task_assignees), merged into the
@@ -87,6 +87,7 @@ const STATUS_KANBAN: Record<TaskStatus, string> = {
   aprovacao: "Kanban · Aprovação",
   aprovado: "Kanban · Concluído",
   concluido: "Kanban · Publicado",
+  parada: "Kanban · Parada",
 };
 
 // 'YYYY-MM-DD' -> 'dd/mm'; formats a plan's start→end span for the portal card.
@@ -263,11 +264,15 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     // Any card in the approval pipeline (aprovacao/aprovado/concluido) is
     // client-facing regardless of `client_visible` — that flag only gates
     // the separate "Plano de Ação" feature for earlier Kanban stages.
+    // "parada" (automation halted, needs admin attention) is excluded
+    // unconditionally — an internal error state, never client-facing even
+    // when client_visible=true on the underlying card.
     supabase
       .from("tasks")
       .select(TASK_COLUMNS_WITH_ASSIGNEES)
       .eq("client_id", client.id)
       .or("client_visible.eq.true,status.in.(aprovacao,aprovado,concluido)")
+      .neq("status", "parada")
       .order("position"),
     supabase.from("documents").select(DOC_COLUMNS).eq("client_id", client.id).order("doc_date", { ascending: false, nullsFirst: false }),
     listClientCredentials(client.id),
@@ -1553,7 +1558,7 @@ export async function upsertTaskMetrics(
 
 // ---- Documents (admin) ------------------------------------------------------
 
-const DOC_COLUMNS = "id,client_id,name,doc_type,status,file_url,storage_path,original_file_name,mime_type,size_bytes,doc_date,read_at";
+const DOC_COLUMNS = "id,client_id,task_id,name,doc_type,status,file_url,storage_path,original_file_name,mime_type,size_bytes,doc_date,read_at";
 
 export type AdminDocument = DocumentRecord & { clientName: string; clientSlug: string };
 
@@ -2402,4 +2407,110 @@ export async function listApproverCandidates(clientId: string): Promise<Reviewer
     .order("full_name");
   if (error) fail(error);
   return ((data as TeamMember[] | null) ?? []).map((p) => ({ id: p.id, role: p.role, label: reviewerLabel(p) }));
+}
+
+// ---- Automations (Configurações → Automações) ------------------------------------
+// v2: one row per registered automation instance, always bound to a target
+// card — cadence/execution date come from that card, not from this table.
+// See plan/AUTOMACOES-RELATORIO-TRAFEGO.md. Vocabulary lives in
+// lib/automationCatalog.ts; this is only the instance CRUD.
+export type AutomationTargetTaskSummary = {
+  id: string;
+  title: string;
+  kind: string;
+  clientName: string | null;
+  dueDate: string | null;
+  recurrenceCadence: RecurringCadence | null;
+};
+
+export type AutomationConfig = {
+  id: string;
+  automationKey: string;
+  targetTaskId: string;
+  performanceTemplateId: string | null;
+  active: boolean;
+  lastRunDate: string | null;
+  // Resolved directly here (not left to the frontend to cross-reference
+  // against GET /api/admin/tasks) because a recurring target card that has
+  // already advanced past its first cycle gets payload.recurrence_group=true
+  // and disappears from that list (visibleOnTaskBoard, lib/taskRelations.ts)
+  // — exactly the common case for an automation that has already fired once.
+  targetTask: AutomationTargetTaskSummary | null;
+};
+
+type AutomationConfigJoinRow = Record<string, unknown> & {
+  tasks?: { title: string; kind: string; due_date: string | null; recurrence_cadence: string | null; clients: { name: string } | { name: string }[] | null } | null;
+};
+
+function mapAutomationConfigRow(row: AutomationConfigJoinRow): AutomationConfig {
+  const task = row.tasks ?? null;
+  const client = task ? (Array.isArray(task.clients) ? task.clients[0] : task.clients) : null;
+  return {
+    id: row.id as string,
+    automationKey: row.automation_key as string,
+    targetTaskId: row.target_task_id as string,
+    performanceTemplateId: (row.performance_template_id as string | null) ?? null,
+    active: Boolean(row.active),
+    lastRunDate: (row.last_run_date as string | null) ?? null,
+    targetTask: task ? {
+      id: row.target_task_id as string,
+      title: task.title,
+      kind: task.kind,
+      clientName: client?.name ?? null,
+      dueDate: task.due_date,
+      recurrenceCadence: (task.recurrence_cadence as RecurringCadence | null) ?? null,
+    } : null,
+  };
+}
+
+export async function listAutomationConfigs(): Promise<AutomationConfig[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("automation_configs")
+    .select("*,tasks!automation_configs_target_task_id_fkey(title,kind,due_date,recurrence_cadence,clients(name))")
+    .order("created_at");
+  if (error) fail(error);
+  return ((data ?? []) as AutomationConfigJoinRow[]).map(mapAutomationConfigRow);
+}
+
+export async function createAutomationConfig(
+  input: { automationKey: string; targetTaskId: string; performanceTemplateId?: string | null; active?: boolean },
+  createdBy: string,
+): Promise<AutomationConfig> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("automation_configs")
+    .insert({
+      automation_key: input.automationKey,
+      target_task_id: input.targetTaskId,
+      performance_template_id: input.performanceTemplateId ?? null,
+      active: input.active ?? true,
+      created_by: createdBy,
+    })
+    .select("*")
+    .limit(1);
+  if (error) fail(error);
+  return mapAutomationConfigRow(data![0]);
+}
+
+export async function updateAutomationConfig(
+  id: string,
+  patch: { targetTaskId?: string; performanceTemplateId?: string | null; active?: boolean },
+): Promise<AutomationConfig> {
+  const supabase = await createClient();
+  const fields: Record<string, unknown> = {};
+  if (patch.targetTaskId !== undefined) fields.target_task_id = patch.targetTaskId;
+  if (patch.performanceTemplateId !== undefined) fields.performance_template_id = patch.performanceTemplateId;
+  if (patch.active !== undefined) fields.active = patch.active;
+  const { data, error } = await supabase.from("automation_configs").update(fields).eq("id", id).select("*").limit(1);
+  if (error) fail(error);
+  const row = data?.[0] as Record<string, unknown> | undefined;
+  if (!row) throw new HttpError(404, "Automação não encontrada.");
+  return mapAutomationConfigRow(row);
+}
+
+export async function deleteAutomationConfig(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("automation_configs").delete().eq("id", id);
+  if (error) fail(error);
 }

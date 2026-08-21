@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { COLUMNS, STATUS_LABEL, statusAfterKanbanDrop, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
 
 describe("Kanban COLUMNS", () => {
-  it("has 6 columns, Concluído sitting between Aprovação and Publicado", () => {
+  it("has 7 columns, Concluído sitting between Aprovação and Publicado, Parada last", () => {
     expect(COLUMNS.map((c) => c.status)).toEqual([
       "backlog",
       "em_producao",
@@ -10,6 +10,7 @@ describe("Kanban COLUMNS", () => {
       "aprovacao",
       "aprovado",
       "concluido",
+      "parada",
     ]);
     expect(COLUMNS.map((c) => c.label)).toEqual([
       "Entrada",
@@ -18,13 +19,15 @@ describe("Kanban COLUMNS", () => {
       "Aprovação",
       "Concluído",
       "Publicado",
+      "Parada",
     ]);
   });
 
   it("STATUS_LABEL is derived from COLUMNS and covers every status", () => {
     expect(STATUS_LABEL.aprovado).toBe("Concluído");
     expect(STATUS_LABEL.concluido).toBe("Publicado");
-    expect(Object.keys(STATUS_LABEL)).toHaveLength(6);
+    expect(STATUS_LABEL.parada).toBe("Parada");
+    expect(Object.keys(STATUS_LABEL)).toHaveLength(7);
   });
 });
 
@@ -61,6 +64,17 @@ describe("visibleColumnsFor (Revisão/Aprovação column visibility)", () => {
   it("hides Aprovação again once the toggle is off and its last card has moved elsewhere", () => {
     expect(visibleColumnsFor([{ status: "aprovacao" as const }], false, true, true).some((c) => c.status === "aprovacao")).toBe(true);
     expect(visibleColumnsFor([{ status: "em_producao" as const }], false, false, true).some((c) => c.status === "aprovacao")).toBe(false);
+  });
+});
+
+describe("visibleColumnsFor (Parada column visibility)", () => {
+  it("hides Parada when no card sits in it — no toggle, purely card-driven", () => {
+    expect(visibleColumnsFor([{ status: "backlog" as const }], true, true, true).some((c) => c.status === "parada")).toBe(false);
+  });
+
+  it("shows Parada as soon as a card is halted in it", () => {
+    const tasks = [{ status: "backlog" as const }, { status: "parada" as const }];
+    expect(visibleColumnsFor(tasks, false, false, true).some((c) => c.status === "parada")).toBe(true);
   });
 });
 

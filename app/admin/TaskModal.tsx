@@ -14,14 +14,16 @@ import {
 } from "./kanbanShared";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
-import { formatCommentTime } from "@/lib/comments";
+import { formatCommentTime, splitCommentText } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
-import { isHtmlDocument } from "@/lib/documentFiles";
+import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
 import type { AdminDocument } from "@/lib/supabase";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
+import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
+import BackArrowIcon from "./BackArrowIcon";
 
 type Draft = {
   title: string;
@@ -472,8 +474,35 @@ export default function TaskModal({
   const commentDocs = draft.clientSlug
     ? [...attachableDocs.filter((d) => d.clientSlug === draft.clientSlug), ...attachableDocs.filter((d) => d.clientSlug !== draft.clientSlug)]
     : attachableDocs;
+  // Anexos = documents attached directly to THIS card (documents.task_id, e.g.
+  // a report an automation generated) UNION any document a comment happens to
+  // link to (file link pasted/posted in the thread) — every file link in a
+  // comment becomes an icon here too, not just direct task_id attachments.
+  const taskDocs = useMemo(() => {
+    if (!liveTask) return [];
+    const byId = new Map(attachableDocs.filter((d) => d.task_id === liveTask.id).map((d) => [d.id, d]));
+    for (const c of comments) {
+      for (const part of splitCommentText(c.text)) {
+        if (!("url" in part)) continue;
+        const doc = attachableDocs.find((d) => d.file_url === part.url);
+        if (doc) byId.set(doc.id, doc);
+      }
+    }
+    return Array.from(byId.values());
+  }, [liveTask, attachableDocs, comments]);
+  const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
+  // A comment link that matches a known document's file_url opens the same
+  // preview modal in place instead of navigating to the raw file in a new tab.
+  function openDocForUrl(url: string): boolean {
+    const doc = attachableDocs.find((d) => d.file_url === url);
+    if (!doc) return false;
+    setPreviewDoc(doc);
+    return true;
+  }
   function attachDocToComment(doc: AdminDocument) {
-    const link = doc.file_url ? `📎 ${doc.name} — ${doc.file_url}` : `📎 ${doc.name}`;
+    // [label](url) renders as a short link (the file's own name) instead of
+    // the raw URL — see lib/comments.ts splitCommentText.
+    const link = doc.file_url ? `📎 [${doc.name}](${doc.file_url})` : `📎 ${doc.name}`;
     setComment((current) => (current.trim() ? `${current}\n${link}` : link));
   }
   const onTaskPatchedRef = useRef(onTaskPatched);
@@ -841,12 +870,13 @@ export default function TaskModal({
   const stepIdx = STATUS_ORDER.indexOf(draft.status);
 
   return (
+    <>
     <div className="kb-modal-backdrop" onClick={() => { if (!busy) void closeAfterSave(); }}>
       <div className={`tm tm-tone-${tone} tm-lg`} onClick={(e) => e.stopPropagation()}>
         {mode === "edit" ? (
           <div className={`tm-head tm-head-tone-${tone}`}>
             <div className="tm-head-identity">
-              {onBack ? <button type="button" className="tm-back" onClick={() => void closeAfterSave(onBack)} aria-label="Voltar para o card anterior" title="Voltar">←</button> : null}
+              {onBack ? <button type="button" className="tm-back" onClick={() => void closeAfterSave(onBack)} aria-label="Voltar para o card anterior" title="Voltar"><BackArrowIcon /></button> : null}
               <span className="tm-head-ico" aria-hidden>{kindIcon(draft.kind)}</span>
               <div className="tm-head-text">
               <input
@@ -1266,6 +1296,16 @@ export default function TaskModal({
             ) : null}
 
             {error ? <p className="admin-error">{error}</p> : null}
+
+            {mode === "edit" && taskDocs.length > 0 ? (
+              <div className="tm-docs">
+                {taskDocs.map((d) => (
+                  <button type="button" key={d.id} className="tm-doc-thumb" title={d.name} aria-label={d.name} onClick={() => setPreviewDoc(d)}>
+                    <span className="tm-doc-badge">{fileTypeLabel(d)}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {mode === "edit" ? (
@@ -1278,7 +1318,7 @@ export default function TaskModal({
                       <span className="tm-comment-av">{initials(c.author)}</span>
                       <div>
                         <p className="tm-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
-                        <p className="tm-comment-text"><CommentText text={c.text} /></p>
+                        <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} /></p>
                       </div>
                     </div>
                   ))}
@@ -1330,5 +1370,20 @@ export default function TaskModal({
         </footer>
       </div>
     </div>
+    {previewDoc ? (
+      <DocumentPreviewModal
+        doc={previewDoc}
+        // Back arrow: dismiss just the PDF layer, back to this card.
+        onBack={() => setPreviewDoc(null)}
+        // ✕ close: skip past the card entirely, back to wherever it was
+        // opened from — same as closing the card itself would.
+        onClose={() => { setPreviewDoc(null); void closeAfterSave(); }}
+        onChanged={(updated) => {
+          setPreviewDoc(updated);
+          setAttachableDocs((docs) => docs.map((d) => (d.id === updated.id ? updated : d)));
+        }}
+      />
+    ) : null}
+    </>
   );
 }

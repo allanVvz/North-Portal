@@ -28,6 +28,21 @@ describe("splitCommentText", () => {
       { url: "https://exemplo.com/y" },
     ]);
   });
+
+  it("reconhece a forma curta [label](url) com o nome do arquivo", () => {
+    expect(splitCommentText("Relatório gerado: [relatorio.pdf](https://exemplo.com/relatorio.pdf)")).toEqual([
+      { text: "Relatório gerado: " },
+      { url: "https://exemplo.com/relatorio.pdf", label: "relatorio.pdf" },
+    ]);
+  });
+
+  it("mistura link curto e link cru no mesmo texto", () => {
+    expect(splitCommentText("[a.pdf](https://x.com/a.pdf) e também https://x.com/b")).toEqual([
+      { url: "https://x.com/a.pdf", label: "a.pdf" },
+      { text: " e também " },
+      { url: "https://x.com/b" },
+    ]);
+  });
 });
 
 describe("extractLatestLink", () => {

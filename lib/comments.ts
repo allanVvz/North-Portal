@@ -10,6 +10,13 @@ export function commentsOf(payload: Record<string, unknown> | null | undefined):
 }
 
 const URL_RE = /https?:\/\/[^\s)]+/gi;
+// `[label](url)` — the short-link form both the automation (lib/automations/run.ts)
+// and the manual "attach a document" comment button (TaskModal.tsx
+// attachDocToComment) write, so a comment shows the file's own name instead
+// of its full raw URL. A bare https?://... (pasted by hand, or from an older
+// comment written before this existed) still matches too, falling back to
+// showing the raw URL as before.
+const LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)]+)/gi;
 
 /** The most recent link pasted into any comment — this is what "abrir card" /
  *  "ver material" points to now, replacing the old static per-client Drive
@@ -22,15 +29,19 @@ export function extractLatestLink(comments: TaskComment[]): string | null {
   return null;
 }
 
-/** Splits comment text into plain-text and URL segments so callers can render
- *  pasted links as clickable `<a>` tags without each duplicating the regex. */
-export function splitCommentText(text: string): Array<{ text: string } | { url: string }> {
-  const parts: Array<{ text: string } | { url: string }> = [];
+/** Splits comment text into plain-text and link segments so callers can
+ *  render pasted/generated links as clickable `<a>` tags without each
+ *  duplicating the regex. A link segment carries `label` when the source
+ *  text used the short `[label](url)` form — callers show that instead of
+ *  the raw `url` when present. */
+export function splitCommentText(text: string): Array<{ text: string } | { url: string; label?: string }> {
+  const parts: Array<{ text: string } | { url: string; label?: string }> = [];
   let lastIndex = 0;
-  for (const match of text.matchAll(URL_RE)) {
+  for (const match of text.matchAll(LINK_RE)) {
     const index = match.index ?? 0;
     if (index > lastIndex) parts.push({ text: text.slice(lastIndex, index) });
-    parts.push({ url: match[0] });
+    const [, label, labeledUrl, bareUrl] = match;
+    parts.push(label && labeledUrl ? { url: labeledUrl, label } : { url: bareUrl });
     lastIndex = index + match[0].length;
   }
   if (lastIndex < text.length) parts.push({ text: text.slice(lastIndex) });

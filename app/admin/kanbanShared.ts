@@ -11,6 +11,7 @@ export const COLUMNS: { status: TaskStatus; label: string }[] = [
   { status: "aprovacao", label: "Aprovação" },
   { status: "aprovado", label: "Concluído" },
   { status: "concluido", label: "Publicado" },
+  { status: "parada", label: "Parada" },
 ];
 export const STATUS_ORDER = COLUMNS.map((c) => c.status);
 export const STATUS_LABEL: Record<TaskStatus, string> = Object.fromEntries(
@@ -37,11 +38,16 @@ export function visibleColumnsFor(
 ): typeof COLUMNS {
   const hasRevisao = anyClientRevisaoAdmin || tasks.some((t) => t.status === "revisao");
   const hasAprovacao = anyClientAprovacaoAdmin || tasks.some((t) => t.status === "aprovacao");
+  // "Parada" has no per-client "Ativo para Admin" toggle — it isn't an
+  // optional workflow stage, it's an automation-error indicator, so it only
+  // ever shows up when a card is actually sitting in it.
+  const hasParada = tasks.some((t) => t.status === "parada");
   return COLUMNS.filter(
     (c) =>
       (c.status !== "revisao" || hasRevisao) &&
       (c.status !== "aprovacao" || hasAprovacao) &&
-      (c.status !== "concluido" || publicadoColumnVisible),
+      (c.status !== "concluido" || publicadoColumnVisible) &&
+      (c.status !== "parada" || hasParada),
   );
 }
 

@@ -19,8 +19,8 @@ const flags = (overrides: Partial<ClientFlowFlags> = {}): ClientFlowFlags => ({
 });
 
 describe("TASK_STATUSES", () => {
-  it("keeps the Kanban column order, with the new Concluído stage between Aprovação and Publicado", () => {
-    expect(TASK_STATUSES).toEqual(["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "concluido"]);
+  it("keeps the Kanban column order, with the new Concluído stage between Aprovação and Publicado, and parada last", () => {
+    expect(TASK_STATUSES).toEqual(["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "concluido", "parada"]);
   });
 });
 

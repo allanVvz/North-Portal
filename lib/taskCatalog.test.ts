@@ -22,6 +22,17 @@ describe("taskProgress — non-plan cards", () => {
   });
 });
 
+describe("taskProgress — parada (automation halted the card)", () => {
+  it("freezes at the pre-halt status's percentage instead of the array-index fallback", () => {
+    const halted = { kind: "criativo", status: "parada" as const, progress_weight: 1, payload: { pre_parada_status: "em_producao" } };
+    expect(taskProgress(halted)).toBe(30); // criativo_pub's em_producao, not concluido's 100
+  });
+
+  it("is 0 when there's no pre_parada_status marker", () => {
+    expect(taskProgress(t("criativo", "parada"))).toBe(0);
+  });
+});
+
 describe("catálogo canônico de tipos", () => {
   it("não expõe recorrência, roteiro ou gravação como tipos primários", () => {
     expect(TASK_KIND_KEYS).not.toContain("publicacao_recorrente");

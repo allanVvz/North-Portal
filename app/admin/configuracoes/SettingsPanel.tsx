@@ -13,6 +13,8 @@ import { useSidebarEnabledPref } from "../kanbanPrefs";
 
 const PROFILE_PHOTO_STORAGE_KEY = "admin-profile-photo-mock";
 
+// Automações foi promovida de aba daqui pra tela própria no menu principal
+// (/admin/automacoes) em 2026-08-21 — ver plan/AUTOMACOES-RELATORIO-TRAFEGO.md.
 type Tab = "perfil" | "equipe" | "politicas" | "etapas" | "checkpoints" | "faturamento" | "integracoes";
 const TABS: { key: Tab; label: string }[] = [
   { key: "perfil", label: "Perfil da agência" },

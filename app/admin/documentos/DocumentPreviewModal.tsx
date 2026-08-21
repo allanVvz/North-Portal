@@ -5,6 +5,7 @@ import type { AdminDocument } from "@/lib/supabase";
 import type { DocumentStatus, DocumentType } from "@/lib/validation";
 import { fileTypeLabel, formatFileSize } from "@/lib/documentFiles";
 import DocumentFilePreview from "@/app/DocumentFilePreview";
+import BackArrowIcon from "../BackArrowIcon";
 
 const TYPE_LABEL: Record<DocumentType, string> = {
   contrato: "Contrato", proposta: "Proposta", relatorio: "Relatório", material: "Material",
@@ -28,10 +29,15 @@ function fmtDate(iso: string | null): string {
 
 export default function DocumentPreviewModal({
   doc,
+  onBack,
   onClose,
   onChanged,
 }: {
   doc: AdminDocument;
+  // Present only when opened from within a card (TaskModal) — dismisses just
+  // this preview, back to that card. Omitted (e.g. from the Documentos
+  // table) means there's no "card" to go back to, so no button renders.
+  onBack?: () => void;
   onClose: () => void;
   onChanged: (updated: AdminDocument) => void;
 }) {
@@ -60,7 +66,12 @@ export default function DocumentPreviewModal({
 
   return (
     <div className="kb-modal-backdrop" onClick={onClose}>
-      <div className="tm docprev-tm" onClick={(e) => e.stopPropagation()}>
+      <div className="tm tm-lg docprev-tm" onClick={(e) => e.stopPropagation()}>
+        {onBack ? (
+          <button type="button" className="tm-back tm-back-floating" onClick={onBack} aria-label="Voltar para o card" title="Voltar">
+            <BackArrowIcon />
+          </button>
+        ) : null}
         <div className={`tm-head tm-head-tone-${STATUS_TONE[doc.status]}`}>
           <span className="tm-head-ico" aria-hidden>{fileTypeLabel(doc)}</span>
           <div className="tm-head-text">
