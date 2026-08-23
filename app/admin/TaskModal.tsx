@@ -1286,7 +1286,7 @@ export default function TaskModal({
                     title="Clique duas vezes para editar"
                   >
                     {draft.description ? (
-                      <CommentText text={draft.description} />
+                      <CommentText text={draft.description} showLinkPreview />
                     ) : (
                       <span className="tm-desc-placeholder">Objetivo, referência e critério de pronto entram aqui antes de enviar para o quadro.</span>
                     )}
@@ -1318,7 +1318,7 @@ export default function TaskModal({
                       <span className="tm-comment-av">{initials(c.author)}</span>
                       <div>
                         <p className="tm-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
-                        <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} /></p>
+                        <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} showLinkPreview /></p>
                       </div>
                     </div>
                   ))}
