@@ -70,7 +70,7 @@ function Kpi({ label, value, previous, kind, hint, inverse = false, onHide }: { 
   );
 }
 
-// Card central do funil — imagem à esquerda, etapas/CPA/mensagens à direita
+// Card central do funil — imagem à esquerda, etapas + par de resultado à direita
 // (Parte 4); as etapas (2-3) vêm de `funnelStages`, configurável por
 // template (Parte 5a).
 function ConversionFunnel({
@@ -88,6 +88,9 @@ function ConversionFunnel({
   const spend = totalWhenPresent(current, "custo");
   const lastValue = stageValues[stageValues.length - 1];
   const costPerLastStage = ratio(spend, lastValue);
+  // Mesmo cálculo do custo por lead, para que os dois resultados sejam
+  // comparáveis: o mesmo investimento dividido por cada desfecho.
+  const costPerMessage = ratio(spend, summary.messages);
   return (
     <div className="acq-conversion-flow">
       <div className="acq-funnel-layout">
@@ -101,17 +104,30 @@ function ConversionFunnel({
               {index < stageLabels.length - 1 ? <div className="acq-flow-arrow" aria-label={`${stageRates[index]} para a próxima etapa`}><b aria-hidden>→</b><small>{stageRates[index]}</small></div> : null}
             </div>)}
           </div>
-          <div className="acq-funnel-terminal"><span>Custo por {stageLabels[stageLabels.length - 1]?.toLowerCase()}</span><strong>{format(costPerLastStage, "money")}</strong><small>investimento ÷ {stageLabels[stageLabels.length - 1]?.toLowerCase()}</small></div>
-          {showMessageBranch ? (
-            <div className="acq-message-branch" aria-label="Mensagens iniciadas como ramificação paralela dos cliques">
-              <div className="acq-message-rate">
-                <strong>{format(summary.clickToMessageRate, "percent")}</strong>
-                <span>{summary.messageClickBasis === "link" ? "dos cliques no link" : "dos cliques totais"}</span>
-              </div>
-              <span className="acq-message-branch-arrow" aria-hidden>↘</span>
-              <div className="acq-message-branch-value"><span>Mensagens iniciadas</span><strong>{format(summary.messages)}</strong><small>ramificação de intenção</small></div>
+          {/* Os dois resultados do funil, lado a lado e com o mesmo peso.
+              Conversas iniciadas era uma ramificação pendurada num "↘", o que
+              a lia como subproduto dos cliques; nesta operação as duas são
+              a mesma coisa — alguém levantou a mão — e disputam o mesmo
+              investimento, então precisam ser comparáveis na mesma linha. */}
+          <div className={`acq-outcomes${showMessageBranch ? "" : " single"}`}>
+            <div className="acq-outcome leads">
+              <span className="acq-outcome-label">Leads</span>
+              <strong className="acq-outcome-value">{format(summary.opportunities)}</strong>
+              <span className="acq-outcome-cost">{format(summary.costPerLead, "money")} por lead</span>
+              <span className="acq-outcome-rate">{format(summary.conversionRate, "percent")} dos cliques</span>
             </div>
-          ) : null}
+            {showMessageBranch ? (
+              <div className="acq-outcome conversas">
+                <span className="acq-outcome-label">Conversas iniciadas</span>
+                <strong className="acq-outcome-value">{format(summary.messages)}</strong>
+                <span className="acq-outcome-cost">{format(costPerMessage, "money")} por conversa</span>
+                <span className="acq-outcome-rate">
+                  {format(summary.clickToMessageRate, "percent")} dos cliques{summary.messageClickBasis === "link" ? " no link" : ""}
+                </span>
+              </div>
+            ) : null}
+          </div>
+          <div className="acq-funnel-terminal"><span>Custo por {stageLabels[stageLabels.length - 1]?.toLowerCase()}</span><strong>{format(costPerLastStage, "money")}</strong><small>investimento ÷ {stageLabels[stageLabels.length - 1]?.toLowerCase()}</small></div>
         </div>
       </div>
     </div>
@@ -225,11 +241,11 @@ export default function AcquisitionDashboard({ workspace }: { workspace: Perform
         <section className="acq-conversion-panel">
           <div className="acq-section-head">
             <div><span>Conversão e intenção</span><h2>Funil de aquisição</h2></div>
-            <small>Alcance → clique → lead → CPA · mensagens em paralelo</small>
+            <small>Alcance → clique → resultado · leads e conversas lado a lado</small>
             <MetricSettingsMenu label="etapas do funil" options={metricOptions} selected={funnelStages} multiple max={3} onChange={toggleFunnelStage} onHideSection={() => hideSection("funnel")} />
           </div>
           <ConversionFunnel stages={funnelStages} current={current} customMetrics={customMetrics} showMessageBranch={showMessageBranch} summary={summary} />
-          <label className="acq-message-toggle"><input type="checkbox" checked={showMessageBranch} onChange={(e) => { setShowMessageBranch(e.target.checked); markTemplateDirty(); }} /> Mostrar ramificação de mensagens</label>
+          <label className="acq-message-toggle"><input type="checkbox" checked={showMessageBranch} onChange={(e) => { setShowMessageBranch(e.target.checked); markTemplateDirty(); }} /> Mostrar conversas iniciadas</label>
 
           {!hiddenSections.has("trend") ? (
             <div className="acq-funnel-trend">
