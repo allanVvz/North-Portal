@@ -14,7 +14,7 @@ import {
 } from "./kanbanShared";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
-import { formatCommentTime, splitCommentText } from "@/lib/comments";
+import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
 import { TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
@@ -347,6 +347,9 @@ export default function TaskModal({
   const recurrenceParentId = liveTask && !isRecurringParent ? recurrenceParentIdOf(liveTask) : null;
   const [recurrenceParent, setRecurrenceParent] = useState<TaskRecord | null>(() => recurrenceParentOf(recurrenceParentId, clientTasks));
   const [comment, setComment] = useState("");
+  // Comentário em edição inline. Guarda o `at` que estava na tela para o
+  // servidor recusar se a thread mudou (ver edit_task_comment).
+  const [editingComment, setEditingComment] = useState<{ index: number; at: string; text: string } | null>(null);
   // Documents attachable to a comment — pdf/other files, not Trilhas HTML
   // decks. Lazily fetched once per edit session (small, agency-wide list;
   // same "all documents" endpoint Informações uses).
@@ -689,6 +692,41 @@ export default function TaskModal({
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 1800);
     } catch { /* clipboard unavailable; button just won't confirm */ }
+  }
+
+  async function saveCommentEdit() {
+    if (!liveTask || !editingComment) return;
+    const { index, at, text } = editingComment;
+    if (!text.trim()) return;
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index, at, text: text.trim() }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
+      const updated = await res.json() as TaskRecord;
+      setEditingComment(null);
+      setLiveTask(updated); onTaskPatched?.(updated);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : "Não foi possível editar o comentário.");
+    }
+  }
+
+  async function removeComment(index: number, at: string) {
+    if (!liveTask) return;
+    if (!window.confirm("Excluir este comentário? Não dá para desfazer.")) return;
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index, at }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
+      const updated = await res.json() as TaskRecord;
+      if (editingComment?.index === index) setEditingComment(null);
+      setLiveTask(updated); onTaskPatched?.(updated);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : "Não foi possível excluir o comentário.");
+    }
   }
 
   async function sendComment() {
@@ -1310,40 +1348,65 @@ export default function TaskModal({
 
           {mode === "edit" ? (
             <div className="tm-side">
-              {/* Autoria: até a migration 20260826090000 o card só guardava
-                  created_at, então cards antigos não têm autor — cai em
-                  "Sistema" em vez de mentir um nome. */}
-              <div className="tm-box tm-authorbox">
-                <p className="tm-box-label">Origem do card</p>
-                <p className="tm-authorline">
-                  <span>Criado por</span>
-                  <b>{liveTask?.created_by_name ?? "Sistema"}</b>
+              {/* Uma linha só: "Criado em <data hora>". Autor e conclusão saíram
+                  — quem criou já aparece no primeiro comentário e a conclusão
+                  está no status; três linhas de metadado empurravam a conversa
+                  para baixo sem responder nada que se perguntasse aqui. */}
+              {liveTask?.created_at ? (
+                <p className="tm-createdline">
+                  <span>Criado em</span>
+                  <b>{formatAbsoluteTime(liveTask.created_at)}</b>
                 </p>
-                {liveTask?.created_at ? (
-                  <p className="tm-authorline">
-                    <span>Criado em</span>
-                    <b>{formatCommentTime(liveTask.created_at)}</b>
-                  </p>
-                ) : null}
-                {liveTask?.completed_at ? (
-                  <p className="tm-authorline">
-                    <span>Concluído em</span>
-                    <b>{formatCommentTime(liveTask.completed_at)}</b>
-                  </p>
-                ) : null}
-              </div>
+              ) : null}
               <div className="tm-box tm-commentsbox">
                 <p className="tm-box-label">Comentários e atividade</p>
                 <div className="tm-comments">
-                  {comments.slice().reverse().map((c, i) => (
-                    <div className="tm-comment" key={i}>
-                      <span className="tm-comment-av">{initials(c.author)}</span>
-                      <div>
-                        <p className="tm-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
-                        <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} showLinkPreview /></p>
+                  {comments.slice().reverse().map((c, i) => {
+                    // A thread é exibida do mais novo para o mais velho, mas o
+                    // índice que o servidor conhece é o do array gravado.
+                    const storedIndex = comments.length - 1 - i;
+                    const editing = editingComment?.index === storedIndex;
+                    return (
+                      <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.at}-${storedIndex}`}>
+                        <span className="tm-comment-av">{initials(c.author)}</span>
+                        <div className="tm-comment-body">
+                          <p className="tm-comment-meta">
+                            <b>{c.author}</b>
+                            <small>{formatCommentTime(c.at)}</small>
+                            {c.edited_at ? <small className="tm-comment-edited">editado</small> : null}
+                            <HeadDropdown className="tm-comment-menu" trigger={<span className="sr-only">Ações do comentário</span>}>
+                              <button type="button" className="tm-headpick-option" onClick={() => setEditingComment({ index: storedIndex, at: c.at, text: c.text })}>
+                                <span aria-hidden>✎</span> Editar
+                              </button>
+                              <button type="button" className="tm-headpick-option danger" onClick={() => void removeComment(storedIndex, c.at)}>
+                                <span aria-hidden>🗑</span> Excluir
+                              </button>
+                            </HeadDropdown>
+                          </p>
+                          {editing ? (
+                            <div className="tm-comment-edit">
+                              <AutoGrowTextarea
+                                rows={1}
+                                autoFocus
+                                value={editingComment.text}
+                                onChange={(e) => setEditingComment((prev) => (prev ? { ...prev, text: e.target.value } : prev))}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void saveCommentEdit(); }
+                                  if (e.key === "Escape") setEditingComment(null);
+                                }}
+                              />
+                              <div className="tm-comment-edit-actions">
+                                <button type="button" className="admin-btn ghost" onClick={() => setEditingComment(null)}>Cancelar</button>
+                                <button type="button" className={`admin-btn primary tm-btn-${tone}`} onClick={() => void saveCommentEdit()} disabled={!editingComment.text.trim()}>Salvar</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} showLinkPreview /></p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
                 </div>
                 <div className="tm-comment-input">

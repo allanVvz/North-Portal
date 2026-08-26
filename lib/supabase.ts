@@ -1740,6 +1740,33 @@ export async function setTaskAssigneeProfiles(taskId: string, profileIds: string
   if (error) fail(error);
 }
 
+/**
+ * Edita/exclui um comentário da thread. `expectedAt` é o carimbo que o cliente
+ * viu naquela posição: o RPC recusa se não bater, em vez de mexer no comentário
+ * errado quando alguém escreveu no card no meio do caminho.
+ */
+export async function editTaskComment(taskId: string, index: number, expectedAt: string, text: string): Promise<TaskRecord> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("edit_task_comment", {
+    p_task_id: taskId, p_index: index, p_expected_at: expectedAt, p_text: text,
+  });
+  if (error) throw new HttpError(409, error.message.includes("mudou") ? "Comentário mudou desde que você abriu o card." : "Não foi possível editar o comentário.");
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new HttpError(404, "Tarefa não encontrada.");
+  return row as TaskRecord;
+}
+
+export async function deleteTaskComment(taskId: string, index: number, expectedAt: string): Promise<TaskRecord> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("delete_task_comment", {
+    p_task_id: taskId, p_index: index, p_expected_at: expectedAt,
+  });
+  if (error) throw new HttpError(409, error.message.includes("mudou") ? "Comentário mudou desde que você abriu o card." : "Não foi possível excluir o comentário.");
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new HttpError(404, "Tarefa não encontrada.");
+  return row as TaskRecord;
+}
+
 export async function appendTaskComment(taskId: string, authorId: string, text: string): Promise<TaskRecord> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("append_task_comment", { p_task_id: taskId, p_author_id: authorId, p_text: text });

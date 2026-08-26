@@ -2841,7 +2841,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .briefing-a { margin: 0; font-size: 14px; color: var(--a-ink); }
 .briefing-a em { color: var(--a-muted); font-style: italic; }
 .briefing-modal-foot { display: flex; justify-content: flex-start; padding: 16px 30px 24px; border-top: 1px solid var(--a-border); }
-.tm-desc-input { width: 100%; border: none; background: none; resize: vertical; font: inherit; font-size: 13.5px; color: var(--a-sec); line-height: 1.5; padding: 0; }
+.tm-desc-input { width: 100%; border: none; background: none; resize: vertical; font: inherit; font-size: 13px; color: var(--a-sec); line-height: 1.45; padding: 0; }
 .tm-desc-view { white-space: pre-wrap; word-break: break-word; cursor: text; }
 .tm-desc-placeholder { color: var(--a-muted); }
 .tm-desc-view a, .tm-comment-text a, .tdp-comment-text a, .ap-comment-preview a {
@@ -2856,11 +2856,11 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-newtype-badge { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 600; }
 
 .tm-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 20px 30px 0; }
-.tm-cell { display: flex; gap: 10px; background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px; padding: 13px 14px; }
+.tm-cell { display: flex; gap: 9px; background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px; padding: 11px 12px; }
 .tm-cell-ico { width: 26px; height: 26px; border-radius: 8px; background: var(--a-inset); display: inline-grid; place-items: center; font-size: 12px; color: var(--a-sec); flex-shrink: 0; }
 .tm-cell-body { min-width: 0; flex: 1; }
 .tm-cell-label { display: block; font-size: 10.5px; color: var(--a-muted); margin-bottom: 3px; }
-.tm-cell-body select, .tm-cell-body input { border: none; background: none; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--a-ink); padding: 0; width: 100%; }
+.tm-cell-body select, .tm-cell-body input { border: none; background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--a-ink); padding: 0; width: 100%; }
 .tm-cell-static { font-size: 13.5px; font-weight: 600; color: var(--a-ink); }
 .tm-cell-inline { display: flex; align-items: center; gap: 6px; }
 .tm-cell-inline .cal-pick { flex: 1; min-width: 0; }
@@ -2905,6 +2905,44 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-comment-meta small { color: var(--a-muted); font-weight: 400; }
 .tm-comment-text { max-width: 100%; margin: 2px 0 0; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 13px; color: var(--a-sec); line-height: 1.4; }
 .tm-comment-text a { overflow-wrap: anywhere; word-break: break-all; }
+
+/* "Criado em <data hora>", uma linha só no topo da coluna de comentários. */
+.tm-createdline {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--a-border);
+  font-size: 12px;
+}
+.tm-createdline span { color: var(--a-muted); }
+.tm-createdline b { color: var(--a-ink); font-weight: 600; }
+
+.tm-comment-body { min-width: 0; flex: 1; }
+.tm-comment-meta { position: relative; }
+.tm-comment-edited { font-style: italic; opacity: 0.75; }
+
+/* Menu do comentário: só o caret, encostado à direita da linha do autor.
+   Aparece no hover/foco para não poluir a leitura da thread — mas continua
+   sempre acessível pelo teclado (:focus-within). */
+.tm-comment-menu { margin-left: auto; opacity: 0; transition: opacity .14s; }
+.tm-comment:hover .tm-comment-menu,
+.tm-comment-menu:focus-within { opacity: 1; }
+.tm-comment-menu .tm-headpick-trigger { padding: 2px 4px; gap: 0; }
+.tm-comment-menu .tm-headpick-panel { right: 0; left: auto; min-width: 148px; }
+.tm-headpick-option.danger { color: var(--a-danger); }
+
+.tm-comment.editing { background: var(--a-hover); border-radius: 10px; padding: 6px; margin: -6px; }
+.tm-comment-edit { margin-top: 6px; }
+.tm-comment-edit textarea {
+  width: 100%; font: inherit; font-size: 13px; line-height: 1.4; color: var(--a-ink);
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 10px;
+  padding: 8px 10px; resize: none;
+}
+.tm-comment-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* Nome acessível para gatilhos que na tela são só um ícone. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* Inline Google Drive/Docs/Sheets/Slides preview — a <span> (not <div>) so it
    stays valid nested inside the <p class="tm-comment-text"> a comment renders
@@ -3476,7 +3514,11 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-lg .tm-title-input { margin-bottom: 1px; }
 .tm-lg .tm-head-client { gap: 5px; padding-top: 3px; line-height: 1.35; }
 .tm-layout { display: grid; grid-template-columns: 1fr; min-width: 0; flex: 1; min-height: 0; overflow-y: auto; }
-.tm-layout:has(.tm-side) { grid-template-columns: minmax(0,1fr) minmax(340px, 420px); align-items: stretch; }
+/* Coluna de comentários ~10% mais larga (340/420 -> 375/462): links do Drive e
+   revisões longas quebravam em três linhas na largura anterior. O que a coluna
+   ganha sai da principal, então descrição e atributos encolhem um pouco junto
+   (ver .tm-desc-input / .tm-cell abaixo). */
+.tm-layout:has(.tm-side) { grid-template-columns: minmax(0,1fr) minmax(375px, 462px); align-items: stretch; }
 .tm-main { display: flex; flex-direction: column; min-width: 0; min-height: 100%; }
 /* Internal, elegant panel (inset card) instead of a bordered "external" column */
 .tm-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 20px 24px 24px 8px; padding: 20px 20px 18px; background: linear-gradient(180deg, var(--a-inset), color-mix(in srgb, var(--a-inset) 76%, var(--a-surface))); border: 1px solid var(--a-border); border-radius: 18px; }
@@ -3548,7 +3590,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-titlebox { display: flex; flex-direction: column; gap: 2px; }
 .tm-newtitle-lg { font-size: 26px; }
 .tm-titlebox .tm-desc-input { margin-top: 10px; background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 10px; padding: 10px 12px; }
-.tm-desc-input { resize: none; overflow-y: auto; min-height: 68px; max-height: 220px; }
+.tm-desc-input { resize: none; overflow-y: auto; min-height: 60px; max-height: 200px; }
 .tm-main > .tm-box:has(.tm-desc-input) { margin-bottom: 24px; }
 .tm .kb-modal-actions { position: relative; z-index: 8; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); flex-shrink: 0; margin-top: 0; background: var(--a-surface); }
 .tm .kb-modal-actions > :first-child { justify-self: start; }

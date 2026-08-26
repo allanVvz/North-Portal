@@ -312,6 +312,18 @@ export const performanceTemplateCreateSchema = z.object({
 export const performanceTemplatePatchSchema = performanceTemplateCreateSchema
   .partial()
   .refine((value) => Object.keys(value).length > 0, { message: "Informe ao menos uma alteração." });
+// Editar/excluir comentário: índice + carimbo esperado, para o servidor recusar
+// quando a thread mudou desde que o card foi aberto (ver edit_task_comment).
+export const taskCommentEditSchema = z.object({
+  index: z.number().int().min(0).max(199),
+  at: z.string().min(1).max(64),
+  text: z.string().trim().min(1).max(2000),
+});
+export const taskCommentDeleteSchema = z.object({
+  index: z.number().int().min(0).max(199),
+  at: z.string().min(1).max(64),
+});
+
 export const performanceSyncSchema = z.object({
   links: z.array(z.object({ taskId: z.string().uuid(), postId: z.string().min(1).max(200) })).min(1).max(100),
 });

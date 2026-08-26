@@ -2,7 +2,7 @@
 // by the admin Kanban (TaskModal/TaskDetailPanel) and the client portal
 // (Feedbacks page) alike, so both read the exact same shape.
 
-export type TaskComment = { author: string; text: string; at: string };
+export type TaskComment = { author: string; text: string; at: string; edited_at?: string };
 
 export function commentsOf(payload: Record<string, unknown> | null | undefined): TaskComment[] {
   const comments = (payload ?? {}).comments;
@@ -62,7 +62,14 @@ export function formatCommentTime(iso: string, now: number = Date.now()): string
     if (minutes < 60) return `há ${minutes} min`;
     return `há ${Math.floor(diff / 3.6e6)} h`;
   }
+  return formatAbsoluteTime(iso);
+}
+
+/** Data e hora absolutas em pt-BR ("24/08/2026 11:43"). Usada onde o relativo
+ *  não serve — a linha "Criado em" do card, que é um carimbo, não um "agora". */
+export function formatAbsoluteTime(iso: string): string {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
   const date = d.toLocaleDateString("pt-BR");
   const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   return `${date} ${time}`;
