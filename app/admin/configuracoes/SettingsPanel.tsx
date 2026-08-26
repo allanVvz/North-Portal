@@ -10,13 +10,14 @@ import DriveIntegration from "./DriveIntegration";
 import MetaIntegration from "./MetaIntegration";
 import WindsorIntegration from "./WindsorIntegration";
 import NotificationsSettings from "./NotificationsSettings";
+import LandingPagesSettings from "./LandingPagesSettings";
 import { useSidebarEnabledPref } from "../kanbanPrefs";
 
 const PROFILE_PHOTO_STORAGE_KEY = "admin-profile-photo-mock";
 
 // Automações foi promovida de aba daqui pra tela própria no menu principal
 // (/admin/automacoes) em 2026-08-21 — ver plan/AUTOMACOES-RELATORIO-TRAFEGO.md.
-type Tab = "perfil" | "equipe" | "politicas" | "notificacoes" | "etapas" | "checkpoints" | "faturamento" | "integracoes";
+type Tab = "perfil" | "equipe" | "politicas" | "notificacoes" | "etapas" | "checkpoints" | "faturamento" | "landing-pages" | "integracoes";
 const TABS: { key: Tab; label: string }[] = [
   { key: "perfil", label: "Perfil da agência" },
   { key: "equipe", label: "Equipe & papéis" },
@@ -25,6 +26,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "etapas", label: "Etapas" },
   { key: "checkpoints", label: "Checkpoints comerciais" },
   { key: "faturamento", label: "Faturamento" },
+  { key: "landing-pages", label: "Landing Pages" },
   { key: "integracoes", label: "Integrações" },
 ];
 
@@ -92,6 +94,7 @@ export default function SettingsPanel({
             <p className="admin-sub">Planos, faturas e método de pagamento. <span className="admin-soon">em breve</span></p>
           </div>
         ) : null}
+        {tab === "landing-pages" ? <LandingPagesSettings /> : null}
         {tab === "integracoes" ? (
           <>
             <MetaIntegration clients={clients} />
