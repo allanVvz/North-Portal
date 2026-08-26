@@ -3,13 +3,16 @@
 Branch: `preview/site-leads-consolidado` (criada a partir de `main` em 2026-08-26).
 
 Consolida duas branches WIP de 19/08/2026 que ainda não tinham sido enviadas ao
-GitHub nem mergeadas em `main`:
+GitHub nem mergeadas em `main`, mais duas telas novas de Configurações
+construídas em cima desse resultado:
 
 - `feat/leads-publicos` (`88e8311`) — API pública de captura de leads.
 - `feat/site-publico` (`bd26b71`) — redesign do site público (home nova, planos,
   quem-somos, páginas legais, SEO, banner de consentimento, formulário de lead).
+- `preview/notificacoes-settings` — aba "Notificações" em Configurações.
+- `preview/landing-pages-settings` — aba "Landing Pages" em Configurações.
 
-Uma terceira branch, `feat/documentos-storage`, foi **deliberadamente deixada de
+Uma quinta branch, `feat/documentos-storage`, foi **deliberadamente deixada de
 fora** — ver seção final.
 
 ## Antes de testar
@@ -112,6 +115,37 @@ arquivo (a branch antiga trazia uma versão de login anterior ao trabalho de
 Supabase Auth + toggle de tema que já está em produção) e foi resolvido
 descartando a versão da branch. Confirmar que o login continua funcionando
 normalmente, sem regressão.
+
+### `/admin/configuracoes` — aba "Notificações" (nova)
+Preferência local (por dispositivo, via `localStorage`) para silenciar tipos
+de notificação. Não requer login como cliente, só como admin.
+
+- Abra Configurações → aba "Notificações". Deve listar os 6 tipos
+  (`task_review_assigned`, `task_due_soon`, `metric_collection_requested`,
+  `task_commented`, `task_updated`, `task_status_changed`) cada um com um
+  toggle ligado por padrão.
+- Desligue um tipo (ex.: "Edição") e confirme que notificações desse tipo
+  somem do sino no `AdminShell`, do painel na Home e da tela cheia
+  `/admin/notificacoes` — os três consomem o mesmo componente
+  `NotificationsList`, então filtrar ali cobre os três de uma vez.
+- Recarregue a página: a preferência deve persistir (está em
+  `localStorage`, chave própria do hook `useMutedNotificationTypes`).
+- Abra duas abas do admin lado a lado: mudar o toggle numa aba deve refletir
+  na outra sem recarregar (sincronização via `CustomEvent`).
+- Não há chamada de API nesta tela — é puramente client-side. Um
+  `localStorage` corrompido ou com um tipo antigo que não existe mais deve
+  cair no default (nada silenciado) em vez de quebrar a tela.
+
+### `/admin/configuracoes` — aba "Landing Pages" (nova)
+Lista estática das landing pages do sistema — hoje só a `/lp` deste mesmo
+merge. Sem CRUD, sem tabela nova no banco: é só a vitrine.
+
+- Abra Configurações → aba "Landing Pages". Deve mostrar um card com título,
+  descrição e o path `/lp`.
+- O link "Visualizar ↗" deve abrir `/lp` em nova aba.
+- Para adicionar uma landing page nova no futuro, edita-se a constante
+  `LANDING_PAGES` em `lib/landingPages.ts` — a tela renderiza a lista
+  inteira automaticamente, não precisa de mudança na UI.
 
 ## O que ficou de fora, de propósito
 
