@@ -1,6 +1,7 @@
 "use client";
 
 import { formatCommentTime } from "@/lib/comments";
+import { useMutedNotificationTypes } from "@/lib/notificationPrefs";
 import type { NotificationRecord, NotificationType } from "@/lib/notificationTypes";
 
 // Shared body of the notifications inbox: the bell dropdown in AdminShell and
@@ -25,11 +26,14 @@ export default function NotificationsList({
   /** Quando informado, a linha de uma notificação com card vira clicável. */
   onOpenTask?: (taskId: string) => void;
 }) {
-  if (notifications.length === 0) return <p className="admin-notif-empty">{emptyLabel}</p>;
+  const { muted } = useMutedNotificationTypes();
+  const visible = notifications.filter((notif) => !muted.has(notif.type));
+
+  if (visible.length === 0) return <p className="admin-notif-empty">{emptyLabel}</p>;
 
   return (
     <>
-      {notifications.map((notif) => {
+      {visible.map((notif) => {
         const body = (
           <>
             <span className="admin-notif-ico" aria-hidden="true">
