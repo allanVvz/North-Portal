@@ -4036,6 +4036,16 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .rec-stat-btn.attention.on { background: rgba(185, 86, 66, .12); }
 .rec-stat-btn.attention.on span { color: #b95642; }
 
+/* Arrastar rotinas — mesmo vocabulário visual do quadro de Tarefas. */
+.rec-card[draggable="true"] { cursor: grab; }
+.rec-card.dragging { opacity: .45; cursor: grabbing; }
+.rec-column.dropping { outline: 2px dashed var(--a-teal-strong); outline-offset: 3px; border-radius: 14px; }
+.rec-calendar-day.dropping { background: var(--a-teal-soft); box-shadow: inset 0 0 0 2px var(--a-teal-strong); }
+.rec-list-row-wrap[draggable="true"] { cursor: grab; }
+.rec-list-row-wrap.dragging { opacity: .45; }
+.rec-list-row-wrap[data-dropping="true"] { box-shadow: inset 0 2px 0 var(--a-teal-strong); }
+.rec-dnd-error { margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--a-danger) 12%, transparent); color: var(--a-danger); font-size: 12.5px; font-weight: 600; }
+
 .rec-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .rec-toolbar .kb-searchbar { flex: 1 1 360px; min-width: 260px; }
 /* Fixed-width auto columns + a VISIBLE scrollbar: grouping by client can yield

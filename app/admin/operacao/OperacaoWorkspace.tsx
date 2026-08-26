@@ -14,7 +14,7 @@ import TaskModal from "../TaskModal";
 import { PRIORITY_LABEL } from "../kanbanShared";
 import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, todayInTimezone, type RecurringState } from "../recurringState";
 import { recurringOccurrences } from "../recurringOccurrences";
-import { RECURRING_GROUP_BY_LABEL, groupRecurring, type RecurringGroupBy } from "../recurringGrouping";
+import { RECURRING_GROUP_BY_LABEL, SEM_RESPONSAVEL, groupRecurring, type RecurringGroupBy } from "../recurringGrouping";
 import SortMenu from "../SortMenu";
 import { sortItems } from "../taskSort";
 import { useSortPref, type SortScope } from "../taskSortPrefs";
@@ -44,12 +44,21 @@ function RecurrenceCard({
   onOpen,
   compact = false,
   onComplete,
+  dragging = false,
+  onDragStart,
+  onDragEnd,
+  onDropBefore,
 }: {
   task: RecurringTask;
   today: string;
   onOpen: () => void;
   compact?: boolean;
   onComplete?: () => void;
+  dragging?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  /** Só informado quando a ordem exibida é a manual — ver reorderBefore. */
+  onDropBefore?: () => void;
 }) {
   const state = recurringState(task, today);
   const tone = RECURRING_STATE_TONE[state];
@@ -60,7 +69,14 @@ function RecurrenceCard({
   const period = formatPeriod(task.start_date, task.end_date);
 
   return (
-    <article className={`rec-card ${compact ? "compact" : ""}`}>
+    <article
+      className={`rec-card ${compact ? "compact" : ""} ${dragging ? "dragging" : ""}`}
+      draggable={Boolean(onDragStart)}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDropBefore ? (e) => { e.preventDefault(); e.stopPropagation(); } : undefined}
+      onDrop={onDropBefore ? (e) => { e.preventDefault(); e.stopPropagation(); onDropBefore(); } : undefined}
+    >
       <button type="button" className="rec-card-open" onClick={onOpen} aria-label={`Abrir rotina ${task.title}`}>
       <span className="rec-card-topline">
         <span className={`rec-state ${tone}`}>{RECURRING_STATE_LABEL[state]}</span>
@@ -106,6 +122,7 @@ export default function OperacaoWorkspace({
   const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
+
   // One "today", in the agency's timezone, shared by every derived value below —
   // so the badge, the filter and the columns can never disagree about the date.
   const today = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
@@ -137,14 +154,132 @@ export default function OperacaoWorkspace({
     [sort],
   );
 
+  // As rotinas vinham direto da prop (render do servidor). O arrasto precisa
+  // de estado local para aplicar a mudança na hora e reverter se o PATCH
+  // falhar — sem isso o card voltaria ao lugar só depois do router.refresh().
+  const [rows, setRows] = useState(recurringTasks);
+  useEffect(() => setRows(recurringTasks), [recurringTasks]);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dndError, setDndError] = useState("");
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const onCardDragStart = useCallback((e: React.DragEvent, taskId: string) => {
+    setDragId(taskId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", taskId);
+  }, []);
+  const onCardDragEnd = useCallback(() => { setDragId(null); setDropTarget(null); }, []);
+  const allowDrop = useCallback((e: React.DragEvent) => e.preventDefault(), []);
+
+  /**
+   * PATCH otimista de uma rotina. fetch() só rejeita em falha de rede — um 4xx
+   * resolve "com sucesso" —, então o res.ok é checado explicitamente e o
+   * estado volta ao que era, com a mensagem do servidor. Deixar o quadro
+   * mostrando um movimento que não persistiu é pior que não mover.
+   */
+  const patchRoutine = useCallback(async (id: string, body: Record<string, unknown>, optimistic: (task: RecurringTask) => RecurringTask) => {
+    const before = rows;
+    setDndError("");
+    setRows((items) => items.map((r) => (r.id === id ? optimistic(r) : r)));
+    try {
+      const res = await fetch(`/api/admin/tasks/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        setRows(before);
+        const payload = await res.json().catch(() => null) as { error?: string } | null;
+        setDndError(payload?.error ?? "Não foi possível mover a rotina.");
+        return;
+      }
+      router.refresh();
+    } catch {
+      setRows(before);
+      setDndError("Não foi possível mover a rotina — verifique sua conexão.");
+    }
+  }, [rows, router]);
+
+  // Colunas por cliente/responsável: soltar aplica o atributo da coluna. Por
+  // prazo não: aqueles baldes são faixas derivadas de next_due_date
+  // ("Esta semana", "Depois"), não um valor que se possa gravar — qual dia
+  // seria "Depois"? Para mudar a data existe o calendário, onde o gesto diz
+  // exatamente qual é.
+  const columnDropEnabled = groupBy !== "prazo";
+  const dropInColumn = useCallback(async (columnKey: string) => {
+    const id = dragId;
+    setDragId(null);
+    setDropTarget(null);
+    if (!id || !columnDropEnabled) return;
+    const dragged = rows.find((r) => r.id === id);
+    if (!dragged) return;
+
+    if (groupBy === "cliente") {
+      if (dragged.clientName === columnKey) return;
+      const target = clients.find((c) => c.name === columnKey);
+      if (!target) return;
+      await patchRoutine(id, { slug: target.slug }, (task) => ({ ...task, clientName: target.name, clientSlug: target.slug }));
+      return;
+    }
+    const nextAssignee = columnKey === SEM_RESPONSAVEL ? null : columnKey;
+    if ((dragged.assignee ?? null) === nextAssignee) return;
+    await patchRoutine(id, { assignee: nextAssignee, assignee_profile_ids: [] }, (task) => ({ ...task, assignee: nextAssignee }));
+  }, [dragId, rows, groupBy, clients, columnDropEnabled, patchRoutine]);
+
+  // Calendário: soltar num dia é o único gesto que nomeia uma data exata, e é
+  // ela que vira a PRÓXIMA EXECUÇÃO — só ela. `start_date` fica onde está de
+  // propósito: é a âncora da cadência, e a rota deriva dela o dia do mês das
+  // rotinas mensais (route.ts: recurrence_day_of_month). Mandar as duas juntas
+  // faria arrastar um card do dia 5 para o dia 12 reescrever silenciosamente a
+  // regra da rotina inteira, quando o gesto só disse "esta ocorrência é dia 12".
+  const dropOnDay = useCallback(async (isoDay: string) => {
+    const id = dragId;
+    setDragId(null);
+    setDropTarget(null);
+    if (!id) return;
+    const dragged = rows.find((r) => r.id === id);
+    if (!dragged || dragged.next_due_date === isoDay) return;
+    await patchRoutine(id, { due_date: isoDay }, (task) => ({ ...task, next_due_date: isoDay, due_date: isoDay }));
+  }, [dragId, rows, patchRoutine]);
+
+  // Reordenar só é honesto quando a ordem exibida É a manual. Com
+  // "última edição"/"alfabético"/"data" ativos a posição na tela não vem de
+  // `position`, e renumerar a partir dela sobrescreveria o arrasto do usuário
+  // com a ordem de updated_at — mesma regra do quadro de Tarefas.
+  const reorderEnabled = sort.key === "manual";
+  const reorderBefore = useCallback(async (beforeId: string) => {
+    const id = dragId;
+    setDragId(null);
+    setDropTarget(null);
+    if (!id || !reorderEnabled || id === beforeId) return;
+    const dragged = rows.find((r) => r.id === id);
+    if (!dragged) return;
+    const others = rows.filter((r) => r.id !== id);
+    const at = others.findIndex((r) => r.id === beforeId);
+    const reordered = at === -1 ? [...others, dragged] : [...others.slice(0, at), dragged, ...others.slice(at)];
+    const renumbered = reordered.map((task, index) => ({ ...task, position: index * 10 }));
+    const before = rows;
+    setDndError("");
+    setRows(renumbered);
+    try {
+      const changed = renumbered.filter((task) => (before.find((r) => r.id === task.id)?.position ?? -1) !== task.position);
+      const results = await Promise.all(changed.map((task) => fetch(`/api/admin/tasks/${task.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ position: task.position }),
+      })));
+      if (results.some((res) => !res.ok)) { setRows(before); setDndError("Não foi possível reordenar as rotinas."); return; }
+      router.refresh();
+    } catch {
+      setRows(before);
+      setDndError("Não foi possível reordenar — verifique sua conexão.");
+    }
+  }, [dragId, rows, reorderEnabled, router]);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("pt-BR");
-    const matching = recurringTasks.filter((task) => {
+    const matching = rows.filter((task) => {
       if (!recurringMatchesFilters(task, filters, today)) return false;
       return !needle || recurringSearchText(task).includes(needle);
     });
     return sortRecurring(matching);
-  }, [filters, query, recurringTasks, today, sortRecurring]);
+  }, [filters, query, rows, today, sortRecurring]);
 
   const columns = useMemo(
     () => groupRecurring(filtered, groupBy, today, sortRecurring),
@@ -171,16 +306,16 @@ export default function OperacaoWorkspace({
   }, [filtered, monthRange]);
 
   const stats = useMemo(() => {
-    const byState = (state: RecurringState) => recurringTasks.filter((task) => recurringState(task, today) === state).length;
+    const byState = (state: RecurringState) => rows.filter((task) => recurringState(task, today) === state).length;
     return {
-      total: recurringTasks.length,
-      clients: new Set(recurringTasks.map((task) => task.clientName)).size,
+      total: rows.length,
+      clients: new Set(rows.map((task) => task.clientName)).size,
       paradas: byState("parada"),
       ativas: byState("ativa"),
       // The count of cycles ever closed — not "routines currently done", which
       // would drop every time a cycle rolls over and read as data loss.
     };
-  }, [recurringTasks, today]);
+  }, [rows, today]);
 
   function toggleStateFilter(state: RecurringState) {
     setFilters((current) =>
@@ -229,7 +364,7 @@ export default function OperacaoWorkspace({
 
       <nav className="clients-section-tabs" aria-label="Seções da operação">
         <button type="button" className={section === "tarefas" ? "on" : ""} onClick={() => setSection("tarefas")}>Tarefas</button>
-        <button type="button" className={section === "recorrencias" ? "on" : ""} onClick={() => setSection("recorrencias")}>Rotinas <span>{recurringTasks.length}</span></button>
+        <button type="button" className={section === "recorrencias" ? "on" : ""} onClick={() => setSection("recorrencias")}>Rotinas <span>{rows.length}</span></button>
         <button type="button" className={section === "plano" ? "on" : ""} onClick={() => setSection("plano")}>Plano de Ação <span>{plans.length}</span></button>
       </nav>
 
@@ -267,7 +402,7 @@ export default function OperacaoWorkspace({
               <button type="button" className={view === "lista" ? "on" : ""} onClick={() => setView("lista")}>Lista</button>
               <button type="button" className={view === "calendario" ? "on" : ""} onClick={() => setView("calendario")}>Calendário</button>
             </div>
-            <RecurringSearchBar query={query} onQueryChange={setQuery} filters={filters} onFiltersChange={setFilters} tasks={recurringTasks} onPick={setSelected} />
+            <RecurringSearchBar query={query} onQueryChange={setQuery} filters={filters} onFiltersChange={setFilters} tasks={rows} onPick={setSelected} />
             {view === "colunas" ? (
               <div className="kb-modetoggle" aria-label="Agrupar colunas por">
                 {GROUP_BY_OPTIONS.map((option) => (
@@ -297,18 +432,38 @@ export default function OperacaoWorkspace({
             ) : null}
           </div>
 
+          {dndError ? <p className="rec-dnd-error" role="alert">{dndError}</p> : null}
+
           {!filtered.length ? <div className="rec-empty"><strong>Nenhuma rotina encontrada.</strong><span>Ajuste os filtros para voltar a exibir as rotinas.</span></div> : null}
 
           {filtered.length && view === "colunas" ? (
             <div className="rec-board" ref={boardRef}>
               {columns.map((column) => (
-                <section className="rec-column" key={column.key}>
+                <section
+                  className={`rec-column${columnDropEnabled && dropTarget === column.key ? " dropping" : ""}`}
+                  key={column.key}
+                  onDragOver={columnDropEnabled ? (e) => { allowDrop(e); setDropTarget(column.key); } : undefined}
+                  onDragLeave={columnDropEnabled ? () => setDropTarget((k) => (k === column.key ? null : k)) : undefined}
+                  onDrop={columnDropEnabled ? (e) => { e.preventDefault(); void dropInColumn(column.key); } : undefined}
+                >
                   <header>
                     <span className="rec-client-avatar">{column.label.slice(0, 2).toUpperCase()}</span>
                     <div><strong>{column.label}</strong><span>{column.tasks.length} {column.tasks.length === 1 ? "rotina" : "rotinas"}</span></div>
                   </header>
                   <div className="rec-column-stack">
-                    {column.tasks.map((task) => <RecurrenceCard task={task} today={today} onOpen={() => setSelected(task)} onComplete={task.active ? () => void completeCycle(task) : undefined} key={`${column.key}-${task.id}`} />)}
+                    {column.tasks.map((task) => (
+                      <RecurrenceCard
+                        task={task}
+                        today={today}
+                        onOpen={() => setSelected(task)}
+                        onComplete={task.active ? () => void completeCycle(task) : undefined}
+                        dragging={dragId === task.id}
+                        onDragStart={(e) => onCardDragStart(e, task.id)}
+                        onDragEnd={onCardDragEnd}
+                        onDropBefore={reorderEnabled ? () => void reorderBefore(task.id) : undefined}
+                        key={`${column.key}-${task.id}`}
+                      />
+                    ))}
                   </div>
                 </section>
               ))}
@@ -322,7 +477,17 @@ export default function OperacaoWorkspace({
                 const state = recurringState(task, today);
                 const period = formatPeriod(task.start_date, task.end_date);
                 return (
-                  <div className="rec-list-row-wrap" key={task.id}>
+                  <div
+                    className={`rec-list-row-wrap${dragId === task.id ? " dragging" : ""}`}
+                    key={task.id}
+                    draggable
+                    onDragStart={(e) => onCardDragStart(e, task.id)}
+                    onDragEnd={onCardDragEnd}
+                    onDragOver={reorderEnabled ? (e) => { allowDrop(e); setDropTarget(task.id); } : undefined}
+                    onDragLeave={reorderEnabled ? () => setDropTarget((k) => (k === task.id ? null : k)) : undefined}
+                    onDrop={reorderEnabled ? (e) => { e.preventDefault(); void reorderBefore(task.id); } : undefined}
+                    data-dropping={reorderEnabled && dropTarget === task.id ? "true" : undefined}
+                  >
                     <button type="button" className="rec-list-row" onClick={() => setSelected(task)}>
                     <span className="rec-list-title">
                       <TaskKindIcon kind={task.kind} />
@@ -351,11 +516,28 @@ export default function OperacaoWorkspace({
                   const key = date ? isoCalendarDate(date) : null;
                   const dayTasks = key ? occurrencesByDay.get(key) ?? [] : [];
                   return (
-                    <div className={`rec-calendar-day ${date ? "" : "empty"} ${key === today ? "is-today" : ""}`} key={key ?? `empty-${index}`}>
+                    <div
+                      className={`rec-calendar-day ${date ? "" : "empty"} ${key === today ? "is-today" : ""} ${key && dropTarget === key ? "dropping" : ""}`}
+                      key={key ?? `empty-${index}`}
+                      onDragOver={key ? (e) => { allowDrop(e); setDropTarget(key); } : undefined}
+                      onDragLeave={key ? () => setDropTarget((k) => (k === key ? null : k)) : undefined}
+                      onDrop={key ? (e) => { e.preventDefault(); void dropOnDay(key); } : undefined}
+                    >
                       {date ? (
                         <>
                           <time>{date.getDate()}</time>
-                          {dayTasks.map((task) => <RecurrenceCard task={task} today={today} compact onOpen={() => setSelected(task)} key={`${key}-${task.id}`} />)}
+                          {dayTasks.map((task) => (
+                            <RecurrenceCard
+                              task={task}
+                              today={today}
+                              compact
+                              onOpen={() => setSelected(task)}
+                              dragging={dragId === task.id}
+                              onDragStart={(e) => onCardDragStart(e, task.id)}
+                              onDragEnd={onCardDragEnd}
+                              key={`${key}-${task.id}`}
+                            />
+                          ))}
                         </>
                       ) : null}
                     </div>

@@ -20,7 +20,7 @@ export const RECURRING_GROUP_BY_LABEL: Record<RecurringGroupBy, string> = {
 
 export type RecurringGroup = { key: string; label: string; tasks: RecurringTask[] };
 
-const SEM_RESPONSAVEL = "Sem responsável";
+export const SEM_RESPONSAVEL = "Sem responsável";
 const SEM_AGENDA = "Sem agenda";
 
 const PRAZO_BUCKETS = [
