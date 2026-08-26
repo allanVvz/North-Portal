@@ -1,0 +1,201 @@
+import { createSign } from "node:crypto";
+import { HttpError } from "./validation";
+import type { DriveFile } from "./googleDrive";
+
+// Google Drive through a service account — provisioning client folders and
+// listing their files for the admin preview.
+//
+// Plain fetch against the REST API, same shape as lib/meta.ts and lib/windsor.ts.
+// The official `googleapis` SDK was tried first and pulled in type definitions
+// for every Google product, pushing `tsc --noEmit` past seven minutes; signing
+// the service-account JWT by hand costs ~20 lines and keeps the build fast.
+//
+// SERVER ONLY. Kept apart from lib/googleDrive.ts on purpose: that module is a
+// pure URL parser imported by client components (CommentText, GoogleDrivePreview).
+//
+// The integration is optional: with the env vars absent every function returns
+// null/[] instead of throwing, the toggle renders disabled, and the admin keeps
+// pasting folder links by hand. A missing integration must never block creating
+// a client.
+
+const SCOPE = "https://www.googleapis.com/auth/drive";
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+
+// Subfolders created under each client's root folder. The keys map 1:1 to the
+// columns already on client_drive_links, so the automation fills exactly the
+// fields a human would have pasted.
+export const CLIENT_SUBFOLDERS = [
+  { key: "brand", label: "Marca" },
+  { key: "products", label: "Arquivos" },
+  { key: "uploads", label: "Edição" },
+] as const;
+
+export type DriveFolder = { id: string; url: string };
+
+export type DriveProvisionResult = {
+  root: DriveFolder;
+  brand: DriveFolder;
+  products: DriveFolder;
+  uploads: DriveFolder;
+};
+
+type ServiceAccount = { client_email: string; private_key: string };
+
+function serviceAccount(): ServiceAccount | null {
+  const raw = process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON;
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ServiceAccount>;
+    if (!parsed.client_email || !parsed.private_key) return null;
+    // Env vars collapse real newlines, so the PEM usually arrives escaped.
+    const pem = parsed.private_key.split("\\n").join("\n");
+    return { client_email: parsed.client_email, private_key: pem };
+  } catch {
+    return null;
+  }
+}
+
+function rootFolderId(): string | null {
+  const id = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
+  return id && id.trim() ? id.trim() : null;
+}
+
+/** True only when both the credentials and the parent folder are configured. */
+export function isGoogleDriveConfigured(): boolean {
+  return Boolean(serviceAccount() && rootFolderId());
+}
+
+function b64url(input: string | Buffer): string {
+  return Buffer.from(input).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Access tokens last an hour; cache so a burst of calls signs once.
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function accessToken(): Promise<string | null> {
+  const sa = serviceAccount();
+  if (!sa) return null;
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.token;
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claim = b64url(
+    JSON.stringify({ iss: sa.client_email, scope: SCOPE, aud: TOKEN_URL, iat: now, exp: now + 3600 }),
+  );
+  const signer = createSign("RSA-SHA256");
+  signer.update(`${header}.${claim}`);
+  const signature = b64url(signer.sign(sa.private_key));
+  const assertion = `${header}.${claim}.${signature}`;
+
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new HttpError(502, `Falha ao autenticar no Google Drive: ${res.status} ${detail.slice(0, 200)}`);
+  }
+  const data = (await res.json()) as { access_token?: string; expires_in?: number };
+  if (!data.access_token) throw new HttpError(502, "Google Drive nao retornou um token de acesso.");
+  cachedToken = { token: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000 };
+  return cachedToken.token;
+}
+
+function folderUrl(id: string): string {
+  return `https://drive.google.com/drive/folders/${id}`;
+}
+
+async function createFolder(token: string, name: string, parent: string): Promise<DriveFolder> {
+  const res = await fetch(`${DRIVE_FILES}?fields=id&supportsAllDrives=true`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parent] }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new HttpError(502, `Falha ao criar a pasta "${name}": ${res.status} ${detail.slice(0, 200)}`);
+  }
+  const data = (await res.json()) as { id?: string };
+  if (!data.id) throw new HttpError(502, `Google Drive nao retornou o id da pasta "${name}".`);
+  return { id: data.id, url: folderUrl(data.id) };
+}
+
+/**
+ * Creates the client's root folder plus the three standard subfolders.
+ * Returns null when Drive is not configured — callers treat that as "skip",
+ * never as an error. Throws only when Drive IS configured and the API refuses,
+ * so the caller can surface a real failure to the admin.
+ */
+export async function provisionClientDriveFolders(input: {
+  name: string;
+  slug: string;
+  shareWithEmail?: string | null;
+}): Promise<DriveProvisionResult | null> {
+  const parent = rootFolderId();
+  if (!parent) return null;
+  const token = await accessToken();
+  if (!token) return null;
+
+  const root = await createFolder(token, `${input.name} (${input.slug})`, parent);
+  const [brand, products, uploads] = await Promise.all(
+    CLIENT_SUBFOLDERS.map((f) => createFolder(token, f.label, root.id)),
+  );
+
+  // Sharing is best-effort: a typo'd client e-mail must not fail provisioning —
+  // the folders already exist and the admin can share them by hand.
+  const email = input.shareWithEmail?.trim();
+  if (email) {
+    try {
+      await fetch(
+        `https://www.googleapis.com/drive/v3/files/${root.id}/permissions?sendNotificationEmail=false&supportsAllDrives=true`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "user", role: "writer", emailAddress: email }),
+        },
+      );
+    } catch {
+      // swallowed on purpose — see comment above
+    }
+  }
+
+  return { root, brand, products, uploads };
+}
+
+/**
+ * Lists files inside a folder for the admin preview. Returns [] when Drive is
+ * not configured or the folder is unreachable, so the preview degrades to an
+ * empty state instead of breaking the page around it.
+ */
+export async function listFolderFiles(folderId: string, limit = 8): Promise<DriveFile[]> {
+  if (!folderId || !isGoogleDriveConfigured()) return [];
+  try {
+    const token = await accessToken();
+    if (!token) return [];
+    const params = new URLSearchParams({
+      q: `'${folderId.split("'").join("\\'")}' in parents and trashed = false`,
+      fields: "files(id,name,mimeType,thumbnailLink,webViewLink)",
+      orderBy: "modifiedTime desc",
+      pageSize: String(Math.min(Math.max(limit, 1), 50)),
+      supportsAllDrives: "true",
+      includeItemsFromAllDrives: "true",
+    });
+    const res = await fetch(`${DRIVE_FILES}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      files?: { id?: string; name?: string; mimeType?: string; thumbnailLink?: string; webViewLink?: string }[];
+    };
+    return (data.files ?? []).map((f) => ({
+      id: f.id ?? "",
+      name: f.name ?? "(sem nome)",
+      mimeType: f.mimeType ?? "application/octet-stream",
+      thumbnailUrl: f.thumbnailLink ?? null,
+      webViewLink: f.webViewLink ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}

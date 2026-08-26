@@ -8,7 +8,7 @@ import type { SortPref } from "./taskSortPrefs";
 // de atributos. Mesma mecânica de popover do AttrVisibilityPopover:
 // outside-click, Escape e aria-haspopup="menu".
 
-const ORDERED_KEYS: SortKey[] = ["manual", "alfabetico", "edicao", "data"];
+const ORDERED_KEYS: SortKey[] = ["manual", "alfabetico", "edicao", "data", "conclusao"];
 const DIRS: SortDir[] = ["asc", "desc"];
 
 export default function SortMenu({

@@ -1310,6 +1310,28 @@ export default function TaskModal({
 
           {mode === "edit" ? (
             <div className="tm-side">
+              {/* Autoria: até a migration 20260826090000 o card só guardava
+                  created_at, então cards antigos não têm autor — cai em
+                  "Sistema" em vez de mentir um nome. */}
+              <div className="tm-box tm-authorbox">
+                <p className="tm-box-label">Origem do card</p>
+                <p className="tm-authorline">
+                  <span>Criado por</span>
+                  <b>{liveTask?.created_by_name ?? "Sistema"}</b>
+                </p>
+                {liveTask?.created_at ? (
+                  <p className="tm-authorline">
+                    <span>Criado em</span>
+                    <b>{formatCommentTime(liveTask.created_at)}</b>
+                  </p>
+                ) : null}
+                {liveTask?.completed_at ? (
+                  <p className="tm-authorline">
+                    <span>Concluído em</span>
+                    <b>{formatCommentTime(liveTask.completed_at)}</b>
+                  </p>
+                ) : null}
+              </div>
               <div className="tm-box tm-commentsbox">
                 <p className="tm-box-label">Comentários e atividade</p>
                 <div className="tm-comments">

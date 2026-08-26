@@ -6,8 +6,16 @@ import { useRouter } from "next/navigation";
 import ClientSearchBar, { clientMatchesFilters, type ClientActiveFilter } from "./ClientSearchBar";
 import type { ClientStage } from "./clientPipeline";
 import type { AdminClientSummary } from "@/lib/supabase";
+import { ATTENTION_LABEL, type AttentionReason } from "@/lib/adminHome";
 
-export type ClientRow = AdminClientSummary & { checkpointsPct: number; stage: ClientStage };
+export type ClientRow = AdminClientSummary & {
+  checkpointsPct: number;
+  stage: ClientStage;
+  /** O que falta neste cliente. Vazio/ausente = nada pendente. Opcional porque
+   *  Informações reaproveita este tipo só para o seletor de cliente e não tem
+   *  motivo para carregar o overview inteiro. */
+  attention?: AttentionReason[];
+};
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -25,11 +33,14 @@ function formatDate(value: string | null): string {
   }
 }
 
-// Client version of the Kanban's "cliente/tipo/prioridade/responsável"
-// composite search (see KanbanSearchBar.tsx) — attribute→value chips,
-// AND-composable — this is what replaced the old Todos/Ativos/Inativos/
-// Briefing pendente chip row: those are now just picks inside this same box,
-// plus the new Desabilitado attribute for the soft-delete feature.
+// Card grid rather than a table: a client is a thing you go *into*, not a row
+// you scan across. "Visualizar" is the primary action and lands on the client
+// dashboard; editing is a button inside that screen, so the list stays about
+// choosing a client instead of offering two competing entry points.
+//
+// Search/filtering is the same composite attribute→value chip box the Kanban
+// uses (ClientSearchBar), including the Desabilitado attribute that reveals
+// soft-deleted clients.
 export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -55,7 +66,8 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
     setMsg("");
     try {
       const res = await fetch(`/api/admin/client/${encodeURIComponent(c.slug)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ disabled }),
       });
       if (!res.ok) throw new Error();
@@ -79,70 +91,77 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
         <ClientSearchBar q={q} onQChange={setQ} filters={filters} onFiltersChange={setFilters} />
         {msg ? <span className="set-msg">{msg}</span> : null}
         <div className="kb-spacer" />
-        <Link href="/admin/novo" className="admin-btn primary kb-newtask-btn">+ Novo cliente</Link>
+        <Link href="/admin/novo" className="admin-btn primary kb-newtask-btn">
+          + Novo cliente
+        </Link>
       </div>
 
-      <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>Slug</th>
-                <th>Status</th>
-                <th>Briefing</th>
-                <th>Atualizado</th>
-                <th aria-label="Ações" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id} className={c.disabled ? "cli-row-disabled" : ""}>
-                  <td>
-                    <div className="admin-cell-client">
-                      <span className="admin-avatar">{initials(c.name)}</span>
-                      <span className="admin-cell-name">{c.name}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <code className="admin-slug">{c.slug}</code>
-                  </td>
-                  <td>
-                    <span className={`admin-pill ${c.is_active ? "on" : "off"}`}>{c.is_active ? "Ativo" : "Inativo"}</span>
-                    {c.disabled ? <span className="admin-pill off cli-disabled-badge">Desabilitado</span> : null}
-                  </td>
-                  <td>
-                    <span className={`admin-pill ${c.briefing_submitted ? "on" : "muted"}`}>
-                      {c.briefing_submitted ? "Enviado" : "Pendente"}
-                    </span>
-                  </td>
-                  <td className="admin-cell-muted">{formatDate(c.updated_at)}</td>
-                  <td>
-                    <div className="admin-cell-actions">
-                      <Link href={`/admin/${c.slug}`} className="admin-btn ghost">Editar</Link>
-                      <Link href={`/${c.slug}`} className="admin-btn ghost" target="_blank">Portal ↗</Link>
-                      {c.disabled ? (
-                        <button className="admin-btn primary" disabled={busyId === c.id} onClick={() => void setDisabled(c, false)}>
-                          Reabilitar
-                        </button>
-                      ) : (
-                        <button className="admin-btn ghost danger" disabled={busyId === c.id} onClick={() => confirmRemove(c)}>
-                          Remover
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="admin-cell-muted" style={{ textAlign: "center", padding: "28px" }}>
-                    Nenhum cliente neste filtro.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-      </div>
+      {filtered.length === 0 ? (
+        <p className="admin-empty">Nenhum cliente neste filtro.</p>
+      ) : (
+        <div className="cli-grid">
+          {filtered.map((c) => (
+            <article className={`cli-card${c.disabled ? " is-disabled" : ""}`} key={c.id}>
+              <Link href={`/admin/${c.slug}/visao`} className="cli-card-main">
+                <span className="cli-card-head">
+                  <span className="admin-avatar">{initials(c.name)}</span>
+                  <span className="cli-card-id">
+                    <strong>{c.name}</strong>
+                    <code className="admin-slug">/{c.slug}</code>
+                  </span>
+                </span>
+
+                <span className="cli-card-pills">
+                  <span className={`admin-pill ${c.is_active ? "on" : "off"}`}>{c.is_active ? "Ativo" : "Inativo"}</span>
+                  <span className={`admin-pill ${c.briefing_submitted ? "on" : "muted"}`}>
+                    Briefing {c.briefing_submitted ? "enviado" : "pendente"}
+                  </span>
+                  {c.disabled ? <span className="admin-pill off">Desabilitado</span> : null}
+                </span>
+
+                <span className="cli-card-progress">
+                  <span className="cli-card-progress-top">
+                    <span>Onboarding</span>
+                    <strong>{c.checkpointsPct}%</strong>
+                  </span>
+                  <span className="visao-bar" aria-hidden="true">
+                    <span style={{ width: `${Math.min(100, Math.max(0, c.checkpointsPct))}%` }} />
+                  </span>
+                </span>
+
+                {c.attention && c.attention.length > 0 ? (
+                  <span className="cli-card-attention">
+                    {c.attention.map((reason) => (
+                      <em className="admin-chiptag" key={reason}>{ATTENTION_LABEL[reason]}</em>
+                    ))}
+                  </span>
+                ) : null}
+
+                <span className="cli-card-foot">Atualizado {formatDate(c.updated_at)}</span>
+              </Link>
+
+              <div className="cli-card-actions">
+                <Link href={`/admin/${c.slug}/visao`} className="admin-btn primary">
+                  Visualizar
+                </Link>
+                <Link href={`/${c.slug}`} className="admin-btn ghost" target="_blank">
+                  Portal ↗
+                </Link>
+                <div className="kb-spacer" />
+                {c.disabled ? (
+                  <button className="admin-btn ghost" disabled={busyId === c.id} onClick={() => void setDisabled(c, false)}>
+                    Reabilitar
+                  </button>
+                ) : (
+                  <button className="admin-btn ghost danger" disabled={busyId === c.id} onClick={() => confirmRemove(c)}>
+                    Remover
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </>
   );
 }

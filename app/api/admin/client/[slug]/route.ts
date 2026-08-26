@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { getClient, updateClientBundle } from "@/lib/supabase";
+import { getClient, linkClientAdAccount, updateClientBundle } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import {
   HttpError,
@@ -43,9 +43,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
       links: linksPatch,
       results: resultsPatch,
       content: body.content,
+      companyInfo: body.companyInfo,
+      contract: body.contract,
     });
 
-    return NextResponse.json({ ok: true });
+    // Ad-account mapping lives in the integrations vault, not in the client
+    // bundle — best-effort so a mapping failure never loses the form edits.
+    let adAccount: { ok: boolean; reason?: string } | null = null;
+    if (body.adAccountId !== undefined) {
+      try {
+        await linkClientAdAccount(client.slug, body.adAccountId);
+        adAccount = { ok: true };
+      } catch (e) {
+        adAccount = { ok: false, reason: e instanceof Error ? e.message : "Falha ao vincular a conta de anuncios." };
+      }
+    }
+
+    return NextResponse.json({ ok: true, adAccount });
   } catch (error) {
     return apiError(error);
   }

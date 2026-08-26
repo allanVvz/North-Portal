@@ -24,7 +24,7 @@ const SEM_RESPONSAVEL = "Sem responsável";
 const SEM_AGENDA = "Sem agenda";
 
 const PRAZO_BUCKETS = [
-  { key: "atrasadas", label: "Atrasadas" },
+  { key: "paradas", label: "Paradas" },
   { key: "semana", label: "Esta semana" },
   { key: "mes", label: "Este mês" },
   { key: "depois", label: "Depois" },
@@ -44,7 +44,7 @@ export function prazoBucket(task: RecurringTask, today: string): string {
   const state = recurringState(task, today);
   if (state === "sem_agenda" || !task.next_due_date) return "sem_agenda";
   if (state === "concluida") return "concluidas";
-  if (task.next_due_date < today) return "atrasadas";
+  if (task.next_due_date < today) return "paradas";
   if (task.next_due_date <= addDays(today, 7)) return "semana";
   if (task.next_due_date <= addDays(today, 30)) return "mes";
   return "depois";

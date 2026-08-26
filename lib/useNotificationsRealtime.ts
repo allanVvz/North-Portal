@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 // Same idiom as lib/useTaskRealtime.ts, scoped to one account's own
@@ -16,13 +16,18 @@ import { createClient } from "@/lib/supabase/client";
 export function useNotificationsRealtime(profileId: string, onChange: () => void) {
   const cbRef = useRef(onChange);
   cbRef.current = onChange;
+  // The topic has to be unique per hook instance, not per account: supabase-js
+  // hands back the existing channel when a topic repeats, and adding a second
+  // postgres_changes listener to an already-subscribed channel throws. Two
+  // components observe this now (the shell's bell and the Home panel).
+  const instanceId = useId();
 
   useEffect(() => {
     if (!profileId) return;
     const supabase = createClient();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const channel = supabase
-      .channel(`notifications-changes-${profileId}`)
+      .channel(`notifications-changes-${profileId}-${instanceId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `profile_id=eq.${profileId}` },
@@ -36,5 +41,5 @@ export function useNotificationsRealtime(profileId: string, onChange: () => void
       window.clearTimeout(timer);
       void supabase.removeChannel(channel);
     };
-  }, [profileId]);
+  }, [profileId, instanceId]);
 }

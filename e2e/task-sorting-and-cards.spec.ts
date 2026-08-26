@@ -168,9 +168,11 @@ test.describe("Ordenação e cards minimizados (e2e contra o backend real)", () 
     await expect(page.locator(".kb-sort-btn")).toHaveCount(0);
   });
 
-  test("Clientes tem o menu de ordenação e ordena as rotinas", async ({ page }) => {
+  test("Rotinas tem o menu de ordenação e ordena as rotinas", async ({ page }) => {
     await login(page);
-    await page.goto("/admin");
+    // Rotinas saiu da tela de Clientes e agora é uma aba de /admin/operacao.
+    await page.goto("/admin/operacao");
+    await page.getByRole("button", { name: /^Rotinas/ }).click();
     await expect(page.locator(".rec-board, .rec-empty")).toBeVisible();
 
     const sortBtn = page.locator(".kb-sort-btn");

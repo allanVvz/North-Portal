@@ -30,7 +30,9 @@ function LoginInner() {
     const meta = data.user.app_metadata ?? {};
     const role = meta.role as string | undefined;
     const slug = meta.client_slug as string | undefined;
-    const dest = nextParam ?? (role === "admin" ? "/admin/plano" : slug ? `/${slug}` : "/");
+    // Keep in sync with `homeFor` in middleware.ts — that one only fires when an
+    // already-authenticated user hits /login, this one runs right after sign-in.
+    const dest = nextParam ?? (role === "admin" ? "/admin/home" : slug ? `/${slug}` : "/");
     router.replace(dest);
     router.refresh();
   }

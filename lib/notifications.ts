@@ -1,5 +1,11 @@
 import { createClient } from "./supabase/server";
 import { HttpError } from "./validation";
+import { type NotificationRecord, type NotificationType } from "./notificationTypes";
+
+// Re-exportados para não quebrar quem já importa daqui; a definição vive em
+// ./notificationTypes porque este módulo é server-only.
+export { NOTIFICATION_TYPES, NOTIFICATION_TYPE_LABEL } from "./notificationTypes";
+export type { NotificationRecord, NotificationType } from "./notificationTypes";
 
 // Notifications: lightweight per-account inbox (supabase/migrations/20260819000001_notifications.sql).
 // Two producers land in the same table:
@@ -11,19 +17,6 @@ import { HttpError } from "./validation";
 //     changing this module's shape or the table.
 // The pure date-window logic below (isDueSoon) is kept separate from the
 // Supabase calls so it's directly unit-testable (see lib/notifications.test.ts).
-
-export const NOTIFICATION_TYPES = ["task_review_assigned", "task_due_soon"] as const;
-export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
-
-export type NotificationRecord = {
-  id: string;
-  profile_id: string;
-  task_id: string | null;
-  type: NotificationType;
-  message: string;
-  read_at: string | null;
-  created_at: string;
-};
 
 const NOTIFICATION_COLUMNS = "id,profile_id,task_id,type,message,read_at,created_at";
 
@@ -59,6 +52,31 @@ function formatDateBR(dueDate: string): string {
 
 export function dueSoonMessage(title: string, dueDate: string): string {
   return `Prazo próximo: "${title}" vence em ${formatDateBR(dueDate)}.`;
+}
+
+// Rótulo curto do status para a mensagem. Deliberadamente sem o prefixo
+// "Kanban ·" que STATUS_KANBAN usa em lib/supabase.ts: ali o contexto é a
+// coluna do quadro, aqui é uma frase.
+const STATUS_LABEL: Record<string, string> = {
+  backlog: "Entrada",
+  em_producao: "Em produção",
+  revisao: "Revisão",
+  aprovacao: "Aprovação",
+  aprovado: "Aprovado",
+  concluido: "Concluído",
+  parada: "Parada",
+};
+
+export function statusChangedMessage(title: string, status: string): string {
+  return `"${title}" mudou para ${STATUS_LABEL[status] ?? status}.`;
+}
+
+export function taskUpdatedMessage(title: string): string {
+  return `"${title}" foi editado.`;
+}
+
+export function taskCommentedMessage(title: string, author: string): string {
+  return `${author} comentou em "${title}".`;
 }
 
 // ---- data access ----------------------------------------------------------
@@ -116,6 +134,33 @@ export async function upsertDueSoonNotifications(profileId: string, today: Date 
     .from("notifications")
     .upsert(rows, { onConflict: "profile_id,task_id,type" });
   if (upsertError) fail("due-soon upsert", upsertError);
+}
+
+/**
+ * Avisa todo mundo ligado ao card — criador, executores, revisor e aprovador —
+ * menos quem fez a ação. A escolha dos destinatários acontece dentro da função
+ * SECURITY DEFINER no banco, a partir do próprio card: daqui não há como
+ * endereçar alguém que não participa dele.
+ *
+ * Best-effort de propósito: uma notificação que falha não pode derrubar o
+ * comentário ou a edição que o usuário acabou de salvar.
+ */
+export async function notifyTaskParticipants(
+  taskId: string,
+  type: NotificationType,
+  message: string,
+): Promise<void> {
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.rpc("notify_task_participants", {
+      p_task_id: taskId,
+      p_type: type,
+      p_message: message,
+    });
+    if (error) console.error("Notifications fan-out error", { code: error.code, message: error.message?.slice(0, 240) });
+  } catch (error) {
+    console.error("Notifications fan-out threw", error);
+  }
 }
 
 /** Marks either specific notification ids, or the caller's whole unread

@@ -9,17 +9,21 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { actionPlanIdOf, actionPlanMembersOf, detachedTaskRelationPatch, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
+import { actionPlanIdOf, actionPlanMembersOf, belongsToTaskScreen, detachedTaskRelationPatch, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
   normalizeMetrics,
   flowFlagsCascadeEffects,
+  scopeItemSchema,
   ACCESS_PLATFORMS,
   type AccessPlatformKey,
   type AdminTabsVisibility,
   type ClientFlowFlags,
   type ClientTask,
+  type CompanyInfo,
+  type ContractInfo,
+  type ScopeItem,
   type CredentialSummary,
   type DocumentRecord,
   type PortalPayload,
@@ -41,6 +45,7 @@ import {
   type PerformanceTemplateConfig,
 } from "./performanceTemplates";
 import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
+import { averageProgress, isOverdue, plansInProgress, weekAhead } from "./adminHome";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
 
@@ -48,17 +53,22 @@ type ContentRow = { data: Record<string, unknown> | null };
 type PrefsRow = { theme: string | null; avatar_style: number | null; display_name: string | null; username: string | null; manual_seen: boolean | null };
 
 export const TASK_COLUMNS =
-  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at";
+  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at,created_by,created_at,completed_at";
 
 // Responsável linked to a real account (task_assignees), merged into the
 // legacy `assignee` free-text column at read time — see mergeAssigneeDisplay.
 // Every read path that ends up in a UI-facing response selects this instead
 // of the bare TASK_COLUMNS so `assignee` always reflects linked accounts too.
 const TASK_ASSIGNEES_JOIN = "task_assignees(profile:profiles(id,full_name))";
-const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN}`;
+const TASK_AUTHOR_JOIN = "created_by_profile:profiles!tasks_created_by_fkey(full_name)";
+const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN},${TASK_AUTHOR_JOIN}`;
 
 type JoinedAssigneeProfile = { id: string; full_name: string | null };
-type TaskAssigneesJoin = { task_assignees?: { profile: JoinedAssigneeProfile | JoinedAssigneeProfile[] | null }[] | null };
+type JoinedAuthor = { full_name: string | null };
+type TaskAssigneesJoin = {
+  task_assignees?: { profile: JoinedAssigneeProfile | JoinedAssigneeProfile[] | null }[] | null;
+  created_by_profile?: JoinedAuthor | JoinedAuthor[] | null;
+};
 
 // Merges linked-account names into the legacy free-text `assignee` column
 // (mergeAssigneeDisplay) and surfaces the linked profile ids too, so the
@@ -67,15 +77,17 @@ type TaskAssigneesJoin = { task_assignees?: { profile: JoinedAssigneeProfile | J
 // same precedent as reviewer_id/approver_id already being plain fields.
 function mergeTaskAssigneeRow<T extends { assignee: string | null } & TaskAssigneesJoin>(
   row: T,
-): Omit<T, "task_assignees"> & { assignee_profile_ids: string[] } {
-  const { task_assignees, ...rest } = row;
+): Omit<T, "task_assignees" | "created_by_profile"> & { assignee_profile_ids: string[]; created_by_name: string | null } {
+  const { task_assignees, created_by_profile, ...rest } = row;
   const linkedProfiles = (task_assignees ?? [])
     .map((r) => (Array.isArray(r.profile) ? r.profile[0] : r.profile))
     .filter((p): p is JoinedAssigneeProfile => Boolean(p));
+  const author = Array.isArray(created_by_profile) ? created_by_profile[0] : created_by_profile;
   return {
     ...rest,
     assignee: mergeAssigneeDisplay(rest.assignee, linkedProfiles.map((p) => p.full_name)),
     assignee_profile_ids: linkedProfiles.map((p) => p.id),
+    created_by_name: author?.full_name ?? null,
   };
 }
 
@@ -652,14 +664,129 @@ export async function listAllBriefings(): Promise<AdminBriefingRow[]> {
   });
 }
 
+export type DriveFolderIds = {
+  rootFolderId: string | null;
+  brandFolderId: string | null;
+  productsFolderId: string | null;
+  uploadsFolderId: string | null;
+  syncedAt: string | null;
+};
+
+// ---- Home do admin -----------------------------------------------------------
+
+export type AdminHomeSummary = {
+  reviewQueueCount: number;
+  approvalQueueCount: number;
+  overdueTasks: number;
+  actionPlansInProgress: number;
+  actionPlansAvgProgress: number;
+  /** Total de tarefas não realizadas na janela de 7 dias — separado de
+   *  `weekAhead` porque a lista é truncada para não inchar o payload. */
+  weekAheadCount: number;
+  weekAhead: { id: string; title: string; clientName: string; clientSlug: string; dueDate: string; status: TaskStatus }[];
+};
+
+/**
+ * Everything the /admin/home KPIs need, assembled from queries that already
+ * exist plus one light scan of dated tasks. No new table.
+ */
+export async function listAdminHomeSummary(): Promise<AdminHomeSummary> {
+  const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
+
+  // listAdminOverview() saiu daqui junto com o painel "precisam de atenção",
+  // que agora vive na tela Clientes: era a query mais cara do conjunto (join de
+  // tasks por cliente) e a Home não usa mais nada dela.
+  const [plans, reviewQueue, approvalQueue, dated] = await Promise.all([
+    listActionPlans(),
+    listReviewQueue(),
+    listApprovalQueue(),
+    supabase
+      .from("tasks")
+      .select("id,title,due_date,status,kind,recurrence_cadence,payload,clients(name,slug)")
+      .not("due_date", "is", null)
+      .neq("status", "concluido")
+      .neq("status", "aprovado"),
+  ]);
+  if (dated.error) fail(dated.error);
+
+  type JoinedName = { name: string; slug: string };
+  type DatedRow = {
+    id: string; title: string; due_date: string | null; status: TaskStatus;
+    kind: string; recurrence_cadence: RecurringCadence | null; payload: Record<string, unknown>;
+    clients: JoinedName | JoinedName[] | null;
+  };
+  // Só tarefas. Rotinas (o card-modelo recorrente) têm vocabulário e tela
+  // próprios — o `due_date` delas é a PRÓXIMA execução, não um prazo vencido,
+  // então somá-las aqui inventava atraso que não existe. `belongsToTaskScreen`
+  // é a mesma definição que o quadro de Tarefas usa, então o KPI e a tela que
+  // ele abre nunca podem discordar.
+  const rows = ((dated.data as unknown as DatedRow[] | null) ?? [])
+    .filter((r) => belongsToTaskScreen(r))
+    .map((r) => {
+    const client = Array.isArray(r.clients) ? r.clients[0] : r.clients;
+    return {
+      id: r.id,
+      title: r.title,
+      due_date: r.due_date,
+      status: r.status,
+      clientName: client?.name ?? "Sem cliente",
+      // Sem cliente o card ainda abre: o modal aceita slug vazio (é o mesmo
+      // caminho do card "Outros" no Kanban).
+      clientSlug: client?.slug ?? "",
+    };
+  });
+
+  return {
+    reviewQueueCount: reviewQueue.length,
+    approvalQueueCount: approvalQueue.length,
+    overdueTasks: rows.filter((t) => isOverdue(t, today)).length,
+    actionPlansInProgress: plansInProgress(plans).length,
+    actionPlansAvgProgress: averageProgress(plans),
+    weekAheadCount: weekAhead(rows, today).length,
+    // Truncado: a lista da Home mostra os primeiros e o calendário atrás do
+    // toggle cabe em 60 — o número cheio vai em weekAheadCount.
+    weekAhead: weekAhead(rows, today).slice(0, 60).map((t) => ({
+      id: t.id,
+      title: t.title,
+      clientName: t.clientName,
+      clientSlug: t.clientSlug,
+      dueDate: t.due_date ?? "",
+      status: t.status,
+    })),
+  };
+}
+
 export type AdminClientDetail = {
   slug: string;
   name: string;
   is_active: boolean;
   driveLinks: { brandUrl: string | null; productsUrl: string | null; uploadsUrl: string | null };
+  driveFolders: DriveFolderIds;
   results: PortalPayload["results"];
   content: Record<string, unknown>;
+  companyInfo: CompanyInfo;
+  contract: ContractInfo;
 };
+
+type CompanyInfoRow = { segmento: string | null; cidade_uf: string | null; instagram_ou_site: string | null };
+type ContractRow = {
+  plano_tier: string | null;
+  escopo: unknown;
+  valor_mensal: string | number | null;
+  contract_start: string | null;
+  responsavel_nome: string | null;
+  responsavel_whatsapp: string | null;
+};
+
+function normalizeScope(raw: unknown): ScopeItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const parsed = scopeItemSchema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
 
 // Full editable bundle for the admin editor (includes inactive clients).
 export async function getAdminClientDetail(slug: string): Promise<AdminClientDetail | null> {
@@ -667,18 +794,32 @@ export async function getAdminClientDetail(slug: string): Promise<AdminClientDet
   const client = await getClient(slug, true);
   if (!client) return null;
 
-  const [links, results, content] = await Promise.all([
-    supabase.from("client_drive_links").select("brand_url,products_url,uploads_url").eq("client_id", client.id).limit(1),
+  const [links, results, content, company, contract] = await Promise.all([
+    supabase
+      .from("client_drive_links")
+      .select("brand_url,products_url,uploads_url,root_folder_id,brand_folder_id,products_folder_id,uploads_folder_id,drive_synced_at")
+      .eq("client_id", client.id)
+      .limit(1),
     supabase.from("client_results").select("insights,top_metrics,report_url,feedback_url").eq("client_id", client.id).limit(1),
     supabase.from("client_content").select("data").eq("client_id", client.id).limit(1),
+    supabase.from("client_company_info").select("segmento,cidade_uf,instagram_ou_site").eq("client_id", client.id).limit(1),
+    supabase
+      .from("client_contract")
+      .select("plano_tier,escopo,valor_mensal,contract_start,responsavel_nome,responsavel_whatsapp")
+      .eq("client_id", client.id)
+      .limit(1),
   ]);
   if (links.error) fail(links.error);
   if (results.error) fail(results.error);
   if (content.error) fail(content.error);
+  if (company.error) fail(company.error);
+  if (contract.error) fail(contract.error);
 
-  const l = links.data?.[0] as LinksRow | undefined;
+  const l = links.data?.[0] as (LinksRow & Record<string, string | null>) | undefined;
   const r = results.data?.[0] as ResultsRow | undefined;
   const c = content.data?.[0] as ContentRow | undefined;
+  const ci = company.data?.[0] as CompanyInfoRow | undefined;
+  const ct = contract.data?.[0] as ContractRow | undefined;
 
   return {
     slug: client.slug,
@@ -689,6 +830,13 @@ export async function getAdminClientDetail(slug: string): Promise<AdminClientDet
       productsUrl: l?.products_url ?? null,
       uploadsUrl: l?.uploads_url ?? null,
     },
+    driveFolders: {
+      rootFolderId: l?.root_folder_id ?? null,
+      brandFolderId: l?.brand_folder_id ?? null,
+      productsFolderId: l?.products_folder_id ?? null,
+      uploadsFolderId: l?.uploads_folder_id ?? null,
+      syncedAt: l?.drive_synced_at ?? null,
+    },
     results: {
       insights: normalizeInsights(r?.insights),
       topMetrics: normalizeMetrics(r?.top_metrics),
@@ -696,14 +844,36 @@ export async function getAdminClientDetail(slug: string): Promise<AdminClientDet
       feedbackUrl: r?.feedback_url ?? null,
     },
     content: (c?.data as Record<string, unknown> | null) ?? {},
+    companyInfo: {
+      segmento: ci?.segmento ?? null,
+      cidadeUf: ci?.cidade_uf ?? null,
+      instagramOuSite: ci?.instagram_ou_site ?? null,
+    },
+    contract: {
+      planoTier: (ct?.plano_tier as ContractInfo["planoTier"]) ?? null,
+      escopo: normalizeScope(ct?.escopo),
+      valorMensal: ct?.valor_mensal === null || ct?.valor_mensal === undefined ? null : Number(ct.valor_mensal),
+      contractStart: ct?.contract_start ?? null,
+      responsavelNome: ct?.responsavel_nome ?? null,
+      responsavelWhatsapp: ct?.responsavel_whatsapp ?? null,
+    },
   };
 }
 
-// Creates a client + its three empty child rows (briefing/links/results).
+// Creates a client + its child rows (briefing/links/results/company/contract),
+// the commercial checkpoints, and the kickoff card on the Kanban.
+//
+// briefing_answers is created unconditionally: it IS the client's onboarding
+// questionnaire (app/[slug]/content.ts) and getPortalPayload assumes the row
+// exists. The "Criar briefing de onboarding" toggle in the form reflects that
+// rather than gating it.
 export async function createClientWithChildren(input: {
   slug: string;
   name: string;
   is_active: boolean;
+  companyInfo?: CompanyInfo;
+  contract?: ContractInfo;
+  checkpointTemplateIds?: string[];
 }): Promise<ClientRow> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -718,16 +888,65 @@ export async function createClientWithChildren(input: {
   const client = data?.[0] as ClientRow | undefined;
   if (!client) throw new HttpError(503, "Nao foi possivel criar o cliente.");
 
-  const [b, l, r] = await Promise.all([
+  const [b, l, r, ci, ct] = await Promise.all([
     supabase.from("briefing_answers").insert({ client_id: client.id }),
     supabase.from("client_drive_links").insert({ client_id: client.id }),
     supabase.from("client_results").insert({ client_id: client.id }),
+    supabase.from("client_company_info").insert({ client_id: client.id, ...companyInfoPatch(input.companyInfo) }),
+    supabase.from("client_contract").insert({ client_id: client.id, ...contractPatch(input.contract) }),
   ]);
   if (b.error) fail(b.error);
   if (l.error) fail(l.error);
   if (r.error) fail(r.error);
-  await provisionCheckpointsForClient(client.id);
+  if (ci.error) fail(ci.error);
+  if (ct.error) fail(ct.error);
+  await provisionCheckpointsForClient(client.id, input.checkpointTemplateIds);
+  await provisionKickoffTask(client.id);
   return client;
+}
+
+// The "card no Kanban" half of the AO CRIAR checklist. Reuses the existing
+// planejamento/briefing vocabulary from lib/taskCatalog.ts — no new kind.
+// Internal by design (client_visible false): it's the North team's own
+// reminder to review what the client filled in.
+export async function provisionKickoffTask(clientId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("tasks").insert({
+    client_id: clientId,
+    kind: "planejamento",
+    subtype: "briefing",
+    title: "Kickoff — revisar onboarding do cliente",
+    description: "Conferir o briefing preenchido, os acessos concedidos e as pastas do Drive antes da reunião de kickoff.",
+    status: "backlog" as TaskStatus,
+    priority: "media",
+    client_visible: false,
+    position: 0,
+  });
+  if (error) fail(error);
+}
+
+// Column mappers shared by create and update — camelCase (API/Zod) to
+// snake_case (Postgres). Undefined fields are dropped so a PATCH never
+// blanks a column the caller didn't mention.
+function companyInfoPatch(info?: CompanyInfo): Record<string, unknown> {
+  if (!info) return {};
+  const out: Record<string, unknown> = {};
+  if (info.segmento !== undefined) out.segmento = info.segmento;
+  if (info.cidadeUf !== undefined) out.cidade_uf = info.cidadeUf;
+  if (info.instagramOuSite !== undefined) out.instagram_ou_site = info.instagramOuSite;
+  return out;
+}
+
+function contractPatch(contract?: ContractInfo): Record<string, unknown> {
+  if (!contract) return {};
+  const out: Record<string, unknown> = {};
+  if (contract.planoTier !== undefined) out.plano_tier = contract.planoTier;
+  if (contract.escopo !== undefined) out.escopo = contract.escopo;
+  if (contract.valorMensal !== undefined) out.valor_mensal = contract.valorMensal;
+  if (contract.contractStart !== undefined) out.contract_start = contract.contractStart;
+  if (contract.responsavelNome !== undefined) out.responsavel_nome = contract.responsavelNome;
+  if (contract.responsavelWhatsapp !== undefined) out.responsavel_whatsapp = contract.responsavelWhatsapp;
+  return out;
 }
 
 // Applies the admin edit bundle (client name/active + links + results + content) in place.
@@ -738,6 +957,8 @@ export async function updateClientBundle(
     links?: Record<string, unknown>;
     results?: Record<string, unknown>;
     content?: Record<string, unknown>;
+    companyInfo?: CompanyInfo;
+    contract?: ContractInfo;
   },
 ): Promise<void> {
   const supabase = await createClient();
@@ -770,6 +991,90 @@ export async function updateClientBundle(
       .upsert({ client_id: clientId, data: patches.content, updated_at: now }, { onConflict: "client_id" });
     if (error) fail(error);
   }
+  // upsert, not update: clients created before these tables existed have no row.
+  const company = companyInfoPatch(patches.companyInfo);
+  if (Object.keys(company).length) {
+    const { error } = await supabase
+      .from("client_company_info")
+      .upsert({ client_id: clientId, ...company, updated_at: now }, { onConflict: "client_id" });
+    if (error) fail(error);
+  }
+  const contract = contractPatch(patches.contract);
+  if (Object.keys(contract).length) {
+    const { error } = await supabase
+      .from("client_contract")
+      .upsert({ client_id: clientId, ...contract, updated_at: now }, { onConflict: "client_id" });
+    if (error) fail(error);
+  }
+}
+
+// Records the folders created by the Drive automation. The *_url columns stay
+// the single source of the link shown in the UI (so a hand-pasted link keeps
+// working); the *_folder_id columns exist to re-sync and to list files.
+export async function saveDriveFolderProvisioning(
+  clientId: string,
+  folders: { root: { id: string; url: string }; brand: { id: string; url: string }; products: { id: string; url: string }; uploads: { id: string; url: string } },
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("client_drive_links")
+    .update({
+      brand_url: folders.brand.url,
+      products_url: folders.products.url,
+      uploads_url: folders.uploads.url,
+      root_folder_id: folders.root.id,
+      brand_folder_id: folders.brand.id,
+      products_folder_id: folders.products.id,
+      uploads_folder_id: folders.uploads.id,
+      drive_synced_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("client_id", clientId);
+  if (error) fail(error);
+}
+
+// ---- Escopo contratado: catálogo de tags ------------------------------------
+// Lives in the DB rather than an in-code catalog because the admin creates tags
+// straight from the cadastro form ("+ Nova tag") and they must apply immediately.
+
+export type ScopeTag = { id: string; key: string; label: string; has_quantity: boolean };
+
+export async function listScopeTags(): Promise<ScopeTag[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("scope_tags").select("id,key,label,has_quantity").order("label");
+  if (error) fail(error);
+  return (data as ScopeTag[] | null) ?? [];
+}
+
+export async function createScopeTag(input: { label: string; hasQuantity?: boolean }): Promise<ScopeTag> {
+  const supabase = await createClient();
+  const key = slugifyScopeKey(input.label);
+  if (!key) throw new HttpError(400, "Nome de tag invalido.");
+  const { data, error } = await supabase
+    .from("scope_tags")
+    .upsert({ key, label: input.label.trim(), has_quantity: Boolean(input.hasQuantity) }, { onConflict: "key" })
+    .select("id,key,label,has_quantity")
+    .limit(1);
+  if (error) fail(error);
+  const row = data?.[0] as ScopeTag | undefined;
+  if (!row) throw new HttpError(503, "Nao foi possivel criar a tag.");
+  return row;
+}
+
+export function slugifyScopeKey(label: string): string {
+  // NFD splits accented letters into base + combining mark; dropping every
+  // non-ASCII code unit then leaves the plain letter, so "Captacao" and its
+  // accented spelling produce the same key.
+  const ascii = label
+    .normalize("NFD")
+    .split("")
+    .filter((c) => c.charCodeAt(0) < 128)
+    .join("");
+  return ascii
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
 }
 
 // ---- Tasks / Kanban (admin) -------------------------------------------------
@@ -966,11 +1271,26 @@ export async function getTaskById(id: string): Promise<TaskRecord | null> {
   return row ? mergeTaskAssigneeRow(row) : null;
 }
 
+/** Autor da ação corrente, ou null quando não há sessão (cron, automação). */
+async function currentUserId(): Promise<string | null> {
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function createTask(clientId: string | null, input: Record<string, unknown>): Promise<TaskRecord> {
   const supabase = await createClient();
+  // Autoria carimbada aqui, no único funil de criação, e não em cada rota: os
+  // cards nascidos de recorrência, checkpoint, kickoff e automação passam todos
+  // por aqui. Sem sessão (cron/automação) fica null = criado pelo sistema.
+  const author = await currentUserId();
   const { data, error } = await supabase
     .from("tasks")
-    .insert({ ...input, client_id: clientId })
+    .insert({ ...input, client_id: clientId, created_by: author })
     .select(TASK_COLUMNS)
     .limit(1);
   if (error) fail(error);
@@ -1723,9 +2043,12 @@ export type CheckpointTemplate = {
   description: string | null;
   order_index: number;
   active: boolean;
+  // Required templates are instantiated for every client and can't be unchecked
+  // in the cadastro form; today only "Kickoff e onboarding" is optional.
+  required: boolean;
 };
 
-const CHECKPOINT_TEMPLATE_COLUMNS = "id,title,description,order_index,active";
+const CHECKPOINT_TEMPLATE_COLUMNS = "id,title,description,order_index,active,required";
 
 export async function listCheckpointTemplates(): Promise<CheckpointTemplate[]> {
   const supabase = await createClient();
@@ -1778,10 +2101,22 @@ export async function deleteCheckpointTemplate(id: string): Promise<void> {
 // Instantiates a real `tasks` card (kind='checkpoint_comercial') per active
 // template for a client — called on client creation and available as a manual
 // backfill for clients that predate this feature.
-export async function provisionCheckpointsForClient(clientId: string): Promise<void> {
+//
+// `selectedIds` comes from the checkpoint chips in the cadastro form. Required
+// templates are always included regardless of what the client sent: the chips
+// for them render fixed, and the rule is enforced here rather than trusting the
+// payload.
+export async function provisionCheckpointsForClient(
+  clientId: string,
+  selectedIds?: string[],
+): Promise<void> {
   const supabase = await createClient();
   const templates = await listCheckpointTemplates();
-  const active = templates.filter((t) => t.active);
+  let active = templates.filter((t) => t.active);
+  if (selectedIds) {
+    const picked = new Set(selectedIds);
+    active = active.filter((t) => t.required || picked.has(t.id));
+  }
   if (active.length === 0) return;
   const rows = active.map((t) => ({
     client_id: clientId,
@@ -2102,6 +2437,57 @@ export async function updateMetaAccountMap(accountMap: Record<string, MetaAdAcco
   const { error } = await supabase.from("integration_credentials").update({ meta }).eq("id", row.id);
   if (error) fail(error);
   return getMetaSettings();
+}
+
+// ---- Vínculo de conta de anúncios (usado no cadastro/edição de cliente) -----
+// The full Windsor account discovery lives in Configurações › Integrações,
+// behind a live "testar conexão" call. Here we only offer what is already
+// persisted: every Meta ad account the OAuth grant returned, plus any Windsor
+// account already mapped to some client. Empty list = the form shows the
+// "nenhuma conta conectada" state instead of a picker.
+export type AdAccountOption = {
+  provider: "meta" | "windsor";
+  accountId: string;
+  accountName: string;
+};
+
+export async function listAdAccountOptions(): Promise<AdAccountOption[]> {
+  const [meta, windsor] = await Promise.all([getMetaSettings(), getWindsorSettings()]);
+  const out: AdAccountOption[] = meta.adAccounts.map((a) => ({
+    provider: "meta" as const,
+    accountId: a.accountId,
+    accountName: a.accountName,
+  }));
+  const seen = new Set(out.map((a) => a.accountId));
+  for (const ref of Object.values(windsor.accountMap)) {
+    if (ref && !seen.has(ref.accountId)) {
+      seen.add(ref.accountId);
+      out.push({ provider: "windsor", accountId: ref.accountId, accountName: ref.accountName });
+    }
+  }
+  return out;
+}
+
+/** Points a client's slug at an ad account (or clears it with null). */
+export async function linkClientAdAccount(slug: string, accountId: string | null): Promise<void> {
+  if (!accountId) {
+    const meta = await getMetaSettings();
+    if (meta.accountMap[slug]) await updateMetaAccountMap({ ...meta.accountMap, [slug]: null });
+    const windsor = await getWindsorSettings();
+    if (windsor.accountMap[slug]) await saveWindsorSettings({ accountMap: { ...windsor.accountMap, [slug]: null } });
+    return;
+  }
+  const options = await listAdAccountOptions();
+  const picked = options.find((a) => a.accountId === accountId);
+  if (!picked) throw new HttpError(400, "Conta de anuncios nao encontrada.");
+  const ref = { accountId: picked.accountId, accountName: picked.accountName };
+  if (picked.provider === "meta") {
+    const meta = await getMetaSettings();
+    await updateMetaAccountMap({ ...meta.accountMap, [slug]: ref });
+  } else {
+    const windsor = await getWindsorSettings();
+    await saveWindsorSettings({ accountMap: { ...windsor.accountMap, [slug]: ref } });
+  }
 }
 
 export async function disconnectMeta(): Promise<void> {

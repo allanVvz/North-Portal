@@ -75,6 +75,7 @@ export default function ActionPlansBoard({
       title: p.title,
       updatedAt: p.updated_at,
       dueDate: p.end_date ?? p.due_date,
+      completedAt: p.completed_at,
       position: p.position,
     }));
   }, [initial, q, sort]);

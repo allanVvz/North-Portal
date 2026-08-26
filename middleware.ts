@@ -32,7 +32,7 @@ export async function middleware(request: NextRequest) {
   const clientSlug = (user?.app_metadata?.client_slug as string | undefined) ?? undefined;
 
   const homeFor = (r?: string, slug?: string) =>
-    r === "admin" ? "/admin/plano" : slug ? `/${slug}` : "/login";
+    r === "admin" ? "/admin/home" : slug ? `/${slug}` : "/login";
 
   // Public pages: "/" always shows the landing page, even for logged-in users
   // (they can navigate to their area via the header). Only /login redirects

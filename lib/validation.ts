@@ -25,11 +25,58 @@ export const insightSchema = z.object({
   category: z.string().optional(),
   date: z.string().optional(),
 });
+// ---- Cadastro de cliente: empresa, contrato, escopo ---------------------------
+// plano_tier has no CHECK in Postgres on purpose — same call already made for
+// tasks.kind: the vocabulary lives here, so adding a tier is a code change.
+export const PLANO_TIERS = ["start", "growth", "custom"] as const;
+export type PlanoTier = (typeof PLANO_TIERS)[number];
+
+// One entry of client_contract.escopo. `quantity` only means something for tags
+// flagged has_quantity in scope_tags (today just "Carrosséis").
+export const scopeItemSchema = z.object({
+  key: z.string().min(1).max(40),
+  quantity: z.number().int().min(0).max(999).optional(),
+});
+export type ScopeItem = z.infer<typeof scopeItemSchema>;
+
+export const companyInfoSchema = z.object({
+  segmento: z.string().max(160).nullable().optional(),
+  cidadeUf: z.string().max(160).nullable().optional(),
+  instagramOuSite: z.string().max(300).nullable().optional(),
+});
+export type CompanyInfo = z.infer<typeof companyInfoSchema>;
+
+export const contractSchema = z.object({
+  planoTier: z.enum(PLANO_TIERS).nullable().optional(),
+  escopo: z.array(scopeItemSchema).max(20).optional(),
+  valorMensal: z.number().min(0).max(10_000_000).nullable().optional(),
+  contractStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  responsavelNome: z.string().max(160).nullable().optional(),
+  responsavelWhatsapp: z.string().max(40).nullable().optional(),
+});
+export type ContractInfo = z.infer<typeof contractSchema>;
+
+export const scopeTagCreateSchema = z.object({
+  label: z.string().min(1).max(60),
+  hasQuantity: z.boolean().optional(),
+});
+
 export const adminCreateClientSchema = z.object({
   slug: slugSchema,
   name: z.string().min(1).max(MAX_TEXT_BYTES),
   email: z.string().email().max(200),
   is_active: z.boolean().optional(),
+  companyInfo: companyInfoSchema.optional(),
+  contract: contractSchema.optional(),
+  // Which commercial checkpoints to instantiate. Omitted = all active ones
+  // (the pre-existing behaviour). Templates flagged required are always added
+  // server-side regardless of what arrives here.
+  checkpointTemplateIds: z.array(z.string().uuid()).max(50).optional(),
+  // Drive automation. Ignored when the integration is not configured.
+  createDriveFolder: z.boolean().optional(),
+  driveShareEmail: z.string().email().max(200).nullable().optional(),
+  // Ad account (Meta/Windsor) to map to this client's slug.
+  adAccountId: z.string().max(120).nullable().optional(),
 });
 const MAX_CONTENT_BYTES = 200000;
 export const contentSchema = z
@@ -48,6 +95,10 @@ export const adminPatchSchema = z.object({
   reportUrl: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
   feedbackUrl: z.string().max(MAX_TEXT_BYTES).nullable().optional(),
   content: contentSchema.optional(),
+  companyInfo: companyInfoSchema.optional(),
+  contract: contractSchema.optional(),
+  driveShareEmail: z.string().email().max(200).nullable().optional(),
+  adAccountId: z.string().max(120).nullable().optional(),
 });
 
 // ---- Tasks / Kanban -----------------------------------------------------------
@@ -299,6 +350,14 @@ export type TaskRecord = {
   recurrence_cadence: RecurringCadence | null;
   recurrence_weekdays: number[];
   recurrence_day_of_month: number | null;
+  // Autoria e conclusão (migration 20260826090000). `created_by` é o auth.users
+  // que abriu o card; `completed_at` é carimbado por trigger quando o status
+  // entra em estado terminal e limpo quando sai.
+  created_by: string | null;
+  /** Nome do autor, resolvido no join — null para cards criados pelo sistema. */
+  created_by_name: string | null;
+  created_at: string;
+  completed_at: string | null;
   updated_at: string;
 };
 
@@ -359,7 +418,14 @@ export const recurringGenerateSchema = z.object({
 // v2: one row per registered automation instance, always bound to a target
 // card (cadence/execution date come from that card — see
 // plan/AUTOMACOES-RELATORIO-TRAFEGO.md). No more agency/client scope.
-const automationKeySchema = z.enum(["relatorio_trafego_semanal", "provisionar_card_metricas"]);
+const automationKeySchema = z.enum([
+  "relatorio_trafego_semanal",
+  "provisionar_card_metricas",
+  "coleta_metrica_cliente",
+]);
+// Only meaningful for coleta_metrica_cliente: which metricDefs keys the card
+// asks the client for.
+const collectMetricKeysSchema = z.array(z.string().min(1).max(40)).max(20).nullable().optional();
 export const automationConfigCreateSchema = z.object({
   automationKey: automationKeySchema,
   targetTaskId: z.string().uuid(),
@@ -367,11 +433,13 @@ export const automationConfigCreateSchema = z.object({
   // uuid or a builtin's string id (e.g. "builtin-full-funnel"), see
   // supabase/migrations/20260821030010_automations_v2.sql.
   performanceTemplateId: z.string().min(1).max(80).nullable().optional(),
+  collectMetricKeys: collectMetricKeysSchema,
   active: z.boolean().optional(),
 });
 export const automationConfigPatchSchema = z.object({
   targetTaskId: z.string().uuid().optional(),
   performanceTemplateId: z.string().min(1).max(80).nullable().optional(),
+  collectMetricKeys: collectMetricKeysSchema,
   active: z.boolean().optional(),
 });
 export const automationProvisionSchema = z.object({
@@ -669,6 +737,17 @@ export const clientApprovalActionSchema = z
     message: "Descreva o ajuste necessário antes de enviar.",
     path: ["comment"],
   });
+
+// Numbers the client types into the "Informe seus números" pendency. Values are
+// free text (the client writes "29", "R$ 4.200", "12 a 15") — the same shape
+// task_metrics already stores for manually typed metrics.
+export const clientMetricReportSchema = z.object({
+  metrics: z
+    .record(z.string().max(60))
+    .refine((v) => Object.keys(v).length > 0 && Object.keys(v).length <= 20, {
+      message: "Informe ao menos um número.",
+    }),
+});
 
 export class HttpError extends Error {
   constructor(public status: number, message: string, public details?: Record<string, unknown>) {

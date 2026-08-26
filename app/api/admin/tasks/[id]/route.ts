@@ -4,7 +4,8 @@ import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssignee
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
-import { HttpError, introducesInvalidPublishedState, taskPatchSchema } from "@/lib/validation";
+import { notifyTaskParticipants, statusChangedMessage, taskUpdatedMessage } from "@/lib/notifications";
+import { HttpError, introducesInvalidPublishedState, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -22,6 +23,16 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
   } catch (error) {
     return apiError(error);
   }
+}
+
+// Uma edição gera UMA notificação: mudança de status é o evento que interessa
+// quando ela acontece, e as duas juntas encheriam a caixa com o mesmo salvamento.
+async function notifyTaskChange(before: TaskRecord, after: TaskRecord): Promise<void> {
+  if (before.status !== after.status) {
+    await notifyTaskParticipants(after.id, "task_status_changed", statusChangedMessage(after.title, after.status));
+    return;
+  }
+  await notifyTaskParticipants(after.id, "task_updated", taskUpdatedMessage(after.title));
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -94,8 +105,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (assignee_profile_ids !== undefined) {
       await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
       const full = await getTaskById(task.id);
+      await notifyTaskChange(current, full ?? task);
       return NextResponse.json(full ?? task);
     }
+    await notifyTaskChange(current, task);
     return NextResponse.json(task);
   } catch (error) {
     return apiError(error);

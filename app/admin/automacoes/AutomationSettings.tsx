@@ -39,6 +39,7 @@ type AutomationConfig = {
 const AUTOMATION_ICON: Record<AutomationKey, string> = {
   relatorio_trafego_semanal: "▤",
   provisionar_card_metricas: "⇄",
+  coleta_metrica_cliente: "✎",
 };
 
 // A "slot" is one card on screen — either a saved automation_configs row

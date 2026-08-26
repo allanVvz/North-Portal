@@ -3,26 +3,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RecurringTask } from "@/lib/supabase";
-import ClientsTable, { type ClientRow } from "./ClientsTable";
-import HScrollRail from "./HScrollRail";
-import RecurringSearchBar from "./RecurringSearchBar";
-import { recurringMatchesFilters, recurringSearchText, type RecurringActiveFilter } from "./recurringTaskFilters";
-import CardModalLauncher from "./CardModalLauncher";
-import TaskModal from "./TaskModal";
-import { PRIORITY_LABEL } from "./kanbanShared";
-import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, todayInTimezone, type RecurringState } from "./recurringState";
-import { recurringOccurrences } from "./recurringOccurrences";
-import { RECURRING_GROUP_BY_LABEL, groupRecurring, type RecurringGroupBy } from "./recurringGrouping";
-import SortMenu from "./SortMenu";
-import { sortItems } from "./taskSort";
-import { useSortPref, type SortScope } from "./taskSortPrefs";
-import { formatPeriod, formatShortDate, relativeDue } from "./taskDates";
-import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "./calendarUtils";
-import TaskKindIcon from "./TaskKindIcon";
+import KanbanBoard from "../KanbanBoard";
+import ActionPlansBoard from "../plano/ActionPlansBoard";
+import type { ActionPlan } from "@/lib/supabase";
+import HScrollRail from "../HScrollRail";
+import RecurringSearchBar from "../RecurringSearchBar";
+import { recurringMatchesFilters, recurringSearchText, type RecurringActiveFilter } from "../recurringTaskFilters";
+import CardModalLauncher from "../CardModalLauncher";
+import TaskModal from "../TaskModal";
+import { PRIORITY_LABEL } from "../kanbanShared";
+import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, todayInTimezone, type RecurringState } from "../recurringState";
+import { recurringOccurrences } from "../recurringOccurrences";
+import { RECURRING_GROUP_BY_LABEL, groupRecurring, type RecurringGroupBy } from "../recurringGrouping";
+import SortMenu from "../SortMenu";
+import { sortItems } from "../taskSort";
+import { useSortPref, type SortScope } from "../taskSortPrefs";
+import { formatPeriod, formatShortDate, relativeDue } from "../taskDates";
+import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "../calendarUtils";
+import TaskKindIcon from "../TaskKindIcon";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import type { TaskRecord } from "@/lib/validation";
 
-type Section = "recorrencias" | "cadastro";
+type Section = "tarefas" | "recorrencias" | "plano";
 type RecurrenceView = "colunas" | "lista" | "calendario";
 
 const CADENCE_LABEL: Record<RecurringTask["cadence"], string> = {
@@ -80,19 +82,21 @@ function RecurrenceCard({
   );
 }
 
-export default function ClientsWorkspace({
+export default function OperacaoWorkspace({
   clients,
+  plans,
   recurringTasks,
   assignees,
   recurringStorageAvailable,
 }: {
-  clients: ClientRow[];
+  clients: { slug: string; name: string; disabled?: boolean }[];
+  plans: ActionPlan[];
   recurringTasks: RecurringTask[];
   assignees: string[];
   recurringStorageAvailable: boolean;
 }) {
   const router = useRouter();
-  const [section, setSection] = useState<Section>("recorrencias");
+  const [section, setSection] = useState<Section>("tarefas");
   const [view, setView] = useState<RecurrenceView>("colunas");
   const [groupBy, setGroupBy] = useState<RecurringGroupBy>("prazo");
   const [summaryOpen, setSummaryOpen] = useState(true);
@@ -127,6 +131,7 @@ export default function ClientsWorkspace({
       title: task.title,
       updatedAt: task.updated_at,
       dueDate: task.next_due_date,
+      completedAt: task.completed_at,
       position: task.position,
     })),
     [sort],
@@ -170,7 +175,7 @@ export default function ClientsWorkspace({
     return {
       total: recurringTasks.length,
       clients: new Set(recurringTasks.map((task) => task.clientName)).size,
-      atrasadas: byState("atrasada"),
+      paradas: byState("parada"),
       ativas: byState("ativa"),
       // The count of cycles ever closed — not "routines currently done", which
       // would drop every time a cycle rolls over and read as data loss.
@@ -217,19 +222,25 @@ export default function ClientsWorkspace({
     <section className="admin-page kb-wide clients-workspace">
       <header className="admin-head">
         <div>
-          <p className="admin-kicker">Operação</p>
-          <h1 className="admin-title">Clientes</h1>
-          <p className="admin-sub">Cadastros e rotinas dos clientes em um só lugar.</p>
+          <h1 className="admin-title">Operação</h1>
+          <p className="admin-sub">Quadro, rotinas e planos de ação no mesmo lugar.</p>
         </div>
       </header>
 
-      <nav className="clients-section-tabs" aria-label="Seções de clientes">
+      <nav className="clients-section-tabs" aria-label="Seções da operação">
+        <button type="button" className={section === "tarefas" ? "on" : ""} onClick={() => setSection("tarefas")}>Tarefas</button>
         <button type="button" className={section === "recorrencias" ? "on" : ""} onClick={() => setSection("recorrencias")}>Rotinas <span>{recurringTasks.length}</span></button>
-        <button type="button" className={section === "cadastro" ? "on" : ""} onClick={() => setSection("cadastro")}>Cadastro <span>{activeClients.length}</span></button>
+        <button type="button" className={section === "plano" ? "on" : ""} onClick={() => setSection("plano")}>Plano de Ação <span>{plans.length}</span></button>
       </nav>
 
-      {section === "cadastro" ? (
-        clients.length ? <ClientsTable clients={clients} /> : <p className="admin-empty">Nenhum cliente ainda. Crie o primeiro.</p>
+      {section === "tarefas" ? (
+        activeClients.length ? (
+          <KanbanBoard clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
+        ) : (
+          <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
+        )
+      ) : section === "plano" ? (
+        <ActionPlansBoard initial={plans} clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
       ) : (
         <>
           <div className="rec-summary-head">
@@ -244,8 +255,8 @@ export default function ClientsWorkspace({
               <button type="button" className={`rec-stat-btn ${stateFilter === "ativa" ? "on" : ""}`} onClick={() => toggleStateFilter("ativa")} aria-pressed={stateFilter === "ativa"}>
                 <strong>{stats.ativas}</strong><span>Ativas</span>
               </button>
-              <button type="button" className={`rec-stat-btn attention ${stateFilter === "atrasada" ? "on" : ""}`} onClick={() => toggleStateFilter("atrasada")} aria-pressed={stateFilter === "atrasada"}>
-                <strong>{stats.atrasadas}</strong><span>Atrasadas</span>
+              <button type="button" className={`rec-stat-btn attention ${stateFilter === "parada" ? "on" : ""}`} onClick={() => toggleStateFilter("parada")} aria-pressed={stateFilter === "parada"}>
+                <strong>{stats.paradas}</strong><span>Paradas</span>
               </button>
             </div>
           ) : null}

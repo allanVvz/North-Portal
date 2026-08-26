@@ -212,6 +212,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
       title: t.title,
       updatedAt: t.updated_at,
       dueDate: t.due_date,
+      completedAt: t.completed_at,
       position: t.position,
     }));
   }, [taskScreenTasks, activeFilters, q, sort]);

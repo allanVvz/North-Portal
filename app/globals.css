@@ -2104,11 +2104,42 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   padding: 6px 8px 10px; margin: 0 0 4px; border-bottom: 1px solid var(--a-border);
   font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--a-muted);
 }
-.admin-notif-item { display: flex; flex-direction: column; gap: 2px; padding: 9px 8px; border-radius: 8px; transition: background 0.16s; }
+/* Linha da notificação: ícone do tipo à esquerda, mensagem + horário à direita.
+   Era column, o que empilhava o ícone em cima do texto. */
+.admin-notif-item {
+  display: flex; flex-direction: row; align-items: flex-start; gap: 9px;
+  padding: 9px 8px; border-radius: 8px; transition: background 0.16s;
+  position: relative; width: 100%; text-align: left;
+}
 .admin-notif-item:hover { background: var(--a-hover); }
+.admin-notif-item.clickable { background: none; border: none; font: inherit; cursor: pointer; }
+.admin-notif-item.clickable:focus-visible { outline: 2px solid var(--a-teal-strong); outline-offset: -2px; }
+.admin-notif-ico {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; flex: 0 0 24px; margin-top: 1px;
+  border-radius: 7px; background: var(--a-surface2); font-size: 12px; line-height: 1;
+}
+.admin-notif-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+/* Não-lida: barra à esquerda em vez de fundo colorido, que brigaria com o
+   :hover e com o tema escuro. */
+.admin-notif-item.unread::before {
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px;
+  border-radius: 0 2px 2px 0; background: var(--a-teal-strong);
+}
+.admin-notif-item.unread .admin-notif-text { font-weight: 600; }
 .admin-notif-text { font-size: 13.5px; line-height: 1.35; color: var(--a-ink); }
 .admin-notif-time { font-size: 11.5px; color: var(--a-muted); }
+/* Tela cheia da caixa de entrada: as linhas ganham separador, o que num
+   dropdown de 8 itens seria ruído mas numa lista de 200 é o que dá ritmo. */
+.notif-screen { padding: 8px; }
+.notif-screen .admin-notif-item { border-radius: 0; border-top: 1px solid var(--a-border); padding: 12px 10px; }
+.notif-screen .admin-notif-item:first-child { border-top: none; }
 .admin-notif-empty { margin: 0; padding: 16px 8px; text-align: center; font-size: 13px; color: var(--a-muted); }
+.admin-notif-all {
+  display: block; margin-top: 4px; padding: 9px 8px; border-top: 1px solid var(--a-border);
+  font-size: 12.5px; font-weight: 600; color: var(--a-teal-text); text-align: center;
+}
+.admin-notif-all:hover { background: var(--a-hover); }
 
 /* account: user card is a button; panel opens above it */
 .admin-account { position: relative; }
@@ -2786,6 +2817,13 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 
 .tm-box { margin: 20px 30px 0; background: var(--a-inset); border-radius: 14px; padding: 18px 20px; }
 .tm-box-label { margin: 0 0 10px; font-size: 12px; font-weight: 700; color: var(--a-sec); }
+/* Autoria do card — linhas rótulo/valor, densas, sem competir com os
+   comentários que vêm logo abaixo no mesmo tm-side. */
+.tm-authorbox { margin-bottom: 12px; }
+.tm-authorline { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 6px; font-size: 12.5px; }
+.tm-authorline:last-child { margin-bottom: 0; }
+.tm-authorline span { color: var(--a-muted); }
+.tm-authorline b { color: var(--a-ink); font-weight: 600; text-align: right; }
 .tm-attrsbox { padding: 6px 10px; }
 .tm-attrs-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; background: none; border: none; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--a-sec); padding: 10px 8px; }
 .tm-attrs-caret { transition: transform .15s ease; }
@@ -4074,3 +4112,223 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   .recurrence-form-grid { grid-template-columns: 1fr; }
   .recurrence-assignee { grid-column: auto; }
 }
+
+/* ============================================================= */
+/* Admin — cadastro/edição de cliente (ClientFormSections)        */
+/* ============================================================= */
+/* Two-column field grid used by the empresa/plano/responsável cards. */
+.admin-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+@media (max-width: 720px) { .admin-grid2 { grid-template-columns: 1fr; } }
+
+/* Chip rows: plano tiers, escopo tags and commercial checkpoints. */
+.admin-chiprow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.admin-chipwrap { display: inline-flex; align-items: center; gap: 6px; }
+.admin-chip.ghost { border-style: dashed; color: var(--a-muted); background: transparent; }
+.admin-chip.ghost:hover { color: var(--a-teal-text); border-color: var(--a-teal); }
+/* Required checkpoints read as "always included", not as disabled controls. */
+.admin-chip.locked { cursor: default; opacity: 1; }
+.admin-chip.locked:hover { background: var(--a-teal-soft); }
+.admin-chiptag {
+  margin-left: 7px; padding: 1px 7px; border-radius: 999px; font-style: normal;
+  font-size: 10.5px; font-weight: 500; color: var(--a-muted); background: var(--a-surface2);
+}
+.admin-chip.active .admin-chiptag { color: var(--a-teal-text); background: var(--a-surface); }
+
+/* These sit inside .admin-field, whose `.admin-field input` rule is
+   class+tag — matching that specificity (and coming later) is what keeps them
+   from stretching to 100% width. */
+input.admin-chipqty { width: 64px; flex: 0 0 auto; padding: 6px 8px; text-align: center; }
+input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-radius: 999px; }
+
+.admin-warn {
+  display: block; margin-top: 6px; font-size: 11.5px; font-style: normal;
+  color: var(--a-gold-text, #7d6634);
+}
+.admin-summary-kv { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.admin-summary-kv li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--a-muted); }
+.admin-summary-kv strong { font-weight: 600; color: var(--a-ink); }
+
+/* ---- Materiais do Drive: pastas + preview de arquivos ---- */
+.drive-folders { display: flex; flex-direction: column; gap: 14px; }
+.drive-folder { padding: 12px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface2); }
+.drive-folder-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.drive-folder-head strong { font-size: 13px; color: var(--a-ink); }
+.drive-thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 10px; }
+.drive-thumb { display: flex; flex-direction: column; gap: 5px; text-decoration: none; min-width: 0; }
+.drive-thumb-box {
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  aspect-ratio: 4 / 3; border-radius: 8px; background: var(--a-inset);
+  border: 1px solid var(--a-border); color: var(--a-muted); font-size: 17px;
+}
+.drive-thumb-box img { width: 100%; height: 100%; object-fit: cover; }
+.drive-thumb-name {
+  font-size: 10.5px; color: var(--a-muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.drive-thumb:hover .drive-thumb-box { border-color: var(--a-teal); }
+
+/* ============================================================= */
+/* Admin — Home (/admin/home)                                     */
+/* ============================================================= */
+.home-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.home-kpi {
+  display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; text-decoration: none;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+}
+.home-kpi:hover { border-color: var(--a-teal); }
+.home-kpi-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--a-muted); }
+.home-kpi-value { font-size: 30px; font-weight: 600; line-height: 1.1; color: var(--a-ink); }
+.home-kpi-value.t-gold { color: var(--a-gold-text); }
+.home-kpi-value.t-red { color: var(--a-red-text, #a4483a); }
+.home-kpi-sub { font-size: 11.5px; color: var(--a-muted); }
+
+.home-cols { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .home-cols { grid-template-columns: 1fr; } }
+.home-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+
+.home-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.home-list li {
+  display: flex; align-items: center; gap: 12px; padding: 11px 0;
+  border-top: 1px solid var(--a-border);
+}
+.home-list li:first-child { border-top: none; padding-top: 0; }
+.home-list-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.home-list-main strong { font-size: 13px; color: var(--a-ink); }
+.home-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.home-date {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 42px; flex: 0 0 42px; padding: 5px 0; border-radius: 9px;
+  background: var(--a-surface2); border: 1px solid var(--a-border);
+}
+.home-date strong { font-size: 14px; line-height: 1; color: var(--a-ink); }
+.home-date em { font-style: normal; font-size: 9px; letter-spacing: .05em; color: var(--a-muted); }
+/* O item da semana inteiro é o alvo do clique (abre o card), então herda o
+   layout do <li> em vez de virar um botão dentro dele. */
+.home-list-open {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  background: none; border: none; padding: 0; margin: 0; font: inherit;
+  text-align: left; cursor: pointer; border-radius: 9px;
+  transition: background 0.16s;
+}
+.home-list-open:hover { background: var(--a-hover); }
+.home-list-open:disabled { opacity: 0.55; cursor: progress; }
+.home-list-open:focus-visible { outline: 2px solid var(--a-teal-strong); outline-offset: 2px; }
+.home-notifs { display: flex; flex-direction: column; }
+
+/* ============================================================= */
+/* Admin — Ver cliente (/admin/[slug]/visao)                      */
+/* ============================================================= */
+.visao-chips { margin-bottom: 18px; }
+.visao-cols { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; margin-bottom: 16px; }
+@media (max-width: 980px) { .visao-cols { grid-template-columns: 1fr; } }
+.visao-main { display: flex; flex-direction: column; gap: 16px; }
+.visao-side { display: flex; flex-direction: column; gap: 16px; }
+
+.visao-kv { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; }
+.visao-kv li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--a-border); font-size: 12.5px; color: var(--a-sec); }
+.visao-kv li:first-child { border-top: none; padding-top: 0; }
+.visao-kv strong { font-size: 15px; color: var(--a-ink); }
+.visao-delta { margin-left: 7px; font-style: normal; font-size: 11px; color: var(--a-teal-text); }
+
+.visao-timeline { list-style: none; margin: 0; padding: 2px 0 2px 16px; border-left: 1px solid var(--a-border); display: flex; flex-direction: column; gap: 14px; }
+.visao-timeline li { display: flex; align-items: center; gap: 10px; }
+
+.visao-bar { display: block; height: 6px; border-radius: 999px; background: var(--a-inset); overflow: hidden; }
+.visao-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--a-teal); }
+.visao-pct { font-size: 13px; color: var(--a-ink); }
+.visao-drive { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+
+/* ---- Instagram contact sheet ---- */
+.ig-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.ig-kicker { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
+.ig-profile { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--a-border); }
+.ig-avatar {
+  display: flex; align-items: center; justify-content: center; width: 54px; height: 54px; flex: 0 0 54px;
+  border-radius: 999px; background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 600; font-size: 16px;
+}
+.ig-id { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.ig-id strong { font-family: Fraunces, Georgia, serif; font-size: 19px; color: var(--a-ink); }
+.ig-counts { display: flex; gap: 22px; }
+.ig-counts span { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.ig-counts strong { font-size: 16px; color: var(--a-ink); }
+.ig-counts em { font-style: normal; font-size: 10.5px; color: var(--a-muted); }
+
+.ig-subhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 16px 0 12px; }
+.ig-subhead strong { font-size: 13px; color: var(--a-ink); }
+.ig-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 640px) { .ig-grid { grid-template-columns: repeat(2, 1fr); } }
+.ig-cell {
+  display: flex; flex-direction: column; gap: 6px; text-decoration: none; min-width: 0;
+  border: 1px solid var(--a-border); border-radius: 12px; overflow: hidden; background: var(--a-surface);
+}
+.ig-cell:hover { border-color: var(--a-teal); }
+.ig-media {
+  position: relative; display: block; aspect-ratio: 1 / 1; background: var(--a-inset);
+}
+.ig-media img { width: 100%; height: 100%; object-fit: cover; }
+.ig-type, .ig-top {
+  position: absolute; top: 8px; font-style: normal; font-size: 10px; font-weight: 500;
+  padding: 3px 8px; border-radius: 999px; background: var(--a-surface); color: var(--a-sec);
+}
+.ig-type { left: 8px; }
+.ig-top { right: 8px; background: var(--a-teal); color: #fff; }
+.ig-caption {
+  padding: 0 10px; font-size: 11.5px; color: var(--a-ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ig-metrics { display: flex; justify-content: space-between; gap: 8px; padding: 0 10px 10px; font-size: 11px; color: var(--a-muted); }
+.ig-metrics strong { color: var(--a-ink); }
+
+/* ============================================================= */
+/* Admin — lista de clientes, calendário semanal                  */
+/* ============================================================= */
+/* ---- Clientes: card grid ---- */
+.cli-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+.cli-card {
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+}
+.cli-card:hover { border-color: var(--a-teal); }
+/* O que falta no cliente, dentro do próprio card — mesma linguagem de chip da
+   Home antiga, agora no lugar onde a informação é acionável. */
+.cli-card-attention { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 14px 10px; }
+.cli-card.is-disabled { opacity: .6; }
+.cli-card-main { display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 14px; text-decoration: none; }
+.cli-card-head { display: flex; align-items: center; gap: 11px; }
+.cli-card-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cli-card-id strong { font-size: 14.5px; color: var(--a-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cli-card-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.cli-card-progress { display: flex; flex-direction: column; gap: 5px; }
+.cli-card-progress-top { display: flex; align-items: baseline; justify-content: space-between; font-size: 11.5px; color: var(--a-muted); }
+.cli-card-progress-top strong { font-size: 12.5px; color: var(--a-ink); }
+.cli-card-foot { font-size: 11px; color: var(--a-muted); }
+.cli-card-actions {
+  display: flex; align-items: center; gap: 8px; padding: 11px 14px;
+  border-top: 1px solid var(--a-border); background: var(--a-surface2);
+}
+
+/* ---- Home: calendário da semana ---- */
+.week-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+@media (max-width: 720px) { .week-cal { grid-template-columns: repeat(3, 1fr); } }
+.week-cal-day {
+  display: flex; flex-direction: column; gap: 7px; min-height: 96px; padding: 8px 7px;
+  border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface2);
+}
+.week-cal-day.is-today { border-color: var(--a-teal); background: var(--a-teal-soft); }
+.week-cal-head { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
+.week-cal-dow { font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--a-muted); }
+.week-cal-num { font-size: 13px; color: var(--a-ink); }
+.week-cal-items { display: flex; flex-direction: column; gap: 5px; }
+.week-cal-empty { font-size: 12px; color: var(--a-muted); }
+.week-cal-pill {
+  display: flex; flex-direction: column; gap: 1px; padding: 5px 7px; border-radius: 7px;
+  background: var(--a-surface); border: 1px solid var(--a-border); text-decoration: none;
+}
+.week-cal-pill:hover { border-color: var(--a-teal); }
+.week-cal-pill strong { font-size: 10.5px; line-height: 1.25; color: var(--a-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.week-cal-pill span { font-size: 9.5px; color: var(--a-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Grid children default to min-width:auto, so the nowrap pills inside would
+   push the 7 columns past the card instead of ellipsing. */
+.week-cal-day { min-width: 0; }
+.week-cal-items, .week-cal-pill, .week-cal-pill strong, .week-cal-pill span { min-width: 0; max-width: 100%; }
+.home-card-wide { grid-column: 1 / -1; }

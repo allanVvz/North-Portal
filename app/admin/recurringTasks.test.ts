@@ -53,6 +53,9 @@ const task: RecurringTask = {
   template_payload: {},
   created_at: "2026-07-20T12:00:00Z",
   updated_at: "2026-07-20T12:00:00Z",
+  created_by: null,
+  created_by_name: null,
+  completed_at: null,
   executions: [],
 };
 
@@ -91,14 +94,14 @@ describe("tarefas recorrentes de clientes", () => {
 });
 
 describe("estado da recorrência", () => {
-  it("marca como atrasada apenas quando o prazo já passou no fuso da rotina", () => {
-    expect(recurringState(make({ next_due_date: "2026-07-19" }), "2026-07-20")).toBe("atrasada");
+  it("marca como parada apenas quando o prazo já passou no fuso da rotina", () => {
+    expect(recurringState(make({ next_due_date: "2026-07-19" }), "2026-07-20")).toBe("parada");
     expect(recurringState(make({ next_due_date: "2026-07-20" }), "2026-07-20")).toBe("ativa");
   });
 
   it("não antecipa o atraso quando o servidor está em UTC e o cliente em BRT", () => {
     // 21:00 BRT no dia 20 já é 00:00 UTC do dia 21 — o cálculo ingênuo com
-    // `new Date()` marcava a rotina como atrasada três horas antes da hora.
+    // `new Date()` marcava a rotina como parada três horas antes da hora.
     const lateEvening = new Date("2026-07-21T00:30:00Z");
     expect(todayInTimezone("America/Sao_Paulo", lateEvening)).toBe("2026-07-20");
     expect(recurringState(make({ next_due_date: "2026-07-20" }), todayInTimezone("America/Sao_Paulo", lateEvening))).toBe("ativa");
@@ -167,21 +170,21 @@ describe("expansão de ocorrências no calendário", () => {
 describe("agrupamento e ordenação do quadro", () => {
   it("separa por prazo a partir de hoje", () => {
     const hoje = "2026-07-20";
-    expect(prazoBucket(make({ next_due_date: "2026-07-18" }), hoje)).toBe("atrasadas");
+    expect(prazoBucket(make({ next_due_date: "2026-07-18" }), hoje)).toBe("paradas");
     expect(prazoBucket(make({ next_due_date: "2026-07-24" }), hoje)).toBe("semana");
     expect(prazoBucket(make({ next_due_date: "2026-08-10" }), hoje)).toBe("mes");
     expect(prazoBucket(make({ next_due_date: "2026-11-10" }), hoje)).toBe("depois");
     expect(prazoBucket(make({ next_due_date: null }), hoje)).toBe("sem_agenda");
   });
 
-  it("não cobra como atrasada uma rotina cujo ciclo já foi concluído", () => {
+  it("não cobra como parada uma rotina cujo ciclo já foi concluído", () => {
     // A coluna tem que bater com o selo do card e com o contador do topo:
     // prazo vencido + ciclo fechado é trabalho pronto, não pendência.
     const concluida = make({ next_due_date: "2026-07-18", template_payload: { cycle_completed: true } });
     expect(prazoBucket(concluida, "2026-07-20")).toBe("concluidas");
   });
 
-  it("ordena atrasadas primeiro e deixa sem data por último", () => {
+  it("ordena paradas primeiro e deixa sem data por último", () => {
     const ordenadas = [
       make({ id: "c", next_due_date: null }),
       make({ id: "b", next_due_date: "2026-08-01" }),
@@ -200,7 +203,7 @@ describe("agrupamento e ordenação do quadro", () => {
 
   it("omite colunas de prazo vazias", () => {
     const grupos = groupRecurring([make({ next_due_date: "2026-07-18" })], "prazo", "2026-07-20");
-    expect(grupos.map((g) => g.key)).toEqual(["atrasadas"]);
+    expect(grupos.map((g) => g.key)).toEqual(["paradas"]);
   });
 
   it("coloca card compartilhado nas colunas dos dois responsáveis", () => {

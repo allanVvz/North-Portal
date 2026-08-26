@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CurrentUserProvider } from "./CurrentUserContext";
-import { formatCommentTime } from "@/lib/comments";
+import NotificationsList from "./NotificationsList";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
-import type { NotificationRecord } from "@/lib/notifications";
+import type { NotificationRecord } from "@/lib/notificationTypes";
 
 type Theme = "light" | "dark";
 
@@ -14,6 +14,7 @@ type Theme = "light" | "dark";
 // joins, fill:none) — picked per nav item for recognizability rather than
 // the previous generic Unicode glyphs (◎ ◈ ▤ …, several duplicated).
 type IconName =
+  | "home"
   | "users"
   | "target"
   | "listChecks"
@@ -30,6 +31,12 @@ type IconName =
   | "chevronDown";
 
 const ICON_PATHS: Record<IconName, React.ReactNode> = {
+  home: (
+    <>
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+    </>
+  ),
   users: (
     <>
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -139,31 +146,25 @@ function Icon({ name, size = 17 }: { name: IconName; size?: number }) {
   );
 }
 
-const NAV_GROUPS: { head: string; items: { href: string; ico: IconName; label: string; hidden?: boolean }[] }[] = [
-  {
-    head: "Operação",
-    items: [
-      { href: "/admin", ico: "users", label: "Clientes" },
-      { href: "/admin/plano", ico: "target", label: "Plano de Ação" },
-      { href: "/admin/kanban", ico: "listChecks", label: "Tarefas" },
-      { href: "/admin/revisoes", ico: "eye", label: "Revisões" },
-      { href: "/admin/aprovacoes", ico: "checkCircle", label: "Aprovações" },
-    ],
-  },
-  {
-    head: "Dados",
-    items: [
-      { href: "/admin/performance", ico: "barChart", label: "Performance" },
-      { href: "/admin/documentos", ico: "fileText", label: "Informações" },
-      { href: "/admin/automacoes", ico: "bot", label: "Automações" },
-    ],
-  },
+const NAV_ITEMS: { href: string; ico: IconName; label: string }[] = [
+  { href: "/admin/home", ico: "home", label: "Início" },
+  { href: "/admin/clientes", ico: "users", label: "Clientes" },
+  // Tarefas, Rotinas e Plano de Ação vivem numa tela só (/admin/operacao),
+  // com a seleção na linha superior — por isso o item é "Operação", não
+  // "Tarefas": Tarefas é uma das três abas de dentro.
+  { href: "/admin/operacao", ico: "listChecks", label: "Operação" },
+  { href: "/admin/revisoes", ico: "eye", label: "Revisões" },
+  { href: "/admin/aprovacoes", ico: "checkCircle", label: "Aprovações" },
+  { href: "/admin/performance", ico: "barChart", label: "Performance" },
+  { href: "/admin/documentos", ico: "fileText", label: "Informações" },
+  { href: "/admin/automacoes", ico: "bot", label: "Automações" },
 ];
 
 // Every /admin/* section route; used so the "Clientes" (/admin) item does not
 // stay highlighted when a more specific section is active.
-const ALL_HREFS = [...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.href)), "/admin/configuracoes"];
-const SECTION_HREFS = ALL_HREFS.filter((h) => h !== "/admin");
+// Telas /admin/* que existem fora do menu — sem elas na lista, isActive() as
+// trataria como "Clientes" e deixaria o item errado destacado.
+const SECTION_HREFS = [...NAV_ITEMS.map((i) => i.href), "/admin/configuracoes", "/admin/notificacoes"];
 
 export default function AdminShell({
   email,
@@ -281,12 +282,15 @@ export default function AdminShell({
   }, [notifOpen]);
 
   function isActive(href: string): boolean {
-    if (href === "/admin") {
-      // Clientes: also covers /admin/novo and /admin/<slug> editor, but not other sections
+    if (pathname === href || pathname.startsWith(`${href}/`)) return true;
+    // Clientes also owns the screens that hang off a client: /admin/novo and
+    // /admin/<slug> (editor and visão). Those aren't nav entries of their own,
+    // so they'd otherwise leave the sidebar with nothing highlighted.
+    if (href === "/admin/clientes") {
       if (SECTION_HREFS.some((h) => pathname === h || pathname.startsWith(`${h}/`))) return false;
-      return pathname === "/admin" || pathname.startsWith("/admin/");
+      return pathname.startsWith("/admin/");
     }
-    return pathname === href || pathname.startsWith(`${href}/`);
+    return false;
   }
 
   return (
@@ -317,47 +321,34 @@ export default function AdminShell({
                 {notifOpen ? (
                   <div className="admin-notif-panel" role="menu">
                     <p className="admin-notif-head">Notificações</p>
-                    {notifications.length > 0 ? (
-                      notifications.map((notif) => (
-                        <div className="admin-notif-item" key={notif.id} role="menuitem">
-                          <span className="admin-notif-text">{notif.message}</span>
-                          <span className="admin-notif-time">{formatCommentTime(notif.created_at)}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="admin-notif-empty">Nenhuma notificação por aqui.</p>
-                    )}
+                    <NotificationsList notifications={notifications} />
+                    <Link className="admin-notif-all" href="/admin/notificacoes" onClick={() => setNotifOpen(false)}>
+                      Ver todas →
+                    </Link>
                   </div>
                 ) : null}
               </div>
             </div>
           </div>
 
-          {NAV_GROUPS.map((group) => {
-            const items = group.items.filter((item) => {
+          <div className="admin-nav-group">
+            {NAV_ITEMS.filter((item) => {
               if (item.href === "/admin/revisoes") return revisoesTabVisible;
               if (item.href === "/admin/aprovacoes") return aprovacoesTabVisible;
               return true;
-            });
-            if (items.length === 0) return null;
-            return (
-              <div className="admin-nav-group" key={group.head}>
-                <p className="admin-nav-head">{group.head}</p>
-                {items.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`admin-nav-item ${isActive(item.href) ? "active" : ""}`}
-                  >
-                    <span className="admin-nav-ico">
-                      <Icon name={item.ico} />
-                    </span>
-                    <span className="admin-nav-label">{item.label}</span>
-                  </Link>
-                ))}
-              </div>
-            );
-          })}
+            }).map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`admin-nav-item ${isActive(item.href) ? "active" : ""}`}
+              >
+                <span className="admin-nav-ico">
+                  <Icon name={item.ico} />
+                </span>
+                <span className="admin-nav-label">{item.label}</span>
+              </Link>
+            ))}
+          </div>
 
           <div className="admin-side-foot">
             <div className="admin-account" ref={accountRef}>

@@ -2,21 +2,44 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AdminClientDetail } from "@/lib/supabase";
-import type { Insight, Metric } from "@/lib/validation";
+import type { AdAccountOption, AdminClientDetail, ScopeTag } from "@/lib/supabase";
+import type { Insight, Metric, PlanoTier } from "@/lib/validation";
+import {
+  AccountLinkSection,
+  CompanyInfoSection,
+  PlanScopeSection,
+  ResponsibleSection,
+  parseValorMensal,
+  type CompanyInfoState,
+  type ContractState,
+} from "./ClientFormSections";
+import DriveFoldersSection from "./DriveFoldersSection";
 
-type Props = { slug: string; detail: AdminClientDetail };
+type Props = {
+  slug: string;
+  detail: AdminClientDetail;
+  scopeTags: ScopeTag[];
+  adAccounts: AdAccountOption[];
+  adAccountId: string;
+  driveConfigured: boolean;
+};
 
-const CONTENT_SECTIONS: { key: string; label: string }[] = [
-  { key: "home", label: "Home (banner, stats, faixa)" },
-  { key: "pendencias", label: "Central de pendências" },
-  { key: "central", label: "Central Comercial (contrato)" },
+// The nine sections the client portal actually reads. Two corrections against
+// the previous list: "documentos" is gone (it was written to client_content and
+// never read — the portal's Documentos page comes from the `documents` table),
+// and "trilhas" is here (it IS rendered by the portal but was missing from this
+// list, so every save silently dropped a client's trilhas override).
+// `fallback` marks sections the portal replaces with live data when it exists.
+const CONTENT_SECTIONS: { key: string; label: string; fallback?: string }[] = [
+  { key: "home", label: "Home (banner, stats, faixa)", fallback: "stats e feed vêm de checkpoints/aprovações reais" },
+  { key: "pendencias", label: "Central de pendências", fallback: "status recalculado a partir do briefing/acessos" },
+  { key: "central", label: "Central Comercial (contrato)", fallback: "checkpoints vêm dos cards reais" },
   { key: "acessos", label: "Acessos & Pastas" },
-  { key: "documentos", label: "Documentos" },
   { key: "time", label: "Time North" },
-  { key: "agenda", label: "Agenda / Calendário" },
-  { key: "dashboard", label: "Dashboard" },
-  { key: "plano", label: "Plano de Ação (fallback do Kanban)" },
+  { key: "agenda", label: "Agenda / Calendário", fallback: "substituída quando há cards de agendamento" },
+  { key: "dashboard", label: "Dashboard", fallback: "métricas do topo vêm de Resultados quando preenchidas" },
+  { key: "plano", label: "Plano de Ação", fallback: "substituído quando há cards de plano visíveis" },
+  { key: "trilhas", label: "Trilhas North" },
 ];
 
 function initialContentText(content: Record<string, unknown>): Record<string, string> {
@@ -27,10 +50,26 @@ function initialContentText(content: Record<string, unknown>): Record<string, st
   return out;
 }
 
-export default function ClientEditor({ slug, detail }: Props) {
+export default function ClientEditor({ slug, detail, scopeTags, adAccounts, adAccountId: initialAdAccount, driveConfigured }: Props) {
   const router = useRouter();
   const [name, setName] = useState(detail.name);
   const [isActive, setIsActive] = useState(detail.is_active);
+  const [company, setCompany] = useState<CompanyInfoState>({
+    segmento: detail.companyInfo.segmento ?? "",
+    cidadeUf: detail.companyInfo.cidadeUf ?? "",
+    instagramOuSite: detail.companyInfo.instagramOuSite ?? "",
+  });
+  const [contract, setContract] = useState<ContractState>({
+    planoTier: (detail.contract.planoTier as PlanoTier | null) ?? "",
+    escopo: detail.contract.escopo ?? [],
+    valorMensal: detail.contract.valorMensal != null ? String(detail.contract.valorMensal) : "",
+    contractStart: detail.contract.contractStart ?? "",
+    responsavelNome: detail.contract.responsavelNome ?? "",
+    responsavelWhatsapp: detail.contract.responsavelWhatsapp ?? "",
+  });
+  const [tags, setTags] = useState<ScopeTag[]>(scopeTags);
+  const [adAccountId, setAdAccountId] = useState(initialAdAccount);
+  const [driveShareEmail, setDriveShareEmail] = useState("");
   const [brandUrl, setBrandUrl] = useState(detail.driveLinks.brandUrl ?? "");
   const [productsUrl, setProductsUrl] = useState(detail.driveLinks.productsUrl ?? "");
   const [uploadsUrl, setUploadsUrl] = useState(detail.driveLinks.uploadsUrl ?? "");
@@ -50,6 +89,22 @@ export default function ClientEditor({ slug, detail }: Props) {
   }
   function updateInsight(index: number, patch: Partial<Insight>) {
     setInsights((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  async function createTag(label: string): Promise<ScopeTag | null> {
+    const res = await fetch("/api/admin/scope-tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error ?? "Não foi possível criar a tag.");
+      return null;
+    }
+    const { tag } = (await res.json()) as { tag: ScopeTag };
+    setTags((all) => (all.some((t) => t.key === tag.key) ? all : [...all, tag]));
+    return tag;
   }
 
   async function onSubmit(event: React.FormEvent) {
@@ -76,10 +131,19 @@ export default function ClientEditor({ slug, detail }: Props) {
       }));
 
     // Assemble the content override from the per-section JSON editors.
-    const content: Record<string, unknown> = {};
+    //
+    // Starts from the stored object rather than {} on purpose: the PATCH
+    // replaces client_content.data wholesale, so anything this editor doesn't
+    // manage (a key added by a later release, for instance) would be destroyed
+    // by a plain save. Clearing a textarea still removes that one section, which
+    // is what "deixe vazio para usar o padrão" means.
+    const content: Record<string, unknown> = { ...detail.content };
     for (const { key, label } of CONTENT_SECTIONS) {
       const raw = (contentText[key] ?? "").trim();
-      if (!raw) continue;
+      if (!raw) {
+        delete content[key];
+        continue;
+      }
       try {
         content[key] = JSON.parse(raw);
       } catch {
@@ -103,6 +167,20 @@ export default function ClientEditor({ slug, detail }: Props) {
         topMetrics: cleanMetrics,
         insights: cleanInsights,
         content,
+        companyInfo: {
+          segmento: company.segmento.trim() || null,
+          cidadeUf: company.cidadeUf.trim() || null,
+          instagramOuSite: company.instagramOuSite.trim() || null,
+        },
+        contract: {
+          planoTier: contract.planoTier || null,
+          escopo: contract.escopo,
+          valorMensal: parseValorMensal(contract.valorMensal),
+          contractStart: contract.contractStart || null,
+          responsavelNome: contract.responsavelNome.trim() || null,
+          responsavelWhatsapp: contract.responsavelWhatsapp.trim() || null,
+        },
+        adAccountId: adAccountId || null,
       }),
     });
 
@@ -119,34 +197,47 @@ export default function ClientEditor({ slug, detail }: Props) {
 
   return (
     <form className="admin-form" onSubmit={onSubmit}>
-      <fieldset className="admin-group">
-        <legend>Identificação</legend>
-        <label className="admin-field">
-          <span>Nome</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
-        </label>
-        <label className="admin-toggle">
-          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-          <span className="sw" />
-          <span>Cliente ativo (portal acessível)</span>
-        </label>
-      </fieldset>
+      <CompanyInfoSection
+        name={name}
+        onName={setName}
+        value={company}
+        onChange={(patch) => setCompany((c) => ({ ...c, ...patch }))}
+        slugField={
+          <label className="admin-toggle">
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+            <span className="sw" />
+            <span>Cliente ativo (portal acessível)</span>
+          </label>
+        }
+      />
 
-      <fieldset className="admin-group">
-        <legend>Materiais (Google Drive)</legend>
-        <label className="admin-field">
-          <span>Pasta da marca</span>
-          <input value={brandUrl} onChange={(e) => setBrandUrl(e.target.value)} placeholder="https://drive.google.com/…" />
-        </label>
-        <label className="admin-field">
-          <span>Produtos / serviços</span>
-          <input value={productsUrl} onChange={(e) => setProductsUrl(e.target.value)} placeholder="https://drive.google.com/…" />
-        </label>
-        <label className="admin-field">
-          <span>Uploads do cliente</span>
-          <input value={uploadsUrl} onChange={(e) => setUploadsUrl(e.target.value)} placeholder="https://drive.google.com/…" />
-        </label>
-      </fieldset>
+      <PlanScopeSection
+        value={contract}
+        onChange={(patch) => setContract((c) => ({ ...c, ...patch }))}
+        tags={tags}
+        onCreateTag={createTag}
+      />
+
+      <ResponsibleSection value={contract} onChange={(patch) => setContract((c) => ({ ...c, ...patch }))} />
+
+      <AccountLinkSection
+        driveConfigured={driveConfigured}
+        driveShareEmail={driveShareEmail}
+        onDriveShareEmail={setDriveShareEmail}
+        accounts={adAccounts}
+        adAccountId={adAccountId}
+        onAdAccountId={setAdAccountId}
+      />
+
+      <DriveFoldersSection
+        folders={detail.driveFolders}
+        brandUrl={brandUrl}
+        productsUrl={productsUrl}
+        uploadsUrl={uploadsUrl}
+        onBrandUrl={setBrandUrl}
+        onProductsUrl={setProductsUrl}
+        onUploadsUrl={setUploadsUrl}
+      />
 
       <fieldset className="admin-group">
         <legend>Resultados — métricas (até 4)</legend>

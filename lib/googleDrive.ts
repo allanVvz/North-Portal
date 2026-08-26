@@ -70,3 +70,30 @@ export const GOOGLE_DRIVE_KIND_LABEL: Record<GoogleDriveKind, string> = {
   spreadsheet: "Google Sheets",
   presentation: "Google Slides",
 };
+
+// ---- Drive file metadata (client-safe) --------------------------------------
+// Shape and helper live here, next to the URL parser, because client components
+// render the folder previews. lib/googleDriveApi.ts (which fetches these from
+// the Drive REST API) imports node:crypto to sign its service-account JWT and
+// must never reach a browser bundle.
+
+export type DriveFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  thumbnailUrl: string | null;
+  webViewLink: string | null;
+};
+
+export type DriveFileKind = "image" | "video" | "doc" | "sheet" | "slide" | "pdf" | "other";
+
+/** Coarse file kind used to pick an icon in the preview grid. */
+export function driveFileKind(mimeType: string): DriveFileKind {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType.includes("spreadsheet")) return "sheet";
+  if (mimeType.includes("presentation")) return "slide";
+  if (mimeType.includes("document") || mimeType.startsWith("text/")) return "doc";
+  return "other";
+}

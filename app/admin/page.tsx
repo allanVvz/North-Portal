@@ -1,33 +1,8 @@
-import {
-  listAllBriefings,
-  listAssigneeOptions,
-  listClients,
-  listRecurringTasks,
-  recurringTasksStorageAvailable,
-} from "@/lib/supabase";
-import ClientsWorkspace from "./ClientsWorkspace";
-import type { ClientRow } from "./ClientsTable";
-import { clientStageFor } from "./clientPipeline";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function AdminClientsPage() {
-  const [summaries, briefings, recurringTasks, assignees, recurringStorageAvailable] = await Promise.all([
-    listClients({ includeDisabled: true }),
-    listAllBriefings(),
-    listRecurringTasks(),
-    listAssigneeOptions(),
-    recurringTasksStorageAvailable(),
-  ]);
-  const checkpointsBySlug = new Map(briefings.map((b) => [b.slug, b.checkpointsPct]));
-  const clients: ClientRow[] = summaries.map((c) => {
-    const checkpointsPct = checkpointsBySlug.get(c.slug) ?? 0;
-    return { ...c, checkpointsPct, stage: clientStageFor(c.briefing_submitted, checkpointsPct) };
-  });
-  return <ClientsWorkspace
-    clients={clients}
-    recurringTasks={recurringTasks}
-    assignees={assignees}
-    recurringStorageAvailable={recurringStorageAvailable}
-  />;
+// /admin passou a ser só a porta de entrada: a Home é o destino, a lista de
+// clientes tem rota própria em /admin/clientes. Mantido como redirect para não
+// quebrar links antigos (e o bookmark de quem já usava /admin).
+export default function AdminRootPage() {
+  redirect("/admin/home");
 }

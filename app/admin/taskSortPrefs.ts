@@ -37,7 +37,7 @@ export const SORT_DEFAULTS: Record<SortScope, SortPref> = {
 const STORAGE_KEY = "kb-sort";
 const EVENT = "kb-sort-change";
 
-const VALID_KEYS = new Set<SortKey>(["manual", "alfabetico", "edicao", "data"]);
+const VALID_KEYS = new Set<SortKey>(["manual", "alfabetico", "edicao", "data", "conclusao"]);
 
 /** Descarta escopos/valores desconhecidos em vez de propagar uma ordem inválida
  *  para o comparador (um `key` antigo removido do menu cairia no default). */

@@ -11,6 +11,7 @@ function row(id: string, fields: Partial<SortFields> = {}): Row {
     title: fields.title ?? id,
     updatedAt: fields.updatedAt ?? "2026-08-01T00:00:00.000Z",
     dueDate: fields.dueDate === undefined ? "2026-08-10" : fields.dueDate,
+    completedAt: fields.completedAt === undefined ? null : fields.completedAt,
     position: fields.position ?? 0,
   };
 }
@@ -67,6 +68,28 @@ describe("sortItems", () => {
   it("agrupa todos os sem-data no fim preservando a ordem entre eles", () => {
     const rows = [row("s1", { dueDate: null }), row("com", { dueDate: "2026-08-02" }), row("s2", { dueDate: null })];
     expect(ids(sortItems(rows, "data", "desc", pick))).toEqual(["com", "s1", "s2"]);
+  });
+
+  it("ordena pela data de conclusão", () => {
+    const rows = [
+      row("terceiro", { completedAt: "2026-08-20T10:00:00.000Z" }),
+      row("primeiro", { completedAt: "2026-08-02T10:00:00.000Z" }),
+      row("segundo", { completedAt: "2026-08-11T10:00:00.000Z" }),
+    ];
+    expect(ids(sortItems(rows, "conclusao", "asc", pick))).toEqual(["primeiro", "segundo", "terceiro"]);
+    expect(ids(sortItems(rows, "conclusao", "desc", pick))).toEqual(["terceiro", "segundo", "primeiro"]);
+  });
+
+  // Mesma invariante do prazo: um card ainda aberto (sem completed_at) não pode
+  // subir ao topo da "ordem de conclusão" só por não ter data.
+  it("mantém cards não concluídos no fim nas DUAS direções", () => {
+    const rows = [
+      row("aberto", { completedAt: null }),
+      row("tarde", { completedAt: "2026-08-20T10:00:00.000Z" }),
+      row("cedo", { completedAt: "2026-08-02T10:00:00.000Z" }),
+    ];
+    expect(ids(sortItems(rows, "conclusao", "asc", pick))).toEqual(["cedo", "tarde", "aberto"]);
+    expect(ids(sortItems(rows, "conclusao", "desc", pick))).toEqual(["tarde", "cedo", "aberto"]);
   });
 
   it("usa position na ordem manual", () => {

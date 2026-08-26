@@ -14,10 +14,13 @@ import type { RecurringTask } from "@/lib/supabase";
 // it for "paused by an admin". No vocabulary can honour both, so both collapse
 // into `sem_agenda` — the one label that is true either way.
 
-export type RecurringState = "atrasada" | "ativa" | "concluida" | "sem_agenda";
+// "parada", não "atrasada": uma rotina cuja próxima execução ficou para trás
+// não está com uma entrega atrasada — ela parou de girar. O vocabulário de
+// atraso pertence às tarefas.
+export type RecurringState = "parada" | "ativa" | "concluida" | "sem_agenda";
 
 export const RECURRING_STATE_LABEL: Record<RecurringState, string> = {
-  atrasada: "Atrasada",
+  parada: "Parada",
   ativa: "Ativa",
   concluida: "Ciclo concluído",
   sem_agenda: "Sem agenda",
@@ -25,13 +28,13 @@ export const RECURRING_STATE_LABEL: Record<RecurringState, string> = {
 
 /** Matches the `.rec-state.*` / `.rec-pulse-fill.*` tones in globals.css. */
 export const RECURRING_STATE_TONE: Record<RecurringState, string> = {
-  atrasada: "overdue",
+  parada: "overdue",
   ativa: "active",
   concluida: "complete",
   sem_agenda: "paused",
 };
 
-export const RECURRING_STATES = ["atrasada", "ativa", "concluida", "sem_agenda"] as const;
+export const RECURRING_STATES = ["parada", "ativa", "concluida", "sem_agenda"] as const;
 
 type StateInput = Pick<
   RecurringTask,
@@ -86,5 +89,5 @@ export function recurringState(task: StateInput, today?: string): RecurringState
   }
 
   const reference = today ?? todayInTimezone(task.timezone);
-  return task.next_due_date < reference ? "atrasada" : "ativa";
+  return task.next_due_date < reference ? "parada" : "ativa";
 }
