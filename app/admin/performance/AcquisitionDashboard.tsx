@@ -86,11 +86,16 @@ function ConversionFunnel({
   const stageLabels = stages.map((ref) => acquisitionMetricLabel(ref, customMetrics, metricLabel));
   const stageRates = stageValues.slice(1).map((value, i) => ratioLabel(value, stageValues[i]));
   const spend = totalWhenPresent(current, "custo");
-  const lastValue = stageValues[stageValues.length - 1];
-  const costPerLastStage = ratio(spend, lastValue);
   // Mesmo cálculo do custo por lead, para que os dois resultados sejam
   // comparáveis: o mesmo investimento dividido por cada desfecho.
   const costPerMessage = ratio(spend, summary.messages);
+  // Consolidado dos dois desfechos. A média é ponderada — investimento total
+  // dividido pelo total de resultados — e não a média dos dois custos
+  // unitários: com 100 leads a R$ 10 e 2 conversas a R$ 500, a média simples
+  // diria R$ 255, quando o que a operação de fato pagou por resultado foi
+  // R$ 19,60. Quando uma das duas métricas não veio, o total é a que veio.
+  const totalOutcomes = showMessageBranch ? sumWhenAny(summary.opportunities, summary.messages) : summary.opportunities;
+  const costPerOutcome = ratio(spend, totalOutcomes);
   return (
     <div className="acq-conversion-flow">
       <div className="acq-funnel-layout">
@@ -127,11 +132,33 @@ function ConversionFunnel({
               </div>
             ) : null}
           </div>
-          <div className="acq-funnel-terminal"><span>Custo por {stageLabels[stageLabels.length - 1]?.toLowerCase()}</span><strong>{format(costPerLastStage, "money")}</strong><small>investimento ÷ {stageLabels[stageLabels.length - 1]?.toLowerCase()}</small></div>
+          {/* Consolidado dos dois cards acima. Antes este box mostrava "custo
+              por <última etapa>", que repetia o custo por lead sempre que leads
+              era a etapa final — o caso normal. */}
+          <div className="acq-funnel-terminal">
+            <div className="acq-terminal-cell">
+              <span>{showMessageBranch ? "Leads + conversas" : "Leads"}</span>
+              <strong>{format(totalOutcomes)}</strong>
+              <small>resultados no período</small>
+            </div>
+            <div className="acq-terminal-cell">
+              <span>Custo médio</span>
+              <strong>{format(costPerOutcome, "money")}</strong>
+              <small>investimento ÷ resultados</small>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+/** Soma que sobrevive a métrica ausente: null + 5 = 5, null + null = null.
+ *  Somar tratando null como zero mentiria um total; descartar a soma inteira
+ *  por causa de uma métrica que a conta não expõe esconderia a que veio. */
+function sumWhenAny(a: NullableMetric, b: NullableMetric): NullableMetric {
+  if (a === null && b === null) return null;
+  return (a ?? 0) + (b ?? 0);
 }
 
 function ratioLabel(numerator: NullableMetric, denominator: NullableMetric) {
