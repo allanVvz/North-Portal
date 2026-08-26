@@ -1,8 +1,3 @@
 import "./site.css";
 import SiteFrame from "./SiteFrame";
-
-// Public marketing site (landing + planos + como funciona + quem somos + legal).
-// Wrapped by the sticky header + rich footer + light/dark theme in SiteFrame.
-export default function SiteLayout({ children }: { children: React.ReactNode }) {
-  return <SiteFrame>{children}</SiteFrame>;
-}
+export default function SiteLayout({children}:{children:React.ReactNode}){const data={"@context":"https://schema.org","@type":"ProfessionalService",name:"North",url:process.env.NEXT_PUBLIC_SITE_URL||"http://localhost:3000",description:"Estratégia, conteúdo e performance para negócios locais premium.",areaServed:{"@type":"Country",name:"Brasil"},serviceType:["Estratégia de marketing","Produção de conteúdo","Gestão de mídia paga","Operação de marketing"]};return <SiteFrame><script type="application/ld+json" dangerouslySetInnerHTML={{__html:JSON.stringify(data).replace(/</g,"\\u003c")}}/>{children}</SiteFrame>}

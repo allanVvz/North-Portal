@@ -1,8 +1,1 @@
-import LegalView from "../LegalView";
-
-export const metadata = { title: "Política de Privacidade · North" };
-export const dynamic = "force-dynamic";
-
-export default function Page() {
-  return <LegalView slug="privacidade" />;
-}
+import LegalView from "../LegalView";export const metadata={title:"Política de Privacidade · North",description:"Como a North coleta, utiliza e protege dados pessoais.",alternates:{canonical:"/politica-de-privacidade"}};export const dynamic="force-dynamic";export default function Page(){return <LegalView slug="privacidade"/>}

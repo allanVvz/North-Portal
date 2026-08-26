@@ -1,8 +1,1 @@
-import LegalView from "../LegalView";
-
-export const metadata = { title: "Termos de Uso · North" };
-export const dynamic = "force-dynamic";
-
-export default function Page() {
-  return <LegalView slug="termos" />;
-}
+import LegalView from "../LegalView";export const metadata={title:"Termos de Uso · North",description:"Termos aplicáveis ao uso do site e do Portal North.",alternates:{canonical:"/termos-de-uso"}};export const dynamic="force-dynamic";export default function Page(){return <LegalView slug="termos"/>}

@@ -1,8 +1,1 @@
-import LegalView from "../LegalView";
-
-export const metadata = { title: "Política de Cookies · North" };
-export const dynamic = "force-dynamic";
-
-export default function Page() {
-  return <LegalView slug="cookies" />;
-}
+import LegalView from "../LegalView";export const metadata={title:"Política de Cookies · North",description:"Cookies essenciais, analytics e preferências de consentimento da North.",alternates:{canonical:"/politica-de-cookies"}};export const dynamic="force-dynamic";export default function Page(){return <LegalView slug="cookies"/>}

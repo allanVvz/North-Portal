@@ -1,16 +1,9 @@
-import PlanosGrid from "./PlanosGrid";
-
-export const metadata = { title: "Planos · North" };
-
-export default function PlanosPage() {
-  return (
-    <section className="site-section">
-      <div className="site-wrap">
-        <p className="site-kicker">Planos</p>
-        <h2 className="site-h2">Escolha seu <em>ritmo</em></h2>
-        <p className="site-lead">Comece simples e evolua conforme sua operação cresce. Sem fidelidade engessada.</p>
-        <PlanosGrid />
-      </div>
-    </section>
-  );
-}
+import type { Metadata } from "next";
+import Link from "next/link";
+export const metadata:Metadata={title:"Modelos de parceria · North",description:"Conheça os níveis de parceria da North, sem pacotes genéricos ou preços públicos.",alternates:{canonical:"/planos"},openGraph:{title:"Modelos de parceria · North",description:"Uma parceria dimensionada para o momento da sua operação."}};
+const partners=[
+  {tag:"DIREÇÃO",name:"Estratégia essencial",desc:"Para negócios com execução interna que precisam de foco, posicionamento e um plano acionável.",items:["Imersão e diagnóstico","Direção estratégica","Plano de ação priorizado","Rituais de acompanhamento"]},
+  {tag:"OPERAÇÃO",name:"Crescimento integrado",desc:"Para quem precisa conectar estratégia, conteúdo, mídia e rotina em uma operação contínua.",items:["Estratégia e planejamento","Conteúdo e produção","Gestão de performance","Portal e governança"]},
+  {tag:"EXPANSÃO",name:"Estrutura sob medida",desc:"Para operações com múltiplas unidades, regiões, ofertas ou uma agenda de crescimento mais complexa.",items:["Arquitetura personalizada","Múltiplas frentes ou praças","Cadência ampliada","Indicadores e governança"]},
+];
+export default function PlanosPage(){return <><section className="inner-hero dark-section"><div className="site-wrap"><p className="eyebrow light">MODELOS DE PARCERIA</p><h1>O escopo acompanha<br/><em>o momento do negócio.</em></h1><p>Sem preço-isca ou pacote universal. O diagnóstico define o nível de operação e as entregas com melhor relação entre esforço e impacto.</p></div></section><section className="site-section"><div className="site-wrap"><div className="partner-grid">{partners.map((p,i)=><article className={`partner-card ${i===1?"featured":""}`} key={p.name}><small>{p.tag}</small><h2>{p.name}</h2><p>{p.desc}</p><ul>{p.items.map(x=><li key={x}>{x}</li>)}</ul><Link href="/#diagnostico" className={`site-btn ${i===1?"solid":"ghost"}`}>Conversar sobre este modelo</Link></article>)}</div><p className="provisional" style={{textAlign:"center",marginTop:35}}>ESCOPO, PRAZOS E INVESTIMENTO SÃO DEFINIDOS APÓS DIAGNÓSTICO. NÃO HÁ CONTRATAÇÃO AUTOMÁTICA.</p></div></section><section className="site-section offer-band"><div className="site-wrap split-copy"><div><p className="eyebrow">O QUE DEFINE A RECOMENDAÇÃO</p><h2>Fit antes<br/><em>da proposta.</em></h2></div><div><ul className="check-list"><li>Objetivo e urgência do negócio</li><li>Maturidade da operação atual</li><li>Capacidade de atendimento e venda</li><li>Praça, concorrência e complexidade</li><li>Faixa de investimento disponível</li></ul></div></div></section></>}

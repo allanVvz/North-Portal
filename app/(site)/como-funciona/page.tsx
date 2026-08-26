@@ -1,37 +1,11 @@
-export const metadata = { title: "Como funciona · North" };
+import type { Metadata } from "next";
+import Link from "next/link";
 
-const STEPS = [
-  { n: "01", t: "Imersão & Onboarding", d: "Briefing por etapas e organização de acessos e pastas. Quanto mais contexto, mais certeira a estratégia." },
-  { n: "02", t: "Estratégia & Alinhamento", d: "Planejamento, roteiros e aprovação prévia antes de qualquer produção." },
-  { n: "03", t: "Produção & Aprovação", d: "Criativos e campanhas entregues no portal para sua aprovação com um clique." },
-  { n: "04", t: "Publicação & Resultados", d: "Publicamos o aprovado e medimos tudo no dashboard de performance." },
+export const metadata: Metadata={title:"Como funciona · North",description:"Conheça a imersão, a direção estratégica e a operação contínua da North.",alternates:{canonical:"/como-funciona"},openGraph:{title:"Como funciona · North",description:"Da imersão aos resultados, uma operação de marketing com direção."}};
+const steps=[
+  ["01","Imersão","Mapeamos negócio, oferta, público, região, concorrência, histórico e capacidade comercial.","Contexto, acessos e disponibilidade das pessoas-chave.","Diagnóstico, mapa de oportunidades e critérios de sucesso."],
+  ["02","Estratégia","Transformamos contexto em posicionamento, prioridades, campanhas e indicadores.","Validação de prioridades e decisões rápidas.","Rota estratégica, plano de ação e cadência recomendada."],
+  ["03","Produção & aprovação","Roteiros, peças, campanhas e entregas avançam em ciclos claros dentro do portal.","Feedback objetivo nos prazos combinados.","Produção, controle de qualidade e publicação do aprovado."],
+  ["04","Resultados & evolução","Conectamos sinais de marketing ao que acontece na agenda, no salão ou no caixa.","Contexto comercial e retorno sobre a qualidade dos leads.","Leitura de dados, aprendizados e ajustes da próxima rota."],
 ];
-
-export default function ComoFuncionaPage() {
-  return (
-    <>
-      <section className="site-section">
-        <div className="site-wrap">
-          <p className="site-kicker">Como funciona</p>
-          <h2 className="site-h2">Do briefing ao <em>resultado</em></h2>
-          <p className="site-lead">Um processo claro, em quatro movimentos — você sempre sabe onde está.</p>
-          <div className="steps-grid">
-            {STEPS.map((s) => (
-              <div className="step" key={s.n}>
-                <div className="step-num">{s.n}</div>
-                <h3>{s.t}</h3>
-                <p>{s.d}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-      <div className="cream-band">
-        <div className="site-wrap">
-          <p>“Clareza primeiro. Resultado como consequência.”</p>
-          <small>Filosofia North</small>
-        </div>
-      </div>
-    </>
-  );
-}
+export default function ComoFuncionaPage(){return <><section className="inner-hero dark-section"><div className="site-wrap"><p className="eyebrow light">COMO FUNCIONA</p><h1>Uma rota visível,<br/><em>do contexto ao resultado.</em></h1><p>Você sabe o que está acontecendo, quem precisa agir e por que cada entrega existe.</p></div></section><section className="site-section"><div className="site-wrap"><div className="section-heading"><p className="eyebrow">QUATRO MOVIMENTOS</p><h2>Profundidade sem<br/><em>complicar a operação.</em></h2></div><div className="content-grid">{steps.map(([n,t,d,client,north])=><article className="content-card" key={n}><span>{n}</span><h2>{t}</h2><p>{d}</p><h3>O cliente traz</h3><p>{client}</p><h3>A North conduz</h3><p>{north}</p></article>)}</div></div></section><section className="site-section dark-section"><div className="site-wrap portal-block" style={{marginTop:0}}><div><p className="eyebrow light">FLUXO NO PORTAL</p><h3>Menos mensagens perdidas. Mais continuidade.</h3><p>Cada item segue de briefing a produção, revisão, aprovação e leitura de resultado. Histórico e responsáveis permanecem no mesmo contexto.</p></div><div className="content-card" style={{background:"rgba(15,46,48,.75)",borderColor:"rgba(159,201,194,.2)"}}><div className="demo-flow" style={{fontSize:11,padding:"50px 10px"}}><span>Briefing</span><i/><span>Produção</span><i/><span>Aprovação</span><i/><span>Publicado</span><i/><span>Aprendizado</span></div><p className="provisional">DEMONSTRAÇÃO ESTRUTURAL · O FLUXO REAL VARIA CONFORME O ESCOPO</p></div></div></section><section className="site-section"><div className="site-wrap section-heading" style={{marginBottom:0}}><p className="eyebrow">PRÓXIMO PASSO</p><h2>Descubra qual rota faz<br/><em>sentido agora.</em></h2><p>O diagnóstico considera maturidade, urgência, capacidade e faixa de investimento.</p><Link className="site-btn solid" href="/#diagnostico" style={{marginTop:28}}>Solicitar diagnóstico</Link></div></section></>}

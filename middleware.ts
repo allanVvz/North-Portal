@@ -4,6 +4,7 @@ import { updateSession } from "@/lib/supabase/middleware";
 // Routes reachable without a session (the public marketing site + auth).
 const PUBLIC_PREFIXES = [
   "/",
+  "/lp",
   "/login",
   "/logout",
   "/api/auth",
