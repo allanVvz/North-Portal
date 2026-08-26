@@ -3,3 +3,28 @@
 @keyframes orbitSpin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.site *{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 @media(max-width:960px){.site-nav{position:absolute;left:0;right:0;top:72px;background:var(--paper);padding:24px;display:none;flex-direction:column;border-bottom:1px solid var(--border)}.site-nav.open{display:flex}.site-burger{display:block}.login-link{display:none}.hero-grid-v2,.portal-block,.split-copy,.faq-layout,.lead-layout{grid-template-columns:1fr}.hero-v2{min-height:auto}.hero-visual{padding:20px 0}.split-copy,.faq-layout,.lead-layout{gap:50px}.method-grid{grid-template-columns:repeat(2,1fr)}.method-grid article:nth-child(2){border-right:0}.case-v2,.case-v2:nth-child(even){grid-template-columns:1fr}.case-v2:nth-child(even)>.case-placeholder{order:0}.case-placeholder{min-height:280px}.offer-grid,.responsibility-grid,.partner-grid,.values-grid,.team-grid{grid-template-columns:repeat(2,1fr)}.site-footer-in{grid-template-columns:2fr 1fr 1fr}.site-footer-in .foot-col:last-child{grid-column:2}.consent{align-items:flex-start;flex-direction:column;gap:16px}}
 @media(max-width:640px){.site-wrap,.site-header-in,.site-footer-in,.site-footer-base{width:min(100% - 32px,1200px)}.site-section{padding:72px 0}.site-brand>span:last-child,.header-cta{display:none}.hero-grid-v2{padding-block:65px;gap:35px}.hero-copy-v2 h1{font-size:48px}.hero-actions{align-items:flex-start;flex-direction:column}.hero-visual{margin-inline:-8px}.demo-layout{grid-template-columns:82px 1fr;min-height:280px}.demo-layout aside{padding:18px 10px}.demo-main{padding:20px 13px}.demo-heading strong{font-size:18px}.demo-heading em{display:none}.demo-kpis{gap:5px}.demo-kpis>div{padding:9px}.demo-kpis b{font-size:16px}.demo-flow{display:none}.orbit{display:none}.method-grid,.offer-grid,.responsibility-grid,.partner-grid,.values-grid,.team-grid,.content-grid{grid-template-columns:1fr}.method-grid article{border-right:0;border-bottom:1px solid rgba(232,220,192,.15)}.portal-block{margin-top:65px}.case-v2>div:last-child{padding:34px}.case-placeholder{min-height:230px}.partner-card.featured{transform:none}.lead-form{padding:26px 20px}.lead-layout{gap:35px}.consent{left:12px;right:12px;bottom:12px;padding:18px}.consent-actions{width:100%;flex-direction:column}.site-footer-in{grid-template-columns:1fr 1fr;gap:35px}.foot-brand{grid-column:1/-1}.site-footer-in .foot-col:last-child{grid-column:auto}.site-footer-base{gap:10px;flex-direction:column}.inner-hero{padding:75px 0 65px}}
+
+/* ============================================================= */
+/* Tema escuro ("lua") — mesmo mecanismo de /login (useSiteTheme, */
+/* localStorage "site-theme"). Paleta trazida do tema escuro que  */
+/* já existia em produção antes deste redesign (.site[data-theme= */
+/* "dark"] em main), com os nomes de variável do arquivo novo.    */
+/* Seções que já eram escuras por design (.dark-section, hero,    */
+/* método, formulário de lead, rodapé) não mudam — só invertem as */
+/* superfícies que hoje são claras (fundo da página, cards,       */
+/* header, texto). */
+.site[data-theme="dark"] {
+  --paper: #0a2428;
+  --white: #0f2e30;
+  --ink: #e8dcc0;
+  --body: #b9c4bd;
+  --muted: #8aa39c;
+  --sage: #78aca8;
+  --sage-bright: #9fc9c2;
+  --border: rgba(232, 220, 192, .13);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 18px 40px rgba(0, 0, 0, .35);
+}
+.site[data-theme="dark"] .site-header { background: rgba(10, 36, 40, .86); }
+.site[data-theme="dark"] .offer-band { background: #0c282c; }
+.site-theme { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: var(--white); color: var(--body); cursor: pointer; font-size: 15px; display: inline-grid; place-items: center; flex-shrink: 0; }
+.site-theme:hover { background: color-mix(in srgb, var(--sage) 16%, var(--white)); }
