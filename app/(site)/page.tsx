@@ -63,7 +63,13 @@ export default function LandingPage() {
   const move = (dir: 1 | -1) => setSlide((p) => (p + dir + SLIDES.length) % SLIDES.length);
 
   return (
-    <>
+    // Home preservada da versão pré-redesign (ver plan de merge:
+    // "manter / da main"). O redesign trouxe um site.css inteiro novo, que
+    // não define nenhuma das classes que esta página usa (.hero, .stats-grid,
+    // .mock-app, .svc-card, .tst-card…) — .home-legacy escopa a restauração
+    // dessas regras em app/(site)/site.css sem tocar /lp, /planos ou as
+    // demais páginas do redesign.
+    <div className="home-legacy">
       {/* HERO */}
       <section className="site-wrap">
         <div className="hero">
@@ -213,6 +219,6 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-    </>
+    </div>
   );
 }
