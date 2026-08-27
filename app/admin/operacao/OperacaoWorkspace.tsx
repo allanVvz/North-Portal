@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { RecurringTask } from "@/lib/supabase";
 import KanbanBoard from "../KanbanBoard";
 import CardCover from "../CardCover";
-import { taskCover } from "@/lib/taskCover";
+import { taskCoverCandidates } from "@/lib/taskCover";
 import ActionPlansBoard from "../plano/ActionPlansBoard";
 import type { ActionPlan } from "@/lib/supabase";
 import HScrollRail from "../HScrollRail";
@@ -70,7 +70,7 @@ function RecurrenceCard({
   // e não só a próxima execução.
   const period = formatPeriod(task.start_date, task.end_date);
   // Na visão compacta (calendário) o card é pequeno demais para uma capa.
-  const cover = compact ? null : taskCover(task);
+  const coverCandidates = compact ? [] : taskCoverCandidates(task);
 
   return (
     <article
@@ -82,7 +82,7 @@ function RecurrenceCard({
       onDrop={onDropBefore ? (e) => { e.preventDefault(); e.stopPropagation(); onDropBefore(); } : undefined}
     >
       <button type="button" className="rec-card-open" onClick={onOpen} aria-label={`Abrir rotina ${task.title}`}>
-      {cover ? <CardCover cover={cover} title={task.title} className="rec-card-cover" /> : null}
+      {coverCandidates.length ? <CardCover candidates={coverCandidates} title={task.title} className="rec-card-cover" /> : null}
       <span className="rec-card-topline">
         <span className={`rec-state ${tone}`}>{RECURRING_STATE_LABEL[state]}</span>
       </span>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { taskCover } from "./taskCover";
+import { MAX_COVER_CANDIDATES, taskCover, taskCoverCandidates } from "./taskCover";
 
 const FILE_A = "1AaBbCcDdEeFfGgHhIiJjKkLlMmNn";
 const FILE_B = "2ZzYyXxWwVvUuTtSsRrQqPpOoNnMm";
@@ -81,5 +81,92 @@ describe("capa do card", () => {
   it("não quebra com payload sem comentários ou com formato estranho", () => {
     expect(taskCover({ payload: { comments: "não é array" } })).toBeNull();
     expect(taskCover({ payload: { outraCoisa: 1 } })).toBeNull();
+  });
+
+  // Caso real, tirado do card "REELS FEED - Quando cliente não vem"
+  // (cbdfcd10-b14a-4dc6-991f-4e3c06690397). Serve de guarda contra dois
+  // detalhes que a equipe usa na prática e que um teste sintético não pegaria:
+  // o link vem no formato `/open?id=...&usp=drive_fs` (o que o botão de
+  // compartilhar do Drive para desktop gera, não o `/file/d/...`), e a
+  // descrição tem um link do Instagram antes, que não pode virar capa.
+  it("caso real: descrição com Instagram, capa vem do primeiro Drive nos comentários", () => {
+    const cover = taskCover({
+      description: "https://www.instagram.com/p/DYfAkrINUVj/\nquando aquele cliente que sempre vem não aparece",
+      payload: {
+        comments: [
+          { author: "Allan", at: "1", text: "Aparentemente só tenho o take da Kaome na frente da Baita." },
+          { author: "Allan", at: "2", text: "https://drive.google.com/open?id=1MNnZqZA6_6BiXdCIsVc6tyjxcXLnlCd_&usp=drive_fs" },
+          { author: "Allan", at: "3", text: "https://drive.google.com/open?id=1W3Xjputkp2GLR9iCXQIxm05_Tk2A10jR&usp=drive_fs" },
+          { author: "Allan", at: "4", text: "Capa https://drive.google.com/open?id=1s1WhkToAyjd22sxewRJ2M2RyaSHsSOHB&usp=drive_fs" },
+        ],
+      },
+    });
+    expect(cover).toEqual({ fileId: "1MNnZqZA6_6BiXdCIsVc6tyjxcXLnlCd_", source: "comments" });
+  });
+});
+
+// Por que uma LISTA e não um só: medido em produção, a maioria dos arquivos
+// colados nos comentários não está compartilhada publicamente. Se o card
+// apostasse tudo no primeiro link, ficaria sem capa mesmo tendo arquivos
+// perfeitamente exibíveis logo abaixo — foi exatamente o que aconteceu no card
+// "REELS FEED - Quando cliente não vem".
+describe("candidatos a capa", () => {
+  it("junta descrição e comentários, descrição primeiro", () => {
+    const candidatos = taskCoverCandidates({
+      description: driveUrl(FILE_A),
+      payload: { comments: [comment(driveUrl(FILE_B), "2026-08-01T10:00:00Z")] },
+    });
+    expect(candidatos).toEqual([
+      { fileId: FILE_A, source: "description" },
+      { fileId: FILE_B, source: "comments" },
+    ]);
+  });
+
+  it("não repete o mesmo arquivo citado duas vezes", () => {
+    const candidatos = taskCoverCandidates({
+      description: driveUrl(FILE_A),
+      payload: { comments: [comment(`de novo: ${driveUrl(FILE_A)}`, "2026-08-01T10:00:00Z")] },
+    });
+    expect(candidatos).toHaveLength(1);
+  });
+
+  it("pega vários arquivos do mesmo texto, na ordem", () => {
+    const candidatos = taskCoverCandidates({ description: `${driveUrl(FILE_A)} e ${driveUrl(FILE_B)}` });
+    expect(candidatos.map((c) => c.fileId)).toEqual([FILE_A, FILE_B]);
+  });
+
+  it("respeita o teto — cada candidato que falha é uma requisição perdida", () => {
+    const comments = Array.from({ length: 20 }, (_, i) =>
+      comment(driveUrl(`1file${String(i).padStart(20, "x")}`), `2026-08-${String(i + 1).padStart(2, "0")}T10:00:00Z`),
+    );
+    expect(taskCoverCandidates({ payload: { comments } })).toHaveLength(MAX_COVER_CANDIDATES);
+  });
+
+  it("taskCover é só o primeiro candidato", () => {
+    const task = { description: driveUrl(FILE_A), payload: { comments: [comment(driveUrl(FILE_B), "1")] } };
+    expect(taskCover(task)).toEqual(taskCoverCandidates(task)[0]);
+  });
+
+  it("caso real: o card tem 4 candidatos, não 1", () => {
+    // O 1º e o 2º não estão compartilhados (404 na miniatura); o 3º está. Com
+    // um candidato só o card ficaria sem capa; com a lista, ele cai no 3º.
+    const candidatos = taskCoverCandidates({
+      description: "https://www.instagram.com/p/DYfAkrINUVj/",
+      payload: {
+        comments: [
+          { author: "Allan", at: "1", text: "Aparentemente só tenho o take da Kaome." },
+          { author: "Allan", at: "2", text: "https://drive.google.com/open?id=1MNnZqZA6_6BiXdCIsVc6tyjxcXLnlCd_&usp=drive_fs" },
+          { author: "Allan", at: "3", text: "https://drive.google.com/open?id=1W3Xjputkp2GLR9iCXQIxm05_Tk2A10jR&usp=drive_fs" },
+          { author: "Allan", at: "4", text: "https://drive.google.com/open?id=1z-X1-amdHLOfbsQMyuwfqs8L0HHt1vCC&usp=drive_fs" },
+          { author: "Allan", at: "5", text: "Capa https://drive.google.com/open?id=1s1WhkToAyjd22sxewRJ2M2RyaSHsSOHB&usp=drive_fs" },
+        ],
+      },
+    });
+    expect(candidatos.map((c) => c.fileId)).toEqual([
+      "1MNnZqZA6_6BiXdCIsVc6tyjxcXLnlCd_",
+      "1W3Xjputkp2GLR9iCXQIxm05_Tk2A10jR",
+      "1z-X1-amdHLOfbsQMyuwfqs8L0HHt1vCC",
+      "1s1WhkToAyjd22sxewRJ2M2RyaSHsSOHB",
+    ]);
   });
 });

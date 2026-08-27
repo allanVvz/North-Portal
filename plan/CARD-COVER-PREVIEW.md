@@ -41,11 +41,21 @@ Imagem e vídeo do Google Drive viram capa automaticamente.
 
 ### Como a capa é escolhida
 
-`lib/taskCover.ts`, função pura e testada:
+`lib/taskCover.ts`, função pura e testada. Devolve uma **lista ordenada de
+candidatos**, não um só:
 
-1. **Descrição do card** — primeiro link do Drive que aparece.
+1. **Descrição do card** — todos os links do Drive, na ordem.
 2. **Comentários**, do mais antigo para o mais novo.
-3. Nada disso → sem capa, card como sempre foi.
+3. Teto de 6 candidatos.
+4. Nada disso → sem capa, card como sempre foi.
+
+**Por que uma lista.** Nem todo arquivo do Drive rende miniatura: pode não
+estar compartilhado, pode ter sido apagado, pode ser um formato sem prévia.
+Medido nos dados de produção — 12 arquivos amostrados dos comentários — **só 2
+respondiam miniatura**. Com um candidato só, um card com quatro arquivos
+perfeitamente exibíveis ficava sem capa porque o primeiro link não abria. O
+card tenta em ordem e para no primeiro que responder; cada 404 avança para o
+próximo.
 
 Duas decisões de ordem, ambas deliberadas:
 
@@ -83,10 +93,30 @@ card  →  <img loading="lazy" src="/api/admin/drive/thumbnail/{fileId}">
              ↓
          requireAdmin
              ↓
-         fetchDriveThumbnail()  →  Drive: metadata (mimeType, thumbnailLink)
-             ↓                     →  Drive: bytes da miniatura em =s480
+         fetchDriveThumbnail()
+             ├─ conta de serviço configurada?
+             │     ↓ sim   Drive API: metadata (mimeType, thumbnailLink)
+             │             Drive API: bytes da miniatura em =s480
+             │             (falhou? cai para o público abaixo)
+             └─ público:   drive.google.com/thumbnail?id=…&sz=w480
+             ↓
          imagem, Cache-Control: private, max-age=3600
+         (nada respondeu → 404, o card tenta o próximo candidato)
 ```
+
+**Dois caminhos, de propósito.** O endpoint público não precisa de credencial
+nenhuma e funciona para arquivo compartilhado como "qualquer pessoa com o
+link" — a mesma premissa que o preview embutido do card já assumia. É o que faz
+a capa existir **hoje**, sem conta de serviço configurada.
+
+A conta de serviço, quando existir, cobre o que o público não cobre: arquivo
+privado que foi compartilhado com ela. E mesmo com ela ligada o caminho público
+segue de rede, porque a conta de serviço só enxerga o que foi compartilhado
+com ela — um arquivo público que ela não vê continua rendendo capa.
+
+A única situação em que **não** há queda para o público é quando a API respondeu
+e disse que o arquivo é PDF/planilha/apresentação: aí sabemos o tipo e a
+resposta é "não vira capa". Cair para o público furaria a regra.
 
 Três escolhas que valem registro:
 
@@ -105,10 +135,25 @@ A miniatura fica no navegador de quem pediu, nunca num cache compartilhado.
 
 ### Degradação
 
-404 é resposta normal, não erro: arquivo que não é imagem nem vídeo, Drive não
-configurado, link quebrado, id inválido. O componente esconde a capa e o card
-fica exatamente como era antes de existir capa. Isso vale inteiro para quem não
-tem `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` configurado — nenhuma tela quebra.
+404 é resposta normal, não erro: arquivo que não é imagem nem vídeo, arquivo
+não compartilhado, link quebrado, id inválido. O card avança para o próximo
+candidato; acabando a lista, a capa some e o card fica exatamente como era
+antes de existir capa. Nenhuma tela quebra.
+
+### Cobertura real hoje
+
+Sem conta de serviço, a capa depende do arquivo estar compartilhado como
+"qualquer pessoa com o link". Na amostra de produção isso valia para **2 de 12**
+arquivos. Ou seja: a capa **funciona**, mas aparece numa minoria dos cards.
+
+Para cobrir o resto há dois caminhos, e eles se somam:
+
+1. **Configurar `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`** — e, crucialmente,
+   **compartilhar as pastas dos clientes com o e-mail da conta de serviço**. Só
+   criar a credencial não basta: uma conta de serviço nova não enxerga nada do
+   Drive pessoal de ninguém.
+2. **Compartilhar os arquivos** como "qualquer pessoa com o link", que é o que
+   o preview embutido dentro do card já exigia.
 
 ### Arquivos
 

@@ -185,32 +185,67 @@ export type DriveThumbnail = { mimeType: string; body: ArrayBuffer; contentType:
  * arquivo está compartilhado — pela nossa rota, a conta de serviço enxerga
  * tudo o que já enxerga no resto da integração.
  */
+/**
+ * A miniatura pública de um arquivo — o endpoint que o próprio Drive usa para
+ * quem abre um link compartilhado, sem API e sem credencial nenhuma.
+ *
+ * É o que faz a capa existir mesmo sem a conta de serviço configurada. Só
+ * funciona para arquivo compartilhado como "qualquer pessoa com o link" — a
+ * mesma premissa que o preview embutido do card já assume desde sempre
+ * (ver lib/googleDrive.ts). Medido em produção: uma minoria dos arquivos
+ * colados nos comentários passa por aqui, e é justamente por isso que o card
+ * tenta vários candidatos em vez de apostar no primeiro.
+ */
+async function fetchPublicDriveThumbnail(fileId: string, size: number): Promise<DriveThumbnail | null> {
+  try {
+    const res = await fetch(`https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=w${size}`, {
+      redirect: "follow",
+    });
+    // Arquivo não compartilhado devolve 200/404 com uma página HTML de erro —
+    // por isso o tipo importa tanto quanto o status.
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!res.ok || !contentType.startsWith("image/")) return null;
+    return { mimeType: contentType, body: await res.arrayBuffer(), contentType };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchDriveThumbnail(fileId: string, size = 480): Promise<DriveThumbnail | null> {
-  if (!fileId || !isGoogleDriveConfigured()) return null;
+  if (!fileId) return null;
+  // Sem conta de serviço, o público é a única via. Com ela, o público ainda
+  // serve de rede: a conta de serviço só enxerga o que foi compartilhado com
+  // ela, e um arquivo público que ela não vê continua rendendo capa.
+  if (!isGoogleDriveConfigured()) return fetchPublicDriveThumbnail(fileId, size);
   try {
     const token = await accessToken();
-    if (!token) return null;
+    if (!token) return fetchPublicDriveThumbnail(fileId, size);
 
     const metaParams = new URLSearchParams({ fields: "mimeType,thumbnailLink", supportsAllDrives: "true" });
     const metaRes = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${metaParams}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!metaRes.ok) return null;
+    // Metadado inacessível = a conta de serviço não enxerga esse arquivo. Pode
+    // ainda assim ser público; deixa o caminho público tentar.
+    if (!metaRes.ok) return fetchPublicDriveThumbnail(fileId, size);
     const meta = (await metaRes.json()) as { mimeType?: string; thumbnailLink?: string };
 
     const mimeType = meta.mimeType ?? "";
     // Só imagem e vídeo viram capa. Planilha, apresentação e PDF também têm
     // miniatura no Drive, mas uma parede de miniaturas de documento não ajuda
     // a ler o quadro — ver plan/CARD-COVER-PREVIEW.md.
+    //
+    // Aqui NÃO há queda para o público: sabemos o tipo e a resposta é "não".
+    // Cair para o público furaria justamente essa regra.
     if (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")) return null;
-    if (!meta.thumbnailLink) return null;
+    if (!meta.thumbnailLink) return fetchPublicDriveThumbnail(fileId, size);
 
     // O thumbnailLink termina em `=s220`. Trocar o sufixo pede a versão no
     // tamanho que a capa precisa, direto do Google — nada é redimensionado
     // aqui.
     const sized = meta.thumbnailLink.replace(/=s\d+(-c)?$/, `=s${size}`);
     const imageRes = await fetch(sized);
-    if (!imageRes.ok) return null;
+    if (!imageRes.ok) return fetchPublicDriveThumbnail(fileId, size);
 
     return {
       mimeType,
@@ -218,7 +253,7 @@ export async function fetchDriveThumbnail(fileId: string, size = 480): Promise<D
       contentType: imageRes.headers.get("content-type") ?? "image/jpeg",
     };
   } catch {
-    return null;
+    return fetchPublicDriveThumbnail(fileId, size);
   }
 }
 
