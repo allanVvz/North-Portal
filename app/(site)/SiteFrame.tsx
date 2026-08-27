@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import ConsentBanner from "./components/ConsentBanner";
 import { captureAttribution, track } from "./components/analytics";
 import { useSiteTheme } from "../useSiteTheme";
+import CompassMark from "../CompassMark";
 
 const NAV = [
   { href: "/quem-somos", label: "Quem somos" },
@@ -34,7 +35,7 @@ export default function SiteFrame({ children }: { children: React.ReactNode }) {
       <header className="site-header">
         <div className="site-header-in">
           <Link href="/" className="site-brand" aria-label="North — início">
-            <span className="site-compass" aria-hidden><i /></span>
+            <span className="site-compass" aria-hidden><CompassMark size={22} /></span>
             <b>north</b><span>estratégia &amp; operação</span>
           </Link>
           <nav className={`site-nav ${menuOpen ? "open" : ""}`} aria-label="Navegação principal">
@@ -60,7 +61,7 @@ export default function SiteFrame({ children }: { children: React.ReactNode }) {
       <footer className="site-footer">
         <div className="site-footer-in">
           <div className="foot-brand">
-            <Link href="/" className="site-brand"><span className="site-compass" aria-hidden><i /></span><b>north</b></Link>
+            <Link href="/" className="site-brand"><span className="site-compass" aria-hidden><CompassMark size={22} /></span><b>north</b></Link>
             <p>Estratégia, conteúdo e performance para negócios locais que querem crescer com direção.</p>
           </div>
           <div className="foot-col"><h2>Explore</h2><Link href="/como-funciona">Como funciona</Link><Link href="/planos">Modelos de parceria</Link><Link href="/quem-somos">Quem somos</Link></div>

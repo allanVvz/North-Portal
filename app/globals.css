@@ -1587,10 +1587,7 @@ body.menu-open {
 @keyframes authRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 .auth-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
-.auth-mark {
-  width: 18px; height: 18px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, var(--l-teal), #2f5f57);
-}
+.auth-mark { display: inline-flex; color: var(--l-teal); }
 .auth-brand .wordmark { font-size: 17px; color: var(--l-ink); font-weight: 800; }
 .auth-brand em { font-style: normal; font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--l-muted); }
 .auth-title { font-family: Fraunces, Georgia, serif; font-weight: 400; font-size: clamp(26px, 3vw, 32px); line-height: 1.08; margin: 6px 0 2px; color: var(--l-ink); }

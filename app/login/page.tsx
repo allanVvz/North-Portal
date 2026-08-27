@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useSiteTheme } from "../useSiteTheme";
+import CompassMark from "../CompassMark";
 
 function LoginInner() {
   const router = useRouter();
@@ -53,7 +54,7 @@ function LoginInner() {
       </button>
       <form className="auth-card" onSubmit={onSubmit}>
         <div className="auth-brand">
-          <span className="auth-mark" aria-hidden />
+          <span className="auth-mark" aria-hidden><CompassMark size={18} /></span>
           <strong className="wordmark">north</strong>
           <em>Portal</em>
         </div>
