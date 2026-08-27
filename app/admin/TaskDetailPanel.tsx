@@ -9,6 +9,8 @@ import TaskKindIcon from "./TaskKindIcon";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials } from "./kanbanShared";
 import CommentAvatar from "./CommentAvatar";
+import CardCover from "./CardCover";
+import { taskCoverCandidates } from "@/lib/taskCover";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatCommentTime } from "@/lib/comments";
@@ -85,8 +87,13 @@ export default function TaskDetailPanel({
     } catch { setComment(text); }
   }
 
+  const coverCandidates = taskCoverCandidates(task);
+
   return (
     <aside className="tdp">
+      {coverCandidates.length ? (
+        <CardCover candidates={coverCandidates} title={task.title} className="tdp-cover" />
+      ) : null}
       <div className="tdp-top">
         <div className="tdp-top-actions">
           <button className="tdp-icon-btn" onClick={() => void closeAfterSave(onExpand)} aria-label="Expandir">↗</button>

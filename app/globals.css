@@ -2349,6 +2349,23 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 /* Sangria até a borda: a margem negativa anula o padding do card, então a capa
    encosta no canto arredondado em vez de flutuar numa moldura. */
 .kb-card-cover { margin: -14px -14px 12px; }
+
+/* No modal a capa é uma FAIXA: larga e fina, no topo, acima do cabeçalho.
+   Não repete a caixa quadrada do quadro porque ali a capa identifica o card
+   numa coluna, e aqui o card já está aberto e identificado — uma capa alta
+   empurraria o conteúdo todo para baixo da dobra. O recorte continua sendo
+   `cover` (regra de .card-cover), então a faixa corta a imagem no centro.
+   Declarada DEPOIS de .card-cover: mesma especificidade, vence por ordem —
+   ver a nota sobre cascata no CLAUDE.md. */
+.tm-cover { aspect-ratio: 5 / 1; border-radius: 20px 20px 0 0; }
+/* Com a faixa presente, quem arredonda o topo do modal é ela — o cabeçalho
+   passa a ser um bloco reto logo abaixo. */
+.tm-cover + .tm-head { border-radius: 0; }
+
+/* No painel lateral vale a mesma ideia de faixa, um pouco menos fina porque a
+   coluna tem 340px: a 5/1 a imagem viraria um filete de 68px. A sangria anula
+   o padding do painel (18px em cima, 20px nas laterais). */
+.tdp-cover { aspect-ratio: 3 / 1; border-radius: 15px 15px 0 0; margin: -18px -20px 12px; }
 .kb-card-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; row-gap: 6px; margin-bottom: 8px; }
 .kb-type { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; text-transform: uppercase; }
 .kb-type.t-criativo { background: var(--a-teal-soft); color: var(--a-teal-text); }

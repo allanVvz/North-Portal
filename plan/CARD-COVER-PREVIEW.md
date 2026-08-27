@@ -22,6 +22,21 @@ com capa 16:9 continuam medindo o mesmo.
 O texto, a evolução e o rodapé continuam **abaixo** da capa, na ordem que já
 têm. A capa entra por cima, não no meio.
 
+### Onde a capa aparece
+
+| Superfície | Formato | Por quê |
+|---|---|---|
+| Card no quadro (Tarefas, Rotinas) | quadrado, `1/1` | identifica o card numa coluna; quadrado mantém a altura previsível |
+| Modal do card (`.tm-cover`) | faixa larga e fina, `5/1` | o card já está aberto e identificado — capa alta empurraria o conteúdo para baixo da dobra |
+| Painel lateral (`.tdp-cover`) | faixa, `3/1` | mesma ideia, menos fina: a 5/1 numa coluna de 340px a imagem viraria um filete de 68px |
+
+Modal e painel são as duas superfícies do mesmo clique — qual abre depende de
+uma preferência de UI (`sidebarEnabled` em `KanbanBoard`), então as duas
+precisam da capa.
+
+No modal a capa lê a descrição do **rascunho**, não a salva: colar um link do
+Drive na descrição mostra a capa na hora, antes de salvar.
+
 ### Enquadramento
 
 **A capa sempre preenche a caixa e corta o que sobra** — deitada ou em pé,
@@ -152,8 +167,20 @@ antes de existir capa. Nenhuma tela quebra.
 ### Cobertura real hoje
 
 Sem conta de serviço, a capa depende do arquivo estar compartilhado como
-"qualquer pessoa com o link". Na amostra de produção isso valia para **2 de 12**
-arquivos. Ou seja: a capa **funciona**, mas aparece numa minoria dos cards.
+"qualquer pessoa com o link". Medido card a card em produção — os 13 cards que
+têm link do Drive, todos os candidatos testados:
+
+| Resultado | Cards |
+|---|---|
+| Ganham capa | **4** |
+| Sem nenhum arquivo acessível | **9** |
+
+Dos 4 que ganham, **3 só ganham porque a varredura pula candidato**: o 1º e o
+2º link não abrem, o 3º abre. Isso confirma que a lista de candidatos está
+fazendo o trabalho dela.
+
+Os 9 restantes não são problema de ordem nem de parser — nenhum dos arquivos
+deles responde miniatura. É compartilhamento, e só se resolve fora do código.
 
 Para cobrir o resto há dois caminhos, e eles se somam:
 

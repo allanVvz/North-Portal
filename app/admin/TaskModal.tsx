@@ -13,6 +13,8 @@ import {
   TONES, commentsOf, initials,
 } from "./kanbanShared";
 import CommentAvatar from "./CommentAvatar";
+import CardCover from "./CardCover";
+import { taskCoverCandidates } from "@/lib/taskCover";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
@@ -906,12 +908,23 @@ export default function TaskModal({
     setBusy(false);
   }
 
+  // A capa do modal usa a descrição do RASCUNHO (não a salva), então colar um
+  // link do Drive na descrição mostra a capa na hora, antes de salvar. Os
+  // comentários vêm do card salvo — não são editáveis aqui.
+  // Memoizado porque isto varre descrição + thread inteira, e rodaria a cada
+  // tecla digitada no título.
+  const coverCandidates = useMemo(
+    () => taskCoverCandidates({ description: draft.description, payload: task?.payload }),
+    [draft.description, task?.payload],
+  );
+
   const stepIdx = STATUS_ORDER.indexOf(draft.status);
 
   return (
     <>
     <div className="kb-modal-backdrop" onClick={() => { if (!busy) void closeAfterSave(); }}>
       <div className={`tm tm-tone-${tone} tm-lg`} onClick={(e) => e.stopPropagation()}>
+        {coverCandidates.length ? <CardCover candidates={coverCandidates} title={draft.title || "card"} className="tm-cover" /> : null}
         {mode === "edit" ? (
           <div className={`tm-head tm-head-tone-${tone}`}>
             <div className="tm-head-identity">
