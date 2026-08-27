@@ -585,7 +585,30 @@ export const agencyProfileSchema = z.object({
   note: z.string().max(MAX_TEXT_BYTES),
 });
 export const meProfileSchema = z.object({
-  full_name: z.string().trim().min(1).max(MAX_TEXT_BYTES),
+  full_name: z.string().trim().min(1).max(MAX_TEXT_BYTES).optional(),
+  bio: z.string().trim().max(500).nullable().optional(),
+  avatar_url: z.string().trim().max(2000).nullable().optional(),
+}).refine((v) => v.full_name !== undefined || v.bio !== undefined || v.avatar_url !== undefined, {
+  message: "Informe ao menos um campo.",
+});
+
+// PATCH /api/admin/team/[id] — admin editando o cargo de outro perfil.
+// Texto livre de propósito (ver migration 20260827000000): não é enum, só
+// decide quem aparece em Quem Somos (cargo preenchido = aparece).
+export const teamCargoPatchSchema = z.object({
+  cargo: z.string().trim().max(40).nullable(),
+});
+
+export const RESPONSIBILITY_KEYS = ["edicao", "captacao", "roteiro", "metricas", "aprovacao"] as const;
+export type ResponsibilityKey = (typeof RESPONSIBILITY_KEYS)[number];
+
+// PATCH /api/admin/team/responsibilities — liga/desliga uma atribuição por vez
+// (mesmo padrão de toggle unitário do resto de Configurações, não substitui a
+// matriz inteira).
+export const responsibilityPatchSchema = z.object({
+  responsibility: z.enum(RESPONSIBILITY_KEYS),
+  profileId: z.string().uuid(),
+  assigned: z.boolean(),
 });
 
 // PATCH /api/admin/notifications — mark either an explicit id list, or the

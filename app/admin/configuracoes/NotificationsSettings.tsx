@@ -12,12 +12,9 @@ export default function NotificationsSettings() {
 
   return (
     <div className="set-card">
-      <div className="set-appearance-head">
-        <div>
-          <h2 className="set-h">Notificações</h2>
-          <p className="admin-sub">Escolha quais tipos de notificação você quer receber no sino e na Home. Vale só neste navegador.</p>
-        </div>
-      </div>
+      <p className="set-h set-h-inline">
+        Notificações <span>— escolha quais tipos você quer receber no sino e na Home. Vale só neste navegador.</span>
+      </p>
 
       <div className="set-visibility-divider" />
 

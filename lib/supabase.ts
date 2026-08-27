@@ -31,9 +31,11 @@ import {
   type ReviewerCandidate,
   type RecurringCadence,
   type RecurringTaskRecord,
+  type ResponsibilityKey,
   type TaskRecord,
   type TaskStatus,
 } from "./validation";
+import { createAdminClient } from "./supabase/admin";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
 import { AI_PROVIDER_SETTINGS_DEFAULT, type AiProviderSettings, type AiVendor } from "./aiProviders";
@@ -2739,6 +2741,9 @@ export type TeamMember = {
   role: "admin" | "client";
   client_id: string | null;
   level: string | null;
+  // Texto livre (ver migration 20260827000000): não é enum, só decide quem
+  // aparece em "Quem Somos" (cargo preenchido = aparece).
+  cargo: string | null;
 };
 
 // Best-effort display name for the sidebar account card; falls back to null
@@ -2757,14 +2762,83 @@ export async function updateProfileName(userId: string, fullName: string): Promi
   if (error) fail(error);
 }
 
+// O próprio perfil, incluindo os campos que MyAccountForm exibe abaixo do
+// nome (bio, avatar) — getProfileName acima continua servindo os call sites
+// que só precisam do nome (Home, layout, autoria de comentário do cliente).
+export async function getMyProfile(userId: string): Promise<{ bio: string | null; avatar_url: string | null }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("profiles").select("bio,avatar_url").eq("id", userId).limit(1);
+  if (error) fail(error);
+  const row = data?.[0] as { bio: string | null; avatar_url: string | null } | undefined;
+  return { bio: row?.bio ?? null, avatar_url: row?.avatar_url ?? null };
+}
+
+// Patch parcial do próprio perfil — substitui updateProfileName no único call
+// site que a usava (POST /api/admin/me), que agora também aceita bio/avatar.
+export async function updateMyProfile(userId: string, patch: { full_name?: string; bio?: string | null; avatar_url?: string | null }): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("profiles").update(patch).eq("id", userId);
+  if (error) fail(error);
+}
+
+// Admin editando o cargo de QUALQUER perfil (diferente de updateMyProfile,
+// que só grava no próprio). Sem checar role aqui — a rota chamadora já exige
+// requireAdmin(); nada impede (de propósito) atribuir cargo a um perfil
+// client, embora a UI só ofereça o campo para admins.
+export async function updateTeamMemberCargo(profileId: string, cargo: string | null): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("profiles").update({ cargo }).eq("id", profileId);
+  if (error) fail(error);
+}
+
 export async function listTeam(): Promise<TeamMember[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,full_name,role,client_id,level")
+    .select("id,full_name,role,client_id,level,cargo")
     .order("role");
   if (error) fail(error);
   return (data as TeamMember[] | null) ?? [];
+}
+
+export type ResponsibilityAssignment = { responsibility: ResponsibilityKey; profile_id: string };
+
+export async function listResponsibilityAssignments(): Promise<ResponsibilityAssignment[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("responsibility_assignments").select("responsibility,profile_id");
+  if (error) fail(error);
+  return (data as ResponsibilityAssignment[] | null) ?? [];
+}
+
+export async function setResponsibilityAssignment(responsibility: ResponsibilityKey, profileId: string, assigned: boolean): Promise<void> {
+  const supabase = await createClient();
+  if (assigned) {
+    const { error } = await supabase.from("responsibility_assignments").upsert({ responsibility, profile_id: profileId }, { onConflict: "responsibility,profile_id" });
+    if (error) fail(error);
+    return;
+  }
+  const { error } = await supabase.from("responsibility_assignments").delete().eq("responsibility", responsibility).eq("profile_id", profileId);
+  if (error) fail(error);
+}
+
+export type PublicTeamProfile = { full_name: string | null; cargo: string | null; bio: string | null; avatar_url: string | null };
+
+/**
+ * Dados de "Quem Somos" — a única leitura de `profiles` feita fora de
+ * /admin, por isso via service role (a RLS de profiles é self/admin
+ * autenticado; um visitante público não tem sessão nenhuma). Seleciona SÓ
+ * essas 4 colunas, nunca email/role/client_id — cargo preenchido é o único
+ * critério de "isso é público".
+ */
+export async function listPublicTeamProfiles(): Promise<PublicTeamProfile[]> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("profiles")
+    .select("full_name,cargo,bio,avatar_url")
+    .not("cargo", "is", null)
+    .order("full_name");
+  if (error) fail(error);
+  return (data as PublicTeamProfile[] | null) ?? [];
 }
 
 // Reviewer candidates for a task — split by stage, since a reviewer is never

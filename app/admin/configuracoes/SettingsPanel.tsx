@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AgencyProfile, CheckpointTemplate, LegalDoc, TeamMember } from "@/lib/supabase";
+import type { AgencyProfile, CheckpointTemplate, LegalDoc, ResponsibilityAssignment, TeamMember } from "@/lib/supabase";
+import { uploadAvatarFile } from "@/lib/avatarUpload";
+import type { ResponsibilityKey } from "@/lib/validation";
 import { createClient } from "@/lib/supabase/client";
 import CheckpointTemplates from "./CheckpointTemplates";
 import EtapasPanel from "./EtapasPanel";
@@ -12,8 +14,6 @@ import WindsorIntegration from "./WindsorIntegration";
 import NotificationsSettings from "./NotificationsSettings";
 import LandingPagesSettings from "./LandingPagesSettings";
 import { useSidebarEnabledPref } from "../kanbanPrefs";
-
-const PROFILE_PHOTO_STORAGE_KEY = "admin-profile-photo-mock";
 
 // Automações foi promovida de aba daqui pra tela própria no menu principal
 // (/admin/automacoes) em 2026-08-21 — ver plan/AUTOMACOES-RELATORIO-TRAFEGO.md.
@@ -45,13 +45,15 @@ export default function SettingsPanel({
   checkpointTemplates,
   clients,
   currentUser,
+  responsibilities,
 }: {
   legalDocs: LegalDoc[];
   agency: AgencyProfile;
   team: TeamMember[];
   checkpointTemplates: CheckpointTemplate[];
   clients: { slug: string; name: string }[];
-  currentUser: { fullName: string; email: string };
+  currentUser: { fullName: string; email: string; bio: string | null; avatarUrl: string | null };
+  responsibilities: ResponsibilityAssignment[];
 }) {
   const [tab, setTab] = useState<Tab>("perfil");
 
@@ -77,7 +79,7 @@ export default function SettingsPanel({
             <AgencyForm initial={agency} />
           </>
         ) : null}
-        {tab === "equipe" ? <TeamList team={team} /> : null}
+        {tab === "equipe" ? <TeamList team={team} initialAssignments={responsibilities} /> : null}
         {tab === "politicas" ? (
           <>
             <LegalDocs initial={legalDocs} />
@@ -113,12 +115,18 @@ function initialsOf(name: string): string {
   return words.length ? words.slice(0, 2).map((w) => w[0]).join("").toUpperCase() : "AD";
 }
 
-function MyAccountForm({ initial }: { initial: { fullName: string; email: string } }) {
-  const [photo, setPhoto] = useState<string | null>(null);
+function MyAccountForm({ initial }: { initial: { fullName: string; email: string; bio: string | null; avatarUrl: string | null } }) {
+  const [photo, setPhoto] = useState<string | null>(initial.avatarUrl);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoMsg, setPhotoMsg] = useState("");
 
   const [fullName, setFullName] = useState(initial.fullName || initial.email);
   const [nameBusy, setNameBusy] = useState(false);
   const [nameMsg, setNameMsg] = useState("");
+
+  const [bio, setBio] = useState(initial.bio ?? "");
+  const [bioBusy, setBioBusy] = useState(false);
+  const [bioMsg, setBioMsg] = useState("");
 
   const [email, setEmail] = useState(initial.email);
   const [emailBusy, setEmailBusy] = useState(false);
@@ -129,26 +137,38 @@ function MyAccountForm({ initial }: { initial: { fullName: string; email: string
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState("");
 
-  useEffect(() => {
-    setPhoto(window.localStorage.getItem(PROFILE_PHOTO_STORAGE_KEY));
-  }, []);
-
-  function onPhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function onPhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      setPhoto(dataUrl);
-      window.localStorage.setItem(PROFILE_PHOTO_STORAGE_KEY, dataUrl);
-    };
-    reader.readAsDataURL(file);
     event.target.value = "";
+    if (!file) return;
+    setPhotoBusy(true);
+    setPhotoMsg("");
+    try {
+      const url = await uploadAvatarFile(file);
+      const res = await fetch("/api/admin/me", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ avatar_url: url }),
+      });
+      if (!res.ok) throw new Error("Não foi possível salvar a foto.");
+      setPhoto(url);
+    } catch (err) {
+      setPhotoMsg(err instanceof Error ? err.message : "Não foi possível enviar a foto.");
+    }
+    setPhotoBusy(false);
   }
 
-  function removePhoto() {
-    setPhoto(null);
-    window.localStorage.removeItem(PROFILE_PHOTO_STORAGE_KEY);
+  async function removePhoto() {
+    setPhotoBusy(true);
+    setPhotoMsg("");
+    try {
+      const res = await fetch("/api/admin/me", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ avatar_url: null }),
+      });
+      if (!res.ok) throw new Error("Não foi possível remover a foto.");
+      setPhoto(null);
+    } catch (err) {
+      setPhotoMsg(err instanceof Error ? err.message : "Não foi possível remover a foto.");
+    }
+    setPhotoBusy(false);
   }
 
   async function saveName() {
@@ -165,6 +185,22 @@ function MyAccountForm({ initial }: { initial: { fullName: string; email: string
       setNameMsg("Não foi possível salvar.");
     }
     setNameBusy(false);
+  }
+
+  async function saveBio() {
+    setBioBusy(true);
+    setBioMsg("");
+    try {
+      const res = await fetch("/api/admin/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bio: bio.trim() || null }),
+      });
+      setBioMsg(res.ok ? "Salvo." : "Não foi possível salvar.");
+    } catch {
+      setBioMsg("Não foi possível salvar.");
+    }
+    setBioBusy(false);
   }
 
   async function saveEmail() {
@@ -213,17 +249,17 @@ function MyAccountForm({ initial }: { initial: { fullName: string; email: string
       <p className="admin-sub">Seus dados pessoais de acesso.</p>
 
       <div className="set-avatar-row">
-        {/* eslint-disable-next-line @next/next/no-img-element -- local preview of a not-yet-uploaded file; no remote optimization applies */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- public storage URL, sized fixed avatar, no remote-optimization loader configured for it */}
         <span className="set-avatar-big">{photo ? <img src={photo} alt="" /> : initialsOf(fullName)}</span>
         <div className="set-avatar-actions">
           <div className="set-avatar-buttons">
             <label className="admin-btn ghost">
-              Escolher foto
-              <input type="file" accept="image/*" onChange={onPhotoChange} className="set-avatar-input" />
+              {photoBusy ? "Enviando…" : "Escolher foto"}
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onPhotoChange} className="set-avatar-input" disabled={photoBusy} />
             </label>
-            {photo ? <button className="admin-btn ghost" onClick={removePhoto}>Remover</button> : null}
+            {photo ? <button className="admin-btn ghost" onClick={removePhoto} disabled={photoBusy}>Remover</button> : null}
           </div>
-          <p className="set-note-inline">Foto de exemplo, salva só neste navegador — upload real chega quando tivermos um bucket de armazenamento configurado.</p>
+          {photoMsg ? <p className="set-note-inline">{photoMsg}</p> : null}
         </div>
       </div>
 
@@ -236,6 +272,20 @@ function MyAccountForm({ initial }: { initial: { fullName: string; email: string
         {nameMsg ? <span className="set-msg">{nameMsg}</span> : <span />}
         <button className="admin-btn primary" onClick={saveName} disabled={nameBusy || !fullName.trim()}>
           {nameBusy ? "Salvando…" : "Salvar nome"}
+        </button>
+      </div>
+
+      {/* Abaixo do nome de usuário, de propósito — é a única outra coisa que
+          esta seção ganhou. Alimenta a bio pública em "Quem Somos" quando o
+          perfil tem cargo preenchido (ver ProfileTile/listPublicTeamProfiles);
+          para quem não é C-level, fica só um registro interno sem uso hoje. */}
+      <label className="admin-field"><span>Descrição</span>
+        <textarea rows={3} maxLength={500} value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Uma frase curta sobre seu papel na North." />
+      </label>
+      <div className="set-actions">
+        {bioMsg ? <span className="set-msg">{bioMsg}</span> : <span />}
+        <button className="admin-btn primary" onClick={saveBio} disabled={bioBusy}>
+          {bioBusy ? "Salvando…" : "Salvar descrição"}
         </button>
       </div>
 
@@ -316,21 +366,117 @@ function AgencyForm({ initial }: { initial: AgencyProfile }) {
   );
 }
 
-function TeamList({ team }: { team: TeamMember[] }) {
+// As 5 frentes como você descreveu. Cadastro informativo por enquanto — não
+// influencia nenhum picker de Responsável/Revisor/Aprovador nos cards; a
+// tabela por trás (responsibility_assignments) foi desenhada pra não exigir
+// retrabalho se isso um dia virar sugestão automática.
+const RESPONSIBILITIES: { key: ResponsibilityKey; label: string }[] = [
+  { key: "edicao", label: "Edição" },
+  { key: "captacao", label: "Captação" },
+  { key: "roteiro", label: "Roteiro" },
+  { key: "metricas", label: "Métricas" },
+  { key: "aprovacao", label: "Aprovação" },
+];
+
+function TeamList({ team, initialAssignments }: { team: TeamMember[]; initialAssignments: ResponsibilityAssignment[] }) {
+  const [members, setMembers] = useState(team);
+  const admins = members.filter((m) => m.role === "admin");
+
+  const [assignments, setAssignments] = useState<Record<string, Set<string>>>(() => {
+    const map: Record<string, Set<string>> = {};
+    for (const row of initialAssignments) {
+      (map[row.responsibility] ??= new Set()).add(row.profile_id);
+    }
+    return map;
+  });
+  const [respMsg, setRespMsg] = useState("");
+
+  async function saveCargo(id: string, cargo: string) {
+    const trimmed = cargo.trim();
+    setMembers((rows) => rows.map((m) => (m.id === id ? { ...m, cargo: trimmed || null } : m)));
+    try {
+      const res = await fetch(`/api/admin/team/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cargo: trimmed || null }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      // silencioso de propósito: campo de texto solto, sem indicador de erro
+      // dedicado — o valor salvo será revalidado no próximo carregamento.
+    }
+  }
+
+  async function toggleResponsibility(responsibility: ResponsibilityKey, profileId: string, checked: boolean) {
+    setRespMsg("");
+    setAssignments((prev) => {
+      const next: Record<string, Set<string>> = { ...prev, [responsibility]: new Set(prev[responsibility]) };
+      if (checked) next[responsibility].add(profileId); else next[responsibility].delete(profileId);
+      return next;
+    });
+    try {
+      const res = await fetch("/api/admin/team/responsibilities", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ responsibility, profileId, assigned: checked }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setRespMsg("Não foi possível salvar — tente de novo.");
+    }
+  }
+
   return (
-    <div className="set-card">
-      <h2 className="set-h">Equipe & papéis</h2>
-      <p className="admin-sub">Usuários com acesso à plataforma. Novos acessos são criados via <code>scripts/create-user.mjs</code>.</p>
-      <ul className="set-team">
-        {team.map((m) => (
-          <li key={m.id} className="set-team-row">
-            <span className="set-team-name">{m.full_name ?? "—"}</span>
-            <span className={`set-role ${m.role}`}>{m.role === "admin" ? "Admin North" : "Cliente"}</span>
-          </li>
-        ))}
-        {team.length === 0 ? <li className="admin-sub">Nenhum perfil.</li> : null}
-      </ul>
-    </div>
+    <>
+      <div className="set-card">
+        <h2 className="set-h">Equipe & papéis</h2>
+        <p className="admin-sub">Usuários com acesso à plataforma. Novos acessos são criados via <code>scripts/create-user.mjs</code>.</p>
+        <ul className="set-team">
+          {members.map((m) => (
+            <li key={m.id} className="set-team-row">
+              <span className="set-team-name">{m.full_name ?? "—"}</span>
+              {m.role === "admin" ? (
+                <input
+                  className="set-cargo-input"
+                  defaultValue={m.cargo ?? ""}
+                  placeholder="Cargo (opcional)"
+                  maxLength={40}
+                  onBlur={(e) => { if (e.target.value.trim() !== (m.cargo ?? "")) void saveCargo(m.id, e.target.value); }}
+                />
+              ) : null}
+              <span className={`set-role ${m.role}`}>{m.role === "admin" ? "Admin" : "Cliente"}</span>
+            </li>
+          ))}
+          {members.length === 0 ? <li className="admin-sub">Nenhum perfil.</li> : null}
+        </ul>
+      </div>
+
+      <div className="set-card">
+        <h2 className="set-h">Responsabilidades</h2>
+        <p className="admin-sub">Quem cuida de cada frente — cadastro informativo, ainda não sugere nem restringe Responsável/Revisor/Aprovador nos cards.</p>
+        {respMsg ? <p className="set-msg">{respMsg}</p> : null}
+        {admins.length === 0 ? (
+          <p className="admin-sub">Nenhum admin cadastrado.</p>
+        ) : (
+          <div className="set-resp-table" style={{ gridTemplateColumns: `140px repeat(${admins.length}, 1fr)` }}>
+            <div className="set-resp-row set-resp-head">
+              <span />
+              {admins.map((a) => <span className="set-resp-col-label" key={a.id}>{a.full_name}</span>)}
+            </div>
+            {RESPONSIBILITIES.map((r) => (
+              <div className="set-resp-row" key={r.key}>
+                <span className="set-resp-label">{r.label}</span>
+                {admins.map((a) => (
+                  <label className="set-resp-check" key={a.id}>
+                    <input
+                      type="checkbox"
+                      checked={assignments[r.key]?.has(a.id) ?? false}
+                      onChange={(e) => void toggleResponsibility(r.key, a.id, e.target.checked)}
+                    />
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

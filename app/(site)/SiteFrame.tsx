@@ -50,7 +50,7 @@ export default function SiteFrame({ children }: { children: React.ReactNode }) {
           >
             {theme === "light" ? "☾" : "☀"}
           </button>
-          <Link href="/login" className="login-link">Área do cliente</Link>
+          <Link href="/login" className="login-link">Login</Link>
           <button type="button" className="site-burger" onClick={() => setMenuOpen((v) => !v)} aria-label={menuOpen ? "Fechar menu" : "Abrir menu"} aria-expanded={menuOpen}><span /><span /></button>
         </div>
       </header>
