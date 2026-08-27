@@ -144,11 +144,9 @@ function MyAccountForm({ initial }: { initial: { fullName: string; email: string
     setPhotoBusy(true);
     setPhotoMsg("");
     try {
+      // uploadAvatarFile já grava avatar_url no perfil (rota de servidor faz
+      // upload + PATCH numa chamada só) — não precisa de um segundo request aqui.
       const url = await uploadAvatarFile(file);
-      const res = await fetch("/api/admin/me", {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ avatar_url: url }),
-      });
-      if (!res.ok) throw new Error("Não foi possível salvar a foto.");
       setPhoto(url);
     } catch (err) {
       setPhotoMsg(err instanceof Error ? err.message : "Não foi possível enviar a foto.");
