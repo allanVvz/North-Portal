@@ -118,6 +118,13 @@ A única situação em que **não** há queda para o público é quando a API re
 e disse que o arquivo é PDF/planilha/apresentação: aí sabemos o tipo e a
 resposta é "não vira capa". Cair para o público furaria a regra.
 
+**Limitação conhecida do caminho público**: ele não informa o tipo do arquivo,
+só devolve a imagem. Então um PDF compartilhado publicamente e citado num
+comentário *pode* virar capa enquanto a conta de serviço não estiver
+configurada — a regra "só imagem e vídeo" só é aplicável pelo caminho da API,
+que é quem sabe o `mimeType`. Preferi isso a não ter capa nenhuma; configurar a
+conta de serviço resolve junto com o resto.
+
 Três escolhas que valem registro:
 
 **Por que uma rota por arquivo, e não resolver tudo na consulta da lista.** O
