@@ -3049,6 +3049,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    the comment thread (see CommentText's showLinkPreview). */
 .gdrive-preview { position: relative; display: block; width: 100%; max-width: 420px; height: 200px; margin: 8px 0 2px; border: 1px solid var(--a-border); border-radius: 10px; overflow: hidden; background: var(--a-surface); }
 .gdrive-preview iframe { display: block; width: 100%; height: 100%; border: 0; }
+/* Prévia de PASTA dentro do comentário: a listagem do Drive é feita para uma
+   aba inteira e chega grande demais numa coluna estreita. Mesmo tratamento do
+   navegador de pastas — `zoom` encolhe o conteúdo, a largura fica em 100%
+   (porcentagem já resolve no espaço escalado) e só a altura compensa. */
+.gdrive-preview.is-folder { height: 200px; }
+.gdrive-preview.is-folder iframe { --embed-zoom: .62; zoom: var(--embed-zoom); width: 100%; height: calc(100% / var(--embed-zoom)); }
 .gdrive-preview-loading { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: var(--a-inset, var(--np-surface-2)); color: var(--a-muted); font-size: 12px; }
 .tm-comment-input { display: flex; gap: 8px; }
 .tm-comment-input input, .tm-comment-input textarea { flex: 1; background: var(--a-surface); }
@@ -3636,10 +3642,6 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-side .tm-commentsbox { flex: 1; display: flex; flex-direction: column; min-height: 0; margin: 0; background: none; padding: 0; }
 .tm-side .tm-box-label { margin: 0 0 12px; }
 .tm-side .tm-comments { flex: 1; max-height: none; min-height: 220px; }
-/* Com a caixa de pastas presente há menos altura para repartir. Sem baixar este
-   piso, os dois juntos passavam da coluna em tela mais baixa — a conversa
-   continua rolando por dentro, que é o comportamento dela de qualquer forma. */
-.tm-side:has(.tm-drivebox) .tm-comments { min-height: 140px; }
 .tm-layout:has(.tm-side) .tm-main { grid-column: 1; grid-row: 1; }
 .tm-layout:has(.tm-side) .tm-side { grid-column: 2; grid-row: 1; }
 
@@ -4389,13 +4391,31 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 /* Dentro do card o espaço é menor que no cadastro do cliente — mas não muito
    menor: a 0.5 os nomes dos arquivos ficavam ilegíveis, que é o oposto de uma
    prévia útil. */
-.tm-drivebox .drive-browser-embed { --embed-zoom: .68; height: calc(220px / var(--embed-zoom)); }
-.tm-drivebox .drive-thumbs { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
+/* Na coluna principal há bem mais largura que na lateral onde isto morava
+   antes, então o zoom pode ser mais generoso. */
+.tm-materials .drive-browser-embed { --embed-zoom: .74; height: calc(175px / var(--embed-zoom)); }
+.tm-materials .drive-thumbs { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
 
-/* A caixa de pastas no card não pode crescer: .tm-side é um flex column onde
-   quem encolhe é a caixa de comentários. Sem `flex: 0 0 auto` + altura contida,
-   cada pasta empurrava a conversa para fora do modal. */
-.tm-side .tm-drivebox { flex: 0 0 auto; margin: 0 0 14px; padding: 0; background: none; }
+/* "Materiais": a pasta do Drive e os arquivos anexados no mesmo bloco, na
+   coluna principal, abaixo da descrição. Antes a pasta era uma caixa solta na
+   coluna de comentários — o que partia "onde está o material deste card" em
+   dois lugares distantes, e ainda disputava altura com a conversa.
+
+   Uma coluna flexível para a pasta e uma coluna `auto` para os anexos: com só
+   um dos dois presente, o outro mede zero e o bloco vira um retângulo único,
+   sem regra condicional. `margin-top: auto` mantém o bloco no rodapé da coluna,
+   como a tira de anexos já fazia. */
+.tm-materials {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start;
+  margin: auto 30px 24px; padding: 14px 16px;
+  background: var(--a-inset); border-radius: 14px;
+}
+.tm-materials .tm-docs { margin: 0; }
+.tm-folders { min-width: 0; }
+/* Estreito: pasta e anexos empilham em vez de espremer a grade do Drive. */
+@media (max-width: 1100px) {
+  .tm-materials { grid-template-columns: minmax(0, 1fr); }
+}
 /* Seletor de pasta, só aparece quando o card cita mais de uma. */
 .drive-pick { display: flex; gap: 6px; margin-bottom: 8px; }
 .drive-pick-tab {

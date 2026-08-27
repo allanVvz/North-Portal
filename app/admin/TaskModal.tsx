@@ -1358,13 +1358,22 @@ export default function TaskModal({
 
             {error ? <p className="admin-error">{error}</p> : null}
 
-            {mode === "edit" && taskDocs.length > 0 ? (
-              <div className="tm-docs">
-                {taskDocs.map((d) => (
-                  <button type="button" key={d.id} className="tm-doc-thumb" title={d.name} aria-label={d.name} onClick={() => setPreviewDoc(d)}>
-                    <span className="tm-doc-badge">{fileTypeLabel(d)}</span>
-                  </button>
-                ))}
+            {/* Materiais do card: a pasta do Drive e os arquivos anexados no
+                mesmo bloco, porque respondem à mesma pergunta — "onde está o
+                material disto?". Compõem um retângulo só quando há apenas um
+                dos dois, e duas colunas quando há os dois. */}
+            {mode === "edit" && (driveFolders.length > 0 || taskDocs.length > 0) ? (
+              <div className="tm-materials">
+                {driveFolders.length > 0 ? <CardDriveFolders folders={driveFolders} /> : null}
+                {taskDocs.length > 0 ? (
+                  <div className="tm-docs">
+                    {taskDocs.map((d) => (
+                      <button type="button" key={d.id} className="tm-doc-thumb" title={d.name} aria-label={d.name} onClick={() => setPreviewDoc(d)}>
+                        <span className="tm-doc-badge">{fileTypeLabel(d)}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1381,7 +1390,6 @@ export default function TaskModal({
                   <b>{formatAbsoluteTime(liveTask.created_at)}</b>
                 </p>
               ) : null}
-              {driveFolders.length ? <CardDriveFolders folders={driveFolders} /> : null}
               <div className="tm-box tm-commentsbox">
                 <p className="tm-box-label">Comentários e atividade</p>
                 <div className="tm-comments">

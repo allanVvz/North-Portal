@@ -46,6 +46,10 @@ export default function CardDriveFolders({ folders }: { folders: TaskDriveFolder
   const visible = folders.filter((f) => f.certain || resolved[f.folderId]);
   const [picked, setPicked] = useState(0);
 
+  // Sem caixa própria: quem monta a moldura é o bloco "Materiais" do modal,
+  // que junta a pasta e os anexos numa composição só. Antes isto era uma caixa
+  // solta na coluna de comentários, o que dividia "onde estão os arquivos deste
+  // card" em dois lugares distantes.
   if (!visible.length) return null;
 
   // UMA pasta por vez, com seletor quando há mais de uma.
@@ -60,8 +64,7 @@ export default function CardDriveFolders({ folders }: { folders: TaskDriveFolder
   const current = visible[Math.min(picked, visible.length - 1)];
 
   return (
-    <div className="tm-box tm-drivebox">
-      <p className="tm-box-label">{visible.length === 1 ? "Pasta do Drive" : "Pastas do Drive"}</p>
+    <div className="tm-folders">
       {visible.length > 1 ? (
         <div className="drive-pick" role="tablist" aria-label="Pastas citadas no card">
           {visible.map((folder, i) => (

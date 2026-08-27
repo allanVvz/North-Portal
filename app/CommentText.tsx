@@ -16,7 +16,10 @@ import GoogleDrivePreview from "@/app/GoogleDrivePreview";
 // portal, etc.) keep the plain-link behavior unchanged.
 //
 // showLinkPreview is opt-in too: when on, a link recognized as Google
-// Drive/Docs/Sheets/Slides also renders an inline preview right after it.
+// Drive/Docs/Sheets/Slides also renders an inline preview right after it —
+// cada link ganha a SUA prévia, inclusive vários no mesmo comentário. A URL
+// crua vai junto do link parseado porque a forma "?id=" não diz se é pasta ou
+// arquivo, e quem resolve essa ambiguidade é o GoogleDrivePreview.
 // Off by default so call sites outside the task card (client portal,
 // TaskDetailPanel, ...) render exactly as before.
 export default function CommentText({ text, onLinkClick, showLinkPreview = false }: { text: string; onLinkClick?: (url: string) => boolean; showLinkPreview?: boolean }) {
@@ -35,7 +38,7 @@ export default function CommentText({ text, onLinkClick, showLinkPreview = false
             >
               {part.label ?? part.url}
             </a>
-            {drive ? <GoogleDrivePreview link={drive} /> : null}
+            {drive ? <GoogleDrivePreview link={drive} url={part.url} /> : null}
           </Fragment>
         );
       })}
