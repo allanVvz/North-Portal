@@ -2373,7 +2373,18 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    cabeçalho continua sendo o ícone. */
 .tm-cover + .tm-head {
   position: relative; z-index: 1;
-  background: color-mix(in srgb, var(--a-surface) 30%, transparent);
+  /* Véu em gradiente, não em opacidade única. A 30% chapado o título ficava
+     em cima da foto sem contraste nenhum — legível só por sorte, conforme a
+     imagem. O gradiente abre onde o texto está (esquerda, onde ficam ícone,
+     título e cliente) e afina para a direita, que é onde a capa aparece de
+     fato. A capa continua visível; o título continua legível. */
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--a-surface) 92%, transparent) 0%,
+    color-mix(in srgb, var(--a-surface) 74%, transparent) 30%,
+    color-mix(in srgb, var(--a-surface) 34%, transparent) 58%,
+    color-mix(in srgb, var(--a-surface) 26%, transparent) 100%
+  );
   border-radius: 20px 20px 0 0;
 }
 
@@ -4363,14 +4374,22 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
    que se pede aqui. Assim `height: calc(300px / …)` significa "300px na tela",
    e o que muda é quanta coisa cabe dentro. */
 .drive-browser-embed {
-  --embed-zoom: .6;
+  --embed-zoom: .78;
   zoom: var(--embed-zoom);
-  width: calc(100% / var(--embed-zoom));
-  height: calc(300px / var(--embed-zoom));
+  /* A largura NÃO é dividida pelo zoom, a altura sim. Dentro de um elemento com
+     `zoom`, uma porcentagem já resolve no espaço escalado — `width: 100%` sozinho
+     preenche o pai. Dividir também, como esta regra fazia antes, aplicava a
+     compensação duas vezes e o iframe saía com o dobro da largura da coluna,
+     vazando para fora. Medida em px não tem esse comportamento, então a altura
+     continua dividida: `calc(220px / …)` significa "220px na tela". */
+  width: 100%;
+  height: calc(210px / var(--embed-zoom));
   border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface);
 }
-/* Dentro do card o espaço é bem menor que no cadastro do cliente. */
-.tm-drivebox .drive-browser-embed { --embed-zoom: .5; height: calc(170px / var(--embed-zoom)); }
+/* Dentro do card o espaço é menor que no cadastro do cliente — mas não muito
+   menor: a 0.5 os nomes dos arquivos ficavam ilegíveis, que é o oposto de uma
+   prévia útil. */
+.tm-drivebox .drive-browser-embed { --embed-zoom: .68; height: calc(220px / var(--embed-zoom)); }
 .tm-drivebox .drive-thumbs { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
 
 /* A caixa de pastas no card não pode crescer: .tm-side é um flex column onde
