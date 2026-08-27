@@ -27,7 +27,7 @@ têm. A capa entra por cima, não no meio.
 | Superfície | Formato | Por quê |
 |---|---|---|
 | Card no quadro (Tarefas, Rotinas) | quadrado, `1/1` | identifica o card numa coluna; quadrado mantém a altura previsível |
-| Modal do card (`.tm-cover`) | faixa larga e fina, `5/1` | o card já está aberto e identificado — capa alta empurraria o conteúdo para baixo da dobra |
+| Modal do card (`.tm-cover`) | **atrás do cabeçalho**, altura zero extra | ver abaixo |
 | Painel lateral (`.tdp-cover`) | faixa, `3/1` | mesma ideia, menos fina: a 5/1 numa coluna de 340px a imagem viraria um filete de 68px |
 
 Modal e painel são as duas superfícies do mesmo clique — qual abre depende de
@@ -36,6 +36,32 @@ precisam da capa.
 
 No modal a capa lê a descrição do **rascunho**, não a salva: colar um link do
 Drive na descrição mostra a capa na hora, antes de salvar.
+
+**No modal a capa não tem faixa própria.** A primeira versão empilhava uma
+faixa 5/1 acima do cabeçalho, e as duas somadas comiam altura demais justamente
+onde o conteúdo precisa caber. Agora a capa fica **atrás do cabeçalho**, na
+mesma altura (`--tm-cover-h`, a mesma variável que dá `min-height` ao header, para
+os dois nunca saírem de sincronia): custo zero de altura, e o cabeçalho vira um
+véu de 30% (`color-mix(... var(--a-surface) 30%, transparent)`) que deixa a
+imagem passar.
+
+Esse véu **substitui** o gradiente de tom do tipo de card (`.tm-head-criativo` e
+companhia) — duas classes contra uma, ganha por especificidade. É intencional:
+aqueles gradientes têm alfa de .13 a .04 e sobre uma foto não seriam vistos de
+qualquer jeito. Quem identifica o tipo no cabeçalho segue sendo o ícone.
+
+### O modal 10% maior
+
+O app inteiro roda a `--ui-scale: 0.80` (`html { zoom }`). No card aberto isso
+deixava rótulo, data e comentário pequenos demais para a tela onde se passa mais
+tempo. `.tm-lg` ganhou `--tm-scale: 1.1` + `zoom`, devolvendo ~10% **só ao
+modal**, sem tocar no resto do admin.
+
+As medidas são divididas pelo mesmo fator porque `zoom` multiplica o tamanho
+renderizado — sem dividir, o modal passaria da viewport em telas menores (a
+1280px chegaria a 1387px de largura). Abaixo de 900px o zoom extra é desligado
+(`--tm-scale: 1`): ali o modal já usa a tela inteira, e ampliar só faria
+transbordar.
 
 ### Enquadramento
 

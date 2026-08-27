@@ -2350,17 +2350,32 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    encosta no canto arredondado em vez de flutuar numa moldura. */
 .kb-card-cover { margin: -14px -14px 12px; }
 
-/* No modal a capa é uma FAIXA: larga e fina, no topo, acima do cabeçalho.
-   Não repete a caixa quadrada do quadro porque ali a capa identifica o card
-   numa coluna, e aqui o card já está aberto e identificado — uma capa alta
-   empurraria o conteúdo todo para baixo da dobra. O recorte continua sendo
-   `cover` (regra de .card-cover), então a faixa corta a imagem no centro.
+/* No modal a capa NÃO ocupa faixa própria: ela fica atrás do cabeçalho, na
+   mesma altura. Antes era uma faixa de 5/1 empilhada acima do header, e as
+   duas somadas comiam altura demais do modal — que é justamente onde o
+   conteúdo precisa caber.
+   Agora a capa é o fundo do cabeçalho: custo zero de altura, e o header
+   translúcido deixa a imagem aparecer. `aspect-ratio: auto` cancela o 1/1
+   herdado de .card-cover; a altura passa a ser a do próprio cabeçalho, via
+   --tm-cover-h, para os dois nunca saírem de sincronia.
    Declarada DEPOIS de .card-cover: mesma especificidade, vence por ordem —
    ver a nota sobre cascata no CLAUDE.md. */
-.tm-cover { aspect-ratio: 5 / 1; border-radius: 20px 20px 0 0; }
-/* Com a faixa presente, quem arredonda o topo do modal é ela — o cabeçalho
-   passa a ser um bloco reto logo abaixo. */
-.tm-cover + .tm-head { border-radius: 0; }
+.tm-cover {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 0;
+  height: var(--tm-cover-h); aspect-ratio: auto;
+  border-radius: 20px 20px 0 0;
+}
+/* O cabeçalho sobe para cima da capa e vira um véu de 30%.
+   Isto SUBSTITUI o gradiente de tom do tipo de card (.tm-head-criativo e
+   companhia) — duas classes contra uma, ganha por especificidade. É
+   intencional: aqueles gradientes têm alfa de .13 a .04 e, sobre uma foto,
+   não seriam vistos de qualquer forma; o que identifica o tipo do card no
+   cabeçalho continua sendo o ícone. */
+.tm-cover + .tm-head {
+  position: relative; z-index: 1;
+  background: color-mix(in srgb, var(--a-surface) 30%, transparent);
+  border-radius: 20px 20px 0 0;
+}
 
 /* No painel lateral vale a mesma ideia de faixa, um pouco menos fina porque a
    coluna tem 340px: a 5/1 a imagem viraria um filete de 68px. A sangria anula
@@ -2821,7 +2836,9 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tdp-comment-input input, .tdp-comment-input textarea { flex: 1; }
 
 /* ---- Task Modal (center, per-type) ---- */
-.tm { width: min(760px, 94vw); max-height: 92vh; overflow-y: auto; background: var(--a-surface); border-radius: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.32); display: flex; flex-direction: column; }
+/* `position: relative` é o que ancora .tm-cover, que fica posicionada atrás do
+   cabeçalho em vez de empilhada acima dele. */
+.tm { position: relative; width: min(760px, 94vw); max-height: 92vh; overflow-y: auto; background: var(--a-surface); border-radius: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.32); display: flex; flex-direction: column; }
 .tm-head { display: flex; align-items: center; gap: 14px; padding: 24px 30px; border-radius: 20px 20px 0 0; }
 .tm-head-plain { background: var(--a-surface); border-bottom: 1px solid var(--a-border); }
 .tm-head-plain h2 { margin: 0; font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 22px; color: var(--a-ink); }
@@ -3571,13 +3588,25 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 
 /* ---- Task modal v2: larger, two-column edit layout ---- */
 .tm-lg {
-  width: min(1680px, calc((100vw / var(--ui-scale)) - 24px));
-  height: min(880px, calc((100dvh / var(--ui-scale)) - 64px));
-  max-height: calc((100dvh / var(--ui-scale)) - 64px);
+  /* O app inteiro roda a --ui-scale (0.80) por `html { zoom }`. No card aberto
+     isso deixava rótulo, data e comentário pequenos demais para a tela onde se
+     passa mais tempo. Este zoom extra devolve ~10% só ao modal, sem mexer no
+     resto do admin.
+     As medidas são divididas pelo mesmo fator porque `zoom` multiplica o
+     tamanho renderizado: sem dividir, o modal passaria da viewport em telas
+     menores (a 1280px chegaria a 1387px de largura). */
+  --tm-scale: 1.1;
+  --tm-cover-h: 88px;
+  zoom: var(--tm-scale);
+  width: min(1680px, calc(((100vw / var(--ui-scale)) - 24px) / var(--tm-scale)));
+  height: min(880px, calc(((100dvh / var(--ui-scale)) - 64px) / var(--tm-scale)));
+  max-height: calc(((100dvh / var(--ui-scale)) - 64px) / var(--tm-scale));
   overflow-x: hidden;
   border: 1px solid color-mix(in srgb, var(--a-border) 72%, transparent);
 }
-.tm-lg .tm-head { min-height: 88px; gap: 18px; padding: 24px 32px 19px; }
+/* Mesma variável que dá altura à capa — os dois são a mesma faixa, e sair de
+   sincronia deixaria uma tira da imagem aparecendo abaixo do cabeçalho. */
+.tm-lg .tm-head { min-height: var(--tm-cover-h); gap: 18px; padding: 24px 32px 19px; }
 .tm-lg .tm-head:not(.tm-head-plain) { display: grid; grid-template-columns: minmax(260px, 460px) minmax(280px, 1fr) auto; }
 .tm-head-identity { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .tm-lg .tm-head-text { min-width: 0; max-width: 460px; }
@@ -3698,7 +3727,10 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 }
 
 @media (max-width: 900px) {
-  .tm-lg { height: calc((100dvh / var(--ui-scale)) - 40px); max-height: calc((100dvh / var(--ui-scale)) - 40px); }
+  /* Abaixo de 900px o modal já usa a tela inteira: ampliar 10% só o faria
+     transbordar. O zoom extra é desligado, e por isso as medidas aqui não
+     precisam dividir por --tm-scale. */
+  .tm-lg { --tm-scale: 1; height: calc((100dvh / var(--ui-scale)) - 40px); max-height: calc((100dvh / var(--ui-scale)) - 40px); }
   .tm-layout:has(.tm-side) { grid-template-columns: 1fr; }
   .tm-layout:has(.tm-side) .tm-side, .tm-side { grid-column: 1; grid-row: 2; margin: 4px 30px 20px; }
   .tm-layout:has(.tm-side) .tm-main { grid-column: 1; grid-row: 1; min-height: auto; }
@@ -3707,7 +3739,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 }
 
 @media (max-width: 640px) {
-  .tm-lg { width: calc((100vw / var(--ui-scale)) - 16px); height: calc((100dvh / var(--ui-scale)) - 16px); max-height: calc((100dvh / var(--ui-scale)) - 16px); border-radius: 16px; }
+  .tm-lg { --tm-scale: 1; width: calc((100vw / var(--ui-scale)) - 16px); height: calc((100dvh / var(--ui-scale)) - 16px); max-height: calc((100dvh / var(--ui-scale)) - 16px); border-radius: 16px; }
   .tm-lg .tm-head { padding: 16px; gap: 10px; }
   .tm-head-identity { gap: 8px; }
   .tm-new-headline { flex-wrap: wrap; }
