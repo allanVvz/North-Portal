@@ -165,6 +165,63 @@ export async function provisionClientDriveFolders(input: {
   return { root, brand, products, uploads };
 }
 
+/** Miniatura de um arquivo do Drive, já dimensionada. */
+export type DriveThumbnail = { mimeType: string; body: ArrayBuffer; contentType: string };
+
+/**
+ * A miniatura de um arquivo, para a capa do card.
+ *
+ * Devolve null — nunca lança — quando o Drive não está configurado, o arquivo
+ * não existe, não é imagem nem vídeo, ou não tem miniatura pronta. Quem chama
+ * traduz isso em 404 e o card simplesmente não mostra capa.
+ *
+ * Vídeo entra aqui de propósito: o `thumbnailLink` do Drive já é UM FRAME
+ * renderizado pelo Google, uma imagem estática — é o preview leve que o card
+ * quer, sem baixar nem decodificar vídeo nenhum.
+ *
+ * A miniatura é buscada e devolvida por nós, em vez de mandar o `thumbnailLink`
+ * para o navegador, por dois motivos: o link é assinado e expira em algumas
+ * horas (a capa apareceria e sumiria sozinha), e ele só é público quando o
+ * arquivo está compartilhado — pela nossa rota, a conta de serviço enxerga
+ * tudo o que já enxerga no resto da integração.
+ */
+export async function fetchDriveThumbnail(fileId: string, size = 480): Promise<DriveThumbnail | null> {
+  if (!fileId || !isGoogleDriveConfigured()) return null;
+  try {
+    const token = await accessToken();
+    if (!token) return null;
+
+    const metaParams = new URLSearchParams({ fields: "mimeType,thumbnailLink", supportsAllDrives: "true" });
+    const metaRes = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${metaParams}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!metaRes.ok) return null;
+    const meta = (await metaRes.json()) as { mimeType?: string; thumbnailLink?: string };
+
+    const mimeType = meta.mimeType ?? "";
+    // Só imagem e vídeo viram capa. Planilha, apresentação e PDF também têm
+    // miniatura no Drive, mas uma parede de miniaturas de documento não ajuda
+    // a ler o quadro — ver plan/CARD-COVER-PREVIEW.md.
+    if (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")) return null;
+    if (!meta.thumbnailLink) return null;
+
+    // O thumbnailLink termina em `=s220`. Trocar o sufixo pede a versão no
+    // tamanho que a capa precisa, direto do Google — nada é redimensionado
+    // aqui.
+    const sized = meta.thumbnailLink.replace(/=s\d+(-c)?$/, `=s${size}`);
+    const imageRes = await fetch(sized);
+    if (!imageRes.ok) return null;
+
+    return {
+      mimeType,
+      body: await imageRes.arrayBuffer(),
+      contentType: imageRes.headers.get("content-type") ?? "image/jpeg",
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Lists files inside a folder for the admin preview. Returns [] when Drive is
  * not configured or the folder is unreachable, so the preview degrades to an

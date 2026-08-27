@@ -8,6 +8,8 @@ import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./Kanban
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
 import TaskKindIcon from "./TaskKindIcon";
+import CardCover from "./CardCover";
+import { taskCover } from "@/lib/taskCover";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
 import SortMenu from "./SortMenu";
@@ -527,6 +529,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     const overdue = isOverdue(t.due_date, todayIso, t.status);
     const dueRelative = relativeDue(t.due_date, todayIso);
     const period = formatPeriod(t.start_date, t.end_date);
+    const cover = taskCover(t);
     return (
       <article
         className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
@@ -538,6 +541,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDropBefore(); }}
         onClick={() => openTask(t.id)}
       >
+        {cover ? <CardCover cover={cover} title={t.title} className="kb-card-cover" /> : null}
         <div className="kb-card-top">
           {t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
           {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}

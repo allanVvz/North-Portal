@@ -2328,6 +2328,29 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-col-body { display: flex; flex-direction: column; gap: 8px; }
 .kb-card { background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 11px; padding: 14px; cursor: pointer; box-shadow: 0 1px 2px rgba(12,44,44,.04); position: relative; }
 .kb-card:hover { border-color: var(--a-teal); }
+
+/* Capa do card (app/admin/CardCover.tsx): a miniatura do primeiro arquivo do
+   Drive citado na descrição ou nos comentários.
+
+   Caixa quadrada de propósito — é o que dá às colunas cards de altura
+   previsível, independente da proporção do arquivo. O quadro que monta a capa
+   acrescenta a própria classe de sangria (.kb-card-cover / .rec-card-cover),
+   porque o padding do card é diferente em cada um. */
+.card-cover {
+  display: block; overflow: hidden; aspect-ratio: 1 / 1;
+  background: var(--a-inset); border-radius: 10px 10px 0 0;
+}
+.card-cover img { width: 100%; height: 100%; display: block; object-fit: cover; }
+/* Enquadramento decidido pela proporção real, no onLoad — ver o componente.
+   Antes de saber, `cover` acima evita o salto de layout.
+   Deitada: cabe inteira, sem cortar as laterais da paisagem. */
+.card-cover.deitada img { object-fit: contain; }
+/* Em pé: cortada no centro — contê-la deixaria duas tarjas enormes. */
+.card-cover.em-pe img { object-fit: cover; object-position: center; }
+
+/* Sangria até a borda: a margem negativa anula o padding do card, então a capa
+   encosta no canto arredondado em vez de flutuar numa moldura. */
+.kb-card-cover { margin: -14px -14px 12px; }
 .kb-card-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; row-gap: 6px; margin-bottom: 8px; }
 .kb-type { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; text-transform: uppercase; }
 .kb-type.t-criativo { background: var(--a-teal-soft); color: var(--a-teal-text); }
@@ -4097,6 +4120,10 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 
 .rec-card { position: relative; width: 100%; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface); color: var(--a-ink); box-shadow: 0 1px 2px rgba(12,44,44,.04); transition: border-color .15s, box-shadow .15s, transform .15s; }
 .rec-card-open { width: 100%; padding: 13px 38px 13px 13px; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
+/* Sangria da capa no card de rotina: o padding aqui é 13px 38px 13px 13px (a
+   folga à direita é do botão de concluir ciclo), e a capa precisa anular os
+   quatro lados para encostar na borda. */
+.rec-card-cover { margin: -13px -38px 11px -13px; }
 .rec-cycle-dot { position: absolute; right: 10px; bottom: 10px; width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--a-teal); border-radius: 50%; color: var(--a-teal-text); background: var(--a-surface); font-size: 11px; font-weight: 800; cursor: pointer; }
 .rec-cycle-dot:hover { background: var(--a-teal); color: #fff; }
 .rec-card:hover { border-color: var(--a-teal); box-shadow: 0 6px 18px rgba(12,44,44,.09); transform: translateY(-1px); }
