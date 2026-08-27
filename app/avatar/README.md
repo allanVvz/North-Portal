@@ -30,7 +30,7 @@ não continuar mostrando a foto antiga depois da troca.
 | 1 | Configurações → Minha conta | `SettingsPanel.tsx` · `MyAccountForm` | `getMyProfile()` do próprio usuário |
 | 2 | Configurações → Equipe & papéis | `SettingsPanel.tsx` · `TeamList` | `listTeam()` traz `avatar_url` de cada perfil |
 | 3 | Barra lateral do admin (cartão de conta e menu) | `app/admin/AdminShell.tsx` | `getMyProfile()` em `app/admin/layout.tsx` → prop `avatarUrl` |
-| 4 | Comentários das tarefas | `app/admin/CommentAvatar.tsx`, usado por `TaskModal.tsx` e `TaskDetailPanel.tsx` | **pelo nome** — ver a ressalva abaixo |
+| 4 | Comentários das tarefas | `app/admin/CommentAvatar.tsx`, usado por `TaskModal.tsx` e `TaskDetailPanel.tsx` | **por id, com o nome de rede** — ver abaixo |
 | 5 | Quem somos (público) | `app/(site)/quem-somos/page.tsx` | `listPublicTeamProfiles()`, só perfis com `cargo` preenchido |
 
 Os quatro primeiros são do admin e exigem sessão. O quinto é público e sem
@@ -65,43 +65,50 @@ unificados: `kanbanShared.ts` reexporta a regra única, e `ClientsTable`,
 `ClientPipelineBoard`, `DocumentsTable`, `SettingsPanel` e `quem-somos`
 importam dela.
 
-## A ressalva dos comentários
+## Os comentários: id primeiro, nome de rede
 
-Esta é a única resolução que **não** é por id de perfil, e é importante saber
-por quê.
+Esta é a única resolução em duas etapas do app, e vale entender por quê.
 
-Um comentário de tarefa grava o autor como **texto congelado**:
+Um comentário de tarefa guarda o autor de duas formas:
 
 ```ts
-export type TaskComment = { author: string; text: string; at: string; edited_at?: string };
+export type TaskComment = {
+  author: string;      // nome congelado — SEMPRE presente
+  author_id?: string;  // id do perfil — desde a migration 20260827001000
+  text: string; at: string; edited_at?: string;
+};
 ```
 `lib/comments.ts`
 
-Isso é proposital — é o que mantém os comentários antigos legíveis depois que
-uma conta é apagada, e é o que permite autores que não são pessoas
-(`author: "Automação"`, em `lib/automations/taskAccess.ts`). O preço é que não
-existe id para buscar a foto: ela só pode ser encontrada casando o nome.
+O `author` em texto é proposital e não vai embora: é ele que mantém o
+comentário legível depois que a conta é apagada, e é o único autor que um
+comentário de automação tem (`author: "Automação"`, em
+`lib/automations/taskAccess.ts`). O `author_id` é um extra por cima, não um
+substituto.
 
-O índice nome → foto é montado uma vez por navegação do admin em
+A busca está em `findAuthorPhoto()` (`app/avatar/photoKey.ts`):
+
+1. **Tem `author_id` e ele está no índice?** Usa a foto desse perfil. Exato:
+   acerta mesmo se a pessoa foi renomeada depois do comentário, e não confunde
+   dois homônimos.
+2. **Senão, casa o nome.** É o que atende os comentários antigos e o id de uma
+   conta que foi apagada.
+3. **Senão, iniciais.** Automação, conta apagada sem homônimo, perfil sem foto.
+
+O índice (`buildPhotoIndex()`) é montado uma vez por navegação em
 `app/admin/layout.tsx` e distribuído por `TeamPhotosProvider`
 (`app/admin/CurrentUserContext.tsx`), no mesmo padrão do `CurrentUserProvider`
 que já existia — sem prop drilling por board e modal.
 
-Quando o nome não casa, cai nas iniciais. Isso acontece com:
+### Os comentários antigos não foram reescritos
 
-- autor que não é pessoa (`Automação`, `Sistema`);
-- perfil renomeado depois do comentário;
-- conta apagada.
+Os ~96 comentários que já existiam continuam só com o nome. Eles não têm id
+porque naquele momento não havia — atribuir um agora seria adivinhar quem
+escreveu, e o fallback por nome já os atende. Comentário antigo continua
+exatamente como está, e é assim que deve ficar: ele é registro histórico.
 
-Em todos esses casos o resultado é exatamente o que a tela mostrava antes desta
-mudança, então nada regride. Dois perfis homônimos mostrariam a mesma foto — o
-pior caso é a foto errada entre duas pessoas de mesmo nome, nunca vazamento de
-dado.
-
-**Se um dia isso precisar ser exato**, o caminho é gravar `author_id` junto do
-`author` nos comentários novos (mantendo o texto para os antigos) e resolver
-por id quando o campo existir. Não vale reescrever os comentários antigos: o
-nome em texto é justamente o registro histórico.
+`edit_task_comment` (migration 20260826120000) não precisou de ajuste — ele
+mescla o objeto com `||`, então o `author_id` sobrevive à edição sozinho.
 
 ## Checklist ao adicionar um lugar novo
 

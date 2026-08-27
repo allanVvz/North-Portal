@@ -2,7 +2,20 @@
 // by the admin Kanban (TaskModal/TaskDetailPanel) and the client portal
 // (Feedbacks page) alike, so both read the exact same shape.
 
-export type TaskComment = { author: string; text: string; at: string; edited_at?: string };
+export type TaskComment = {
+  /** Nome do autor, congelado no momento do comentário. Sempre presente — é
+   *  ele que mantém o comentário legível depois que a conta é apagada, e é o
+   *  único autor que um comentário de automação tem. */
+  author: string;
+  /** Id do perfil que escreveu, quando há um. Ausente em comentário de
+   *  automação (não é pessoa) e nos escritos antes da migration
+   *  20260827001000. Quando existe, é por ele que a foto do autor é resolvida
+   *  — ver app/avatar/README.md. */
+  author_id?: string;
+  text: string;
+  at: string;
+  edited_at?: string;
+};
 
 export function commentsOf(payload: Record<string, unknown> | null | undefined): TaskComment[] {
   const comments = (payload ?? {}).comments;

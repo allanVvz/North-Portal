@@ -219,7 +219,7 @@ export default function TaskDetailPanel({
         <div className="tdp-comments">
           {comments.slice().reverse().map((c, i) => (
             <div className="tdp-comment" key={i}>
-              <CommentAvatar author={c.author} className="tdp-comment-av" />
+              <CommentAvatar comment={c} className="tdp-comment-av" />
               <div>
                 <p className="tdp-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
                 <p className="tdp-comment-text"><CommentText text={c.text} /></p>

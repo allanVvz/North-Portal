@@ -1369,7 +1369,7 @@ export default function TaskModal({
                     const editing = editingComment?.index === storedIndex;
                     return (
                       <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.at}-${storedIndex}`}>
-                        <CommentAvatar author={c.author} className="tm-comment-av" />
+                        <CommentAvatar comment={c} className="tm-comment-av" />
                         <div className="tm-comment-body">
                           <p className="tm-comment-meta">
                             <b>{c.author}</b>

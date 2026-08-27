@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from "react";
 
-import { photoKey } from "../avatar/photoKey";
+import { EMPTY_PHOTO_INDEX, findAuthorPhoto, type TeamPhotoIndex } from "../avatar/photoKey";
 
 export type CurrentAdminUser = {
   name: string;
@@ -31,36 +31,21 @@ export function useCurrentAdminUser(): CurrentAdminUser {
 }
 
 // ---------------------------------------------------------------------------
-// Fotos da equipe, indexadas por nome.
+// Fotos da equipe.
 //
-// Os comentários de tarefa gravam o autor como TEXTO congelado
-// (`TaskComment.author` em lib/comments.ts), não como id de perfil — foi assim
-// desde o começo, e é o que mantém os comentários antigos legíveis depois que
-// uma conta é apagada. O preço é que a foto do autor só pode ser resolvida
-// casando o nome, o que é best-effort por natureza:
-//
-//   - autor que não é pessoa ("Automação", "Sistema") nunca casa → iniciais;
-//   - perfil renomeado depois do comentário não casa → iniciais;
-//   - dois perfis homônimos casariam no mesmo → aceitável, e o fallback é
-//     apenas a foto errada entre duas pessoas de mesmo nome, não vazamento.
-//
-// Em todos os casos o pior resultado é cair nas iniciais, que é exatamente o
-// que a tela mostrava antes. Ver app/avatar/README.md.
+// Montado uma vez por navegação em app/admin/layout.tsx e distribuído por
+// contexto, no mesmo padrão do CurrentUserProvider acima — sem prop drilling
+// por board e modal. A lógica de busca mora em app/avatar/photoKey.ts; aqui
+// só a distribuição. Ver app/avatar/README.md.
 // ---------------------------------------------------------------------------
 
-export type TeamPhotoIndex = Record<string, string>;
-
-const TeamPhotosContext = createContext<TeamPhotoIndex>({});
-
-// Reexportada para quem já importa daqui; a implementação mora em
-// app/avatar/photoKey.ts.
-export { photoKey };
+const TeamPhotosContext = createContext<TeamPhotoIndex>(EMPTY_PHOTO_INDEX);
 
 export function TeamPhotosProvider({ photos, children }: { photos: TeamPhotoIndex; children: React.ReactNode }) {
   return <TeamPhotosContext.Provider value={photos}>{children}</TeamPhotosContext.Provider>;
 }
 
-/** Foto de quem assina um comentário, ou null quando o nome não casa. */
-export function useTeamPhoto(authorName: string | null | undefined): string | null {
-  return useContext(TeamPhotosContext)[photoKey(authorName)] ?? null;
+/** Foto de quem assina um comentário, ou null quando não é alguém da equipe. */
+export function useAuthorPhoto(author: { author: string; author_id?: string }): string | null {
+  return findAuthorPhoto(useContext(TeamPhotosContext), author);
 }

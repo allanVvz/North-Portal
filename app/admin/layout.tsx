@@ -2,8 +2,7 @@ import { redirect } from "next/navigation";
 import { getAdminTabsVisibility, getMyProfile, getProfileName, listTeam } from "@/lib/supabase";
 import { getSession } from "@/lib/supabase/auth";
 import { initialsOf } from "../avatar/initials";
-import { photoKey } from "../avatar/photoKey";
-import type { TeamPhotoIndex } from "./CurrentUserContext";
+import { buildPhotoIndex } from "../avatar/photoKey";
 import AdminShell from "./AdminShell";
 
 // Admin shell: gated by role (defense in depth alongside middleware).
@@ -26,10 +25,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const name = profileName ?? "Administrador";
   const initials = profileName ? initialsOf(profileName) : (email.split("@")[0] || "AD").slice(0, 2).toUpperCase();
 
-  const teamPhotos: TeamPhotoIndex = {};
-  for (const member of team) {
-    if (member.full_name && member.avatar_url) teamPhotos[photoKey(member.full_name)] = member.avatar_url;
-  }
+  const teamPhotos = buildPhotoIndex(team);
 
   return (
     <AdminShell
