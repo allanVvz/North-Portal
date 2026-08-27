@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import ClientSearchBar, { clientMatchesFilters, type ClientActiveFilter } from "./ClientSearchBar";
 import type { ClientStage } from "./clientPipeline";
 import type { AdminClientSummary } from "@/lib/supabase";
+import { initialsOf as initials } from "../avatar/initials";
 import { ATTENTION_LABEL, type AttentionReason } from "@/lib/adminHome";
 
 export type ClientRow = AdminClientSummary & {
@@ -17,12 +18,6 @@ export type ClientRow = AdminClientSummary & {
   attention?: AttentionReason[];
 };
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
 
 function formatDate(value: string | null): string {
   if (!value) return "—";

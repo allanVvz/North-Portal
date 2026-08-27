@@ -2744,6 +2744,9 @@ export type TeamMember = {
   // Texto livre (ver migration 20260827000000): não é enum, só decide quem
   // aparece em "Quem Somos" (cargo preenchido = aparece).
   cargo: string | null;
+  // Foto de perfil — mesma coluna que alimenta Quem Somos, a barra lateral e
+  // os comentários. Ver app/avatar/README.md para o mapa completo.
+  avatar_url: string | null;
 };
 
 // Best-effort display name for the sidebar account card; falls back to null
@@ -2795,7 +2798,7 @@ export async function listTeam(): Promise<TeamMember[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,full_name,role,client_id,level,cargo")
+    .select("id,full_name,role,client_id,level,cargo,avatar_url")
     .order("role");
   if (error) fail(error);
   return (data as TeamMember[] | null) ?? [];

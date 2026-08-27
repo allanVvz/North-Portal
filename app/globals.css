@@ -1806,9 +1806,15 @@ body.menu-open {
   display: flex; align-items: center; gap: 10px; padding: 10px;
   border-radius: 12px; background: var(--a-surface2); border: 1px solid var(--a-border);
 }
+/* Foto dentro de um círculo de avatar. Vale para todo círculo que renderiza
+   <UserAvatar> (app/avatar/UserAvatar.tsx): a foto preenche o círculo e herda
+   o formato dele, então cada tela só precisa de overflow:hidden. */
+.avatar-photo { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+
 .admin-avatar {
   width: 30px; height: 30px; border-radius: 50%; flex: 0 0 30px; display: grid; place-items: center;
   font-size: 11px; font-weight: 700; color: var(--a-teal-text); background: var(--a-teal-soft);
+  overflow: hidden;
 }
 .admin-usermeta { min-width: 0; display: flex; flex-direction: column; }
 .admin-username { font-size: 13px; font-weight: 600; color: var(--a-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2667,6 +2673,11 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .set-team { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; }
 .set-team-row { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-bottom: 1px solid var(--a-border); }
 .set-team-row:last-child { border-bottom: none; }
+.set-team-av {
+  width: 30px; height: 30px; border-radius: 50%; flex: 0 0 30px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; color: var(--a-teal-text); background: var(--a-teal-soft);
+  overflow: hidden;
+}
 .set-team-name { font-size: 14px; color: var(--a-ink); flex: 1; min-width: 0; }
 .set-role { font-size: 11.5px; font-weight: 600; padding: 3px 11px; border-radius: 999px; flex-shrink: 0; }
 .set-role.admin { background: var(--a-teal-soft); color: var(--a-teal-text); }
@@ -2764,7 +2775,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tdp-activity { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .tdp-comments { display: flex; flex-direction: column; gap: 10px; max-height: 220px; overflow-y: auto; margin-bottom: 10px; }
 .tdp-comment { display: flex; gap: 9px; }
-.tdp-comment-av { width: 26px; height: 26px; border-radius: 50%; background: var(--a-teal); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-grid; place-items: center; flex-shrink: 0; }
+.tdp-comment-av { width: 26px; height: 26px; border-radius: 50%; background: var(--a-teal); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-grid; place-items: center; flex-shrink: 0; overflow: hidden; }
 .tdp-comment-meta { margin: 0; font-size: 12.5px; display: flex; gap: 7px; align-items: baseline; }
 .tdp-comment-meta small { color: var(--a-muted); font-weight: 400; }
 .tdp-comment-text { margin: 2px 0 0; font-size: 13px; color: var(--a-sec); line-height: 1.4; white-space: pre-wrap; }
@@ -2922,7 +2933,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-comments { display: flex; flex-direction: column; gap: 10px; max-height: 160px; min-width: 0; overflow-y: auto; overflow-x: hidden; }
 .tm-comment { display: flex; gap: 9px; }
 .tm-comment > div { flex: 1; min-width: 0; }
-.tm-comment-av { width: 26px; height: 26px; border-radius: 50%; background: var(--a-teal); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-grid; place-items: center; flex-shrink: 0; }
+.tm-comment-av { width: 26px; height: 26px; border-radius: 50%; background: var(--a-teal); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-grid; place-items: center; flex-shrink: 0; overflow: hidden; }
 .tm-comment-meta { margin: 0; font-size: 12.5px; display: flex; gap: 7px; align-items: baseline; }
 .tm-comment-meta small { color: var(--a-muted); font-weight: 400; }
 .tm-comment-text { max-width: 100%; margin: 2px 0 0; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 13px; color: var(--a-sec); line-height: 1.4; }

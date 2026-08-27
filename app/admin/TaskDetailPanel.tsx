@@ -8,6 +8,7 @@ import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials } from "./kanbanShared";
+import CommentAvatar from "./CommentAvatar";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatCommentTime } from "@/lib/comments";
@@ -218,7 +219,7 @@ export default function TaskDetailPanel({
         <div className="tdp-comments">
           {comments.slice().reverse().map((c, i) => (
             <div className="tdp-comment" key={i}>
-              <span className="tdp-comment-av">{initials(c.author)}</span>
+              <CommentAvatar author={c.author} className="tdp-comment-av" />
               <div>
                 <p className="tdp-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
                 <p className="tdp-comment-text"><CommentText text={c.text} /></p>

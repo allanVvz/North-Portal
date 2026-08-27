@@ -3,13 +3,7 @@
 import Link from "next/link";
 import { STAGE_LABEL, STAGE_ORDER } from "./clientPipeline";
 import type { ClientRow } from "./ClientsTable";
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
+import { initialsOf as initials } from "../avatar/initials";
 
 // Moved here from Clientes (was a Lista/Pipeline toggle in ClientsTable.tsx)
 // — Onboarding is exactly the audience for a stage-by-stage view of every

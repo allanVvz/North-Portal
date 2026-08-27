@@ -12,6 +12,7 @@ import {
   COLUMNS, FORMATO_OPTIONS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, STATUS_ORDER,
   TONES, commentsOf, initials,
 } from "./kanbanShared";
+import CommentAvatar from "./CommentAvatar";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
@@ -1368,7 +1369,7 @@ export default function TaskModal({
                     const editing = editingComment?.index === storedIndex;
                     return (
                       <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.at}-${storedIndex}`}>
-                        <span className="tm-comment-av">{initials(c.author)}</span>
+                        <CommentAvatar author={c.author} className="tm-comment-av" />
                         <div className="tm-comment-body">
                           <p className="tm-comment-meta">
                             <b>{c.author}</b>

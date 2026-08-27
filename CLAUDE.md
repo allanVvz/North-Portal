@@ -39,6 +39,13 @@ Never lazy-initialize React state by reading `localStorage` directly in `useStat
 
 Several screens persist per-user UI prefs (sort order, visible columns, view mode) via `localStorage` + a `CustomEvent` so multiple components mounted on the same screen stay in sync without prop drilling or a backend round-trip. See `app/admin/taskSortPrefs.ts`, `app/admin/kanbanPrefs.ts`, `lib/acquisitionPrefs.ts` for the pattern. Always fall back safely to the default when `localStorage` has no value, or an invalid/stale one (a shape from an older version of the app).
 
+## Identidade visual e foto de perfil
+
+Dois assuntos que já foram duplicados em várias telas e agora têm dono único — leia o README antes de mexer:
+
+- **Marca (bússola, logo, favicon)**: `app/brand/README.md`. A geometria só existe em `app/brand/compass.ts`; `app/icon.svg` é gerado por `npm run brand:icons` e um teste falha o verify se alguém editar o SVG à mão.
+- **Foto de perfil**: `app/avatar/README.md`. Mapa dos cinco lugares onde a foto aparece, a regra única de "foto ou iniciais" (`UserAvatar`), e a ressalva de que o autor de comentário é texto congelado — a foto ali é resolvida por nome, não por id.
+
 ## Commit style
 
 Commits are in Portuguese, `type(scope): short imperative summary` subject line, followed by a prose body explaining **why** the change was made (not just what changed) — trade-offs considered, bugs that motivated it, edge cases the fix accounts for. Multi-paragraph bodies are normal for anything non-trivial. Every commit ends with:

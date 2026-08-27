@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import DocumentPreviewModal from "./DocumentPreviewModal";
+import { initialsOf as initials } from "../../avatar/initials";
 import DocumentDropZone from "./DocumentDropZone";
 import DocumentsFilterBar, { documentMatchesFilters, type DocActiveFilter } from "./DocumentsFilterBar";
 import type { AdminDocument } from "@/lib/supabase";
@@ -20,9 +21,6 @@ const STATUS_LABEL: Record<DocumentStatus, string> = {
 const STATUS_TONE: Record<DocumentStatus, string> = {
   enviada: "blue", assinado: "green", aguardando_assinatura: "red", publicado: "green", compartilhado: "purple",
 };
-
-const initials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";

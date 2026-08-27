@@ -85,8 +85,9 @@ export const TONES = ["green", "gold", "blue", "purple", "neutral"] as const;
 export const FORMATO_OPTIONS = ["Reels vertical", "Stories", "Post feed", "Carrossel", "Vídeo horizontal", "Flyer"];
 export const PLATAFORMA_OPTIONS = ["Instagram", "TikTok", "YouTube", "Facebook", "Google", "WhatsApp"];
 
-export const initials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+// Regra única de iniciais — mora em app/avatar/initials.ts. Reexportada daqui
+// porque boa parte do Kanban já importava `initials` deste módulo.
+export { initialsOf as initials } from "../avatar/initials";
 
 export function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

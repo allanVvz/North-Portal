@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import BrandLockup from "../brand/BrandLockup";
-import { CurrentUserProvider } from "./CurrentUserContext";
+import UserAvatar from "../avatar/UserAvatar";
+import { CurrentUserProvider, TeamPhotosProvider, type TeamPhotoIndex } from "./CurrentUserContext";
 import NotificationsList from "./NotificationsList";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
 import type { NotificationRecord } from "@/lib/notificationTypes";
@@ -172,6 +173,8 @@ export default function AdminShell({
   name,
   initials,
   userId,
+  avatarUrl,
+  teamPhotos,
   revisoesTabVisible,
   aprovacoesTabVisible,
   children,
@@ -180,6 +183,8 @@ export default function AdminShell({
   name: string;
   initials: string;
   userId: string;
+  avatarUrl: string | null;
+  teamPhotos: TeamPhotoIndex;
   revisoesTabVisible: boolean;
   aprovacoesTabVisible: boolean;
   children: React.ReactNode;
@@ -354,7 +359,7 @@ export default function AdminShell({
               {accountOpen ? (
                 <div className="admin-account-panel" role="menu">
                   <div className="admin-account-head">
-                    <span className="admin-avatar">{initials}</span>
+                    <UserAvatar name={name} photoUrl={avatarUrl} className="admin-avatar" />
                     <span className="admin-usermeta">
                       <span className="admin-username">{name}</span>
                       <span className="admin-useremail" title={email}>
@@ -395,7 +400,7 @@ export default function AdminShell({
                 aria-haspopup="menu"
                 aria-expanded={accountOpen}
               >
-                <span className="admin-avatar">{initials}</span>
+                <UserAvatar name={name} photoUrl={avatarUrl} className="admin-avatar" />
                 <span className="admin-usermeta">
                   <span className="admin-username">{name}</span>
                   <span className="admin-useremail" title={email}>
@@ -412,7 +417,9 @@ export default function AdminShell({
       </aside>
 
       <main className="admin-main">
-        <CurrentUserProvider user={{ name, email, initials, userId }}>{children}</CurrentUserProvider>
+        <CurrentUserProvider user={{ name, email, initials, userId, avatarUrl }}>
+          <TeamPhotosProvider photos={teamPhotos}>{children}</TeamPhotosProvider>
+        </CurrentUserProvider>
       </main>
     </div>
   );

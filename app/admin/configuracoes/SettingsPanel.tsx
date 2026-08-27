@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AgencyProfile, CheckpointTemplate, LegalDoc, ResponsibilityAssignment, TeamMember } from "@/lib/supabase";
 import { uploadAvatarFile } from "@/lib/avatarUpload";
+import UserAvatar from "../../avatar/UserAvatar";
 import type { ResponsibilityKey } from "@/lib/validation";
 import { createClient } from "@/lib/supabase/client";
 import CheckpointTemplates from "./CheckpointTemplates";
@@ -108,11 +109,6 @@ export default function SettingsPanel({
       </div>
     </div>
   );
-}
-
-function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  return words.length ? words.slice(0, 2).map((w) => w[0]).join("").toUpperCase() : "AD";
 }
 
 function MyAccountForm({ initial }: { initial: { fullName: string; email: string; bio: string | null; avatarUrl: string | null } }) {
@@ -248,7 +244,7 @@ function MyAccountForm({ initial }: { initial: { fullName: string; email: string
 
       <div className="set-avatar-row">
         {/* eslint-disable-next-line @next/next/no-img-element -- public storage URL, sized fixed avatar, no remote-optimization loader configured for it */}
-        <span className="set-avatar-big">{photo ? <img src={photo} alt="" /> : initialsOf(fullName)}</span>
+        <UserAvatar name={fullName} photoUrl={photo} className="set-avatar-big" />
         <div className="set-avatar-actions">
           <div className="set-avatar-buttons">
             <label className="admin-btn ghost">
@@ -428,6 +424,7 @@ function TeamList({ team, initialAssignments }: { team: TeamMember[]; initialAss
         <ul className="set-team">
           {members.map((m) => (
             <li key={m.id} className="set-team-row">
+              <UserAvatar name={m.full_name} photoUrl={m.avatar_url} className="set-team-av" />
               <span className="set-team-name">{m.full_name ?? "—"}</span>
               {m.role === "admin" ? (
                 <input
