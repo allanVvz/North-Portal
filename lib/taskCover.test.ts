@@ -181,19 +181,53 @@ describe("pastas do Drive citadas no card", () => {
   it("pega a pasta da descrição e a do comentário, sem repetir", () => {
     const pastas = taskDriveFolders({
       description: FOLDER,
-      payload: { comments: [comment(`de novo ${FOLDER}`, "1"), comment(driveUrl(FILE_A), "2")] },
+      payload: { comments: [comment(`de novo ${FOLDER}`, "1")] },
     });
-    expect(pastas).toEqual([{ folderId: "14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z", url: FOLDER }]);
+    expect(pastas).toEqual([{ folderId: "14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z", url: FOLDER, certain: true }]);
   });
 
-  it("NÃO trata /open?id= como pasta — no comentário não há como saber", () => {
-    expect(taskDriveFolders({ description: AMBIGUO })).toEqual([]);
+  it("/drive/folders/ é prova: certain", () => {
+    expect(taskDriveFolders({ description: FOLDER })[0].certain).toBe(true);
   });
 
-  it("arquivo nunca vira pasta, e pasta nunca vira capa", () => {
+  it("/open?id= entra na lista, mas como incerto", () => {
+    // É a forma mais comum nos dados reais e boa parte dela é pasta. Recusá-la
+    // deixava de fora quase tudo que a equipe cola; quem renderiza pergunta ao
+    // servidor antes de abrir.
+    const pastas = taskDriveFolders({ description: AMBIGUO });
+    expect(pastas).toEqual([
+      { folderId: "10yfhwlbsCrBsINQWqMvmYmrfm-eYe3qZ", url: AMBIGUO, certain: false },
+    ]);
+  });
+
+  it("/file/d/ prova que NÃO é pasta — fica de fora", () => {
+    expect(taskDriveFolders({ description: driveUrl(FILE_A) })).toEqual([]);
+  });
+
+  it("pasta nunca vira capa, e o arquivo provado nunca vira pasta", () => {
     const task = { description: `${FOLDER} e ${driveUrl(FILE_A)}` };
     expect(taskDriveFolders(task).map((f) => f.folderId)).toEqual(["14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z"]);
     expect(taskCoverCandidates(task).map((c) => c.fileId)).toEqual([FILE_A]);
+  });
+
+  it("caso real: o card CAPAS DESTAQUES tem uma pasta incerta nos comentários", () => {
+    const pastas = taskDriveFolders({
+      description: "CRIAR NOVAS CAPAS DE DESTAQUE PARA BAITA",
+      payload: {
+        comments: [
+          comment("Allan, aqui vamos atualizar a demanda", "1"),
+          comment("https://www.figma.com/design/uC5G3L9AszE7U6V8OtxBJH/Baita---Arraia?node-id=395-1203", "2"),
+          comment("https://drive.google.com/open?id=1UuafuydwTq9oTixjzLAaOlRrPPrHjzHj&usp=drive_fs", "3"),
+        ],
+      },
+    });
+    expect(pastas).toEqual([
+      {
+        folderId: "1UuafuydwTq9oTixjzLAaOlRrPPrHjzHj",
+        url: "https://drive.google.com/open?id=1UuafuydwTq9oTixjzLAaOlRrPPrHjzHj&usp=drive_fs",
+        certain: false,
+      },
+    ]);
   });
 
   it("card sem pasta devolve lista vazia", () => {

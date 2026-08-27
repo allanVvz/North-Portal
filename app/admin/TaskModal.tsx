@@ -15,7 +15,7 @@ import {
 import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
 import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
-import DriveBrowser from "./DriveBrowser";
+import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
@@ -1381,21 +1381,7 @@ export default function TaskModal({
                   <b>{formatAbsoluteTime(liveTask.created_at)}</b>
                 </p>
               ) : null}
-              {driveFolders.length ? (
-                <div className="tm-box tm-drivebox">
-                  <p className="tm-box-label">
-                    {driveFolders.length === 1 ? "Pasta do Drive" : "Pastas do Drive"}
-                  </p>
-                  {driveFolders.map((folder, i) => (
-                    <DriveBrowser
-                      key={folder.folderId}
-                      folderId={folder.folderId}
-                      label={driveFolders.length === 1 ? "Pasta" : `Pasta ${i + 1}`}
-                      limit={12}
-                    />
-                  ))}
-                </div>
-              ) : null}
+              {driveFolders.length ? <CardDriveFolders folders={driveFolders} /> : null}
               <div className="tm-box tm-commentsbox">
                 <p className="tm-box-label">Comentários e atividade</p>
                 <div className="tm-comments">

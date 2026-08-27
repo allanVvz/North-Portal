@@ -165,6 +165,64 @@ export async function provisionClientDriveFolders(input: {
   return { root, brand, products, uploads };
 }
 
+/**
+ * Um id do Drive é pasta ou arquivo?
+ *
+ * A pergunta existe porque `/open?id=…` — a forma que o Drive para desktop
+ * gera, e a mais comum nos comentários dos cards — serve para os dois, e a URL
+ * sozinha não diz qual. Sem responder isso, o card não tem como saber se abre
+ * um navegador de pastas ou não faz nada.
+ *
+ * Dois caminhos, como no resto da integração:
+ *
+ *   * com conta de serviço, o `mimeType` responde de forma definitiva;
+ *   * sem ela, sobra sondar o embed público. A página que o Google devolve
+ *     para uma PASTA contém marcadores `flip-entry` (uma por item listado); a
+ *     de um ARQUIVO não contém nenhum. Verificado nos dois sentidos contra
+ *     arquivos e pastas reais de produção.
+ *
+ * Limite conhecido do caminho público: pasta VAZIA também não tem `flip-entry`
+ * e é lida como "não é pasta". Sem consequência prática — não haveria nada para
+ * navegar nela de qualquer forma.
+ *
+ * Devolve "unknown" quando não dá para afirmar; quem chama trata isso como
+ * "não abre navegador", nunca como erro.
+ */
+export async function resolveDriveItemKind(fileId: string): Promise<"folder" | "file" | "unknown"> {
+  if (!fileId) return "unknown";
+
+  if (isGoogleDriveConfigured()) {
+    try {
+      const token = await accessToken();
+      if (token) {
+        const params = new URLSearchParams({ fields: "mimeType", supportsAllDrives: "true" });
+        const res = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const meta = (await res.json()) as { mimeType?: string };
+          if (meta.mimeType) return meta.mimeType === FOLDER_MIME ? "folder" : "file";
+        }
+        // Metadado inacessível: a conta de serviço não enxerga este item. Pode
+        // ainda ser público — segue para a sondagem abaixo.
+      }
+    } catch {
+      // idem
+    }
+  }
+
+  try {
+    const res = await fetch(
+      `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(fileId)}#grid`,
+      { redirect: "follow" },
+    );
+    if (!res.ok) return "unknown";
+    return (await res.text()).includes("flip-entry") ? "folder" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** Miniatura de um arquivo do Drive, já dimensionada. */
 export type DriveThumbnail = { mimeType: string; body: ArrayBuffer; contentType: string };
 

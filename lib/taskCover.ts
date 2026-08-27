@@ -94,7 +94,19 @@ export function taskCoverCandidates(task: {
 }
 
 /** Uma pasta do Drive citada num card. */
-export type TaskDriveFolder = { folderId: string; url: string };
+export type TaskDriveFolder = {
+  folderId: string;
+  url: string;
+  /**
+   * A URL provou que isto é uma pasta?
+   *
+   * `true` para `/drive/folders/…`, que só existe para pasta. `false` para
+   * `/open?id=…`, que serve para arquivo E para pasta — nesse caso quem
+   * renderiza pergunta ao servidor (`/api/admin/drive/kind`) antes de abrir
+   * qualquer coisa.
+   */
+  certain: boolean;
+};
 
 /**
  * As pastas do Drive citadas no card, sem repetição, na ordem em que aparecem.
@@ -107,12 +119,14 @@ export type TaskDriveFolder = { folderId: string; url: string };
  * (app/admin/DriveBrowser.tsx): colar o link da pasta num comentário passa a
  * bastar para poder circular por ela sem sair do card.
  *
- * Só a forma inequívoca `/drive/folders/…` conta aqui. A forma `/open?id=…` —
- * a mais comum nos dados reais — serve para arquivo E para pasta, e num
- * comentário não há nada que diga qual dos dois é. Abrir um navegador de pastas
- * em cima de um arquivo seria pior que não abrir nada. No cadastro do cliente é
- * diferente: lá o campo em que o link foi colado já responde a pergunta — ver
- * driveFolderIdFromUrl em lib/googleDrive.
+ * A lista inclui os links `/open?id=…`, marcados com `certain: false`. Eles são
+ * a MAIORIA dos links reais e boa parte deles é pasta — recusá-los aqui, como
+ * uma primeira versão fazia, deixava de fora quase tudo que a equipe cola. Como
+ * a URL não diz se é pasta ou arquivo, quem renderiza pergunta ao servidor
+ * antes de abrir (ver /api/admin/drive/kind).
+ *
+ * No cadastro do cliente a pergunta nem se coloca: lá o campo em que o link foi
+ * colado já responde — ver driveFolderIdFromUrl em lib/googleDrive.
  */
 export function taskDriveFolders(task: {
   description?: string | null;
@@ -124,9 +138,13 @@ export function taskDriveFolders(task: {
   const collect = (text: string) => {
     for (const url of linksIn(text)) {
       const link = parseGoogleDriveUrl(url);
-      if (link?.kind !== "folder" || seen.has(link.id)) continue;
+      // `folder` veio de /drive/folders/ (prova); `file` pode ter vindo de
+      // /file/d/ (prova de que NÃO é pasta) ou de /open?id= (não prova nada).
+      if (!link || seen.has(link.id)) continue;
+      const ambiguous = link.kind === "file" && /[?&]id=/.test(url);
+      if (link.kind !== "folder" && !ambiguous) continue;
       seen.add(link.id);
-      folders.push({ folderId: link.id, url });
+      folders.push({ folderId: link.id, url, certain: link.kind === "folder" });
     }
   };
 
