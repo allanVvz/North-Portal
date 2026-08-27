@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import CompassMark from "../CompassMark";
+import BrandLockup from "../brand/BrandLockup";
 import { CurrentUserProvider } from "./CurrentUserContext";
 import NotificationsList from "./NotificationsList";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
@@ -300,9 +300,7 @@ export default function AdminShell({
         <div className="admin-sidebar-content">
           <div className="admin-topline">
             <Link href="/admin/plano" className="admin-brand">
-              <span className="admin-mark"><CompassMark size={16} /></span>
-              <span className="admin-word">NORTH</span>
-              <span className="admin-role">admin</span>
+              <BrandLockup variant="admin" />
             </Link>
             <div className="admin-topline-actions">
               <div className="admin-notif" ref={notifRef}>

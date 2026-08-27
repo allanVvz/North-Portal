@@ -8,6 +8,7 @@
 // light/dark toggle.
 
 import { useCallback, useEffect, useState } from "react";
+import CompassMark from "../brand/CompassMark";
 
 type Theme = "dark" | "light";
 
@@ -244,26 +245,6 @@ function Check() {
   );
 }
 
-function MiniCompassMark() {
-  return (
-    <svg className="manual-compass" viewBox="0 0 220 220" width="150" height="150" aria-hidden>
-      <circle className="mc-ring" cx="110" cy="110" r="96" />
-      <circle className="mc-ring soft" cx="110" cy="110" r="60" />
-      {[0, 90, 180, 270].map((d) => {
-        const a = ((d - 90) * Math.PI) / 180;
-        const x = 110 + Math.cos(a) * 84;
-        const y = 110 + Math.sin(a) * 84;
-        return <circle key={d} className="mc-dot" cx={x} cy={y} r="3.5" />;
-      })}
-      <g className="mc-needle">
-        <polygon className="mc-needle-n" points="110,34 119,110 101,110" />
-        <polygon className="mc-needle-s" points="110,186 119,110 101,110" />
-      </g>
-      <circle className="mc-hub" cx="110" cy="110" r="7" />
-    </svg>
-  );
-}
-
 function Reveal({ i, children, className }: { i: number; children?: React.ReactNode; className?: string }) {
   return (
     <div className={className} style={{ animationDelay: `${i * 70}ms` }}>
@@ -304,7 +285,7 @@ function SlideBody({
             </button>
           </Reveal>
         ) : null}
-        <div className="manual-cover-compass"><MiniCompassMark /></div>
+        <div className="manual-cover-compass"><CompassMark size={150} className="manual-compass" /></div>
         <div className="manual-cover-foot">
           <span className="manual-wordmark">north</span>
           <em>agência de marketing &amp; tráfego</em>

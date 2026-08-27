@@ -917,12 +917,10 @@ body.np-menu-open { overflow: hidden; }
 .manual-cover-foot { position: absolute; left: 0; bottom: -40px; display: flex; align-items: center; gap: 12px; opacity: .7; }
 .manual-wordmark { font-weight: 800; font-size: 18px; letter-spacing: -.01em; }
 .manual-cover-foot em { font-style: normal; font-size: 12.5px; opacity: .8; }
-.manual-compass .mc-ring { fill: none; stroke: currentColor; stroke-width: 1; opacity: .35; }
-.manual-compass .mc-ring.soft { opacity: .18; }
-.manual-compass .mc-dot { fill: currentColor; opacity: .5; }
-.manual-compass .mc-hub { fill: #6fae9d; }
-.manual-compass .mc-needle-n { fill: #6fae9d; }
-.manual-compass .mc-needle-s { fill: currentColor; opacity: .35; }
+/* A bússola da capa é a marca única (app/brand/CompassMark) — ela se pinta
+   sozinha com `currentColor` e traz as próprias opacidades, por isso aqui não
+   há mais regra por forma. */
+.manual-compass { flex-shrink: 0; }
 @media (max-width: 760px) {
   .manual-cover { padding-right: 0; }
   .manual-cover-compass { position: static; transform: none; margin-top: 24px; width: 110px; }

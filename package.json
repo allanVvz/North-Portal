@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "brand:icons": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-brand-icons.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "env:check": "node scripts/validate-env.mjs app",
