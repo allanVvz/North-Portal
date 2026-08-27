@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGoogleDriveUrl } from "./googleDrive";
+import { DRIVE_FOLDER_MIME, driveFileKind, driveFolderIdFromUrl, isDriveFolder, parseGoogleDriveUrl } from "./googleDrive";
 
 describe("parseGoogleDriveUrl", () => {
   it("recognizes a shared file link and builds its preview embed", () => {
@@ -39,5 +39,35 @@ describe("parseGoogleDriveUrl", () => {
     expect(parseGoogleDriveUrl("https://example.com/file/d/1AbC")).toBeNull();
     expect(parseGoogleDriveUrl("https://docs.google.com/forms/d/1FormId/edit")).toBeNull();
     expect(parseGoogleDriveUrl("not-a-url")).toBeNull();
+  });
+});
+
+// `/open?id=…` é a forma que o Drive para desktop gera e a mais comum nos dados
+// reais — e é AMBÍGUA: serve para arquivo e para pasta. Quem resolve a
+// ambiguidade é o contexto, e por isso as duas funções abaixo respondem
+// diferente para a mesma URL. Caso real: a pasta "EDIÇÃO" da Baita chega assim.
+describe("pasta a partir da URL, e a ambiguidade do /open?id=", () => {
+  const OPEN = "https://drive.google.com/open?id=10yfhwlbsCrBsINQWqMvmYmrfm-eYe3qZ&usp=drive_fs";
+  const FOLDERS = "https://drive.google.com/drive/folders/14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z";
+
+  it("campo de pasta aceita /open?id= — quem colou ali já disse que é pasta", () => {
+    expect(driveFolderIdFromUrl(OPEN)).toBe("10yfhwlbsCrBsINQWqMvmYmrfm-eYe3qZ");
+  });
+
+  it("campo de pasta aceita a forma inequívoca", () => {
+    expect(driveFolderIdFromUrl(FOLDERS)).toBe("14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z");
+  });
+
+  it("ignora o que não é do Drive, nulo ou vazio", () => {
+    expect(driveFolderIdFromUrl("https://www.instagram.com/p/abc/")).toBeNull();
+    expect(driveFolderIdFromUrl(null)).toBeNull();
+    expect(driveFolderIdFromUrl("")).toBeNull();
+    expect(driveFolderIdFromUrl("   ")).toBeNull();
+  });
+
+  it("pasta é reconhecida como pasta, não como 'outro'", () => {
+    expect(driveFileKind(DRIVE_FOLDER_MIME)).toBe("folder");
+    expect(isDriveFolder({ mimeType: DRIVE_FOLDER_MIME })).toBe(true);
+    expect(isDriveFolder({ mimeType: "image/png" })).toBe(false);
   });
 });

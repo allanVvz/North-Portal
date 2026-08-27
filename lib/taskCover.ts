@@ -93,6 +93,48 @@ export function taskCoverCandidates(task: {
   return candidates;
 }
 
+/** Uma pasta do Drive citada num card. */
+export type TaskDriveFolder = { folderId: string; url: string };
+
+/**
+ * As pastas do Drive citadas no card, sem repetição, na ordem em que aparecem.
+ *
+ * Separado dos candidatos a capa porque a pergunta é outra: capa é "qual imagem
+ * representa este card", pasta é "onde fica o material deste card". Uma pasta
+ * nunca vira capa (ver driveFilesIn) e um arquivo nunca vira pasta.
+ *
+ * É o que alimenta o navegador de pastas dentro do card
+ * (app/admin/DriveBrowser.tsx): colar o link da pasta num comentário passa a
+ * bastar para poder circular por ela sem sair do card.
+ *
+ * Só a forma inequívoca `/drive/folders/…` conta aqui. A forma `/open?id=…` —
+ * a mais comum nos dados reais — serve para arquivo E para pasta, e num
+ * comentário não há nada que diga qual dos dois é. Abrir um navegador de pastas
+ * em cima de um arquivo seria pior que não abrir nada. No cadastro do cliente é
+ * diferente: lá o campo em que o link foi colado já responde a pergunta — ver
+ * driveFolderIdFromUrl em lib/googleDrive.
+ */
+export function taskDriveFolders(task: {
+  description?: string | null;
+  payload?: Record<string, unknown> | null;
+}): TaskDriveFolder[] {
+  const folders: TaskDriveFolder[] = [];
+  const seen = new Set<string>();
+
+  const collect = (text: string) => {
+    for (const url of linksIn(text)) {
+      const link = parseGoogleDriveUrl(url);
+      if (link?.kind !== "folder" || seen.has(link.id)) continue;
+      seen.add(link.id);
+      folders.push({ folderId: link.id, url });
+    }
+  };
+
+  collect(task.description ?? "");
+  for (const comment of commentsOf(task.payload) as TaskComment[]) collect(comment.text);
+  return folders;
+}
+
 /** O primeiro candidato, ou null. Conveniência para quem só quer saber se há capa. */
 export function taskCover(task: {
   description?: string | null;

@@ -4338,6 +4338,25 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 }
 .drive-thumb:hover .drive-thumb-box { border-color: var(--a-teal); }
 
+/* Navegador de pastas (app/admin/DriveBrowser.tsx), usado no cadastro do
+   cliente, na visão do cliente e dentro do card. */
+.drive-browser { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* Subpasta é um <button> no meio de <a>s: precisa perder a aparência de botão
+   para ficar igual aos arquivos ao lado. */
+.drive-thumb.is-folder { border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.drive-thumb.is-folder .drive-thumb-box { color: var(--a-teal-text); background: var(--a-teal-soft); font-size: 20px; }
+/* Trilha: só aparece depois de descer um nível, por isso não ocupa espaço no
+   estado inicial. */
+.drive-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11.5px; }
+.drive-crumb { border: 0; padding: 0; background: none; font: inherit; color: var(--a-teal-text); cursor: pointer; text-decoration: underline; }
+.drive-crumb.on { color: var(--a-muted); cursor: default; text-decoration: none; }
+.drive-crumb-sep { color: var(--a-muted); }
+/* Queda pública: o embed do próprio Google, que navega sozinho. */
+.drive-browser-embed { width: 100%; height: 260px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); }
+/* Dentro do card o espaço é menor que no cadastro. */
+.tm-drivebox .drive-browser-embed { height: 220px; }
+.tm-drivebox .drive-thumbs { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+
 /* ============================================================= */
 /* Admin — Home (/admin/home)                                     */
 /* ============================================================= */

@@ -14,7 +14,8 @@ import {
 } from "./kanbanShared";
 import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
-import { taskCoverCandidates } from "@/lib/taskCover";
+import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
+import DriveBrowser from "./DriveBrowser";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
@@ -918,6 +919,14 @@ export default function TaskModal({
     [draft.description, task?.payload],
   );
 
+  // Pastas do Drive citadas no card. Mesma origem da capa (descrição +
+  // comentários), pergunta diferente: onde fica o material, não qual imagem
+  // representa. Ver taskDriveFolders.
+  const driveFolders = useMemo(
+    () => taskDriveFolders({ description: draft.description, payload: task?.payload }),
+    [draft.description, task?.payload],
+  );
+
   const stepIdx = STATUS_ORDER.indexOf(draft.status);
 
   return (
@@ -1371,6 +1380,21 @@ export default function TaskModal({
                   <span>Criado em</span>
                   <b>{formatAbsoluteTime(liveTask.created_at)}</b>
                 </p>
+              ) : null}
+              {driveFolders.length ? (
+                <div className="tm-box tm-drivebox">
+                  <p className="tm-box-label">
+                    {driveFolders.length === 1 ? "Pasta do Drive" : "Pastas do Drive"}
+                  </p>
+                  {driveFolders.map((folder, i) => (
+                    <DriveBrowser
+                      key={folder.folderId}
+                      folderId={folder.folderId}
+                      label={driveFolders.length === 1 ? "Pasta" : `Pasta ${i + 1}`}
+                      limit={12}
+                    />
+                  ))}
+                </div>
               ) : null}
               <div className="tm-box tm-commentsbox">
                 <p className="tm-box-label">Comentários e atividade</p>

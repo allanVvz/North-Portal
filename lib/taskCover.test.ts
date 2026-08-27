@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_COVER_CANDIDATES, taskCover, taskCoverCandidates } from "./taskCover";
+import { MAX_COVER_CANDIDATES, taskCover, taskCoverCandidates, taskDriveFolders } from "./taskCover";
 
 const FILE_A = "1AaBbCcDdEeFfGgHhIiJjKkLlMmNn";
 const FILE_B = "2ZzYyXxWwVvUuTtSsRrQqPpOoNnMm";
@@ -168,5 +168,36 @@ describe("candidatos a capa", () => {
       "1z-X1-amdHLOfbsQMyuwfqs8L0HHt1vCC",
       "1s1WhkToAyjd22sxewRJ2M2RyaSHsSOHB",
     ]);
+  });
+});
+
+// No card o link aparece solto no meio de um comentário, sem campo que o
+// qualifique — então só a forma inequívoca conta. Abrir um navegador de pastas
+// em cima de um arquivo seria pior que não abrir nada.
+describe("pastas do Drive citadas no card", () => {
+  const FOLDER = "https://drive.google.com/drive/folders/14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z";
+  const AMBIGUO = "https://drive.google.com/open?id=10yfhwlbsCrBsINQWqMvmYmrfm-eYe3qZ&usp=drive_fs";
+
+  it("pega a pasta da descrição e a do comentário, sem repetir", () => {
+    const pastas = taskDriveFolders({
+      description: FOLDER,
+      payload: { comments: [comment(`de novo ${FOLDER}`, "1"), comment(driveUrl(FILE_A), "2")] },
+    });
+    expect(pastas).toEqual([{ folderId: "14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z", url: FOLDER }]);
+  });
+
+  it("NÃO trata /open?id= como pasta — no comentário não há como saber", () => {
+    expect(taskDriveFolders({ description: AMBIGUO })).toEqual([]);
+  });
+
+  it("arquivo nunca vira pasta, e pasta nunca vira capa", () => {
+    const task = { description: `${FOLDER} e ${driveUrl(FILE_A)}` };
+    expect(taskDriveFolders(task).map((f) => f.folderId)).toEqual(["14fk0asXkJD2Dm5S1FmOdO5hkRnjCYh1Z"]);
+    expect(taskCoverCandidates(task).map((c) => c.fileId)).toEqual([FILE_A]);
+  });
+
+  it("card sem pasta devolve lista vazia", () => {
+    expect(taskDriveFolders({ description: "sem link" })).toEqual([]);
+    expect(taskDriveFolders({})).toEqual([]);
   });
 });
