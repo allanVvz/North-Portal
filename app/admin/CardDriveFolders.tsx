@@ -44,19 +44,41 @@ export default function CardDriveFolders({ folders }: { folders: TaskDriveFolder
   }, [pendingKey]);
 
   const visible = folders.filter((f) => f.certain || resolved[f.folderId]);
+  const [picked, setPicked] = useState(0);
+
   if (!visible.length) return null;
+
+  // UMA pasta por vez, com seletor quando há mais de uma.
+  //
+  // Empilhar todas foi a primeira versão e quebrou a coluna: .tm-side é um
+  // flex column onde só a caixa de comentários encolhe, então cada navegador a
+  // mais empurrava a conversa para fora do modal. O card "REELS FEED - Motivo
+  // do estresse" tem três links e transbordava.
+  //
+  // Além de não quebrar, ler melhor: ninguém circula por três pastas ao mesmo
+  // tempo.
+  const current = visible[Math.min(picked, visible.length - 1)];
 
   return (
     <div className="tm-box tm-drivebox">
       <p className="tm-box-label">{visible.length === 1 ? "Pasta do Drive" : "Pastas do Drive"}</p>
-      {visible.map((folder, i) => (
-        <DriveBrowser
-          key={folder.folderId}
-          folderId={folder.folderId}
-          label={visible.length === 1 ? "Pasta" : `Pasta ${i + 1}`}
-          limit={12}
-        />
-      ))}
+      {visible.length > 1 ? (
+        <div className="drive-pick" role="tablist" aria-label="Pastas citadas no card">
+          {visible.map((folder, i) => (
+            <button
+              type="button"
+              key={folder.folderId}
+              role="tab"
+              aria-selected={i === picked}
+              className={`drive-pick-tab${i === picked ? " on" : ""}`}
+              onClick={() => setPicked(i)}
+            >
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <DriveBrowser key={current.folderId} folderId={current.folderId} label="Pasta" limit={12} />
     </div>
   );
 }

@@ -3625,6 +3625,10 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-side .tm-commentsbox { flex: 1; display: flex; flex-direction: column; min-height: 0; margin: 0; background: none; padding: 0; }
 .tm-side .tm-box-label { margin: 0 0 12px; }
 .tm-side .tm-comments { flex: 1; max-height: none; min-height: 220px; }
+/* Com a caixa de pastas presente há menos altura para repartir. Sem baixar este
+   piso, os dois juntos passavam da coluna em tela mais baixa — a conversa
+   continua rolando por dentro, que é o comportamento dela de qualquer forma. */
+.tm-side:has(.tm-drivebox) .tm-comments { min-height: 140px; }
 .tm-layout:has(.tm-side) .tm-main { grid-column: 1; grid-row: 1; }
 .tm-layout:has(.tm-side) .tm-side { grid-column: 2; grid-row: 1; }
 
@@ -4351,11 +4355,35 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .drive-crumb { border: 0; padding: 0; background: none; font: inherit; color: var(--a-teal-text); cursor: pointer; text-decoration: underline; }
 .drive-crumb.on { color: var(--a-muted); cursor: default; text-decoration: none; }
 .drive-crumb-sep { color: var(--a-muted); }
-/* Queda pública: o embed do próprio Google, que navega sozinho. */
-.drive-browser-embed { width: 100%; height: 260px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); }
-/* Dentro do card o espaço é menor que no cadastro. */
-.tm-drivebox .drive-browser-embed { height: 220px; }
-.tm-drivebox .drive-thumbs { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+/* Queda pública: o embed do próprio Google, que navega sozinho.
+
+   O conteúdo dele vem grande demais — é uma página feita para ocupar uma aba
+   inteira, não um painel. `zoom` encolhe o que está DENTRO do iframe; a largura
+   e a altura são multiplicadas pelo inverso para que a caixa continue medindo o
+   que se pede aqui. Assim `height: calc(300px / …)` significa "300px na tela",
+   e o que muda é quanta coisa cabe dentro. */
+.drive-browser-embed {
+  --embed-zoom: .6;
+  zoom: var(--embed-zoom);
+  width: calc(100% / var(--embed-zoom));
+  height: calc(300px / var(--embed-zoom));
+  border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface);
+}
+/* Dentro do card o espaço é bem menor que no cadastro do cliente. */
+.tm-drivebox .drive-browser-embed { --embed-zoom: .5; height: calc(170px / var(--embed-zoom)); }
+.tm-drivebox .drive-thumbs { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
+
+/* A caixa de pastas no card não pode crescer: .tm-side é um flex column onde
+   quem encolhe é a caixa de comentários. Sem `flex: 0 0 auto` + altura contida,
+   cada pasta empurrava a conversa para fora do modal. */
+.tm-side .tm-drivebox { flex: 0 0 auto; margin: 0 0 14px; padding: 0; background: none; }
+/* Seletor de pasta, só aparece quando o card cita mais de uma. */
+.drive-pick { display: flex; gap: 6px; margin-bottom: 8px; }
+.drive-pick-tab {
+  min-width: 24px; height: 24px; padding: 0 7px; border: 1px solid var(--a-border); border-radius: 8px;
+  background: var(--a-surface); color: var(--a-muted); font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.drive-pick-tab.on { border-color: var(--a-teal); background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 700; }
 
 /* ============================================================= */
 /* Admin — Home (/admin/home)                                     */

@@ -92,9 +92,6 @@ export default function DriveBrowser({
           title={`Pasta ${label}`}
           loading="lazy"
         />
-        <p className="admin-hint">
-          Navegação pelo Drive público — só mostra o que estiver compartilhado como “qualquer pessoa com o link”.
-        </p>
       </div>
     );
   }
