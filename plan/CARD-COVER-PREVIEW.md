@@ -24,14 +24,16 @@ têm. A capa entra por cima, não no meio.
 
 ### Enquadramento
 
-| Origem | Tratamento | Por quê |
-|---|---|---|
-| Deitada (paisagem) | **Enquadrada inteira** (`contain`) | Cortar as laterais de uma paisagem tira justamente o enquadramento da foto |
-| Em pé (retrato) | **Cortada no centro** (`cover`) | Contê-la numa caixa quadrada deixaria duas tarjas enormes |
+**A capa sempre preenche a caixa e corta o que sobra** — deitada ou em pé,
+`object-fit: cover` centrado. Uma regra de CSS, sem exceção.
 
-A proporção só é conhecida quando a imagem carrega, então a decisão acontece no
-`onLoad` do `<img>` (`app/admin/CardCover.tsx`). Antes disso vale `cover`, que
-evita salto de layout.
+A primeira versão enquadrava a imagem deitada inteira (`contain`), para não
+cortar as laterais da paisagem, e media a proporção no `onLoad` para decidir.
+Foi removida: as tarjas de fundo que sobravam em cima e embaixo não se lêem
+como capa, se lêem como imagem quebrada — e numa coluna de cards isso vira
+ruído repetido. Cortar as extremidades de uma paisagem custa menos do que isso.
+
+Com uma regra só, a detecção de proporção deixou de ter função e saiu junto.
 
 ---
 

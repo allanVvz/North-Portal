@@ -2340,13 +2340,11 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   display: block; overflow: hidden; aspect-ratio: 1 / 1;
   background: var(--a-inset); border-radius: 10px 10px 0 0;
 }
-.card-cover img { width: 100%; height: 100%; display: block; object-fit: cover; }
-/* Enquadramento decidido pela proporção real, no onLoad — ver o componente.
-   Antes de saber, `cover` acima evita o salto de layout.
-   Deitada: cabe inteira, sem cortar as laterais da paisagem. */
-.card-cover.deitada img { object-fit: contain; }
-/* Em pé: cortada no centro — contê-la deixaria duas tarjas enormes. */
-.card-cover.em-pe img { object-fit: cover; object-position: center; }
+/* A capa SEMPRE preenche a caixa, cortando o que sobra — deitada ou em pé.
+   Já foi `contain` para imagem deitada, para mostrar a paisagem inteira, mas
+   isso deixava duas tarjas do fundo aparecendo em cima e embaixo, e uma coluna
+   de cards com tarja não se lê como capa: se lê como imagem quebrada. */
+.card-cover img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: center; }
 
 /* Sangria até a borda: a margem negativa anula o padding do card, então a capa
    encosta no canto arredondado em vez de flutuar numa moldura. */
