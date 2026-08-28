@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { createClientWithChildren, linkClientAdAccount, listClients, saveDriveFolderProvisioning } from "@/lib/supabase";
+import { createClientWithChildren, linkClientAdAccount, listClients, markLeadConverted, saveDriveFolderProvisioning } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { provisionClientAuth } from "@/lib/supabase/clientAuth";
 import { isGoogleDriveConfigured, provisionClientDriveFolders } from "@/lib/googleDriveApi";
@@ -66,7 +66,21 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ client, credentials, drive, adAccount }, { status: 201 });
+    // Por último, e best-effort como os passos acima: o cliente já existe, então
+    // uma falha aqui não pode derrubar a criação. O pior caso é um lead que
+    // continua "qualificado" e precisa ser fechado à mão — bem melhor do que um
+    // lead marcado como convertido sem cliente do outro lado.
+    let lead: { ok: boolean; reason?: string } | null = null;
+    if (body.leadId) {
+      try {
+        await markLeadConverted(body.leadId, client.id);
+        lead = { ok: true };
+      } catch (e) {
+        lead = { ok: false, reason: e instanceof Error ? e.message : "Falha ao marcar o lead como convertido." };
+      }
+    }
+
+    return NextResponse.json({ client, credentials, drive, adAccount, lead }, { status: 201 });
   } catch (error) {
     return apiError(error);
   }

@@ -1863,6 +1863,10 @@ body.menu-open {
 .admin-btn.ghost { background: transparent; border-color: transparent; color: var(--a-teal-text); }
 .admin-btn.ghost:hover { background: var(--a-hover); }
 .admin-btn:disabled { opacity: 0.5; cursor: default; }
+/* Faltava desde sempre: ClientPipelineBoard e a tela de Leads já usavam
+   `admin-btn ghost sm`, mas a regra não existia, então os botões saíam com
+   padding 9px 15px e estouravam colunas estreitas de kanban. */
+.admin-btn.sm { padding: 5px 9px; font-size: 12px; border-radius: 8px; gap: 4px; }
 
 /* Kanban toolbar: primary CTA gets extra presence, gear becomes icon-only */
 .kb-newtask-btn { padding: 12px 24px; font-size: 14.5px; border-radius: 999px; justify-content: center; box-shadow: 0 2px 8px rgba(94,156,147,.28); }
@@ -4065,27 +4069,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .acq-toolbar.perf-analysis-toolbar { align-items:center; justify-content:flex-start; flex-direction:row; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
 .acq-conversion-panel { min-width:0; padding:26px; border:1px solid var(--a-border); border-radius:18px; background:var(--a-surface); box-shadow:0 8px 28px rgba(12,44,44,.045); }
 .acq-conversion-flow { display:flex; flex-direction:column; gap:22px; }
-.acq-funnel-layout { display:grid; grid-template-columns:minmax(260px,1fr) minmax(300px,1.25fr); gap:32px; align-items:center; }
+/* O funil é a peça principal; o fecho é um cartão de leitura ao lado dele, não
+   uma coluna maior que o gráfico. */
+.acq-funnel-layout { display:grid; grid-template-columns:minmax(280px,1.05fr) minmax(240px,.95fr); gap:28px; align-items:center; }
 /* Imagem grande e recortada: a box fica menor que a imagem escalada, e o
    overflow:hidden come a margem transparente do PNG nas bordas. */
-.acq-object-wrap { position:relative; display:grid; place-items:center; min-height:340px; overflow:hidden; border-radius:20px; }
-.acq-object-wrap img { width:300px; height:300px; object-fit:contain; transform:rotate(180deg) scale(1.3); filter:drop-shadow(0 -15px 20px rgba(63,39,101,.18)); }
 .acq-funnel-info { display:flex; flex-direction:column; gap:14px; min-width:0; }
 /* Pilha vertical afunilando (largo → estreito) referenciando a forma do
    funil, em vez da fileira horizontal anterior. */
-.acq-flow-stages { display:flex; flex-direction:column; align-items:center; gap:10px; width:100%; }
-.acq-flow-item { display:flex; flex-direction:column; align-items:center; min-width:0; width:100%; }
-.acq-flow-stage { display:grid; justify-items:center; gap:3px; min-width:0; width:100%; padding:12px 14px; border:1px solid var(--a-border); border-radius:11px; background:var(--a-surface2); text-align:center; }
-.acq-flow-stage span { color:var(--a-muted); font-size:8.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
-.acq-flow-stage strong { color:var(--a-ink); font-family:Fraunces,Georgia,serif; font-size:19px; font-weight:500; }
-.acq-flow-item:nth-child(1) .acq-flow-stage { width:100%; }
-.acq-flow-item:nth-child(2) .acq-flow-stage { width:85%; background:var(--a-purple-soft); }
-.acq-flow-item:nth-child(3) .acq-flow-stage { width:70%; background:var(--a-gold-soft); }
-.acq-flow-item:nth-child(4) .acq-flow-stage { width:58%; border-color:color-mix(in srgb,var(--a-teal) 45%,var(--a-border)); background:var(--a-teal-soft); }
-.acq-flow-stage.missing { border-style:dashed; opacity:.68; }
-.acq-flow-arrow { display:grid; justify-items:center; gap:0; width:auto; height:26px; flex:0 0 26px; color:var(--a-teal-text); }
-.acq-flow-arrow b { display:block; font-size:17px; font-weight:500; line-height:1; transform:rotate(90deg); }
-.acq-flow-arrow small { color:var(--a-muted); font-size:8.5px; font-weight:750; }
 /* Fecho do funil: total dos dois desfechos e o custo médio ponderado. Duas
    células lado a lado, mais discretas que os cards de resultado acima — é um
    consolidado do que já foi lido, não uma quarta métrica competindo. */
@@ -4110,14 +4101,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .acq-outcome-value { color:var(--a-ink); font-family:Fraunces,Georgia,serif; font-size:26px; font-weight:500; line-height:1.05; }
 .acq-outcome-cost { color:var(--a-ink); font-size:11.5px; font-weight:650; }
 .acq-outcome-rate { color:var(--a-muted); font-size:9.5px; }
-.acq-message-toggle { display:flex; align-items:center; gap:7px; margin-top:-2px; color:var(--a-muted); font-size:11px; }
-.acq-message-toggle input { width:14px; height:14px; accent-color:var(--a-teal-strong); }
 .acq-funnel-trend { padding-top:16px; margin-top:2px; border-top:1px solid var(--a-border); }
 .acq-loading { display:grid; min-height:290px; place-items:center; color:var(--a-muted); font-size:12px; }
 @media(max-width:1180px){.acq-toolbar{align-items:stretch;flex-direction:column}}
-@media(max-width:820px){.acq-funnel-layout{grid-template-columns:1fr}.acq-object-wrap{min-height:auto}}
+@media(max-width:820px){.acq-funnel-layout{grid-template-columns:1fr}.acq-funnel-chart{padding:0 0 8px}}
 @media(max-width:520px){.acq-outcomes{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:600px){.acq-toolbar.perf-analysis-toolbar{align-items:stretch}.acq-toolbar>.perf-daterange-field{align-self:flex-start}.acq-toolbar>.perf-toolbar-icon{align-self:flex-start}.acq-object-wrap{min-height:220px}.acq-object-wrap img{width:260px;height:260px}.acq-flow-item:nth-child(2) .acq-flow-stage,.acq-flow-item:nth-child(3) .acq-flow-stage,.acq-flow-item:nth-child(4) .acq-flow-stage{width:100%}}
+@media(max-width:600px){.acq-toolbar.perf-analysis-toolbar{align-items:stretch}.acq-toolbar>.perf-daterange-field{align-self:flex-start}.acq-toolbar>.perf-toolbar-icon{align-self:flex-start}.acq-funnel-chart svg{max-width:240px}}
 
 .wi-datasources { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 14px 16px; margin-top: 14px; border: 1px solid var(--a-border); border-radius: 12px; }
 .wi-mapping { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 12px; }
@@ -4589,3 +4578,150 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .week-cal-day { min-width: 0; }
 .week-cal-items, .week-cal-pill, .week-cal-pill strong, .week-cal-pill span { min-width: 0; max-width: 100%; }
 .home-card-wide { grid-column: 1 / -1; }
+
+/* ---- Leads (aba de /admin/clientes) ---------------------------------------- */
+/* Classe-only, sem seletor de elemento: CLAUDE.md registra que `tag.classe`
+   perde para regras de classe única declaradas depois neste cascade. */
+
+/* 5 colunas contra as 3 de .cli-pipeline. minmax(190px,1fr) + scroll horizontal
+   em vez de deixar a coluna encolher até o card não caber: abaixo de ~190px o
+   nome e os dois botões de ação não têm como coexistir em nenhuma tipografia. */
+.leads-pipeline { grid-template-columns: repeat(5, minmax(190px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+.leads-pipeline .cli-pipeline-col { padding: 12px 10px; }
+.leads-viewtabs { margin-bottom: 14px; }
+
+.lead-card { gap: 7px; padding: 12px; cursor: grab; transition: box-shadow .16s ease, transform .16s ease, border-color .16s ease; }
+.lead-card:hover { border-color: var(--a-border-strong); box-shadow: 0 4px 14px rgba(12,44,44,.09); transform: translateY(-1px); }
+.lead-card:active { cursor: grabbing; }
+.lead-card.is-busy { opacity: .55; pointer-events: none; }
+
+/* O nome trunca em vez de quebrar em duas linhas: com 5 colunas, deixar
+   "Gabriela Lima" virar duas linhas desalinhava todos os cards vizinhos. */
+.lead-card .cli-card-top { justify-content: space-between; align-items: baseline; gap: 8px; }
+.lead-card .cli-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.lead-date { flex: 0 0 auto; font-size: 10.5px; color: var(--a-muted); white-space: nowrap; }
+.lead-company { margin: 0; font-size: 12px; color: var(--a-sec); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead-card .cli-card-meta { gap: 6px; }
+.lead-origin { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--a-muted); }
+.lead-card .admin-pill { flex: 0 0 auto; font-size: 10.5px; }
+/* .cli-card-actions ganha rodapé cheio (fundo + border-top + padding) na linha
+   ~4549, para o card de CLIENTE, cujo rodapé é full-bleed. O card de lead tem
+   padding próprio, então esse fundo virava um retângulo cinza solto dentro do
+   card. Dois níveis de classe (0,2,0) para vencer por especificidade, não por
+   ordem — CLAUDE.md. */
+.lead-card .cli-card-actions {
+  gap: 4px; padding: 8px 0 0; background: none;
+  border-top: 1px solid var(--a-border);
+}
+.lead-card .cli-card-actions .admin-btn { flex: 1 1 0; min-width: 0; justify-content: center; white-space: nowrap; }
+
+.lead-detail { border-top: 1px solid var(--a-border); margin-top: 2px; padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.lead-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 11.5px; }
+.lead-detail dt { color: var(--a-muted); }
+.lead-detail dd { margin: 0; color: var(--a-ink); overflow-wrap: anywhere; }
+.lead-detail textarea { width: 100%; resize: vertical; font: inherit; font-size: 12px; padding: 7px 9px; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-surface); color: var(--a-ink); }
+.lead-detail-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+
+/* `.admin-shell select` (linha ~2263) é 0,1,1 e vence uma classe solta 0,1,0
+   por especificidade, não por ordem — e seu `background` shorthand ainda apagava
+   o chevron. CLAUDE.md manda subir a especificidade NA classe em vez de marcar
+   o elemento (`select.lead-status-select`), então o escopo vem de .admin-shell. */
+.admin-shell .lead-status-select {
+  font: inherit; font-size: 12.5px; min-width: 106px; padding: 5px 24px 5px 9px;
+  border: 1px solid var(--a-border-strong); border-radius: 8px;
+  background-color: var(--a-surface); color: var(--a-ink);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%235c6b62' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5 6 6.5l5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center; background-size: 10px;
+  -webkit-appearance: none; -moz-appearance: none; appearance: none;
+  cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease;
+}
+.admin-shell .lead-status-select:hover:not(:disabled) { border-color: var(--a-teal); }
+.admin-shell .lead-status-select:focus-visible { outline: none; border-color: var(--a-teal-strong); background-color: var(--a-surface); box-shadow: 0 0 0 3px var(--a-teal-soft); }
+.admin-shell .lead-status-select:disabled { opacity: .6; cursor: default; }
+/* Ações grudam na borda direita: "Converter" é a ação principal da tela e com
+   9 colunas ela caía fora do painel, só alcançável rolando na horizontal. */
+.leads-table th:last-child, .leads-table td:last-child {
+  position: sticky; right: 0; z-index: 1;
+  background: var(--a-surface); box-shadow: -8px 0 12px -8px rgba(12,44,44,.16);
+}
+.leads-table tbody tr:hover td:last-child { background: var(--a-hover); }
+.lead-row-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+.leads-table { min-width: 860px; }
+.leads-table thead th { padding: 12px 12px; }
+.leads-table tbody td { padding: 11px 12px; }
+.leads-table tbody tr.is-busy { opacity: .55; }
+/* Colunas curtas nunca quebram; as de texto livre podem, mas com um piso que
+   evita a coluna de 40px que virava quatro linhas. */
+.leads-table td:nth-child(1), .leads-table td:nth-child(6),
+.leads-table td:nth-child(8), .leads-table td:nth-child(9) { white-space: nowrap; }
+.leads-table td:nth-child(2) { white-space: nowrap; font-weight: 600; color: var(--a-ink); }
+.leads-table th:nth-child(3), .leads-table th:nth-child(4) { min-width: 110px; }
+.leads-table .lead-wa { padding: 5px 7px; }
+.leads-table td:nth-child(7) { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 1240px) {
+  .leads-pipeline { grid-template-columns: repeat(5, minmax(190px, 1fr)); }
+}
+
+/* ---- Funil de aquisição: SVG proporcional aos dados ------------------------ */
+/* Substituiu um PNG de cone 3D azul — decorativo, recortado no container e fora
+   da paleta. Agora a largura de cada faixa É o dado (ver FunnelChart). */
+.acq-funnel-chart { display:grid; place-items:center; padding:8px 4px; }
+.acq-funnel-chart svg { max-width:346px; overflow:visible; }
+.acq-band { animation:acqBandIn .5s cubic-bezier(.22,.61,.36,1) both; transition:opacity .16s ease; }
+.acq-band path { transition:filter .2s ease; }
+.acq-band:hover path { filter:brightness(1.06) drop-shadow(0 4px 10px color-mix(in srgb,var(--a-teal) 42%,transparent)); }
+.acq-band.missing path { animation:none; }
+/* Rótulos fora da forma, ancorados à esquerda e ligados por linha guia — ver
+   o comentário de geometria em FunnelChart. */
+.acq-band-label { fill:var(--a-muted); font-size:8px; font-weight:800; letter-spacing:.1em; }
+.acq-band-value { fill:var(--a-ink); font-family:Fraunces,Georgia,serif; font-size:20px; font-weight:500; }
+.acq-band-leader { stroke:var(--a-border-strong); stroke-width:1; stroke-dasharray:2 3; }
+.acq-band-dot { fill:var(--a-teal-strong); }
+.acq-band.missing .acq-band-value { fill:var(--a-muted); }
+.acq-band.missing .acq-band-dot { fill:var(--a-border-strong); }
+.acq-band-rate { fill:var(--a-muted); font-size:9px; font-weight:750; text-anchor:middle; }
+@keyframes acqBandIn { from { opacity:0; transform:translateY(-6px) scaleX(.94); } to { opacity:1; transform:none; } }
+
+/* Badges de resultado: eram caixas chapadas sem estado. Agora reagem ao ponteiro
+   e o valor entra com uma contagem sutil de baixo para cima. */
+.acq-outcome { position:relative; overflow:hidden; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.acq-outcome::after { content:""; position:absolute; inset:0; border-radius:inherit; opacity:0; background:radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,.75), transparent 70%); transition:opacity .22s ease; pointer-events:none; }
+.acq-outcome:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(12,44,44,.11); }
+.acq-outcome:hover::after { opacity:1; }
+.acq-outcome.leads { border-color:color-mix(in srgb,var(--a-teal) 55%,var(--a-border)); background:linear-gradient(160deg,var(--a-teal-soft),color-mix(in srgb,var(--a-teal-soft) 55%,var(--a-surface))); }
+.acq-outcome.conversas { border-color:color-mix(in srgb,var(--a-gold-text) 34%,var(--a-border)); background:linear-gradient(160deg,var(--a-gold-soft),color-mix(in srgb,var(--a-gold-soft) 50%,var(--a-surface))); }
+.acq-outcome.conversas .acq-outcome-label { color:var(--a-gold-text); }
+.acq-outcome-value { animation:acqValueIn .45s cubic-bezier(.22,.61,.36,1) both; }
+@keyframes acqValueIn { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:none; } }
+
+.acq-funnel-terminal { transition:border-color .18s ease; }
+.acq-terminal-cell strong { transition:color .18s ease; }
+.acq-terminal-cell:hover strong { color:var(--a-teal-text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .acq-band, .acq-outcome-value { animation:none; }
+  .acq-outcome:hover { transform:none; }
+}
+
+/* ---- Fecho do funil: um desfecho, definido pelo template -------------------- */
+/* Substituiu o par fixo Leads|Conversas mais o rodapé de total. Em 4 dos 6
+   clientes de produção `leads` e `compras` são zero em 30 dias, então aqueles
+   cards eram área permanentemente vazia. */
+.acq-result { display:grid; gap:16px; padding:20px 22px; border:1px solid color-mix(in srgb,var(--a-teal) 40%,var(--a-border)); border-radius:16px; background:linear-gradient(150deg,var(--a-teal-soft),color-mix(in srgb,var(--a-teal-soft) 45%,var(--a-surface))); }
+.acq-result-main { display:grid; gap:3px; min-width:0; }
+.acq-result-label { color:var(--a-teal-text); font-size:9px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+.acq-result-value { color:var(--a-ink); font-family:Fraunces,Georgia,serif; font-size:38px; font-weight:500; line-height:1; animation:acqValueIn .45s cubic-bezier(.22,.61,.36,1) both; }
+.acq-result-rate { color:var(--a-sec); font-size:11.5px; }
+.acq-result-side { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 16px; margin:0; padding-top:14px; border-top:1px solid color-mix(in srgb,var(--a-teal) 30%,var(--a-border)); }
+.acq-result-side div { display:grid; gap:1px; min-width:0; }
+.acq-result-side dt { color:var(--a-muted); font-size:9px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
+.acq-result-side dd { margin:0; color:var(--a-ink); font-size:16px; font-weight:650; }
+
+/* KPI de métrica que nenhuma ingestão preenche: mostrado de propósito, mas
+   rotulado como lacuna em vez de um "—" que parece zero do período. */
+.acq-kpi.is-gap { border-style:dashed; background:var(--a-surface2); }
+.acq-kpi.is-gap strong { color:var(--a-muted); }
+.acq-delta.gap { color:var(--a-gold-text); font-weight:700; }
+
+@media (max-width:820px){ .acq-result { grid-template-columns:1fr; gap:14px; } }

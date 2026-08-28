@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { AdAccountOption, CheckpointTemplate, ScopeTag } from "@/lib/supabase";
+import type { AdAccountOption, CheckpointTemplate, LeadRecord, ScopeTag } from "@/lib/supabase";
 import {
   AccountLinkSection,
   CheckpointsSection,
@@ -36,26 +36,41 @@ type Created = {
   adAccount: { ok: boolean; reason?: string } | null;
 };
 
+// Vindo de um lead, o que a pessoa declarou na landing page já responde metade
+// do formulário. O que NÃO dá para pré-preencher é o e-mail: o LeadForm coleta
+// telefone e não e-mail (ver e2e/public-funnel.spec.ts), e provisionClientAuth
+// exige um para criar o login. É por isso que converter não é um clique só —
+// alguém precisa informar o e-mail.
+//
+// A empresa vira o nome do cliente; quem preencheu vira o responsável do
+// contrato. Não é lazy-init de localStorage: o lead vem do servidor por prop,
+// então o HTML server-rendered e o cliente concordam.
 export default function NewClientForm({
   templates,
   scopeTags,
   adAccounts,
   driveConfigured,
+  lead = null,
 }: {
   templates: CheckpointTemplate[];
   scopeTags: ScopeTag[];
   adAccounts: AdAccountOption[];
   driveConfigured: boolean;
+  lead?: LeadRecord | null;
 }) {
   const router = useRouter();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(lead?.company ?? "");
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [email, setEmail] = useState("");
   const [isActive, setIsActive] = useState(true);
 
-  const [company, setCompany] = useState<CompanyInfoState>(EMPTY_COMPANY);
-  const [contract, setContract] = useState<ContractState>(EMPTY_CONTRACT);
+  const [company, setCompany] = useState<CompanyInfoState>(
+    lead ? { ...EMPTY_COMPANY, segmento: lead.segment, cidadeUf: lead.region } : EMPTY_COMPANY,
+  );
+  const [contract, setContract] = useState<ContractState>(
+    lead ? { ...EMPTY_CONTRACT, responsavelNome: lead.name, responsavelWhatsapp: lead.phone } : EMPTY_CONTRACT,
+  );
   const [tags, setTags] = useState<ScopeTag[]>(scopeTags);
 
   // Optional checkpoints start selected: the Figma shows Kickoff checked by
@@ -125,6 +140,7 @@ export default function NewClientForm({
         createDriveFolder: createDrive && driveConfigured,
         driveShareEmail: driveShareEmail.trim() || null,
         adAccountId: adAccountId || null,
+        leadId: lead?.id ?? null,
       }),
     });
     const data = await res.json().catch(() => ({}));

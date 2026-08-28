@@ -77,6 +77,10 @@ export const adminCreateClientSchema = z.object({
   driveShareEmail: z.string().email().max(200).nullable().optional(),
   // Ad account (Meta/Windsor) to map to this client's slug.
   adAccountId: z.string().max(120).nullable().optional(),
+  // Lead das landing pages que originou este cliente. Só marca o lead como
+  // convertido DEPOIS que o cliente existe — o inverso deixaria um lead
+  // apontando para cliente nenhum.
+  leadId: z.string().uuid().nullable().optional(),
 });
 const MAX_CONTENT_BYTES = 200000;
 export const contentSchema = z
@@ -448,6 +452,20 @@ export const automationConfigCreateSchema = z.object({
   collectMetricKeys: collectMetricKeysSchema,
   active: z.boolean().optional(),
 });
+// Triagem de lead: só status e notas. Os campos de identidade (nome, empresa,
+// telefone, segmento, UTM) são o registro do que a pessoa enviou no formulário
+// e não entram aqui de propósito — se fossem editáveis, um sync bidirecional
+// com CRM teria divergência para reconciliar.
+//
+// "convertido" fica fora do enum: esse status só é aplicado por
+// markLeadConverted(), depois que o cliente foi de fato criado.
+export const leadPatchSchema = z.object({
+  status: z.enum(["novo", "contatado", "qualificado", "descartado"]).optional(),
+  notes: z.string().max(2000).nullable().optional(),
+}).refine((v) => v.status !== undefined || v.notes !== undefined, {
+  message: "Nada para atualizar.",
+});
+
 export const automationConfigPatchSchema = z.object({
   targetTaskId: z.string().uuid().optional(),
   performanceTemplateId: z.string().min(1).max(80).nullable().optional(),

@@ -3004,3 +3004,81 @@ export async function deleteAutomationConfig(id: string): Promise<void> {
   const { error } = await supabase.from("automation_configs").delete().eq("id", id);
   if (error) fail(error);
 }
+
+
+// ---- Leads das landing pages -------------------------------------------------
+// Gravados por POST /api/leads (rota pública, service role). Aqui só leitura e
+// triagem: os campos de identidade são o registro do que a pessoa enviou e não
+// são editáveis por ninguém — é por eles que um CRM vai reconciliar depois.
+
+export type LeadRecord = {
+  id: string;
+  created_at: string;
+  name: string;
+  company: string;
+  phone: string;
+  segment: string;
+  region: string;
+  objective: string;
+  investment: string;
+  source_page: string;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  gclid: string | null;
+  status: string;
+  notes: string | null;
+  converted_client_id: string | null;
+};
+
+// Literal única, não concatenada: o cliente do Supabase infere o tipo da linha
+// a partir do texto do select, e uma expressão montada com `+` faz a inferência
+// degradar para GenericStringError.
+const LEAD_COLUMNS = "id,created_at,name,company,phone,segment,region,objective,investment,source_page,utm_source,utm_medium,utm_campaign,gclid,status,notes,converted_client_id";
+
+export async function listLeads(): Promise<LeadRecord[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("leads")
+    .select(LEAD_COLUMNS)
+    .order("created_at", { ascending: false });
+  // A tela de Clientes não pode cair porque a migration dos leads ainda não
+  // chegou num deploy em andamento — mesma degradação de meta_insights_cache.
+  if (isMissingOptionalTable(error, "leads")) return [];
+  if (error) fail(error);
+  return (data as LeadRecord[] | null) ?? [];
+}
+
+export async function getLead(id: string): Promise<LeadRecord | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("leads").select(LEAD_COLUMNS).eq("id", id).limit(1);
+  if (isMissingOptionalTable(error, "leads")) return null;
+  if (error) fail(error);
+  return (data?.[0] as LeadRecord | undefined) ?? null;
+}
+
+export async function updateLead(
+  id: string,
+  patch: { status?: string; notes?: string | null },
+): Promise<LeadRecord> {
+  const supabase = await createClient();
+  const fields: Record<string, unknown> = {};
+  if (patch.status !== undefined) fields.status = patch.status;
+  if (patch.notes !== undefined) fields.notes = patch.notes;
+  const { data, error } = await supabase.from("leads").update(fields).eq("id", id).select(LEAD_COLUMNS).limit(1);
+  if (error) fail(error);
+  const row = data?.[0] as LeadRecord | undefined;
+  if (!row) throw new HttpError(404, "Lead não encontrado.");
+  return row;
+}
+
+// Chamado depois que o cliente já foi criado com sucesso — nunca antes, senão
+// um lead ficaria marcado como convertido apontando para cliente nenhum.
+export async function markLeadConverted(id: string, clientId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("leads")
+    .update({ status: "convertido", converted_client_id: clientId })
+    .eq("id", id);
+  if (error) fail(error);
+}
