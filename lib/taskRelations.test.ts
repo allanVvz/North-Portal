@@ -1,16 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  actionPlanIdOf,
-  actionPlanMembersOf,
-  activatedTaskPayload,
-  belongsToTaskScreen,
-  childrenOf,
-  detachedTaskRelationPatch,
-  isDeferredTask,
-  recurrenceParentOf,
-  recurringActionPlanPatch,
-  visibleOnTaskBoard,
-} from "./taskRelations";
+import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, belongsToTaskScreen, childrenOf, detachedTaskRelationPatch, flowParentIdOf, flowStepKeyOf, flowStepsOf, isDeferredTask, recurrenceParentOf, recurringActionPlanPatch, visibleOnTaskBoard } from "./taskRelations";
 
 describe("relações entre tarefas", () => {
   it("resolve a relação imutável da execução com o card pai carregado", () => {
@@ -107,5 +96,43 @@ describe("separação da tela Tarefas", () => {
     expect(belongsToTaskScreen({ ...base, recurrence_cadence: "semanal" })).toBe(false);
     expect(belongsToTaskScreen({ ...base, payload: { deferred_until_accessed: true } })).toBe(false);
     expect(belongsToTaskScreen({ ...base, payload: { recurrence_group: true } })).toBe(false);
+  });
+});
+
+describe("etapas de fluxo em cascata", () => {
+  const step = { plan_id: "entrega", payload: { flow_step_key: "captacao" } };
+
+  it("aponta a etapa para a sua entrega", () => {
+    expect(flowStepKeyOf(step)).toBe("captacao");
+    expect(flowParentIdOf(step)).toBe("entrega");
+    expect(flowParentIdOf({ plan_id: "plano", payload: {} })).toBeNull();
+  });
+
+  // O plan_id de uma etapa é a ENTREGA, não um plano. Lê-lo como membership
+  // faria a etapa aparecer como atividade de um plano que nunca a adotou.
+  it("não confunde o vínculo com a entrega com membership de Plano de Ação", () => {
+    expect(actionPlanIdOf(step)).toBeNull();
+    // O vínculo real com um plano continua cabendo, pela mesma escapatória da recorrência.
+    expect(actionPlanIdOf({ ...step, payload: { ...step.payload, action_plan_id: "plano-9" } })).toBe("plano-9");
+  });
+
+  it("recusa desvincular uma etapa da sua entrega", () => {
+    expect(detachedTaskRelationPatch(step, "entrega")).toBeNull();
+    // Um membro comum de plano continua desvinculável.
+    expect(detachedTaskRelationPatch({ plan_id: "plano", payload: {} }, "plano")).toEqual({ plan_id: null, payload: {} });
+  });
+
+  // A entrega tem status derivado dos filhos — não existe coluna honesta para
+  // ela, mesma razão pela qual plano_acao e pai recorrente já ficam de fora.
+  it("mantém a entrega fora do quadro Tarefas e a etapa dentro", () => {
+    const entrega = { kind: "criativo", recurrence_cadence: null, flow_template_id: "tpl", payload: {} } as const;
+    const etapa = { kind: "criativo", recurrence_cadence: null, payload: { flow_step_key: "captacao" } } as const;
+    expect(belongsToTaskScreen(entrega)).toBe(false);
+    expect(belongsToTaskScreen(etapa)).toBe(true);
+  });
+
+  it("agrupa as etapas de uma entrega", () => {
+    const outra = { plan_id: "outra-entrega", payload: { flow_step_key: "roteiro" } };
+    expect(flowStepsOf("entrega", [step, outra])).toEqual([step]);
   });
 });

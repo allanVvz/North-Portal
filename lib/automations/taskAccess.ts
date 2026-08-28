@@ -3,7 +3,7 @@
 // session-scoped getters apply here.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { TASK_COLUMNS } from "@/lib/supabase";
+import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { commentsOf, type TaskComment } from "@/lib/comments";
 import type { TaskRecord } from "@/lib/validation";
 

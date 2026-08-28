@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { RecurringCadence, TaskRecord } from "./validation";
+import { derivedTaskId } from "./derivedTaskId";
 import { ACTION_PLAN_PAYLOAD_KEY, DEFERRED_TASK_FLAG } from "./taskRelations";
 import { EXPLICIT_DATES_KEY, EXPLICIT_GROUP_KEY } from "./taskDateGrouping";
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf } from "./recurrenceState";
@@ -84,13 +84,11 @@ export function nextRecurringDueDate(current: string, rule: RecurrenceRule): str
   throw new Error("Não foi possível calcular a próxima ocorrência mensal.");
 }
 
-/** Stable identity is based on the cycle, not its editable date. */
+/** Stable identity is based on the cycle, not its editable date. The hashing
+ * itself now lives in lib/derivedTaskId.ts, shared with flow steps — the digest
+ * and therefore every id this has ever produced is unchanged. */
 export function recurringExecutionId(parentId: string, cycle: number | string): string {
-  const identity = typeof cycle === "number" ? `cycle:${cycle}` : cycle;
-  const digest = createHash("sha256").update(`${parentId}:${identity}`).digest("hex").slice(0, 32).split("");
-  digest[12] = "5";
-  digest[16] = ((parseInt(digest[16], 16) & 3) | 8).toString(16);
-  return `${digest.slice(0, 8).join("")}-${digest.slice(8, 12).join("")}-${digest.slice(12, 16).join("")}-${digest.slice(16, 20).join("")}-${digest.slice(20).join("")}`;
+  return derivedTaskId(parentId, typeof cycle === "number" ? `cycle:${cycle}` : cycle);
 }
 
 function occurrenceTimestamp(parent: TaskRecord, occurrenceDate: string): string | null {

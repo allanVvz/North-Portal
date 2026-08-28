@@ -66,6 +66,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       (patch as Record<string, unknown>).client_id = nextClientId;
     }
 
+    // Um card não vira entrega (nem deixa de ser) por PATCH. Marcar
+    // flow_template_id num card qualquer criaria um pai que agrega etapas sem
+    // nunca ter uma — progresso travado em 0 e card fora do quadro. Entregas
+    // nascem por POST /api/admin/tasks?scope=flow, que cria a primeira etapa junto.
+    if (patch.flow_template_id !== undefined && patch.flow_template_id !== current.flow_template_id) {
+      throw new HttpError(400, "O fluxo de uma entrega nao pode ser alterado.");
+    }
+    delete patch.flow_template_id;
+
     // "Publicado" (concluido) is Criativo-only — the correlation with a real
     // publication (payload.metaPostId) and the metrics it then accumulates
     // only make sense for that kind.

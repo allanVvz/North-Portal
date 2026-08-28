@@ -1,4 +1,5 @@
 import { createClient } from "./supabase/server";
+import { TASK_COLUMNS } from "./taskColumns";
 import {
   currentRecurringExecutionFields,
   explicitDateExecutionFields,
@@ -9,7 +10,7 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { actionPlanIdOf, actionPlanMembersOf, belongsToTaskScreen, detachedTaskRelationPatch, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
+import { actionPlanIdOf, actionPlanMembersOf, belongsToTaskScreen, detachedTaskRelationPatch, flowStepKeyOf, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
@@ -46,7 +47,10 @@ import {
   type PerformanceTemplate,
   type PerformanceTemplateConfig,
 } from "./performanceTemplates";
-import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
+import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel, FLOW_STEP_COUNT_KEY, FLOW_TOTAL_WEIGHT_KEY } from "./taskCatalog";
+import { advanceFlowAfterUpdate } from "./flows/advance";
+import { flowTemplateProblem, getFlowTemplate, templateTotalWeight } from "./flows/template";
+import { flowStepFields } from "./flows/stepFields";
 import { averageProgress, isOverdue, plansInProgress, weekAhead } from "./adminHome";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
@@ -54,8 +58,9 @@ import type { MetaAdAccount } from "./meta";
 type ContentRow = { data: Record<string, unknown> | null };
 type PrefsRow = { theme: string | null; avatar_style: number | null; display_name: string | null; username: string | null; manual_seen: boolean | null };
 
-export const TASK_COLUMNS =
-  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at,created_by,created_at,completed_at";
+// Reexportada de lib/taskColumns.ts (módulo folha, para não ciclar com o motor
+// de fluxos) — os call sites que já importavam daqui seguem funcionando.
+export { TASK_COLUMNS } from "./taskColumns";
 
 // Responsável linked to a real account (task_assignees), merged into the
 // legacy `assignee` free-text column at read time — see mergeAssigneeDisplay.
@@ -1196,6 +1201,67 @@ export async function listAllTasks(): Promise<BoardTask[]> {
     });
 }
 
+// ---- Entregas de fluxo (admin) -----------------------------------------------
+// Uma entrega é o card com flow_template_id: ela agrega as etapas da cascata
+// por plan_id. Não aparece no quadro Tarefas (belongsToTaskScreen a exclui —
+// seu status é derivado dos filhos), então esta é a lista onde ela existe.
+
+export type FlowStepRow = TaskRecord & { progress: number };
+export type FlowDelivery = TaskRecord & {
+  clientName: string;
+  clientSlug: string;
+  templateName: string;
+  progress: number;
+  steps: FlowStepRow[];
+};
+
+export async function listFlowDeliveries(): Promise<FlowDelivery[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug),task_flow_templates(name)`)
+    .not("flow_template_id", "is", null)
+    .order("updated_at", { ascending: false });
+  if (error) fail(error);
+  type Joined = { name: string; slug?: string };
+  type Row = TaskRecord & TaskAssigneesJoin & {
+    clients: Joined | Joined[] | null;
+    task_flow_templates: Joined | Joined[] | null;
+  };
+  const rows = (data as unknown as Row[] | null) ?? [];
+  if (!rows.length) return [];
+
+  // Uma segunda consulta em lote, como listActionPlans — não varrer todas as
+  // tarefas para montar a tela. tasks_plan_id_idx atende este filtro.
+  const { data: stepData, error: stepError } = await supabase
+    .from("tasks")
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
+    .in("plan_id", rows.map((delivery) => delivery.id))
+    .order("position")
+    .order("created_at");
+  if (stepError) fail(stepError);
+  const stepsByDelivery = new Map<string, TaskRecord[]>();
+  for (const r of ((stepData as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow)) {
+    if (!flowStepKeyOf(r) || !r.plan_id) continue;
+    const list = stepsByDelivery.get(r.plan_id);
+    if (list) list.push(r); else stepsByDelivery.set(r.plan_id, [r]);
+  }
+
+  return rows.map(mergeTaskAssigneeRow).map(({ clients, task_flow_templates, ...task }) => {
+    const c = Array.isArray(clients) ? clients[0] : clients;
+    const template = Array.isArray(task_flow_templates) ? task_flow_templates[0] : task_flow_templates;
+    const steps = stepsByDelivery.get(task.id) ?? [];
+    return {
+      ...task,
+      clientName: c?.name ?? "Outros",
+      clientSlug: c?.slug ?? "",
+      templateName: template?.name ?? "Fluxo",
+      progress: taskProgress(task, steps),
+      steps: steps.map((step) => ({ ...step, progress: taskProgress(step) })),
+    };
+  });
+}
+
 // ---- Planos de Ação (admin) --------------------------------------------------
 // A `plano_acao` card with its member activities (plan_id) grouped under it, each
 // with its own workflow progress, plus the plan's rolled-up progress. Powers the
@@ -1327,6 +1393,55 @@ export async function createExplicitDateTaskGroup(clientId: string | null, input
     return await createTask(clientId, first);
   } catch (error) {
     await deleteTask(parent.id).catch(() => undefined);
+    throw error;
+  }
+}
+
+// ---- Fluxos em cascata ---------------------------------------------------
+// Cria a ENTREGA (o card-pai, marcado por flow_template_id) junto com a
+// PRIMEIRA etapa, e devolve a etapa. Devolver a etapa e não a entrega é
+// deliberado e segue createRecurringTaskGroup, que devolve a primeira
+// execução: a entrega não ocupa coluna no quadro (status derivado dos
+// filhos), então abrir a entrega logo após criar deixaria o usuário olhando
+// um card que ele não pode mover. A etapa é o trabalho que existe agora.
+
+export async function createFlowDelivery(
+  clientId: string | null,
+  input: Record<string, unknown>,
+  templateId: string,
+): Promise<TaskRecord> {
+  const template = await getFlowTemplate(createAdminClient(), templateId);
+  if (!template) throw new HttpError(404, "Fluxo nao encontrado.");
+  const problem = flowTemplateProblem(template);
+  if (problem) throw new HttpError(400, problem);
+
+  const firstStep = template.steps[0];
+  const delivery = await createTask(clientId, {
+    ...input,
+    kind: firstStep.kind,
+    subtype: null,
+    plan_id: null,
+    flow_template_id: template.id,
+    recurrence_cadence: null,
+    recurrence_weekdays: [],
+    recurrence_day_of_month: null,
+    payload: {
+      ...((input.payload ?? {}) as Record<string, unknown>),
+      // Denominador congelado do progresso — ver FLOW_TOTAL_WEIGHT_KEY em
+      // lib/taskCatalog.ts. Sem ele a entrega marcaria 100% com só a primeira
+      // etapa pronta.
+      [FLOW_TOTAL_WEIGHT_KEY]: templateTotalWeight(template),
+      [FLOW_STEP_COUNT_KEY]: template.steps.length,
+    },
+  });
+
+  try {
+    return await createTask(clientId, flowStepFields(delivery, firstStep, null));
+  } catch (error) {
+    // Uma entrega sem nenhuma etapa não é recuperável pela cascata (nada
+    // conclui, nada nasce) e ficaria invisível no quadro. Mesmo desfazer de
+    // createExplicitDateTaskGroup.
+    await deleteTask(delivery.id).catch(() => undefined);
     throw error;
   }
 }
@@ -1615,7 +1730,13 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   const recurrenceParentId = current.recurrence_cadence || historical ? null : recurrenceParentIdOf(current);
   const parent = recurrenceParentId ? await getTaskById(recurrenceParentId) : null;
   const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
-  return routeTaskGroupUpdate(id, current, patch, parent, recurrenceParentId, historical, nextRecurrence);
+  const updated = await routeTaskGroupUpdate(id, current, patch, parent, recurrenceParentId, historical, nextRecurrence);
+  // Cascata de fluxo. Fica aqui, e não nas rotas, porque este é o ponto que o
+  // PATCH do admin E a aprovação do cliente (app/api/client/[slug]/tasks/[id])
+  // compartilham — plugar na rota admin deixaria a aprovação do cliente, que é
+  // justamente onde uma etapa costuma se concluir, fora da cascata.
+  await advanceFlowAfterUpdate(current, updated);
+  return updated;
 }
 
 async function completeTaskCycleForRequest(

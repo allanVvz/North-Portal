@@ -185,6 +185,7 @@ export const taskCreateSchema = z.object({
   reviewer_id: z.string().uuid().nullable().optional(),
   approver_id: z.string().uuid().nullable().optional(),
   plan_id: z.string().uuid().nullable().optional(),
+  flow_template_id: z.string().uuid().nullable().optional(),
   requires_review: z.boolean().optional(),
   requires_approval: z.boolean().optional(),
   due_date: isoDate.nullable().optional(),
@@ -351,6 +352,11 @@ export type TaskRecord = {
   reviewer_id: string | null;
   approver_id: string | null;
   plan_id: string | null;
+  // Set ONLY on a flow delivery (the parent card). Its steps carry
+  // payload.flow_step_key instead and leave this null — that asymmetry is what
+  // tells parent from step, and what keeps a step from starting a flow of its
+  // own (which would be an infinite tree).
+  flow_template_id: string | null;
   requires_review: boolean;
   requires_approval: boolean;
   due_date: string | null;

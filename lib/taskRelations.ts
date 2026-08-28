@@ -3,6 +3,16 @@ import type { TaskRecord } from "./validation";
 export const DEFERRED_TASK_FLAG = "deferred_until_accessed";
 export const ACTION_PLAN_PAYLOAD_KEY = "action_plan_id";
 
+/** Which step of its template a flow card is. Present ONLY on steps — the
+ * delivery (parent) is identified by tasks.flow_template_id instead. Keeping
+ * the two markers disjoint is what stops a step from starting a flow of its
+ * own, the same invariant recurrence has ("a recurring child never inherits
+ * the recurrence"). */
+export const FLOW_STEP_KEY = "flow_step_key";
+/** The step this one was cascaded from, so the editor can jump back to the
+ * roteiro instead of hunting for it. */
+export const FLOW_PREV_TASK_KEY = "flow_prev_task_id";
+
 const RECURRENCE_RELATION_PAYLOAD_KEYS = [
   "recurrence_parent_id",
   "recurrence_cycle",
@@ -12,6 +22,22 @@ const RECURRENCE_RELATION_PAYLOAD_KEYS = [
 ] as const;
 
 type TaskRelation = Pick<TaskRecord, "plan_id" | "payload">;
+
+export function flowStepKeyOf(task: Pick<TaskRecord, "payload">): string | null {
+  const value = task.payload?.[FLOW_STEP_KEY];
+  return typeof value === "string" && value ? value : null;
+}
+
+/** The delivery a step hangs under. Like a recurring execution, a step keeps
+ * its structural parent in plan_id; unlike an ordinary card, that parent is
+ * not a Plano de Ação. */
+export function flowParentIdOf(task: TaskRelation): string | null {
+  return flowStepKeyOf(task) ? task.plan_id : null;
+}
+
+export function isFlowDelivery(task: { flow_template_id?: string | null }): boolean {
+  return Boolean(task.flow_template_id);
+}
 
 export function recurrenceParentIdOf(task: Pick<TaskRecord, "payload">): string | null {
   const value = task.payload?.recurrence_parent_id;
@@ -24,7 +50,11 @@ export function recurrenceParentIdOf(task: Pick<TaskRecord, "payload">): string 
 export function actionPlanIdOf(task: TaskRelation): string | null {
   const secondary = task.payload?.[ACTION_PLAN_PAYLOAD_KEY];
   if (typeof secondary === "string" && secondary) return secondary;
-  return recurrenceParentIdOf(task) ? null : task.plan_id;
+  // A flow step's plan_id points at its delivery, not at a plan — reading it
+  // as plan membership would make the step show up as an activity of a plan
+  // that never adopted it, and would let the plan's rollup count it twice.
+  if (recurrenceParentIdOf(task) || flowStepKeyOf(task)) return null;
+  return task.plan_id;
 }
 
 export function withActionPlanId(
@@ -44,6 +74,11 @@ export function detachedTaskRelationPatch(
   task: TaskRelation,
   parentId: string,
 ): Record<string, unknown> | null {
+  // A step is not a membership you can revoke — it is a stage of a delivery.
+  // Cutting the FK would leave a card whose flow_step_key points at a template
+  // it no longer belongs to, and would silently drop it out of the delivery's
+  // rollup while the denominator still counts it.
+  if (flowParentIdOf(task) === parentId) return null;
   if (task.plan_id === parentId) {
     const payload = { ...(task.payload ?? {}) };
     if (recurrenceParentIdOf(task) === parentId) {
@@ -83,9 +118,16 @@ export function visibleOnTaskBoard<T extends Pick<TaskRecord, "payload">>(task: 
   return !isDeferredTask(task) && task.payload?.recurrence_group !== true;
 }
 
-/** The Tarefas surface owns only ordinary, non-recurring work cards. */
-export function belongsToTaskScreen(task: Pick<TaskRecord, "kind" | "recurrence_cadence" | "payload">): boolean {
-  return visibleOnTaskBoard(task) && task.kind !== "plano_acao" && !task.recurrence_cadence;
+/** The Tarefas surface owns only ordinary work cards — never a parent.
+ *
+ * A flow delivery is excluded for the same reason a Plano de Ação and a
+ * recurrence template are: its status is derived from its children, so it has
+ * no honest column to sit in. The board shows the work of the moment (the
+ * current step); the delivery lives in Operação and in the step's header. */
+export function belongsToTaskScreen(
+  task: Pick<TaskRecord, "kind" | "recurrence_cadence" | "payload"> & { flow_template_id?: string | null },
+): boolean {
+  return visibleOnTaskBoard(task) && task.kind !== "plano_acao" && !task.recurrence_cadence && !isFlowDelivery(task);
 }
 
 export function activatedTaskPayload(payload: Record<string, unknown> | null | undefined, accessedAt = new Date().toISOString()): Record<string, unknown> {
@@ -100,6 +142,11 @@ export function childrenOf<T extends Pick<TaskRecord, "plan_id">>(parentId: stri
 
 export function actionPlanMembersOf<T extends TaskRelation>(planId: string, tasks: readonly T[]): T[] {
   return tasks.filter((task) => actionPlanIdOf(task) === planId);
+}
+
+/** The steps of a delivery, in template order when position was seeded from it. */
+export function flowStepsOf<T extends TaskRelation>(deliveryId: string, tasks: readonly T[]): T[] {
+  return tasks.filter((task) => flowParentIdOf(task) === deliveryId);
 }
 
 export function recurrenceExecutionsOf<T extends Pick<TaskRecord, "payload">>(parentId: string, tasks: readonly T[]): T[] {

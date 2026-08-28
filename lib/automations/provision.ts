@@ -9,7 +9,7 @@
 // later pass — this only fixes the mechanism (clone + branch by format).
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { TASK_COLUMNS } from "@/lib/supabase";
+import { TASK_COLUMNS } from "@/lib/taskColumns";
 import type { TaskComment, TaskRecord } from "@/lib/validation";
 import { listMetricsEligibleClientIds } from "./serviceIntegrations";
 import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";

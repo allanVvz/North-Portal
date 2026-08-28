@@ -7,7 +7,10 @@ Tudo que representa trabalho vive em `public.tasks`. Não criar tabelas paralela
 - Tarefa comum: qualquer `kind` sem recorrência.
 - Plano de Ação: `kind = 'plano_acao'`; pode ser uma execução comum ou um template recorrente.
 - Pai recorrente: qualquer `kind` com `recurrence_cadence` preenchido e `payload.recurrence_group = true`.
+- Entrega de fluxo: qualquer `kind` com `flow_template_id` preenchido.
 - Filho: tarefa independente cujo `plan_id` aponta para o pai.
+
+São três eixos de agregação com a mesma mecânica de pai/filho e três significados diferentes: `plano_acao` agrega atividades por composição manual, `recurrence_cadence` agrega execuções por tempo, `flow_template_id` agrega etapas por sequência.
 
 ### Classificação canônica
 
@@ -16,13 +19,26 @@ Tudo que representa trabalho vive em `public.tasks`. Não criar tabelas paralela
 - `gravacao` é `kind = 'agendamento'` + `subtype = 'gravacao'`.
 - Compatibilidade de leitura para valores antigos vive em `canonicalTaskClassification()`, mas o seletor nunca os oferece como tipos primários.
 
-O significado do pai é determinado por seus atributos: `kind = 'plano_acao'` agrega atividades; `recurrence_cadence` agrega execuções. Um filho continua sendo uma tarefa completa, com status, responsável, comentários e prazo próprios.
+O significado do pai é determinado por seus atributos: `kind = 'plano_acao'` agrega atividades; `recurrence_cadence` agrega execuções; `flow_template_id` agrega etapas. Um filho continua sendo uma tarefa completa, com status, responsável, comentários e prazo próprios.
 
 ### Duas relações em uma ocorrência
 
 `tasks.plan_id` continua sendo a relação estrutural principal. Em uma tarefa comum ele pode apontar para um Plano de Ação; em uma ocorrência recorrente ele sempre aponta para o pai da recorrência. Quando somente essa ocorrência também pertence a um Plano de Ação, a relação secundária fica em `payload.action_plan_id`.
 
 Esse campo JSON é um workaround intencional, sem chave estrangeira e sem migration. Leitores de planos e progresso aceitam `plan_id` ou `payload.action_plan_id`, enquanto leitores da recorrência continuam seguindo o `plan_id` direto. Vincular ou desvincular uma ocorrência nunca altera seu pai, e a próxima ocorrência nasce sem `action_plan_id`.
+
+## Fluxos em cascata
+
+Um criativo não é um card: é uma corrente de trabalhos diferentes feitos por pessoas diferentes — Roteiro → Captação → Edição → Publicação. A **entrega** é o pai (`flow_template_id` preenchido) e cada **etapa** é um filho comum ligado por `plan_id`, com `payload.flow_step_key` marcando qual etapa do molde ela é. Os dois marcadores são disjuntos de propósito: só o pai tem a coluna, só a etapa tem a chave no payload.
+
+O molde vive em `task_flow_templates` / `task_flow_steps` (migration `20260828120000_task_flows.sql`), no mesmo papel que `commercial_checkpoint_templates` cumpre para os checkpoints: molde no banco, trabalho em `tasks`.
+
+1. Criar uma entrega (`POST /api/admin/tasks?scope=flow`) cria o pai e a primeira etapa juntos, e devolve a etapa — o pai não ocupa coluna no quadro.
+2. Concluir uma etapa materializa a próxima. O gatilho é `completed_at` passar de null para não-null, não um status: o trigger `tasks_sync_completed_at` já carimba essa coluna em `('aprovado','concluido')` por qualquer caminho de escrita, inclusive a aprovação feita pelo cliente no portal.
+3. O id da etapa é determinístico por (entrega, `step_key`) — `lib/derivedTaskId.ts`, o mesmo hash que a recorrência usa. Disparar de novo colide na chave primária e não faz nada.
+4. `reconcileFlows()` roda na cron diária e varre etapas concluídas sem sucessor. É essa camada que garante a corretude; o gatilho síncrono em `updateTaskGroup` só existe para a próxima etapa aparecer na hora.
+
+O progresso da entrega divide pelo peso do MOLDE, congelado em `payload.flow_total_weight` na criação, e não pelo peso das etapas existentes — senão uma entrega com só o roteiro pronto marcaria 100%. Congelar também impede que editar o molde reescreva o progresso de entregas em andamento.
 
 ## Ciclo de recorrência
 
@@ -78,12 +94,17 @@ O campo físico continua `tasks.assignee text` para evitar uma tabela adicional.
 - Excluir um pai nunca exclui seus filhos: todas as ligações diretas e secundárias são removidas antes da exclusão.
 - Um registro legado não-Criativo que já esteja em `Publicado` pode salvar campos não relacionados. A API continua proibindo novas entradas nessa combinação.
 - Progresso de pai é sempre rollup dos filhos; não é persistido.
+- Etapa de fluxo nunca recebe `flow_template_id`; caso contrário geraria uma árvore infinita, mesma razão do filho recorrente não herdar recorrência.
+- Cascata é append-only: reabrir uma etapa nunca apaga a seguinte, que já pode carregar comentários, anexos e a decisão de um revisor.
+- Etapa não é vínculo revogável: `detachedTaskRelationPatch` recusa desvincular uma etapa da sua entrega, e `actionPlanIdOf` não lê o `plan_id` dela como membership de plano.
+- A entrega fica fora do quadro Tarefas (`belongsToTaskScreen`), como o Plano de Ação e o pai recorrente — status derivado não tem coluna honesta. Ela vive em Operação › Entregas.
+- Trocar o fluxo de uma entrega é proibido no PATCH: reescreveria o denominador do progresso e deixaria etapas órfãs.
 - O toggle “Visível para o cliente” é fail-closed enquanto a feature flag carrega.
 - Funções críticas têm limite automatizado de complexidade ciclomática em `lib/cyclomaticComplexity.test.ts`.
 
 ## Checklist para mudanças futuras
 
-1. Alterou relação pai/filho? Validar Plano de Ação e recorrência juntos.
+1. Alterou relação pai/filho? Validar Plano de Ação, recorrência e fluxo juntos.
 2. Alterou feed de Tarefas? Testar que execução futura continua oculta.
 3. Alterou abertura de card? Testar ativação e navegação do filho.
 4. Alterou responsável? Testar múltiplos nomes e agrupamento por pessoa.
