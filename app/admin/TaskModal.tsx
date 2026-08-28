@@ -9,7 +9,7 @@ import VisibleToggleField from "./VisibleToggleField";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { ATTR_DEFS, useAttrVisibility } from "./kanbanAttrs";
 import {
-  COLUMNS, FORMATO_OPTIONS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, STATUS_ORDER,
+  COLUMNS, FORMATO_OPTIONS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, WORKFLOW_ORDER,
   TONES, commentsOf, initials,
 } from "./kanbanShared";
 import CommentAvatar from "./CommentAvatar";
@@ -927,7 +927,9 @@ export default function TaskModal({
     [draft.description, task?.payload],
   );
 
-  const stepIdx = STATUS_ORDER.indexOf(draft.status);
+  // -1 quando o card está parado: nenhuma etapa aparece cumprida, que é a
+  // leitura certa para um card que travou em vez de avançar.
+  const stepIdx = WORKFLOW_ORDER.indexOf(draft.status);
 
   return (
     <>
@@ -1001,7 +1003,7 @@ export default function TaskModal({
                   <button
                     type="button"
                     key={column.status}
-                    className={`tm-step ${STATUS_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""}`}
+                    className={`tm-step ${column.status !== "parada" && stepIdx >= 0 && WORKFLOW_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""}`}
                     onClick={() => set("status", column.status)}
                   >
                     <span className="tm-step-dot" />

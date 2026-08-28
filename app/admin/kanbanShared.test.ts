@@ -1,26 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { COLUMNS, STATUS_LABEL, statusAfterKanbanDrop, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
+import { COLUMNS, STATUS_LABEL, WORKFLOW_ORDER, statusAfterKanbanDrop, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
 
 describe("Kanban COLUMNS", () => {
-  it("has 7 columns, Concluído sitting between Aprovação and Publicado, Parada last", () => {
+  it("has 7 columns, Parada first e Concluído entre Aprovação e Publicado", () => {
+    // "Parada" primeiro: é estado de erro de automação, não a etapa seguinte a
+    // Publicado. Ver o comentário em kanbanShared.ts.
     expect(COLUMNS.map((c) => c.status)).toEqual([
+      "parada",
       "backlog",
       "em_producao",
       "revisao",
       "aprovacao",
       "aprovado",
       "concluido",
-      "parada",
     ]);
     expect(COLUMNS.map((c) => c.label)).toEqual([
+      "Parada",
       "Entrada",
       "Em produção",
       "Revisão",
       "Aprovação",
       "Concluído",
       "Publicado",
-      "Parada",
     ]);
+  });
+
+  it("WORKFLOW_ORDER exclui parada — card parado não tem etapa cumprida", () => {
+    // Com parada no índice 0 de STATUS_ORDER, comparar por índice a marcaria
+    // como cumprida em toda tarefa. WORKFLOW_ORDER é a lista que o stepper usa.
+    expect(WORKFLOW_ORDER).not.toContain("parada");
+    expect(WORKFLOW_ORDER.indexOf("parada")).toBe(-1);
+    expect(WORKFLOW_ORDER[0]).toBe("backlog");
+    expect(WORKFLOW_ORDER).toHaveLength(COLUMNS.length - 1);
   });
 
   it("STATUS_LABEL is derived from COLUMNS and covers every status", () => {
