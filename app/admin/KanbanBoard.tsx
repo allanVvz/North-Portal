@@ -19,10 +19,10 @@ import { formatPeriod, formatShortDate, isOverdue, relativeDue } from "./taskDat
 import { todayInTimezone } from "./recurringState";
 import { COLUMNS, PRIORITY_LABEL, commentsOf, statusAfterKanbanDrop, taskTone, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
 import { formatCommentTime } from "@/lib/comments";
-import { kindDef, taskProgress } from "@/lib/taskCatalog";
+import { FLOW_STEP_COUNT_KEY, kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
-import { actionPlanIdOf, belongsToTaskScreen } from "@/lib/taskRelations";
+import { actionPlanIdOf, belongsToTaskScreen, flowStepKeyOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 import { calendarMonthDates } from "./calendarUtils";
 
@@ -261,10 +261,38 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     }
     return m;
   }, [tasks]);
+  // Uma entrega de fluxo entra pela mesma porta: suas etapas já caem em
+  // membersByPlan por plan_id. O mapa também vai como terceiro argumento para
+  // que um pai aninhado (uma entrega dentro de um Plano de Ação) seja resolvido
+  // com os filhos dele em mãos, em vez de responder 0.
   const progressOf = useCallback(
-    (t: TaskRecord) => (kindDef(t.kind).isPlan || t.recurrence_cadence ? taskProgress(t, membersByPlan.get(t.id) ?? []) : taskProgress(t)),
+    (t: TaskRecord) =>
+      kindDef(t.kind).isPlan || t.recurrence_cadence || t.flow_template_id
+        ? taskProgress(t, membersByPlan.get(t.id) ?? [], membersByPlan)
+        : taskProgress(t),
     [membersByPlan],
   );
+  // Selo de etapa do card ("2/4 · Vídeo institucional"). A entrega está em
+  // `tasks` (só o quadro a filtra, via belongsToTaskScreen), então nada disso
+  // precisa de fetch. O número da etapa sai da POSIÇÃO entre as etapas já
+  // materializadas, ordenadas por `position` (= order_index do molde) — e não
+  // da contagem delas: a cascata é append-only, então reabrir o roteiro deixa
+  // a captação no lugar, e contar daria 2/4 para o roteiro.
+  const flowBadges = useMemo(() => {
+    const badges = new Map<string, { step: number; total: number; delivery: string }>();
+    for (const delivery of tasks) {
+      if (!delivery.flow_template_id) continue;
+      const steps = (membersByPlan.get(delivery.id) ?? [])
+        .filter((t) => flowStepKeyOf(t))
+        .sort((a, b) => a.position - b.position);
+      const total = Number(delivery.payload?.[FLOW_STEP_COUNT_KEY]) || steps.length;
+      steps.forEach((step, index) => {
+        badges.set(step.id, { step: index + 1, total, delivery: delivery.title });
+      });
+    }
+    return badges;
+  }, [tasks, membersByPlan]);
+
   // plano_acao cards a task can be linked to (same client as the one being edited).
   const planCandidates = useMemo(() => {
     const editId = modalState?.mode === "edit" ? modalState.taskId : null;
@@ -530,6 +558,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     const dueRelative = relativeDue(t.due_date, todayIso);
     const period = formatPeriod(t.start_date, t.end_date);
     const coverCandidates = taskCoverCandidates(t);
+    const flowBadge = visible("flow_step") ? flowBadges.get(t.id) ?? null : null;
     return (
       <article
         className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
@@ -549,6 +578,13 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
         </div>
         <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} /><p className="kb-card-title">{t.title}</p></div>
+        {flowBadge ? (
+          <div className="kb-card-meta">
+            <span className="kb-card-pill kb-flow-step" title={`Etapa ${flowBadge.step} de ${flowBadge.total} · ${flowBadge.delivery}`}>
+              {flowBadge.step}/{flowBadge.total} · {subtypeLabel(t.subtype) || "Etapa"}
+            </span>
+          </div>
+        ) : null}
         {showFormato || showPlataforma ? (
           <div className="kb-card-meta">
             {showFormato ? <span className="kb-card-pill">{formato}</span> : null}

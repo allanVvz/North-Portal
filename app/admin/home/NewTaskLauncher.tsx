@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import TaskModal from "../TaskModal";
+import TaskModal, { type TaskCreationScope } from "../TaskModal";
 
 type ClientOption = { slug: string; name: string; is_active: boolean };
 
@@ -12,13 +12,13 @@ type ClientOption = { slug: string; name: string; is_active: boolean };
 // ClientsWorkspace instead of extending it.
 export default function NewTaskLauncher() {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState<TaskCreationScope | null>(null);
   const [loading, setLoading] = useState(false);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [assignees, setAssignees] = useState<string[]>([]);
   const [planoVisibilityOn, setPlanoVisibilityOn] = useState(true);
 
-  async function openModal() {
+  async function openModal(nextScope: TaskCreationScope) {
     setLoading(true);
     // Fetched on click, not on mount: the Home shouldn't pay for three requests
     // that most visits never need.
@@ -31,15 +31,20 @@ export default function NewTaskLauncher() {
     setAssignees(a.assignees ?? []);
     setPlanoVisibilityOn(p.enabled ?? true);
     setLoading(false);
-    setOpen(true);
+    setScope(nextScope);
   }
 
   return (
     <>
-      <button type="button" className="admin-btn primary" onClick={() => void openModal()} disabled={loading}>
+      <button type="button" className="admin-btn primary" onClick={() => void openModal("task")} disabled={loading}>
         {loading ? "Abrindo…" : "+ Nova tarefa"}
       </button>
-      {open ? (
+      {/* Uma entrega não é um tipo de tarefa, é uma corrente delas — daí um
+          botão próprio em vez de mais uma opção no dropdown de Tipo. */}
+      <button type="button" className="admin-btn" onClick={() => void openModal("flow")} disabled={loading}>
+        + Nova entrega
+      </button>
+      {scope ? (
         <TaskModal
           mode="new"
           task={null}
@@ -48,17 +53,17 @@ export default function NewTaskLauncher() {
           assignees={assignees}
           clientName=""
           initialKind="operacional"
-          creationScope="task"
+          creationScope={scope}
           adminReviewers={[]}
           clientReviewers={[]}
           planoVisibilityOn={planoVisibilityOn}
-          onClose={() => setOpen(false)}
+          onClose={() => setScope(null)}
           onSaved={() => {
-            setOpen(false);
+            setScope(null);
             router.refresh();
           }}
           onDeleted={() => {
-            setOpen(false);
+            setScope(null);
             router.refresh();
           }}
         />

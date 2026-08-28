@@ -3546,6 +3546,36 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
 .kb-card-pill { font-size: 10.5px; color: var(--a-sec); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; }
 .kb-published-mark { color: var(--a-teal-text); background: var(--a-teal-soft); font-weight: 700; }
+/* Selo de etapa da cascata. Classe única (nada de `span.kb-flow-step`): um
+   seletor elemento+classe perde para regras de classe declaradas depois neste
+   cascade — ver CLAUDE.md. Declarado depois de .kb-card-pill de propósito, que
+   é o que faz a cor sobrescrever a do pill genérico. */
+.kb-flow-step { color: var(--a-purple-text); background: var(--a-purple-soft); font-weight: 600; }
+
+/* ---- Entregas de fluxo (Operação › Entregas) ---- */
+/* Só seletores de classe: um `article.flow-row` perderia para regras de classe
+   declaradas depois neste cascade — ver CLAUDE.md. */
+.flow-list { display: flex; flex-direction: column; gap: 8px; }
+.flow-row { border: 1px solid var(--a-line); border-radius: 12px; background: var(--a-card); overflow: hidden; }
+.flow-row-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto 160px auto; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; background: none; border: 0; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.flow-row-head:hover { background: var(--a-inset); }
+.flow-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-row-client { font-size: 11px; color: var(--a-muted); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.flow-row-step { font-size: 10.5px; color: var(--a-purple-text); background: var(--a-purple-soft); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.flow-row-progress { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--a-sec); }
+.flow-row-progress .kb-card-progress-track { flex: 1; }
+.flow-row-caret { color: var(--a-muted); font-size: 12px; }
+.flow-row-steps { display: flex; flex-direction: column; gap: 4px; padding: 4px 14px 14px; border-top: 1px solid var(--a-line); }
+.flow-step { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.flow-step:hover { background: var(--a-inset); }
+.flow-step-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-step-status, .flow-step-pct { font-size: 11px; color: var(--a-muted); white-space: nowrap; }
+.flow-step-pending { margin: 4px 10px 0; }
+.flow-open-delivery { align-self: flex-start; margin-top: 8px; }
+@media (max-width: 900px) {
+  .flow-row-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .flow-row-client, .flow-row-progress { display: none; }
+}
 
 /* ---- Visible-to-client toggle (shared TaskModal/TaskDetailPanel component) ---- */
 .vtf { display: flex; flex-direction: column; gap: 6px; }
