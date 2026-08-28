@@ -384,7 +384,7 @@ export default function OperacaoWorkspace({
           <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
         )
       ) : section === "entregas" ? (
-        <FlowDeliveriesBoard initial={deliveries} />
+        <FlowDeliveriesBoard initial={deliveries} clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
       ) : section === "plano" ? (
         <ActionPlansBoard initial={plans} clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
       ) : (

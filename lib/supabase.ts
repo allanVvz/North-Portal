@@ -1206,14 +1206,12 @@ export async function listAllTasks(): Promise<BoardTask[]> {
 // por plan_id. Não aparece no quadro Tarefas (belongsToTaskScreen a exclui —
 // seu status é derivado dos filhos), então esta é a lista onde ela existe.
 
-export type FlowStepRow = TaskRecord & { progress: number };
-export type FlowDelivery = TaskRecord & {
-  clientName: string;
-  clientSlug: string;
-  templateName: string;
-  progress: number;
-  steps: FlowStepRow[];
-};
+// Estruturalmente um ActionPlan (mesmos campos, incluindo `activities`) mais o
+// nome do molde. É de propósito: a tela de Entregas reusa PlanSearchBar,
+// StrategicView e a ordenação do Plano de Ação sem adaptador nenhum — as duas
+// telas são a mesma leitura ("um pai e o que pende dele"), só que uma agrega
+// por composição e a outra por sequência.
+export type FlowDelivery = ActionPlan & { templateName: string };
 
 export async function listFlowDeliveries(): Promise<FlowDelivery[]> {
   const supabase = await createClient();
@@ -1257,7 +1255,7 @@ export async function listFlowDeliveries(): Promise<FlowDelivery[]> {
       clientSlug: c?.slug ?? "",
       templateName: template?.name ?? "Fluxo",
       progress: taskProgress(task, steps),
-      steps: steps.map((step) => ({ ...step, progress: taskProgress(step) })),
+      activities: steps.map((step) => ({ ...step, progress: taskProgress(step) })),
     };
   });
 }

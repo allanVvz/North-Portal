@@ -366,6 +366,8 @@ export default function TaskModal({
   const flowDeliveryId = liveTask ? flowParentIdOf(liveTask) : null;
   const [flowDelivery, setFlowDelivery] = useState<TaskRecord | null>(null);
   const [flowTemplates, setFlowTemplates] = useState<FlowTemplate[]>([]);
+  // A etapa recém-criada pela conclusão desta, devolvida pelo PATCH.
+  const [flowNext, setFlowNext] = useState<TaskRecord | null>(null);
   const flowTemplate = flowTemplates.find((t) => t.id === (liveTask?.flow_template_id ?? flowDelivery?.flow_template_id)) ?? null;
   // Índice 1-based da etapa dentro do molde, para o "2/4" do cabeçalho. -1
   // quando o molde ainda não chegou ou a etapa foi removida do molde depois de
@@ -480,9 +482,19 @@ export default function TaskModal({
       payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, formato: draft.formato.trim() || null, plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
     };
   }, [aprovacaoOff, draft, kd.isPlan, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn, revisaoOff]);
-  const acceptAutosave = useCallback((updated: TaskRecord) => {
-    setLiveTask(updated);
-    onTaskPatchedRef.current?.(updated);
+  const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
+    // Concluir uma etapa cria a próxima no mesmo request. O servidor devolve
+    // esse card junto para a pessoa não ficar olhando uma etapa concluída sem
+    // caminho nenhum para o trabalho seguinte — antes era preciso fechar e
+    // reabrir para achá-lo. Guardado, não navegado: pular de card sozinho
+    // surpreenderia e poderia levar embora uma edição em andamento.
+    const { flow_next_task: next, ...task } = updated;
+    if (next) {
+      setFlowNext(next);
+      onTaskPatchedRef.current?.(next);
+    }
+    setLiveTask(task as TaskRecord);
+    onTaskPatchedRef.current?.(task as TaskRecord);
   }, []);
   const autosave = useTaskAutosave({ taskId: liveTask?.id ?? "", values: autosaveValues, enabled: mode === "edit" && Boolean(liveTask), textKeys: ["title", "description"], valid: Boolean(draft.title.trim()), onSaved: acceptAutosave });
 
@@ -566,6 +578,8 @@ export default function TaskModal({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [needsFlowTemplates, flowTemplates.length]);
+
+  useEffect(() => { setFlowNext(null); }, [liveTask?.id]);
 
   useEffect(() => {
     if (!flowDeliveryId) { setFlowDelivery(null); return; }
@@ -1324,6 +1338,22 @@ export default function TaskModal({
                       </button>
                     </div>
                   ) : <p className="admin-sub" style={{ margin: 0 }}>Carregando card pai…</p>}
+                </div>
+              </div>
+            ) : null}
+
+            {flowNext ? (
+              <div className="tm-box tm-flownext">
+                <p className="tm-box-label">Próxima etapa criada</p>
+                <div className="tm-member-list">
+                  <div className="tm-member">
+                    <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(flowNext)} disabled={!onOpenRelatedTask || busy}>
+                      <TaskKindIcon kind={flowNext.kind} size="sm" />
+                      <span className="tm-member-title">{subtypeLabel(flowNext.subtype) || flowNext.title}</span>
+                      <span className="tm-member-status">{flowNext.due_date ? `Prazo ${flowNext.due_date}` : "Abrir"}</span>
+                      <span className="tm-member-arrow" aria-hidden>↗</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : null}

@@ -1,127 +1,232 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import CardModalLauncher from "../CardModalLauncher";
+import TaskModal from "../TaskModal";
 import TaskKindIcon from "../TaskKindIcon";
+import SortMenu from "../SortMenu";
 import { STATUS_LABEL } from "../kanbanShared";
+import PlanSearchBar from "../plano/PlanSearchBar";
+import StrategicView, { fmtDate } from "../plano/StrategicView";
+import { sortItems } from "../taskSort";
+import { useSortPref } from "../taskSortPrefs";
 import { FLOW_STEP_COUNT_KEY, subtypeLabel } from "@/lib/taskCatalog";
 import type { FlowDelivery } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
-// A lista das entregas em cascata. Existe porque a entrega é a única coisa da
-// operação que NÃO aparece no quadro Tarefas: seu status é derivado das etapas,
-// então não há coluna honesta para ela (mesma razão de plano_acao e do pai
-// recorrente). O quadro mostra a etapa de agora; aqui se vê a corrente inteira,
-// inclusive as etapas que ainda não nasceram.
+// Entregas é a tela do Plano de Ação lida por outro eixo. As duas respondem à
+// mesma pergunta — "um pai e o que pende dele" — e por isso reusam literalmente
+// os mesmos componentes (PlanSearchBar, StrategicView, SortMenu, o acordeão):
+// um plano agrega atividades por composição manual, uma entrega agrega etapas
+// por sequência. A única diferença que a tela precisa mostrar é que aqui parte
+// das etapas AINDA NÃO EXISTE como card — ela nasce quando a anterior conclui.
 
-function currentStep(delivery: FlowDelivery) {
-  // A etapa corrente é a última materializada — a cascata é sequencial, então
-  // a mais avançada em `position` é sempre onde o trabalho está. Uma etapa
-  // reaberta não muda isso: a seguinte continua existindo (append-only).
-  return delivery.steps.length ? delivery.steps[delivery.steps.length - 1] : null;
+type View = "lista" | "estrategica";
+type EditingTarget = { task: TaskRecord; clientName: string; clientSlug: string; relatedTasks: TaskRecord[]; parentTask?: TaskRecord };
+
+function deliveryMatches(d: FlowDelivery, needle: string): boolean {
+  const n = needle.toLowerCase();
+  if (d.title.toLowerCase().includes(n)) return true;
+  if (d.clientName.toLowerCase().includes(n)) return true;
+  if (d.templateName.toLowerCase().includes(n)) return true;
+  if ((d.assignee ?? "").toLowerCase().includes(n)) return true;
+  if (fmtDate(d.start_date).toLowerCase().includes(n) || fmtDate(d.end_date).toLowerCase().includes(n)) return true;
+  return d.activities.some(
+    (a) =>
+      (a.assignee ?? "").toLowerCase().includes(n) ||
+      a.title.toLowerCase().includes(n) ||
+      subtypeLabel(a.subtype).toLowerCase().includes(n) ||
+      fmtDate(a.due_date).toLowerCase().includes(n),
+  );
 }
 
-function matches(delivery: FlowDelivery, needle: string): boolean {
-  const n = needle.trim().toLowerCase();
-  if (!n) return true;
-  return [delivery.title, delivery.clientName, delivery.templateName, delivery.assignee ?? ""]
-    .concat(delivery.steps.map((step) => step.title))
-    .some((value) => value.toLowerCase().includes(n));
+/** Quantas etapas o molde previa quando a entrega nasceu. Vem do snapshot em
+ *  payload, não de uma consulta: o molde pode ter mudado desde então, e a
+ *  entrega tem que continuar contando pelo que combinou no início. */
+function stepTotal(d: FlowDelivery): number {
+  return Number(d.payload?.[FLOW_STEP_COUNT_KEY]) || d.activities.length;
 }
 
-export default function FlowDeliveriesBoard({ initial }: { initial: FlowDelivery[] }) {
+export default function FlowDeliveriesBoard({
+  initial,
+  clients,
+  assignees,
+}: {
+  initial: FlowDelivery[];
+  clients: { slug: string; name: string }[];
+  assignees: string[];
+}) {
   const router = useRouter();
-  const [query, setQuery] = useState("");
+  const [view, setView] = useState<View>("lista");
+  const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
-  // O card aberto vem com a entrega a que pertence, para o modal já mostrar a
-  // relação sem esperar o fetch por id.
-  const [open, setOpen] = useState<{ task: TaskRecord; delivery: FlowDelivery } | null>(null);
+  const [editing, setEditing] = useState<EditingTarget | null>(null);
+  const [creating, setCreating] = useState(false);
+  // Fail-closed enquanto carrega, como em ActionPlansBoard e CardModalLauncher:
+  // uma entrega nova nunca pode nascer visível ao cliente por causa de um fetch
+  // que ainda não resolveu.
+  const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
+  const { sort, setSort } = useSortPref("entregas.lista");
 
-  const deliveries = useMemo(() => initial.filter((d) => matches(d, query)), [initial, query]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/settings/plano-visibility")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) setPlanoVisibilityOn(Boolean(data.enabled)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
-  if (!initial.length) {
-    return <p className="admin-empty">Nenhuma entrega em andamento. Use “+ Nova entrega” para começar uma.</p>;
+  const deliveries = useMemo(() => {
+    const needle = q.trim();
+    const matching = needle ? initial.filter((d) => deliveryMatches(d, needle)) : initial;
+    return sortItems(matching, sort.key, sort.dir, (d) => ({
+      title: d.title,
+      updatedAt: d.updated_at,
+      dueDate: d.end_date ?? d.due_date,
+      completedAt: d.completed_at,
+      position: d.position,
+    }));
+  }, [initial, q, sort]);
+
+  const asTask = (d: FlowDelivery): TaskRecord => {
+    const { clientName: _c, clientSlug: _s, templateName: _t, progress: _p, activities: _a, ...task } = d;
+    void _c; void _s; void _t; void _p; void _a;
+    return task;
+  };
+
+  function openDelivery(d: FlowDelivery) {
+    setEditing({ task: asTask(d), clientName: d.clientName, clientSlug: d.clientSlug, relatedTasks: d.activities });
+  }
+
+  function openStep(d: FlowDelivery, stepId: string) {
+    const task = d.activities.find((activity) => activity.id === stepId);
+    if (task) setEditing({ task, clientName: d.clientName, clientSlug: d.clientSlug, relatedTasks: d.activities, parentTask: asTask(d) });
   }
 
   return (
-    <>
-      <div className="rec-toolbar">
-        <input
-          className="admin-input"
-          placeholder="Buscar por entrega, cliente, fluxo ou etapa…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Buscar entregas"
+    <div className="ap">
+      <div className="ap-filters">
+        <div className="kb-viewtabs">
+          <button className={view === "lista" ? "on" : ""} onClick={() => setView("lista")}>Lista</button>
+          <button className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
+        </div>
+        <PlanSearchBar q={q} onQChange={setQ} plans={initial} />
+        <div className="kb-spacer" />
+        <button type="button" className="admin-btn primary kb-newtask-btn" onClick={() => setCreating(true)}>+ Entrega</button>
+        {view === "lista" ? <SortMenu sort={sort} onChange={setSort} /> : null}
+      </div>
+
+      {view === "estrategica" ? (
+        <StrategicView
+          plans={deliveries}
+          onOpenPlan={openDelivery}
+          onOpenActivity={openStep}
+          emptyMessage="Nenhuma entrega em andamento. Crie uma em “+ Entrega” — cada etapa concluída cria a próxima."
         />
-      </div>
-
-      <div className="flow-list">
-        {deliveries.map((delivery) => {
-          const step = currentStep(delivery);
-          const total = Number(delivery.payload?.[FLOW_STEP_COUNT_KEY]) || delivery.steps.length;
-          const expanded = openId === delivery.id;
-          return (
-            <article className="flow-row" key={delivery.id}>
-              <button
-                type="button"
-                className="flow-row-head"
-                aria-expanded={expanded}
-                onClick={() => setOpenId(expanded ? null : delivery.id)}
-              >
-                <TaskKindIcon kind={delivery.kind} />
-                <span className="flow-row-title">{delivery.title}</span>
-                <span className="flow-row-client">{delivery.clientName}</span>
-                <span className="flow-row-step">
-                  {step ? `${delivery.steps.length}/${total} · ${subtypeLabel(step.subtype) || step.title}` : `0/${total}`}
-                </span>
-                <span className="flow-row-progress">
-                  <span className="kb-card-progress-track"><span className="kb-card-progress-fill" style={{ width: `${delivery.progress}%` }} /></span>
-                  <b>{delivery.progress}%</b>
-                </span>
-                <span className="flow-row-caret" aria-hidden>{expanded ? "⌃" : "⌄"}</span>
-              </button>
-
-              {expanded ? (
-                <div className="flow-row-steps">
-                  {delivery.steps.map((s) => (
-                    <button type="button" className="flow-step" key={s.id} onClick={() => setOpen({ task: s, delivery })}>
-                      <TaskKindIcon kind={s.kind} size="sm" />
-                      <span className="flow-step-title">{s.title}</span>
-                      <span className="flow-step-status">{STATUS_LABEL[s.status]}</span>
-                      <span className="flow-step-pct">{s.progress}%</span>
-                    </button>
-                  ))}
-                  {/* As etapas que faltam não são linhas do banco; o contador do
-                      molde é o que revela que elas existem. */}
-                  {delivery.steps.length < total ? (
-                    <p className="admin-sub flow-step-pending">
-                      Faltam {total - delivery.steps.length} etapa(s) — cada uma nasce quando a anterior é concluída.
-                    </p>
-                  ) : null}
-                  <button type="button" className="admin-btn ghost flow-open-delivery" onClick={() => setOpen({ task: delivery, delivery })}>
-                    Abrir entrega
+      ) : deliveries.length === 0 ? (
+        <p className="admin-empty">
+          {initial.length === 0
+            ? "Nenhuma entrega em andamento. Crie uma em “+ Entrega” — cada etapa concluída cria a próxima."
+            : "Nenhuma entrega para essa busca."}
+        </p>
+      ) : (
+        <div className="plan-acc">
+          {deliveries.map((d) => {
+            const open = openId === d.id;
+            const total = stepTotal(d);
+            const current = d.activities.length ? d.activities[d.activities.length - 1] : null;
+            const pending = Math.max(0, total - d.activities.length);
+            return (
+              <div className={`plan-acc-item ${open ? "open" : ""}`} key={d.id}>
+                <div className="plan-acc-head">
+                  <button
+                    type="button"
+                    className="plan-acc-caret-btn"
+                    onClick={() => setOpenId(open ? null : d.id)}
+                    aria-label={open ? "Recolher" : "Expandir"}
+                  >
+                    <span className={`plan-acc-caret ${open ? "on" : ""}`}>▸</span>
                   </button>
+                  <button type="button" className="plan-acc-title" onClick={() => openDelivery(d)}>
+                    <span className="plan-card-titleline">
+                      <TaskKindIcon kind={d.kind} size="lg" /><strong>{d.title}</strong>
+                    </span>
+                    <em>
+                      {d.clientName} · {d.templateName} · etapa {d.activities.length}/{total}
+                      {current ? ` · ${subtypeLabel(current.subtype) || current.title}` : ""}
+                    </em>
+                    <span className="plan-acc-description">
+                      {d.description || "Adicione à descrição o que esta entrega precisa ser quando ficar pronta."}
+                    </span>
+                  </button>
+                  <span className="plan-acc-progress">
+                    <span className="plan-acc-bar"><span className="plan-acc-fill" style={{ width: `${d.progress}%` }} /></span>
+                    <b>{d.progress}%</b>
+                  </span>
                 </div>
-              ) : null}
-            </article>
-          );
-        })}
-        {deliveries.length === 0 ? <p className="admin-empty">Nenhuma entrega para essa busca.</p> : null}
-      </div>
 
-      {open ? (
+                {open ? (
+                  <div className="plan-acc-body">
+                    <ul className="plan-acc-list">
+                      {d.activities.map((a) => (
+                        <li key={a.id}>
+                          <button type="button" className="plan-acc-actrow" onClick={() => openStep(d, a.id)}>
+                            <TaskKindIcon kind={a.kind} />
+                            <span className="plan-acc-actitle">{subtypeLabel(a.subtype) || a.title}</span>
+                            <span className="plan-acc-status">{STATUS_LABEL[a.status]}</span>
+                            <span className="plan-acc-actpct">{a.progress}%</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {/* As etapas que faltam não são linhas do banco — só o
+                        contador do molde revela que elas existem. */}
+                    {pending > 0 ? (
+                      <p className="admin-sub">
+                        {pending === 1 ? "Falta 1 etapa" : `Faltam ${pending} etapas`} — cada uma nasce quando a anterior é concluída.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {editing ? (
         <CardModalLauncher
-          task={open.task}
-          clientName={open.delivery.clientName}
-          clientSlug={open.delivery.clientSlug}
-          initialRelatedTasks={open.delivery.steps}
-          parentTask={open.task.id === open.delivery.id ? undefined : open.delivery}
-          onClose={() => setOpen(null)}
-          onSaved={() => { setOpen(null); router.refresh(); }}
-          onDeleted={() => { setOpen(null); router.refresh(); }}
+          task={editing.task}
+          clientName={editing.clientName}
+          clientSlug={editing.clientSlug}
+          initialRelatedTasks={editing.relatedTasks}
+          parentTask={editing.parentTask}
+          onClose={() => { setEditing(null); router.refresh(); }}
+          onSaved={() => { setEditing(null); router.refresh(); }}
+          onDeleted={() => { setEditing(null); router.refresh(); }}
+          onChanged={() => router.refresh()}
         />
       ) : null}
-    </>
+
+      {creating ? (
+        <TaskModal
+          mode="new"
+          task={null}
+          slug=""
+          clients={clients}
+          assignees={assignees}
+          clientName=""
+          creationScope="flow"
+          adminReviewers={[]}
+          clientReviewers={[]}
+          planoVisibilityOn={planoVisibilityOn}
+          onClose={() => setCreating(false)}
+          onSaved={() => { setCreating(false); router.refresh(); }}
+          onDeleted={() => {}}
+        />
+      ) : null}
+    </div>
   );
 }

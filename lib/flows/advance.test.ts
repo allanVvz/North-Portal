@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceFlow, justCompleted } from "./advance";
+import { advanceFlow, justCompleted, nextFlowStepCardOf } from "./advance";
 import { flowStepTaskId } from "./ids";
 import type { AdminClient } from "@/lib/automations/taskAccess";
 import type { TaskRecord } from "@/lib/validation";
@@ -114,6 +114,24 @@ describe("advanceFlow", () => {
     const reaberta = { ...doneStep("roteiro"), status: "em_producao", completed_at: null } as TaskRecord;
     await advanceFlow(admin, reaberta);
     expect(state.tasks).toHaveLength(before);
+  });
+});
+
+describe("nextFlowStepCardOf", () => {
+  // É o que a interface usa para oferecer o acesso à próxima etapa no mesmo
+  // salvamento que a concluiu; antes disso era preciso fechar e reabrir o card.
+  it("devolve a etapa seguinte depois que ela foi materializada", async () => {
+    const state = world();
+    const { admin } = fakeAdmin(state);
+    await advanceFlow(admin, doneStep("roteiro"));
+    const next = await nextFlowStepCardOf(admin, doneStep("roteiro"));
+    expect(next?.id).toBe(flowStepTaskId("entrega", "captacao"));
+  });
+
+  it("devolve null antes de ela existir e depois da última etapa", async () => {
+    const { admin } = fakeAdmin(world());
+    expect(await nextFlowStepCardOf(admin, doneStep("roteiro"))).toBeNull();
+    expect(await nextFlowStepCardOf(admin, doneStep("publicacao"))).toBeNull();
   });
 });
 

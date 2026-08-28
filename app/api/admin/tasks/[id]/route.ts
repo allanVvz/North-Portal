@@ -4,6 +4,9 @@ import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssignee
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
+import { flowStepKeyOf } from "@/lib/taskRelations";
 import { notifyTaskParticipants, statusChangedMessage, taskUpdatedMessage } from "@/lib/notifications";
 import { HttpError, introducesInvalidPublishedState, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
@@ -33,6 +36,22 @@ async function notifyTaskChange(before: TaskRecord, after: TaskRecord): Promise<
     return;
   }
   await notifyTaskParticipants(after.id, "task_updated", taskUpdatedMessage(after.title));
+}
+
+// Concluir uma etapa cria a próxima dentro deste mesmo request. Devolvê-la
+// junto é o que permite a interface oferecer o acesso na hora, em vez de deixar
+// a pessoa fechar e reabrir o card para descobrir que o trabalho seguinte já
+// existe. Campo extra no JSON, fora do TaskRecord — nenhum leitor atual quebra.
+async function withFlowNextTask(before: TaskRecord, after: TaskRecord): Promise<TaskRecord & { flow_next_task?: TaskRecord }> {
+  if (!justCompleted(before, after) || !flowStepKeyOf(after)) return after;
+  try {
+    const next = await nextFlowStepCardOf(createAdminClient(), after);
+    return next ? { ...after, flow_next_task: next } : after;
+  } catch {
+    // A cascata em si já aconteceu; não conseguir ANUNCIAR a próxima etapa é
+    // cosmético e não pode transformar um salvamento bem-sucedido em erro.
+    return after;
+  }
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -115,10 +134,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
       const full = await getTaskById(task.id);
       await notifyTaskChange(current, full ?? task);
-      return NextResponse.json(full ?? task);
+      return NextResponse.json(await withFlowNextTask(current, full ?? task));
     }
     await notifyTaskChange(current, task);
-    return NextResponse.json(task);
+    return NextResponse.json(await withFlowNextTask(current, task));
   } catch (error) {
     return apiError(error);
   }

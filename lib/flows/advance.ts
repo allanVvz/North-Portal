@@ -19,6 +19,7 @@ import { markTaskParada } from "@/lib/automations/errorHandling";
 import { flowParentIdOf, flowStepKeyOf } from "@/lib/taskRelations";
 import type { TaskRecord } from "@/lib/validation";
 import { flowStepFields, todayIso } from "./stepFields";
+import { flowStepTaskId } from "./ids";
 import { flowTemplateProblem, getFlowTemplate, nextStepAfter } from "./template";
 
 export type AdvanceOutcome =
@@ -78,6 +79,28 @@ export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord)
     throw error;
   }
   return { status: "created", task: asTaskRecord(data![0]) };
+}
+
+/**
+ * A etapa que vem depois desta, se já existe como card.
+ *
+ * Serve à interface, não ao motor: quando alguém conclui uma etapa, a próxima
+ * já foi criada dentro do mesmo request (advanceFlowAfterUpdate roda antes da
+ * resposta sair), e sem devolvê-la a pessoa fica olhando um card concluído sem
+ * nenhum caminho para o trabalho seguinte — tinha que fechar e reabrir para
+ * encontrá-lo. Resolve pelo id determinístico, então é uma leitura direta.
+ */
+export async function nextFlowStepCardOf(admin: AdminClient, step: TaskRecord): Promise<TaskRecord | null> {
+  const stepKey = flowStepKeyOf(step);
+  const deliveryId = flowParentIdOf(step);
+  if (!stepKey || !deliveryId) return null;
+  const delivery = await getAdminTask(admin, deliveryId);
+  if (!delivery?.flow_template_id) return null;
+  const template = await getFlowTemplate(admin, delivery.flow_template_id);
+  if (!template) return null;
+  const next = nextStepAfter(template, stepKey);
+  if (!next) return null;
+  return getAdminTask(admin, flowStepTaskId(delivery.id, next.step_key));
 }
 
 /**
