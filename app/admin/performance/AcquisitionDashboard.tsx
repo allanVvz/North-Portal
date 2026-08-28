@@ -171,7 +171,9 @@ const LABEL_X = 176;    // início do rótulo, fora da forma
 const CHART_W = 346;
 const BAND_H = 52;
 const BAND_GAP = 20;
-const MIN_RATIO = 0.10; // piso da faixa mais estreita
+const MIN_RATIO = 0.125; // piso da faixa mais estreita. Sobe o meio do funil
+                         // junto: a 0,125 a etapa intermediária ganha ~10% de
+                         // largura sobre o piso anterior de 0,10.
 
 function FunnelChart({ labels, values, rates }: { labels: string[]; values: NullableMetric[]; rates: string[] }) {
   const base = values[0];
