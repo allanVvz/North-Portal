@@ -171,35 +171,42 @@ const LABEL_X = 176;    // início do rótulo, fora da forma
 const CHART_W = 346;
 const BAND_H = 52;
 const BAND_GAP = 20;
-const MIN_RATIO = 0.125; // piso da faixa mais estreita
-// Cada etapa tem no máximo esta fração da largura da anterior. É o que garante
-// que a forma continue lendo como funil: sem isso, o piso passa a dominar as
-// etapas pequenas (numa conta real a última faixa era 74% piso e 26% dado) e as
-// duas últimas convergiam para a mesma largura — um "funil" com fundo reto.
-const TAPER_MAX = 0.55;
+const BOTTOM_W = 0.20;   // largura da etapa mais estreita do conjunto
+const TAPER_MAX = 0.62;  // teto de segurança: nenhuma etapa passa desta fração da anterior
 
 function FunnelChart({ labels, values, rates }: { labels: string[]; values: NullableMetric[]; rates: string[] }) {
   const base = values[0];
-  // Largura em escala de raiz quadrada, comprimida no intervalo [MIN_RATIO, 1].
+  // Largura em escala LOGARÍTMICA, normalizada no intervalo observado.
   //
-  // A largura crua (valor ÷ primeira etapa) não funciona nestas contas: com
-  // 15.100 de alcance para 248 cliques e 39 conversas, as razões são 1,64% e
-  // 0,26%. Ambas batiam no piso e desenhavam a MESMA faixa — dois números 6x
-  // diferentes com a mesma largura, que é pior do que uma escala comprimida:
-  // era leitura errada, não só apertada.
+  // As razões de um funil real percorrem ordens de grandeza: nas contas de
+  // produção, 15.100 de alcance viram 248 cliques (1,64%) e 39 conversas
+  // (0,26%). Nem a largura crua nem a raiz quadrada davam conta — as duas
+  // amontoavam as etapas finais perto do piso, e o fundo acabava quase tão largo
+  // quanto o meio. Log é a transformação para dado que varia por ordens de
+  // grandeza, e é o que faz a forma voltar a ler como funil.
   //
-  // A raiz separa os pequenos entre si mantendo a ordem (0,26% < 1,64% < 100%
-  // continua valendo), e o piso garante que a faixa final não vire um fio. O
-  // custo é que a largura deixa de ser a razão literal — por isso o valor exato
-  // fica ao lado de cada faixa e a taxa real de conversão entre elas.
-  const scaled = values.map((value) => {
-    if (base === null || base === 0 || value === null) return MIN_RATIO;
-    const ratioOfBase = Math.max(0, Math.min(1, value / base));
-    return MIN_RATIO + (1 - MIN_RATIO) * Math.sqrt(ratioOfBase);
+  // A normalização é sobre o intervalo OBSERVADO, não sobre um máximo fixo: a
+  // etapa mais estreita do conjunto assenta em BOTTOM_W e a mais larga em 1.
+  // Ou seja, a forma mostra o quanto o funil estrangula entre as suas próprias
+  // etapas — que é a pergunta que se faz olhando um funil. O valor absoluto de
+  // cada etapa fica ao lado dela, e a taxa real de conversão no vão entre elas.
+  const logs = values.map((value) => {
+    if (base === null || base === 0 || value === null || value <= 0) return null;
+    return Math.log10(Math.max(value / base, 1e-6));
   });
-  // O afunilamento é imposto depois da escala, nunca antes: a escala continua
-  // decidindo o tamanho de cada etapa a partir do dado, e este passo só impede
-  // que duas etapas seguidas empatem em largura.
+  const known = logs.filter((value): value is number => value !== null);
+  const lo = known.length ? Math.min(...known) : 0;
+  const hi = known.length ? Math.max(...known) : 0;
+  const span = hi - lo;
+  const scaled = logs.map((value) => {
+    // Etapa sem dado, ou funil de etapas todas iguais (span 0, um cilindro):
+    // largura fixa em vez de divisão por zero.
+    if (value === null) return BOTTOM_W;
+    if (span <= 0) return 1;
+    return BOTTOM_W + (1 - BOTTOM_W) * ((value - lo) / span);
+  });
+  // Teto de segurança, aplicado DEPOIS da escala: com log ele quase nunca morde,
+  // mas impede que duas etapas empatem se o dado vier degenerado.
   const widths = scaled.reduce<number[]>((acc, width, index) => {
     acc.push(index === 0 ? width : Math.min(width, acc[index - 1] * TAPER_MAX));
     return acc;
