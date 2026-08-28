@@ -171,13 +171,26 @@ const LABEL_X = 176;    // início do rótulo, fora da forma
 const CHART_W = 346;
 const BAND_H = 52;
 const BAND_GAP = 20;
-const MIN_RATIO = 0.05; // fatia mínima só para a faixa não sumir de vez
+const MIN_RATIO = 0.10; // piso da faixa mais estreita
 
 function FunnelChart({ labels, values, rates }: { labels: string[]; values: NullableMetric[]; rates: string[] }) {
   const base = values[0];
+  // Largura em escala de raiz quadrada, comprimida no intervalo [MIN_RATIO, 1].
+  //
+  // A largura crua (valor ÷ primeira etapa) não funciona nestas contas: com
+  // 15.100 de alcance para 248 cliques e 39 conversas, as razões são 1,64% e
+  // 0,26%. Ambas batiam no piso e desenhavam a MESMA faixa — dois números 6x
+  // diferentes com a mesma largura, que é pior do que uma escala comprimida:
+  // era leitura errada, não só apertada.
+  //
+  // A raiz separa os pequenos entre si mantendo a ordem (0,26% < 1,64% < 100%
+  // continua valendo), e o piso garante que a faixa final não vire um fio. O
+  // custo é que a largura deixa de ser a razão literal — por isso o valor exato
+  // fica ao lado de cada faixa e a taxa real de conversão entre elas.
   const widths = values.map((value) => {
     if (base === null || base === 0 || value === null) return MIN_RATIO;
-    return Math.max(MIN_RATIO, Math.min(1, value / base));
+    const ratioOfBase = Math.max(0, Math.min(1, value / base));
+    return MIN_RATIO + (1 - MIN_RATIO) * Math.sqrt(ratioOfBase);
   });
   const height = labels.length * BAND_H + (labels.length - 1) * BAND_GAP;
 
