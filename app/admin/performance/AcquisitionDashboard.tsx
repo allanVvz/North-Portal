@@ -171,9 +171,12 @@ const LABEL_X = 176;    // início do rótulo, fora da forma
 const CHART_W = 346;
 const BAND_H = 52;
 const BAND_GAP = 20;
-const MIN_RATIO = 0.125; // piso da faixa mais estreita. Sobe o meio do funil
-                         // junto: a 0,125 a etapa intermediária ganha ~10% de
-                         // largura sobre o piso anterior de 0,10.
+const MIN_RATIO = 0.125; // piso da faixa mais estreita
+// Cada etapa tem no máximo esta fração da largura da anterior. É o que garante
+// que a forma continue lendo como funil: sem isso, o piso passa a dominar as
+// etapas pequenas (numa conta real a última faixa era 74% piso e 26% dado) e as
+// duas últimas convergiam para a mesma largura — um "funil" com fundo reto.
+const TAPER_MAX = 0.55;
 
 function FunnelChart({ labels, values, rates }: { labels: string[]; values: NullableMetric[]; rates: string[] }) {
   const base = values[0];
@@ -189,11 +192,18 @@ function FunnelChart({ labels, values, rates }: { labels: string[]; values: Null
   // continua valendo), e o piso garante que a faixa final não vire um fio. O
   // custo é que a largura deixa de ser a razão literal — por isso o valor exato
   // fica ao lado de cada faixa e a taxa real de conversão entre elas.
-  const widths = values.map((value) => {
+  const scaled = values.map((value) => {
     if (base === null || base === 0 || value === null) return MIN_RATIO;
     const ratioOfBase = Math.max(0, Math.min(1, value / base));
     return MIN_RATIO + (1 - MIN_RATIO) * Math.sqrt(ratioOfBase);
   });
+  // O afunilamento é imposto depois da escala, nunca antes: a escala continua
+  // decidindo o tamanho de cada etapa a partir do dado, e este passo só impede
+  // que duas etapas seguidas empatem em largura.
+  const widths = scaled.reduce<number[]>((acc, width, index) => {
+    acc.push(index === 0 ? width : Math.min(width, acc[index - 1] * TAPER_MAX));
+    return acc;
+  }, []);
   const height = labels.length * BAND_H + (labels.length - 1) * BAND_GAP;
 
   return (
