@@ -165,12 +165,11 @@ function ResultPanel({
 // "CLIQUES (TODOS)" ficava cortado numa faixa de 36px. Inflar a largura mínima
 // até o texto caber resolveria a legibilidade mentindo sobre o dado: um estágio
 // de 2,65% desenhado como 42%.
-const FUNNEL_W = 158;   // área de desenho do funil (+20%: a forma ficava fina
-                        // demais para a coluna que ocupa)
-const LABEL_X = 176;    // início do rótulo, fora da forma
-const CHART_W = 346;
-const BAND_H = 52;
-const BAND_GAP = 20;
+const FUNNEL_W = 182;   // área de desenho do funil
+const LABEL_X = 202;    // início do rótulo, fora da forma
+const CHART_W = 398;
+const BAND_H = 60;
+const BAND_GAP = 23;
 const BOTTOM_W = 0.20;   // largura da etapa mais estreita do conjunto
 const TAPER_MAX = 0.62;  // teto de segurança: nenhuma etapa passa desta fração da anterior
 

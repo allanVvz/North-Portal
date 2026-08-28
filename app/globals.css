@@ -4667,7 +4667,7 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 /* Substituiu um PNG de cone 3D azul — decorativo, recortado no container e fora
    da paleta. Agora a largura de cada faixa É o dado (ver FunnelChart). */
 .acq-funnel-chart { display:grid; place-items:center; padding:8px 4px; }
-.acq-funnel-chart svg { max-width:346px; overflow:visible; }
+.acq-funnel-chart svg { max-width:398px; overflow:visible; }
 .acq-band { animation:acqBandIn .5s cubic-bezier(.22,.61,.36,1) both; transition:opacity .16s ease; }
 .acq-band path { transition:filter .2s ease; }
 .acq-band:hover path { filter:brightness(1.06) drop-shadow(0 4px 10px color-mix(in srgb,var(--a-teal) 42%,transparent)); }
