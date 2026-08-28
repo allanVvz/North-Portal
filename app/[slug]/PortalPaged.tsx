@@ -1,6 +1,7 @@
 "use client";
 
 import "./portal.css";
+import CompassMark from "../brand/CompassMark";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 import CommentText from "@/app/CommentText";
@@ -541,7 +542,7 @@ function Header(props: {
     <header className="np-header" ref={props.refEl}>
       <div className="np-brand-zone">
         <button className="np-wordmark" onClick={() => props.onGo("inicio")}>
-          <span className="np-logo-dot" aria-hidden />
+          <span className="np-logo-dot" aria-hidden><CompassMark size={22} /></span>
           <strong>NORTH</strong>
           <em>PORTAL</em>
         </button>
@@ -609,7 +610,7 @@ function MegaDropdown(props: { open: boolean; cluster: NavCluster; onGo: (p: Pag
       <div className={`np-dropdown-inner ${isNorth ? "np-dropdown-north" : ""}`}>
         <div className="np-dd-list">
           <span className="np-eyebrow np-dd-eyebrow">
-            {isNorth && <span className="np-logo-dot sm" aria-hidden />}
+            {isNorth && <span className="np-logo-dot sm" aria-hidden><CompassMark size={14} /></span>}
             {c.label} <em>· direção {cardinalName(c.cardinal)}</em>
           </span>
           <p className="np-dd-blurb">{c.blurb}</p>
@@ -702,7 +703,7 @@ function Overlay(props: {
     <aside className={`np-overlay ${props.open ? "open" : ""}`} aria-hidden={!props.open}>
       <div className="np-overlay-top">
         <button className="np-wordmark" onClick={props.onClose}>
-          <span className="np-logo-dot" aria-hidden />
+          <span className="np-logo-dot" aria-hidden><CompassMark size={22} /></span>
           <strong>north</strong>
           <em>PORTAL</em>
         </button>
@@ -2138,7 +2139,7 @@ function CafePage(props: { onStart: () => void; onGo: (p: PageId) => void }) {
   return (
     <div className="np np-cafe">
       <header className="np-cafe-top">
-        <button className="np-wordmark sm" onClick={() => props.onGo("inicio")}><span className="np-logo-dot" aria-hidden />north</button>
+        <button className="np-wordmark sm" onClick={() => props.onGo("inicio")}><span className="np-logo-dot" aria-hidden><CompassMark size={14} /></span>north</button>
         <span className="np-eyebrow">Briefing · Preparação</span>
       </header>
       <div className="np-cafe-body">
@@ -2191,7 +2192,7 @@ function PageHead(props: { eyebrow: string; title: ReactNode; lead: string }) {
 function Footer() {
   return (
     <footer className="np-footer">
-      <button className="np-wordmark sm"><span className="np-logo-dot" aria-hidden />north<em>PORTAL</em></button>
+      <button className="np-wordmark sm"><span className="np-logo-dot" aria-hidden><CompassMark size={14} /></span>north<em>PORTAL</em></button>
       <nav className="np-footer-links">
         <a href="/politica-de-privacidade">Política de Privacidade</a>
         <a href="/termos-de-uso">Termos de Uso</a>

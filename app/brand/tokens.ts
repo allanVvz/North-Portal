@@ -2,8 +2,11 @@
 //
 // O app inteiro usa CSS custom properties (--sand, --petrol, --a-teal...), e
 // deve continuar usando. Estes literais existem só para os lugares que NÃO
-// enxergam CSS: arquivos SVG estáticos (favicon, apple-icon) e imagens geradas
-// no servidor (opengraph). Se um token daqui mudar, rode `npm run brand:icons`.
+// enxergam CSS: arquivos SVG estáticos (hoje, o favicon). Se um token daqui
+// mudar, rode `npm run brand:icons`.
+//
+// Ressalva: app/opengraph-image.tsx ainda repete os hex na mão em vez de ler
+// daqui — divergência conhecida, registrada em app/brand/README.md.
 export const BRAND_COLORS = {
   /** Petróleo escuro — fundo do favicon e das seções escuras. */
   petrol: "#0c282c",

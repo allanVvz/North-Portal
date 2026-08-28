@@ -2,8 +2,14 @@
 
 A marca da North é **uma bússola monocromática**, e existe em **um só lugar**:
 `app/brand/compass.ts`. Todo o resto — favicon, barra lateral do admin,
-header/footer do site, login, capa do Manual do Cliente — lê daquele
-arquivo. Não há segunda cópia da geometria para manter em sincronia.
+header/footer do site, **telas de login**, portal do cliente, capa do Manual do
+Cliente — lê daquele arquivo. Não há segunda cópia da geometria para manter em
+sincronia.
+
+Antes de mexer, olhe o **[mapa completo](#onde-a-marca-aparece-hoje)** no fim
+deste arquivo: ele lista *todas* as telas que exibem a marca, inclusive as duas
+que já divergem de propósito. Uma tela que exibe a marca e não está no mapa é
+bug de documentação — acrescente a linha junto com o código.
 
 ## Quero trocar o desenho da marca
 
@@ -38,7 +44,7 @@ tela:
 | `admin` | barra lateral do admin | símbolo 16px + `NORTH` + `admin` |
 | `site` | header do site público | símbolo 22px + `north` + `estratégia & operação` |
 | `site-compact` | rodapé do site público | símbolo 22px + `north` |
-| `auth` | tela de login | símbolo 18px + `north` + `Portal` |
+| `auth` | telas de login: `/login` **e** `/recuperar-senha` | símbolo 18px + `north` + `Portal` |
 
 Cada variante emite **as mesmas classes CSS que a tela já usava**
 (`.admin-mark`, `.site-compass`, `.auth-mark`…), então o CSS de cada contexto
@@ -80,11 +86,54 @@ favicon desenha" e "o que o React desenha" não podem divergir por construção.
 
 ## Onde a marca aparece hoje
 
-- `app/admin/AdminShell.tsx` — barra lateral (`BrandLockup variant="admin"`)
-- `app/(site)/SiteFrame.tsx` — header e rodapé (`site` / `site-compact`)
-- `app/login/page.tsx` — cartão de login (`auth`)
-- `app/[slug]/ManualDoCliente.tsx` — capa do manual (`CompassMark size={150}`)
-- `app/icon.svg` — favicon do navegador
+Este é o mapa fechado. Toda tela que desenha a bússola ou escreve "north" está
+aqui — se você adicionar uma, acrescente a linha no mesmo commit.
+
+| Tela | Arquivo | O que exibe | Vem da fonte única? |
+|---|---|---|---|
+| Admin — barra lateral | `app/admin/AdminShell.tsx` | `BrandLockup variant="admin"` | sim |
+| Site público — header | `app/(site)/SiteFrame.tsx` | `BrandLockup variant="site"` | sim |
+| Site público — rodapé | `app/(site)/SiteFrame.tsx` | `BrandLockup variant="site-compact"` | sim |
+| **Login** (`/login`) | `app/login/page.tsx` | `BrandLockup variant="auth"` dentro de `.auth-brand` | sim |
+| **Recuperar senha** (`/recuperar-senha`) | `app/recuperar-senha/page.tsx` | `BrandLockup variant="auth"`, o mesmo lockup do login | sim |
+| Portal do cliente — header, overlay, café, rodapé | `app/[slug]/PortalPaged.tsx` | `CompassMark` 22px/14px em `.np-logo-dot` | símbolo sim, texto **não** |
+| Manual do Cliente — capa | `app/[slug]/ManualDoCliente.tsx` | `CompassMark size={150}` | sim |
+| Favicon da aba | `app/icon.svg` (gerado) | bússola creme sobre placa petróleo | sim |
+| Cartão social (OG) | `app/opengraph-image.tsx` | só a palavra `NORTH`, **sem** bússola | **não** |
+| 404 | `app/not-found.tsx` | nada — sem marca, de propósito (Figma 411:1734) | — |
+
+### As telas de login
+
+As duas telas de autenticação usam **a mesma variante `auth`** — símbolo 18px +
+`north` + `Portal` —, montada uma vez em `BrandLockup.tsx` e não em cada página.
+Cada página só fornece o invólucro `.auth-brand`; a tinta do símbolo vem de
+`.auth-mark { color: var(--l-teal) }` em `app/globals.css`, o que faz a bússola
+acompanhar o tema claro/escuro da tela sem virar um segundo desenho.
+
+Consequência prática: **mudar a marca do login é mexer em `LOCKUPS.auth`**, e as
+duas telas mudam juntas. Não edite o JSX de `app/login/page.tsx` para isso — se
+a alteração couber só numa das duas, ela vira uma variante nova no mapa
+`LOCKUPS`, nunca um lockup solto na página.
+
+### As duas divergências conhecidas
+
+Estão documentadas porque **não** são descuido de quem passar por aqui — são
+dívida assumida, com o caminho de saída escrito:
+
+- **Portal do cliente** (`PortalPaged.tsx`, 5 pontos): o *símbolo* já é
+  `CompassMark`, mas o texto ao lado é JSX à mão (`<strong>` + `<em>`), e nem
+  entre si os cinco batem — o header escreve `NORTH`, o overlay e o rodapé
+  escrevem `north`. É exatamente o problema que `BrandLockup` existe para
+  matar. Saída: uma variante `portal` (e uma `portal-compact`, para os 14px)
+  em `LOCKUPS`, mantendo as classes `.np-wordmark` / `.np-logo-dot` que o CSS
+  do portal já usa.
+- **Cartão social (OG)**: `app/opengraph-image.tsx` desenha a palavra `NORTH`
+  sem a bússola e com hex literais próprios (`#061619`, `#e8dcc0`, `#9fc9c2`)
+  em vez de `app/brand/tokens.ts`. Roda em `next/og` (Satori), fora do React do
+  app: não dá para simplesmente montar `<CompassMark />` ali. Saída: embutir a
+  bússola como `data:` URI gerado por `compassSvgMarkup`, e trocar os hex por
+  `BRAND_COLORS` — ambos os passos precisam ser verificados no Satori antes de
+  entrar.
 
 Ao adicionar um lugar novo, use `BrandLockup` se for logo com texto, ou
-`CompassMark` se for só o símbolo — e acrescente a linha nesta lista.
+`CompassMark` se for só o símbolo — e acrescente a linha na tabela acima.

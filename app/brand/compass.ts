@@ -4,8 +4,10 @@
 // Este arquivo é o ÚNICO lugar onde a geometria do símbolo existe. Tudo o que
 // desenha a marca lê daqui:
 //
-//   app/brand/CompassMark.tsx     -> o símbolo em React (site, admin, login)
-//   scripts/generate-brand-icons.mjs -> gera app/icon.svg e app/apple-icon.svg
+//   app/brand/CompassMark.tsx     -> o símbolo em React (site, admin, login,
+//                                    portal, capa do Manual). O mapa completo
+//                                    das telas está em app/brand/README.md.
+//   scripts/generate-brand-icons.mjs -> gera app/icon.svg (o favicon)
 //   lib/brand.test.ts             -> falha o `npm run verify` se os SVGs
 //                                    gerados saírem do passo com este arquivo
 //
