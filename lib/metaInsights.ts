@@ -11,7 +11,7 @@ export const META_ADS_DATASOURCE = "meta_ads" as const;
 // datasource's schema version — both come from normalizeAdsMetrics below.
 export const META_ADS_CREATIVE_DATASOURCE = "meta_ads_creative" as const;
 export const META_ADS_ADSET_DATASOURCE = "meta_ads_adset" as const;
-export const META_ADS_SCHEMA_VERSION = 3;
+export const META_ADS_SCHEMA_VERSION = 5;
 
 function num(raw: unknown): number | undefined {
   if (raw === null || raw === undefined || raw === "") return undefined;
@@ -54,6 +54,30 @@ export function normalizePublisherPlatform(raw: unknown): MetaPlatform {
 // Shared metric extraction for both campaign-level and ad-level /insights
 // rows — the field set and action-type mapping are identical, only the
 // grouping level (and therefore the id/caption built around it) differs.
+// O desfecho que a campanha realmente persegue, escolhido pelo objetivo.
+// Medido no cache de producao (6 contas, 90 dias): campanhas de venda fecham
+// mais em compra (230) do que em conversa (203), enquanto engajamento/trafego
+// fecham em conversa (1.108 contra 110 compras). Somar os dois tipos contaria
+// o mesmo funil duas vezes; contar so conversa subestimaria as campanhas de
+// venda. Por isso o desfecho e escolhido, nunca somado.
+//
+// `leads` entra apenas como ultimo recurso: no mesmo periodo sao 94 eventos
+// contra 1.311 de mensagens, e nas 44 linhas em que os dois aparecem juntos
+// leads e menor em 38 delas. Ele mede o mesmo evento de negocio pior, entao
+// somar seria dupla contagem e prioriza-lo seria subcontagem.
+function resultadoFor(
+  objective: string,
+  messages: number | undefined,
+  leads: number | undefined,
+  purchases: number | undefined,
+): number | undefined {
+  const o = objective.toUpperCase();
+  const salesFirst = o.includes("SALES") || o.includes("PURCHASE") || o.includes("CONVERSION");
+  return salesFirst
+    ? purchases ?? messages ?? leads
+    : messages ?? leads ?? purchases;
+}
+
 function normalizeAdsMetrics(row: Record<string, unknown>): MetaPost["metrics"] {
   const metrics: MetaPost["metrics"] = {};
   const actions = actionMap(row.actions);
@@ -109,6 +133,18 @@ function normalizeAdsMetrics(row: Record<string, unknown>): MetaPost["metrics"] 
   if (purchases !== undefined) metrics.compras = purchases;
   if (messages !== undefined) metrics.mensagens = messages;
   if (leads !== undefined || purchases !== undefined) metrics.conversoes = (leads ?? 0) + (purchases ?? 0);
+  const resultado = resultadoFor(str(row.objective), messages, leads, purchases);
+  if (resultado !== undefined) metrics.resultado = resultado;
+  // "Alguém levantou a mão", independente do objetivo da campanha. A Meta
+  // reporta o mesmo evento ora como `lead`, ora como conversa iniciada: no
+  // cache de produção são 94 leads contra 1.311 conversas, e nas 44 linhas em
+  // que os dois aparecem juntos leads é menor em 38. Somar contaria duas vezes;
+  // escolher só um perderia as contas que só reportam o outro. Por isso `max`,
+  // e por linha (campanha x plataforma x dia), onde os dois descrevem o mesmo
+  // punhado de pessoas.
+  if (messages !== undefined || leads !== undefined) {
+    metrics.contatos = Math.max(messages ?? 0, leads ?? 0);
+  }
   return metrics;
 }
 

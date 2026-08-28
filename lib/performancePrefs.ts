@@ -28,6 +28,8 @@ export const CAMPAIGN_METRIC_COLUMNS: { key: MetaPostMetricKey; label: string }[
   { key: "mensagens", label: "Conversas" },
   { key: "leads", label: "Leads" },
   { key: "compras", label: "Compras" },
+  { key: "contatos", label: "Conversas" },
+  { key: "resultado", label: "Resultado" },
   { key: "ctr", label: "CTR" },
   { key: "cpc", label: "CPC" },
   { key: "cpm", label: "CPM" },
@@ -44,7 +46,7 @@ const ALL_METRIC_KEYS: MetaPostMetricKey[] = [
   "salvos", "engajamento", "videoViews", "cliques", "ctr", "custo",
   "cpc", "cpm", "frequencia", "cliquesUnicos", "cliquesLink",
   "landingPageViews", "leads", "compras", "mensagens", "conversoes",
-  "profileVisits", "followers", "followersGained",
+  "profileVisits", "followers", "followersGained", "resultado", "contatos",
 ];
 const VALID_METRIC_KEYS = new Set(ALL_METRIC_KEYS);
 const VALID_COLUMN_KEYS = new Set(CAMPAIGN_METRIC_COLUMNS.map((c) => c.key));

@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import MetricSettingsMenu from "./MetricSettingsMenu";
 import TrendChart, { type TrendSeriesDefinition } from "./charts/TrendChart";
@@ -8,7 +7,7 @@ import {
   acquisitionMetricAvailable, acquisitionMetricLabel, acquisitionMetricSeries,
   ratio, resolveAcquisitionMetric, summarizeAcquisition, totalWhenPresent, type NullableMetric,
 } from "./acquisitionInsights";
-import { metricLabel } from "./insights";
+import { isNotIntegrated, metricLabel } from "./insights";
 import { metricRefInverse, metricRefKind, metricRefOptions } from "./performanceLabels";
 import type { PerformanceWorkspace } from "./usePerformanceWorkspace";
 import { ACQUISITION_VIEW_PREFS_DEFAULT } from "@/lib/acquisitionPrefs";
@@ -56,15 +55,19 @@ function Gauge({ label, current, previous, kind, inverse = false }: { label: str
   );
 }
 
-function Kpi({ label, value, previous, kind, hint, inverse = false, onHide }: { label: string; value: NullableMetric; previous: NullableMetric; kind?: "number" | "money" | "percent" | "decimal"; hint?: string; inverse?: boolean; onHide?: () => void }) {
+function Kpi({ label, value, previous, kind, hint, inverse = false, onHide, notIntegrated = false }: { label: string; value: NullableMetric; previous: NullableMetric; kind?: "number" | "money" | "percent" | "decimal"; hint?: string; inverse?: boolean; onHide?: () => void; notIntegrated?: boolean }) {
   return (
-    <article className="acq-kpi">
+    <article className={`acq-kpi${notIntegrated ? " is-gap" : ""}`}>
       <div className="perf-kpi-headrow">
         <span>{label}</span>
         {onHide ? <button type="button" className="perf-kpi-hide" aria-label={`Esconder ${label}`} onClick={onHide}>✕</button> : null}
       </div>
       <strong>{format(value, kind)}</strong>
-      <Delta current={value} previous={previous} inverse={inverse} />
+      {/* "0 neste período" e "esta integração não existe" são coisas diferentes.
+          Um "—" mudo faz procurar um filtro errado que não está lá. */}
+      {notIntegrated
+        ? <span className="acq-delta gap">Sem integração</span>
+        : <Delta current={value} previous={previous} inverse={inverse} />}
       {hint ? <small>{hint}</small> : null}
     </article>
   );
@@ -74,91 +77,153 @@ function Kpi({ label, value, previous, kind, hint, inverse = false, onHide }: { 
 // (Parte 4); as etapas (2-3) vêm de `funnelStages`, configurável por
 // template (Parte 5a).
 function ConversionFunnel({
-  stages, current, customMetrics, showMessageBranch, summary,
+  stages, current, customMetrics,
 }: {
   stages: MetricRef[];
   current: MetaPost[];
   customMetrics: CustomMetric[];
-  showMessageBranch: boolean;
-  summary: ReturnType<typeof summarizeAcquisition>;
 }) {
   const stageValues = stages.map((ref) => resolveAcquisitionMetric(current, ref, customMetrics));
   const stageLabels = stages.map((ref) => acquisitionMetricLabel(ref, customMetrics, metricLabel));
   const stageRates = stageValues.slice(1).map((value, i) => ratioLabel(value, stageValues[i]));
   const spend = totalWhenPresent(current, "custo");
-  // Mesmo cálculo do custo por lead, para que os dois resultados sejam
-  // comparáveis: o mesmo investimento dividido por cada desfecho.
-  const costPerMessage = ratio(spend, summary.messages);
-  // Consolidado dos dois desfechos. A média é ponderada — investimento total
-  // dividido pelo total de resultados — e não a média dos dois custos
-  // unitários: com 100 leads a R$ 10 e 2 conversas a R$ 500, a média simples
-  // diria R$ 255, quando o que a operação de fato pagou por resultado foi
-  // R$ 19,60. Quando uma das duas métricas não veio, o total é a que veio.
-  const totalOutcomes = showMessageBranch ? sumWhenAny(summary.opportunities, summary.messages) : summary.opportunities;
-  const costPerOutcome = ratio(spend, totalOutcomes);
   return (
     <div className="acq-conversion-flow">
       <div className="acq-funnel-layout">
-        <div className="acq-object-wrap">
-          <Image src="/images/performance/acquisition-funnel.png" alt="Funil abstrato roxo, largo no topo e estreito na base" width={220} height={220} priority={false} />
-        </div>
+        <FunnelChart labels={stageLabels} values={stageValues} rates={stageRates} />
         <div className="acq-funnel-info">
-          <div className="acq-flow-stages">
-            {stageLabels.map((label, index) => <div className="acq-flow-item" key={label}>
-              <div className={`acq-flow-stage ${stageValues[index] === null ? "missing" : ""}`}><span>{label}</span><strong>{format(stageValues[index])}</strong></div>
-              {index < stageLabels.length - 1 ? <div className="acq-flow-arrow" aria-label={`${stageRates[index]} para a próxima etapa`}><b aria-hidden>→</b><small>{stageRates[index]}</small></div> : null}
-            </div>)}
-          </div>
-          {/* Os dois resultados do funil, lado a lado e com o mesmo peso.
-              Conversas iniciadas era uma ramificação pendurada num "↘", o que
-              a lia como subproduto dos cliques; nesta operação as duas são
-              a mesma coisa — alguém levantou a mão — e disputam o mesmo
-              investimento, então precisam ser comparáveis na mesma linha. */}
-          <div className={`acq-outcomes${showMessageBranch ? "" : " single"}`}>
-            <div className="acq-outcome leads">
-              <span className="acq-outcome-label">Leads</span>
-              <strong className="acq-outcome-value">{format(summary.opportunities)}</strong>
-              <span className="acq-outcome-cost">{format(summary.costPerLead, "money")} por lead</span>
-              <span className="acq-outcome-rate">{format(summary.conversionRate, "percent")} dos cliques</span>
-            </div>
-            {showMessageBranch ? (
-              <div className="acq-outcome conversas">
-                <span className="acq-outcome-label">Conversas iniciadas</span>
-                <strong className="acq-outcome-value">{format(summary.messages)}</strong>
-                <span className="acq-outcome-cost">{format(costPerMessage, "money")} por conversa</span>
-                <span className="acq-outcome-rate">
-                  {format(summary.clickToMessageRate, "percent")} dos cliques{summary.messageClickBasis === "link" ? " no link" : ""}
-                </span>
-              </div>
-            ) : null}
-          </div>
-          {/* Consolidado dos dois cards acima. Antes este box mostrava "custo
-              por <última etapa>", que repetia o custo por lead sempre que leads
-              era a etapa final — o caso normal. */}
-          <div className="acq-funnel-terminal">
-            <div className="acq-terminal-cell">
-              <span>{showMessageBranch ? "Leads + conversas" : "Leads"}</span>
-              <strong>{format(totalOutcomes)}</strong>
-              <small>resultados no período</small>
-            </div>
-            <div className="acq-terminal-cell">
-              <span>Custo médio</span>
-              <strong>{format(costPerOutcome, "money")}</strong>
-              <small>investimento ÷ resultados</small>
-            </div>
-          </div>
+          {/* O desfecho é a ÚLTIMA ETAPA DO FUNIL, e ela vem do template.
+              Antes eram dois cards fixos (Leads | Conversas) e um rodapé de
+              total: em 4 dos 6 clientes de produção `leads` e `compras` são
+              zero em 30 dias, então dois terços da área ficavam vazios para
+              sempre. Agora cada template declara o desfecho que a operação dele
+              persegue — conversas, compras, ou o resultado por objetivo — e a
+              tela mostra um número só, com o custo e a taxa de conversão da
+              etapa anterior. Nenhum desfecho aparece onde não se aplica. */}
+          <ResultPanel
+            label={stageLabels[stageLabels.length - 1] ?? "Resultado"}
+            value={stageValues[stageValues.length - 1] ?? null}
+            previousStage={stageValues[stageValues.length - 2] ?? null}
+            previousLabel={stageLabels[stageLabels.length - 2] ?? ""}
+            spend={spend}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-/** Soma que sobrevive a métrica ausente: null + 5 = 5, null + null = null.
- *  Somar tratando null como zero mentiria um total; descartar a soma inteira
- *  por causa de uma métrica que a conta não expõe esconderia a que veio. */
-function sumWhenAny(a: NullableMetric, b: NullableMetric): NullableMetric {
-  if (a === null && b === null) return null;
-  return (a ?? 0) + (b ?? 0);
+// Fecho do funil: um desfecho, o que ele custou, e quanto da etapa anterior
+// chegou até aqui. Sem card por tipo de desfecho — ver o comentário na chamada.
+function ResultPanel({
+  label, value, previousStage, previousLabel, spend,
+}: {
+  label: string; value: NullableMetric; previousStage: NullableMetric;
+  previousLabel: string; spend: NullableMetric;
+}) {
+  const costPer = ratio(spend, value);
+  const rate = ratio(value, previousStage, 100);
+  return (
+    <div className="acq-result">
+      <div className="acq-result-main">
+        <span className="acq-result-label">{label}</span>
+        <strong className="acq-result-value">{format(value)}</strong>
+        {rate !== null && previousLabel ? (
+          <span className="acq-result-rate">{format(rate, "percent")} de {previousLabel.toLowerCase()}</span>
+        ) : null}
+      </div>
+      <dl className="acq-result-side">
+        <div>
+          {/* Rótulo fixo em vez de "custo por {label}": o desfecho já está
+              nomeado logo acima, e concordar o plural do rótulo de cada métrica
+              daria "custo por conversas"/"custo por compras". */}
+          <dt>Custo por resultado</dt>
+          <dd>{format(costPer, "money")}</dd>
+        </div>
+        <div>
+          <dt>Investimento</dt>
+          <dd>{format(spend, "money")}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+// Funil desenhado a partir dos próprios números, não uma ilustração ao lado
+// deles. Substituiu um PNG de cone azul 3D: era decorativo (a forma não dizia
+// nada sobre os dados), estava recortado no container e usava roxo/azul, fora
+// da paleta da marca.
+//
+// A largura de cada faixa é proporcional ao valor da etapa em relação à
+// primeira, então o estrangulamento do funil é o dado — se 8.000 de alcance
+// viram 200 cliques, a faixa afunila de verdade. Etapa sem dado vira uma faixa
+// tracejada de largura mínima, para não fingir um volume que não existe.
+// Geometria: o funil ocupa a faixa esquerda e os números vivem FORA dele,
+// ligados por linha guia. Foi a única forma de manter a proporção honesta e
+// legível ao mesmo tempo — as razões reais são extremas (9.000 de alcance para
+// 240 cliques é 2,65%), então com o texto dentro da faixa o rótulo
+// "CLIQUES (TODOS)" ficava cortado numa faixa de 36px. Inflar a largura mínima
+// até o texto caber resolveria a legibilidade mentindo sobre o dado: um estágio
+// de 2,65% desenhado como 42%.
+const FUNNEL_W = 158;   // área de desenho do funil (+20%: a forma ficava fina
+                        // demais para a coluna que ocupa)
+const LABEL_X = 176;    // início do rótulo, fora da forma
+const CHART_W = 346;
+const BAND_H = 52;
+const BAND_GAP = 20;
+const MIN_RATIO = 0.05; // fatia mínima só para a faixa não sumir de vez
+
+function FunnelChart({ labels, values, rates }: { labels: string[]; values: NullableMetric[]; rates: string[] }) {
+  const base = values[0];
+  const widths = values.map((value) => {
+    if (base === null || base === 0 || value === null) return MIN_RATIO;
+    return Math.max(MIN_RATIO, Math.min(1, value / base));
+  });
+  const height = labels.length * BAND_H + (labels.length - 1) * BAND_GAP;
+
+  return (
+    <div className="acq-funnel-chart">
+      <svg viewBox={`0 0 ${CHART_W} ${height}`} role="img" width="100%" height={height}
+        aria-label={`Funil: ${labels.map((label, i) => `${label} ${format(values[i])}`).join(", ")}`}>
+        <defs>
+          <linearGradient id="acqFunnelBand" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--a-teal)" />
+            <stop offset="100%" stopColor="var(--a-teal-text)" />
+          </linearGradient>
+        </defs>
+        {labels.map((label, index) => {
+          const y = index * (BAND_H + BAND_GAP);
+          const top = widths[index] * FUNNEL_W;
+          // A base já se estreita rumo à próxima etapa, então os trapézios
+          // encaixam em vez de empilharem retângulos soltos.
+          const bottom = (widths[index + 1] ?? widths[index] * 0.8) * FUNNEL_W;
+          const x1 = (FUNNEL_W - top) / 2;
+          const x2 = (FUNNEL_W - bottom) / 2;
+          const missing = values[index] === null;
+          const midY = y + BAND_H / 2;
+          const edge = Math.max(x1 + top, x2 + bottom);
+          return (
+            <g key={label} className={`acq-band${missing ? " missing" : ""}`} style={{ animationDelay: `${index * 90}ms` }}>
+              <path d={`M${x1} ${y} H${x1 + top} L${x2 + bottom} ${y + BAND_H} H${x2} Z`}
+                fill={missing ? "var(--a-surface2)" : "url(#acqFunnelBand)"}
+                stroke={missing ? "var(--a-border-strong)" : "none"}
+                strokeDasharray={missing ? "3 3" : undefined}
+                opacity={missing ? 1 : 1 - index * 0.12} />
+              {/* Linha guia: sai da borda real da faixa, então ela encurta
+                  conforme o funil afunila e o olho segue o estrangulamento. */}
+              <path className="acq-band-leader" d={`M${edge + 4} ${midY} H${LABEL_X - 6}`} />
+              <circle className="acq-band-dot" cx={edge + 4} cy={midY} r="2" />
+              <text x={LABEL_X} y={midY - 4} className="acq-band-label">{label.toUpperCase()}</text>
+              <text x={LABEL_X} y={midY + 15} className="acq-band-value">{format(values[index])}</text>
+              {index < labels.length - 1 ? (
+                <text x={FUNNEL_W / 2} y={y + BAND_H + 14} className="acq-band-rate">{rates[index]}</text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
 }
 
 function ratioLabel(numerator: NullableMetric, denominator: NullableMetric) {
@@ -257,7 +322,7 @@ export default function AcquisitionDashboard({ workspace }: { workspace: Perform
             {kpiSlots.map((ref) => {
               const value = resolveAcquisitionMetric(current, ref, customMetrics);
               const previous = resolveAcquisitionMetric(prev, ref, customMetrics);
-              return <Kpi key={ref} label={acquisitionMetricLabel(ref, customMetrics, metricLabel)} value={value} previous={previous} kind={metricRefKind(ref, customMetrics)} inverse={metricRefInverse(ref, customMetrics)} onHide={() => toggleKpiSlot(ref)} />;
+              return <Kpi key={ref} label={acquisitionMetricLabel(ref, customMetrics, metricLabel)} value={value} previous={previous} kind={metricRefKind(ref, customMetrics)} inverse={metricRefInverse(ref, customMetrics)} notIntegrated={isNotIntegrated(ref, customMetrics)} onHide={() => toggleKpiSlot(ref)} />;
             })}
             {!kpiSlots.length ? <p className="perf-empty">Nenhum KPI selecionado.</p> : null}
           </section>
@@ -268,11 +333,14 @@ export default function AcquisitionDashboard({ workspace }: { workspace: Perform
         <section className="acq-conversion-panel">
           <div className="acq-section-head">
             <div><span>Conversão e intenção</span><h2>Funil de aquisição</h2></div>
-            <small>Alcance → clique → resultado · leads e conversas lado a lado</small>
             <MetricSettingsMenu label="etapas do funil" options={metricOptions} selected={funnelStages} multiple max={3} onChange={toggleFunnelStage} onHideSection={() => hideSection("funnel")} />
           </div>
-          <ConversionFunnel stages={funnelStages} current={current} customMetrics={customMetrics} showMessageBranch={showMessageBranch} summary={summary} />
-          <label className="acq-message-toggle"><input type="checkbox" checked={showMessageBranch} onChange={(e) => { setShowMessageBranch(e.target.checked); markTemplateDirty(); }} /> Mostrar conversas iniciadas</label>
+          {/* O ramo de conversas deixou de ter checkbox próprio: ele é regra de
+              template (a fatia `acquisition` de cada builtin decide) e o desfecho
+              já depende do resultado esperado da campanha — "Por resultado"
+              desliga porque `resultado` já absorve a conversa. Um toggle manual
+              ao lado disso dava ao operador uma terceira fonte de verdade. */}
+          <ConversionFunnel stages={funnelStages} current={current} customMetrics={customMetrics} />
 
           {!hiddenSections.has("trend") ? (
             <div className="acq-funnel-trend">

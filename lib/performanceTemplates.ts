@@ -1,5 +1,4 @@
 import {
-  ACQUISITION_VIEW_PREFS_DEFAULT,
   sanitizeAcquisitionViewPrefs,
   type AcquisitionViewPrefs,
 } from "./acquisitionPrefs";
@@ -98,69 +97,109 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
   };
 }
 
-const COST_PER_MESSAGE_ID = "native_cost_per_message";
+const COST_PER_CONTACT_ID = "native_cost_per_contact";
+const COST_PER_PURCHASE_ID = "native_cost_per_purchase";
+const COST_PER_RESULT_ID = "native_cost_per_result";
 const COST_PER_FOLLOWER_ID = "native_cost_per_follower";
-const COST_PER_LEAD_ID = "native_cost_per_lead";
-const costPerLeadMetric = { id: COST_PER_LEAD_ID, label: "Custo por lead", a: "custo" as const, b: "leads" as const, op: "÷" as const, format: "money" as const };
-const costPerMessageMetric = { id: COST_PER_MESSAGE_ID, label: "Custo por conversa", a: "custo" as const, b: "mensagens" as const, op: "÷" as const, format: "money" as const };
+const costPerContact = { id: COST_PER_CONTACT_ID, label: "Custo por conversa", a: "custo" as const, b: "contatos" as const, op: "÷" as const, format: "money" as const };
+const costPerPurchase = { id: COST_PER_PURCHASE_ID, label: "Custo por compra", a: "custo" as const, b: "compras" as const, op: "÷" as const, format: "money" as const };
+const costPerResult = { id: COST_PER_RESULT_ID, label: "Custo por resultado", a: "custo" as const, b: "resultado" as const, op: "÷" as const, format: "money" as const };
+// Seguidores não é preenchido por nenhuma ingestão hoje (ver isNotIntegrated em
+// insights.ts). Fica visível por decisão do usuário: é a métrica que ele
+// acompanha, e um card rotulado "sem integração" comunica a lacuna melhor do
+// que a ausência do card.
+const costPerFollower = { id: COST_PER_FOLLOWER_ID, label: "Custo por seguidor", a: "custo" as const, b: "followersGained" as const, op: "÷" as const, format: "money" as const };
 
-// 3 builtins organized by funnel stage (topo/fundo/completo), replacing the
-// previous "Crescimento do perfil"/"Conversas no WhatsApp" pair — both had
-// drifted into mixing top-of-funnel and bottom-of-funnel metrics together
-// (e.g. WhatsApp mixed in alcance; profile-growth locked to Instagram-only
-// and pulled in mensagens). Each template now also carries an `acquisition`
-// slice (Parte 5a) so picking a template changes both screens' cards.
-const topFunnelPrefs = sanitizePerformanceViewPrefs({
+// Três builtins, um por tipo de desfecho que a operação persegue. A escolha do
+// template é a escolha de "o que conta como resultado nesta conta".
+//
+// O cache de produção (6 contas, 30 dias) é o que dita esta separação: leads
+// aparece em 3 das 6 contas e compras em 2, então um template único com um card
+// por desfecho deixava a maior parte da tela vazia. Além disso `leads` e
+// `mensagens` medem o MESMO evento — 94 contra 1.311 no mesmo período — e por
+// isso viraram a métrica `contatos` (máximo por linha), não dois números.
+const messageFunnelPrefs = sanitizePerformanceViewPrefs({
   ...PERFORMANCE_VIEW_PREFS_DEFAULT,
   defaultPeriod: 30,
-  kpiSlots: ["alcance", "impressoes", "cpm", "frequencia", "profileVisits", "followersGained"].map((metric) => ({ visible: true, metric })),
-  trendMetric: "alcance",
-  topCampaignsMetric: "alcance",
-  visibleColumns: ["alcance", "impressoes", "frequencia", "profileVisits", "followersGained", "ctr", "cpm"],
-  customMetrics: [],
+  // 6 KPIs: 4 com dado garantido em todas as contas + os 2 de seguidores, que
+  // o usuário quer ver justamente por estarem zerados.
+  kpiSlots: ["custo", "alcance", "contatos", `custom:${COST_PER_CONTACT_ID}`, "followersGained", `custom:${COST_PER_FOLLOWER_ID}`].map((metric) => ({ visible: true, metric })),
+  trendMetric: "contatos",
+  topCampaignsMetric: "contatos",
+  visibleColumns: ["alcance", "impressoes", "cliquesLink", "contatos", "custo", "ctr", "cpc", "cpm"],
+  customMetrics: [costPerContact, costPerFollower],
 });
-const bottomFunnelPrefs = sanitizePerformanceViewPrefs({
+const purchaseFunnelPrefs = sanitizePerformanceViewPrefs({
   ...PERFORMANCE_VIEW_PREFS_DEFAULT,
   defaultPeriod: 30,
-  kpiSlots: ["custo", "cliquesLink", "leads", `custom:${COST_PER_LEAD_ID}`, "mensagens", `custom:${COST_PER_MESSAGE_ID}`].map((metric) => ({ visible: true, metric })),
-  trendMetric: "leads",
-  topCampaignsMetric: `custom:${COST_PER_LEAD_ID}`,
-  visibleColumns: ["custo", "cliquesLink", "leads", "mensagens", "ctr", "cpc", "cpm"],
-  customMetrics: [costPerLeadMetric, costPerMessageMetric],
+  kpiSlots: ["custo", "alcance", "cliquesLink", "compras", `custom:${COST_PER_PURCHASE_ID}`].map((metric) => ({ visible: true, metric })),
+  trendMetric: "compras",
+  topCampaignsMetric: "compras",
+  visibleColumns: ["alcance", "impressoes", "cliquesLink", "compras", "custo", "ctr", "cpc", "cpm"],
+  customMetrics: [costPerPurchase],
 });
-const fullFunnelPrefs = sanitizePerformanceViewPrefs({
+const resultFunnelPrefs = sanitizePerformanceViewPrefs({
   ...PERFORMANCE_VIEW_PREFS_DEFAULT,
   defaultPeriod: 30,
-  kpiSlots: ["alcance", "impressoes", "cliquesLink", "leads", "custo", `custom:${COST_PER_LEAD_ID}`].map((metric) => ({ visible: true, metric })),
-  trendMetric: "alcance",
-  topCampaignsMetric: "leads",
-  visibleColumns: ["alcance", "impressoes", "cliquesLink", "leads", "custo", "ctr", "cpc", "cpm"],
-  customMetrics: [costPerLeadMetric],
+  kpiSlots: ["custo", "alcance", "resultado", `custom:${COST_PER_RESULT_ID}`].map((metric) => ({ visible: true, metric })),
+  trendMetric: "resultado",
+  topCampaignsMetric: "resultado",
+  visibleColumns: ["alcance", "impressoes", "cliquesLink", "resultado", "custo", "ctr", "cpc", "cpm"],
+  customMetrics: [costPerResult],
 });
 
-const topFunnelAcquisition: AcquisitionViewPrefs = {
-  kpiSlots: ["alcance", "impressoes", "custo"],
+// A última etapa de `funnelStages` é o desfecho: é dela que o fecho do funil
+// tira o número, o custo e a taxa de conversão (ver ResultPanel).
+const messageFunnelAcquisition: AcquisitionViewPrefs = {
+  // 6 é o teto do slot. Os 4 primeiros têm dado em todas as contas de produção;
+  // os 2 de seguidores entram sabidamente vazios, por decisão do usuário — a
+  // tela os rotula "Sem integração" em vez de mostrar um "—" ambíguo.
+  kpiSlots: ["custo", "alcance", "contatos", `custom:${COST_PER_CONTACT_ID}`, "followersGained", `custom:${COST_PER_FOLLOWER_ID}`],
   volumeSlots: ["impressoes", "cliques"],
-  gaugeSlots: ["cpm", "ctr", "frequencia"],
-  funnelStages: ["alcance", "impressoes", "cliques"],
+  gaugeSlots: ["cpm", "cpc", "ctr"],
+  funnelStages: ["alcance", "cliquesLink", "contatos"],
   showMessageBranch: false,
-  trendMetrics: ["alcance", "impressoes"],
+  trendMetrics: ["custo", "contatos"],
+};
+const purchaseFunnelAcquisition: AcquisitionViewPrefs = {
+  kpiSlots: ["custo", "alcance", "compras", `custom:${COST_PER_PURCHASE_ID}`],
+  volumeSlots: ["impressoes", "cliques"],
+  gaugeSlots: ["cpm", "cpc", "ctr"],
+  funnelStages: ["alcance", "cliquesLink", "compras"],
+  showMessageBranch: false,
+  trendMetrics: ["custo", "compras"],
+};
+const resultFunnelAcquisition: AcquisitionViewPrefs = {
+  kpiSlots: ["custo", "alcance", "resultado", `custom:${COST_PER_RESULT_ID}`],
+  volumeSlots: ["impressoes", "cliques"],
+  gaugeSlots: ["cpm", "cpc", "ctr"],
+  funnelStages: ["alcance", "cliques", "resultado"],
+  showMessageBranch: false,
+  trendMetrics: ["custo", "resultado"],
 };
 
+// Nível fica em "campaign" nos três. As linhas de conjunto/criativo só são
+// buscadas para campanhas marcadas na tabela (usePerformanceWorkspace), e em
+// nível "ad" o currentPaidRows sai dessas mesmas linhas — um template que
+// abrisse em "ad" renderizaria KPIs, tendência e ranking vazios até alguém
+// selecionar uma campanha.
 export const BUILTIN_PERFORMANCE_TEMPLATES: PerformanceTemplate[] = [
   {
-    id: "builtin-full-funnel", name: "Funil completo",
-    description: "Alcance, cliques, leads e investimento — visão de ponta a ponta.", scope: "builtin", ownerProfileId: null, updatedAt: null,
-    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: fullFunnelPrefs, acquisition: ACQUISITION_VIEW_PREFS_DEFAULT, filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] }, level: "campaign", trendMetrics: ["alcance", "leads"] }),
+    id: "builtin-funil-mensagens", name: "Funil de mensagens",
+    description: "Para contas que fecham em conversa. Leads e mensagens contam como o mesmo desfecho.", scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition, filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] }, level: "campaign", trendMetrics: ["alcance", "contatos"] }),
   },
   {
-    id: "builtin-top-funnel", name: "Topo de funil",
-    description: "Alcance, impressões e frequência — reconhecimento e engajamento.", scope: "builtin", ownerProfileId: null, updatedAt: null,
-    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: topFunnelPrefs, acquisition: topFunnelAcquisition, filters: { clientSlug: "", category: "ads", platforms: [], objectives: ["OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT"] }, level: "campaign", trendMetrics: ["alcance", "impressoes"] }),
+    id: "builtin-funil-compras", name: "Funil de compras",
+    description: "Para contas de e-commerce ou venda direta: o desfecho é a compra.", scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: purchaseFunnelPrefs, acquisition: purchaseFunnelAcquisition, filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] }, level: "campaign", trendMetrics: ["alcance", "compras"] }),
   },
   {
-    id: "builtin-bottom-funnel", name: "Fundo de funil",
-    description: "Leads, custo por lead e conversas — conversão e intenção de compra.", scope: "builtin", ownerProfileId: null, updatedAt: null,
-    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: bottomFunnelPrefs, acquisition: ACQUISITION_VIEW_PREFS_DEFAULT, filters: { clientSlug: "", category: "ads", platforms: [], objectives: ["OUTCOME_LEADS", "OUTCOME_SALES"] }, level: "campaign", trendMetrics: ["leads", "custo"] }),
+    id: "builtin-por-resultado", name: "Por resultado",
+    description: "Mistura de objetivos: cada campanha conta o desfecho que ela persegue.", scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({ version: 1, prefs: resultFunnelPrefs, acquisition: resultFunnelAcquisition, filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] }, level: "campaign", trendMetrics: ["custo", "resultado"] }),
   },
 ];
+
+export const DEFAULT_BUILTIN_TEMPLATE_ID = "builtin-funil-mensagens";
+export const DEFAULT_BUILTIN_TEMPLATE = BUILTIN_PERFORMANCE_TEMPLATES[0];

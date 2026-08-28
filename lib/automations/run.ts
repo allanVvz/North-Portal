@@ -15,6 +15,7 @@ import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
 import {
   BUILTIN_PERFORMANCE_TEMPLATES,
+  DEFAULT_BUILTIN_TEMPLATE,
   sanitizePerformanceTemplateConfig,
   type PerformanceTemplateConfig,
 } from "@/lib/performanceTemplates";
@@ -61,11 +62,20 @@ function periodForCadence(cadence: RecurringCadence, endIso: string): Period {
   return { from: isoDay(from), to: isoDay(to) };
 }
 
+// performance_template_id e TEXT (aceita "builtin-*"), mas
+// performance_templates.id e UUID. Consultar um id de builtin ali faz o
+// Postgres devolver "invalid input syntax for type uuid" e derruba a execucao
+// inteira da automacao — foi o que aconteceria com as configs que apontavam
+// para builtins removidos. Por isso o id so vai ao banco quando e um UUID de
+// verdade; qualquer outro id desconhecido cai no template padrao.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function resolveTemplateConfig(admin: AdminClient, templateId: string | null): Promise<PerformanceTemplateConfig> {
-  const fallback = BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === "builtin-full-funnel")!.config;
+  const fallback = DEFAULT_BUILTIN_TEMPLATE.config;
   if (!templateId) return fallback;
   const builtin = BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === templateId);
   if (builtin) return builtin.config;
+  if (!UUID_RE.test(templateId)) return fallback;
   const { data, error } = await admin.from("performance_templates").select("config").eq("id", templateId).limit(1);
   if (error) throw error;
   const row = data?.[0] as { config: unknown } | undefined;

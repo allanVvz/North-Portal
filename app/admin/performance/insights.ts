@@ -27,9 +27,30 @@ export const DASH_METRICS: { key: MetaPostMetricKey; label: string; paidOnly: bo
   { key: "mensagens", label: "Conversas iniciadas", paidOnly: true },
   { key: "leads", label: "Leads", paidOnly: true },
   { key: "compras", label: "Compras", paidOnly: true },
+  { key: "contatos", label: "Conversas", paidOnly: true },
+  { key: "resultado", label: "Resultado", paidOnly: true },
   { key: "custo", label: "Investimento", paidOnly: true },
   { key: "conversoes", label: "Conversões", paidOnly: true },
 ];
+
+// Métricas que existem no vocabulário mas que NENHUMA ingestão preenche hoje:
+// nem o normalizador da Meta (lib/metaInsights.ts) nem o da Windsor
+// (lib/windsor.ts) escrevem estas chaves. Verificado no cache de produção — 376
+// linhas em 30 dias, 6 contas, zero ocorrências.
+//
+// A distinção importa na tela: "0 neste período" e "esta integração não existe"
+// são coisas diferentes, e um "—" mudo faz o operador procurar um problema de
+// filtro que não está lá. Um KPI destes é mostrado de propósito (o usuário quer
+// ver a lacuna de seguidores), mas rotulado como lacuna.
+const NEVER_INGESTED = new Set<MetaPostMetricKey>(["profileVisits", "followers", "followersGained"]);
+
+export function isNotIntegrated(ref: MetricRef, customMetrics: CustomMetric[] = []): boolean {
+  if (isCustomMetricRef(ref)) {
+    const def = customMetrics.find((metric) => `custom:${metric.id}` === ref);
+    return Boolean(def) && (NEVER_INGESTED.has(def!.a) || NEVER_INGESTED.has(def!.b));
+  }
+  return NEVER_INGESTED.has(ref as MetaPostMetricKey);
+}
 
 export function metricLabel(key: string): string {
   return DASH_METRICS.find((m) => m.key === key)?.label ?? key;

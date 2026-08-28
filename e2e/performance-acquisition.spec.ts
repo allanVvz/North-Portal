@@ -45,7 +45,8 @@ test("dashboard de aquisição preserva hierarquia, comparativo e estados vazios
   // de um texto fixo.
   await expect(dashboard.getByText("Investimento x Conversas iniciadas")).toBeVisible();
   await expect(dashboard.getByText("Funil de aquisição")).toBeVisible();
-  await expect(dashboard.locator(".acq-object-wrap img")).toBeVisible();
+  // O funil virou SVG desenhado a partir dos dados (era um PNG decorativo).
+  await expect(dashboard.locator(".acq-funnel-chart svg")).toBeVisible();
 
   // Topo (data + filtro composto) agora é compartilhado com Analytics —
   // renderizado uma vez fora da div de teste do dashboard de Aquisição.
@@ -67,11 +68,13 @@ test("dashboard de aquisição preserva hierarquia, comparativo e estados vazios
   // nível padrão "Campanhas" ela nunca mostra a coluna "Criativo".
   await expect(page.getByRole("columnheader", { name: "Criativo" })).toHaveCount(0);
   await expect(dashboard.locator(".acq-gauge-card")).toHaveCount(3);
-  await expect(dashboard.locator(".acq-flow-stage")).toHaveCount(3);
-  await expect(dashboard.locator(".acq-flow-arrow")).toHaveCount(2);
-  await expect(dashboard.locator(".acq-message-branch")).toBeVisible();
+  // Uma faixa <g class="acq-band"> por etapa, cada uma com rótulo e valor fora
+  // da forma, ligados por linha guia.
+  await expect(dashboard.locator(".acq-band")).toHaveCount(3);
+  await expect(dashboard.locator(".acq-band-leader")).toHaveCount(3);
+  await expect(dashboard.locator(".acq-band-rate")).toHaveCount(2);
+  await expect(dashboard.locator(".acq-outcome.conversas")).toBeVisible();
   await expect(dashboard.locator(".acq-loading")).toHaveCount(0, { timeout: 60_000 });
-  await expect.poll(() => dashboard.locator(".acq-object-wrap img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
 
   await page.setViewportSize({ width: 1280, height: 1200 });
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -152,9 +155,11 @@ test("filtros multi de campanha e conjunto atualizam KPIs, gráfico e criativos"
   await expect(dashboard.locator("path.recharts-line-curve")).toHaveCount(2);
   await expect(dashboard.getByText("Criativo Alfa", { exact: true })).toBeVisible();
   await expect(dashboard.getByText("Criativo Beta", { exact: true })).toBeVisible();
-  await expect(dashboard.locator(".acq-flow-stage")).toHaveCount(3);
-  await expect(dashboard.locator(".acq-flow-arrow")).toHaveCount(2);
-  await expect(dashboard.locator(".acq-message-branch")).toContainText("Mensagens iniciadas");
+  await expect(dashboard.locator(".acq-band")).toHaveCount(3);
+  await expect(dashboard.locator(".acq-band-rate")).toHaveCount(2);
+  // Era ".acq-message-branch" com o texto "Mensagens iniciadas" — as duas
+  // coisas já não existiam antes desta mudança: o ramo pendurado virou um par
+  // de cards de mesmo peso (.acq-outcome) e o rótulo é "Conversas iniciadas".
+  await expect(dashboard.locator(".acq-outcome.conversas")).toContainText("Conversas iniciadas");
   await expect(dashboard.getByText(/dos cliques no link/)).toBeVisible();
-  expect(await dashboard.locator(".acq-object-wrap img").evaluate((image) => getComputedStyle(image).transform)).toContain("-1");
 });

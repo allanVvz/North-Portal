@@ -19,7 +19,7 @@ export type MetaPostMetricKey =
   | "salvos" | "engajamento" | "videoViews" | "cliques" | "ctr" | "custo"
   | "cpc" | "cpm" | "frequencia" | "cliquesUnicos" | "cliquesLink"
   | "landingPageViews" | "leads" | "compras" | "mensagens" | "conversoes"
-  | "profileVisits" | "followers" | "followersGained";
+  | "profileVisits" | "followers" | "followersGained" | "resultado" | "contatos";
 
 export type MetaPlatform = "instagram" | "facebook" | "whatsapp" | "messenger" | "audience_network" | "unknown";
 

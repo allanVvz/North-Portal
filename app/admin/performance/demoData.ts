@@ -147,6 +147,10 @@ export function generateDemoPosts(today = new Date()): MetaPost[] {
         compras,
         mensagens,
         conversoes: leads + compras,
+        // Mesma regra de resultadoFor() em lib/metaInsights.ts: desfecho
+        // escolhido pelo objetivo, nunca somado.
+        resultado: campaign.objective === "OUTCOME_SALES" ? compras : mensagens,
+        contatos: Math.max(mensagens, leads),
       },
     });
   }

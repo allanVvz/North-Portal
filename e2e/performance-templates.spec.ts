@@ -67,11 +67,11 @@ test.describe("Performance · templates e seleção hierárquica", () => {
     await page.getByRole("button", { name: "Analytics", exact: true }).click();
 
     const filterBox = page.locator(".perf-analysis-filterbar .kb-searchbar-box");
-    await expect(filterBox).toContainText("Template: Funil completo", { timeout: 45_000 });
+    await expect(filterBox).toContainText("Template: Funil de mensagens", { timeout: 45_000 });
     await filterBox.click();
     await page.getByRole("button", { name: "Template", exact: true }).click();
-    await page.getByRole("option", { name: /Fundo de funil/ }).click();
-    await expect(page.getByText("Custo por conversa", { exact: true }).first()).toBeVisible();
+    await page.getByRole("option", { name: /Por resultado/ }).click();
+    await expect(page.getByText("Custo por resultado", { exact: true }).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Salvar template", exact: true }).click();
     await page.getByLabel("Nome do template").fill(TEMPLATE_NAME);
@@ -86,7 +86,7 @@ test.describe("Performance · templates e seleção hierárquica", () => {
     if (await objectiveRemove.isVisible()) await objectiveRemove.click();
     const networkRemove = page.getByRole("button", { name: "Remover filtro Rede" });
     if (await networkRemove.isVisible()) await networkRemove.click();
-    await expect(page.locator(".perf-kpi").filter({ hasText: "Custo por conversa" })).toContainText("R$", { timeout: 45_000 });
+    await expect(page.locator(".perf-kpi").filter({ hasText: "Custo por resultado" })).toContainText("R$", { timeout: 45_000 });
 
     const campaignChecks = page.getByRole("checkbox", { name: /^Selecionar campanha / });
     const firstCampaign = campaignChecks.first();

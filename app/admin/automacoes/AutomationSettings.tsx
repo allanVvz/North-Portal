@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { TaskRecord } from "@/lib/validation";
 import { AUTOMATION_DEFINITIONS, AUTOMATION_KEYS, type AutomationKey } from "@/lib/automationCatalog";
 import { kindIcon } from "@/lib/taskCatalog";
+import { DEFAULT_BUILTIN_TEMPLATE } from "@/lib/performanceTemplates";
 import AutomationCardPicker from "./AutomationCardPicker";
 import TaskModal from "../TaskModal";
 
@@ -309,7 +310,7 @@ function AutomationConfigCard({
               value={slot.performanceTemplateId}
               onChange={(e) => onChange({ performanceTemplateId: e.target.value })}
             >
-              <option value="">Funil completo (padrão)</option>
+              <option value="">{DEFAULT_BUILTIN_TEMPLATE.name} (padrão)</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           ) : null}

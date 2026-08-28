@@ -63,10 +63,40 @@ describe("normalizeMetaAdsRow", () => {
       compras: 3,
       mensagens: 7,
       conversoes: 8,
+      // OUTCOME_LEADS nao e objetivo de venda: o desfecho e a conversa.
+      resultado: 7,
+      // Mesmo evento medido de dois jeitos (7 conversas, 5 leads): o maior, nunca a soma.
+      contatos: 7,
     });
     expect(p.objective).toBe("OUTCOME_LEADS");
     expect(p.currency).toBe("BRL");
-    expect(p.schemaVersion).toBe(3);
+    expect(p.schemaVersion).toBe(5);
+  });
+
+  it("resultado escolhe o desfecho pelo objetivo, sem somar tipos diferentes", () => {
+    // Venda: fecha em compra, mesmo havendo conversa na mesma linha.
+    const venda = normalizeMetaAdsRow({ ...base, objective: "OUTCOME_SALES" }, "act123", "Conta Ads")!;
+    expect(venda.metrics.resultado).toBe(3);
+    // Engajamento/trafego: fecha em conversa.
+    const conversa = normalizeMetaAdsRow({ ...base, objective: "OUTCOME_ENGAGEMENT" }, "act123", "Conta Ads")!;
+    expect(conversa.metrics.resultado).toBe(7);
+    // Nunca e a soma dos tipos — isso contaria o mesmo funil duas vezes.
+    expect(venda.metrics.resultado).not.toBe(venda.metrics.conversoes);
+    expect(conversa.metrics.resultado).toBeLessThan(5 + 3 + 7);
+  });
+
+  it("resultado cai em leads so quando nao ha conversa nem compra", () => {
+    const soLead = normalizeMetaAdsRow(
+      { ...base, objective: "OUTCOME_LEADS", actions: [{ action_type: "lead", value: 4 }] },
+      "act123", "Conta Ads",
+    )!;
+    expect(soLead.metrics.mensagens).toBeUndefined();
+    expect(soLead.metrics.resultado).toBe(4);
+  });
+
+  it("resultado fica ausente quando a linha nao tem nenhum desfecho", () => {
+    const p = normalizeMetaAdsRow({ ...base, actions: [{ action_type: "post_engagement", value: 9 }] }, "act123", "Conta Ads")!;
+    expect(p.metrics.resultado).toBeUndefined();
   });
 
   it("does not double count aliases or add engagement actions to conversions", () => {

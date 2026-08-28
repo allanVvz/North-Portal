@@ -28,12 +28,17 @@ export type AcquisitionViewPrefs = {
 };
 
 export const ACQUISITION_VIEW_PREFS_DEFAULT: AcquisitionViewPrefs = {
-  kpiSlots: ["custo", "leads", "custom:native_cost_per_lead"],
+  // Só refs built-in: este default é usado antes de qualquer template ser
+  // aplicado, e um `custom:` aqui dependeria de um template definir aquela
+  // métrica. Quando não define, metricRefLabel() renderiza o card como
+  // "Métrica removida" — foi o que aconteceu quando os builtins que traziam
+  // `native_cost_per_lead` saíram.
+  kpiSlots: ["custo", "alcance", "contatos"],
   volumeSlots: ["impressoes", "cliques"],
   gaugeSlots: ["cpm", "cpc", "ctr"],
-  funnelStages: ["alcance", "cliques", "leads"],
-  showMessageBranch: true,
-  trendMetrics: ["custo", "mensagens"],
+  funnelStages: ["alcance", "cliquesLink", "contatos"],
+  showMessageBranch: false,
+  trendMetrics: ["custo", "contatos"],
 };
 
 const MAX_SLOTS = 6;
