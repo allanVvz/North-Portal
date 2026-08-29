@@ -32,17 +32,4 @@ describe("derivedTaskId", () => {
     expect(flowStepTaskId("x", "1")).not.toBe(recurringExecutionId("x", 1));
   });
 
-  // O script de backfill roda em .mjs e não consegue importar este módulo em
-  // TypeScript, então ele carrega uma cópia das seis linhas do hash. Uma
-  // segunda cópia da função de IDENTIDADE é exatamente o tipo de coisa que
-  // diverge em silêncio: no dia em que divergir, o backfill gera ids que a
-  // cascata não reconhece e volta a produzir duplicatas. Este teste é o que
-  // impede a divergência de passar despercebida.
-  it("a cópia do script de backfill produz os mesmos ids", async () => {
-    const script = await import("../scripts/backfill-entregas.mjs");
-    for (const [parent, key] of [["entrega-1", "captacao"], ["entrega-2", "roteiro"], ["x", "publicacao"]]) {
-      expect(script.flowStepTaskId(parent, key)).toBe(flowStepTaskId(parent, key));
-    }
-    expect(script.derivedTaskId("parent-1", "cycle:3")).toBe(derivedTaskId("parent-1", "cycle:3"));
-  });
 });

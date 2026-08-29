@@ -2046,17 +2046,19 @@ export type PublishedTask = TaskRecord & {
   metricsUpdatedAt: string | null;
 };
 
-// O que o Performance considera "no ar".
+// O que o Performance considera "no ar": o CARD de Publicação, concluído.
 //
 // Era `status = 'concluido'`, o estágio "Publicado" — que deixou de existir.
-// O critério passa a ser a ENTREGA concluída: `kind` é o único tipo com
-// `performance: true` que vai ao ar, e uma Entrega concluída é, por definição,
-// uma peça publicada, já que Publicação é a última etapa da corrente.
+// Publicar deixou de ser um nível de tarefa e virou uma etapa da corrente, e
+// uma etapa é um card. Então o critério é o card dessa etapa: `subtype =
+// 'publicacao'` concluído, seja ele o último elo de uma Entrega nova ou uma
+// peça histórica que foi convertida.
 //
-// A alternativa considerada era filtrar por `payload.publicado_em`, a marca
-// que a migração deixa nos 45 cards históricos. Ela foi descartada porque
-// congelaria o módulo nesses 45 para sempre: nenhum card novo passaria a ter a
-// marca, e o Performance pararia de crescer.
+// Duas alternativas foram descartadas. Filtrar por `payload.publicado_em`
+// congelaria o módulo nas peças históricas, porque card novo nenhum ganharia a
+// marca. E filtrar a ENTREGA concluída (`subtype is null`) mediria a peça
+// inteira, não a publicação — e a Entrega encerra mesmo quando o que se quer
+// medir é o momento em que o material foi ao ar.
 export async function listPublishedTasks(): Promise<PublishedTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -2064,12 +2066,7 @@ export async function listPublishedTasks(): Promise<PublishedTask[]> {
     .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug),task_metrics(metrics,source,updated_at)`)
     .eq("status", "aprovado")
     .eq("kind", "criativo")
-    // `subtype is null` separa a ENTREGA das ETAPAS dela. Uma etapa concluída
-    // (Roteiro, Captação, Edição) é `criativo` + `aprovado` igual à entrega, e
-    // sem este filtro cada peça no ar traria quatro linhas para o Performance —
-    // três delas de trabalho interno que nunca teve métrica. Entrega e criativo
-    // solto nascem com subtype nulo; etapa sempre tem o subtype da etapa.
-    .is("subtype", null)
+    .eq("subtype", "publicacao")
     .order("updated_at", { ascending: false });
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string };
