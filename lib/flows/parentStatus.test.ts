@@ -16,7 +16,7 @@ describe("ciclo de vida do card-entrega", () => {
   });
 
   it("encerra direto quando não há revisor nem aprovador", () => {
-    expect(deliveryStatusOnFinish({ reviewer_id: null, approver_id: null })).toBe("concluido");
+    expect(deliveryStatusOnFinish({ reviewer_id: null, approver_id: null })).toBe("aprovado");
   });
 });
 

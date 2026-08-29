@@ -17,7 +17,7 @@ import { sortItems } from "./taskSort";
 import { useSortPref } from "./taskSortPrefs";
 import { formatPeriod, formatShortDate, isOverdue, relativeDue } from "./taskDates";
 import { todayInTimezone } from "./recurringState";
-import { COLUMNS, PRIORITY_LABEL, commentsOf, statusAfterKanbanDrop, taskTone, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
+import { COLUMNS, PRIORITY_LABEL, commentsOf, taskTone, visibleColumnsFor } from "./kanbanShared";
 import { formatCommentTime } from "@/lib/comments";
 import { FLOW_STEP_COUNT_KEY, kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
@@ -131,10 +131,6 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // Whether ANY client currently has Revisão/Aprovação admin-enabled — drives
   // whether those Kanban columns show at all (see visibleColumns below).
   const [flowSummary, setFlowSummary] = useState({ anyRevisaoAdmin: false, anyAprovacaoAdmin: false });
-  // "Publicado" column — a single global switch. Off merges its cards into
-  // Concluído as a visual-only projection. See kanbanShared.ts.
-  const [publicadoOn, setPublicadoOn] = useState(false);
-
   useEffect(() => {
     fetch("/api/admin/settings/plano-visibility")
       .then((res) => (res.ok ? res.json() : null))
@@ -143,10 +139,6 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     fetch("/api/admin/settings/flow-flags-summary")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data) setFlowSummary(data); })
-      .catch(() => {});
-    fetch("/api/admin/settings/tabs-visibility")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => { if (data) setPublicadoOn(Boolean(data.publicadoColumnVisible)); })
       .catch(() => {});
   }, []);
 
@@ -219,9 +211,11 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     }));
   }, [taskScreenTasks, activeFilters, q, sort]);
 
+  // Igualdade de status, sem exceção. A projeção visual que existia aqui era
+  // do "Publicado" dentro de Concluído, e some com o estágio.
   const tasksInStatusColumn = useCallback(
-    (status: TaskStatus) => tasksForKanbanColumn(filtered, status, publicadoOn),
-    [filtered, publicadoOn],
+    (status: TaskStatus) => filtered.filter((task) => task.status === status),
+    [filtered],
   );
 
   // Responsável mode: one column per distinct assignee among the filtered
@@ -360,8 +354,8 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   useEffect(() => { void loadReviewers(reviewerSlug); void loadFlowFlags(reviewerSlug); }, [reviewerSlug, loadReviewers, loadFlowFlags]);
 
   const visibleColumns = useMemo(
-    () => visibleColumnsFor(tasks, flowSummary.anyRevisaoAdmin, flowSummary.anyAprovacaoAdmin, publicadoOn),
-    [tasks, flowSummary, publicadoOn],
+    () => visibleColumnsFor(tasks, flowSummary.anyRevisaoAdmin, flowSummary.anyAprovacaoAdmin),
+    [tasks, flowSummary],
   );
 
   const gridColCount = boardMode === "status" ? visibleColumns.length : responsavelColumns.length;
@@ -419,11 +413,11 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           const reordered = [...columnTasks.slice(0, at), dragged, ...columnTasks.slice(at)];
           return reordered.map((t, i) => ({
             ...t,
-            status: statusAfterKanbanDrop(t.status, status, publicadoOn),
+            status,
             position: i * 10,
           }));
         })()
-      : [{ ...dragged, status: statusAfterKanbanDrop(dragged.status, status, publicadoOn) }];
+      : [{ ...dragged, status }];
 
     const changed = withPositions.filter((t) => {
       const prior = tasks.find((r) => r.id === t.id);
@@ -449,7 +443,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
       setTasks(before);
       setError("Não foi possível mover o card — verifique sua conexão.");
     }
-  }, [dragId, tasks, tasksInStatusColumn, publicadoOn, sort.key]);
+  }, [dragId, tasks, tasksInStatusColumn, sort.key]);
 
   // Responsável mode: dropping a card onto a person's column just reassigns
   // it — no reordering/position touch, so it can't disturb the status-based
@@ -590,9 +584,6 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
             {showFormato ? <span className="kb-card-pill">{formato}</span> : null}
             {showPlataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
           </div>
-        ) : null}
-        {!publicadoOn && t.status === "concluido" ? (
-          <div className="kb-card-meta"><span className="kb-card-pill kb-published-mark">Publicado</span></div>
         ) : null}
         <div className="kb-card-dates">
           {overdue ? <span className="kb-state overdue">Atrasado</span> : null}

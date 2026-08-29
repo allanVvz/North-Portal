@@ -116,7 +116,9 @@ test.describe("progresso do modal de tarefa", () => {
     await expect(modal.locator(".tm-head-progress b")).toHaveText("0%");
 
     await modal.getByRole("button", { name: "Em produção", exact: true }).click();
-    await expect(modal.locator(".tm-head-progress b")).toHaveText("60%");
+    // 35%, não 60%: "Em produção" vale o mesmo para todo tipo agora. Os 60 eram
+    // do workflow `simples`, que só existia para o operacional.
+    await expect(modal.locator(".tm-head-progress b")).toHaveText("35%");
     await modal.getByRole("button", { name: "Concluído", exact: true }).click();
     await expect(modal.locator(".tm-head-progress b")).toHaveText("100%");
     await expect(modal.getByRole("button", { name: "Salvar card" })).toHaveCount(0);

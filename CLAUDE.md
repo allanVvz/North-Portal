@@ -15,6 +15,8 @@ npx playwright test      # e2e (opt-in, creates real data — see docs/REPRODUCA
 
 **Stop `next dev` before running `npm run build` or `npx tsc --noEmit`.** Running a build while the dev server is still up corrupts `.next` (manifests briefly), producing `/_not-found` / Internal Server Error that looks like an app bug but isn't.
 
+**Playwright's `webServer` survives a killed test run.** `reuseExistingServer: true` means an interrupted `npx playwright test` leaves its `next dev` listening on 3000 — so the next `npm run verify` builds *while a dev server is up*, which is the corruption above. It then shows up as e2e timeouts, not as build errors: a cold `/login` compile took 16.8s once, over the 15s `waitForURL` in some specs. If e2e starts failing on `waitForURL`/`toBeVisible` timeouts with no server error in the log, check `netstat -ano | grep :3000` before suspecting the code — then kill it, `rm -rf .next`, rebuild, and warm the routes with `curl` before re-running.
+
 ## Deploy
 
 Deploy mechanics (how `main` reaches production, when a manual `vercel deploy` is still useful, the `.vercel/`-in-worktree gotcha) live in `DEPLOY.md` — read that before touching Vercel. Short version: push to `main`, Vercel's GitHub integration builds and publishes on its own; don't also run `vercel deploy --prod`.

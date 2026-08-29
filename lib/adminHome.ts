@@ -48,7 +48,7 @@ export function deriveClientsNeedingAttention(rows: OverviewLike[]): ClientAtten
 
 export type PlanLike = { status: TaskStatus; progress: number };
 
-const TERMINAL: TaskStatus[] = ["concluido", "aprovado"];
+const TERMINAL: TaskStatus[] = ["aprovado"];
 
 export function plansInProgress<T extends PlanLike>(plans: T[]): T[] {
   return plans.filter((p) => !TERMINAL.includes(p.status) && p.status !== "parada");

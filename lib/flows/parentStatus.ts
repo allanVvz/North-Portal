@@ -22,7 +22,7 @@ export const DELIVERY_INITIAL_STATUS: TaskStatus = "em_producao";
 export function deliveryStatusOnFinish(delivery: Pick<TaskRecord, "reviewer_id" | "approver_id">): TaskStatus {
   if (delivery.reviewer_id) return "revisao";
   if (delivery.approver_id) return "aprovacao";
-  return "concluido";
+  return "aprovado";
 }
 
 /** A entrega só encerra quando todas as etapas do molde existem E terminaram.

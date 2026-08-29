@@ -32,18 +32,18 @@ export type AttrDef = {
 // header/identifier), so a toggle for it would do nothing.
 export const ATTR_DEFS: AttrDef[] = [
   { key: "kind", label: "Tipo", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
-  { key: "formato", label: "Formato", scope: "Criativo", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
-  { key: "plataforma", label: "Plataforma", scope: "Criativo · Agendamento", kinds: ["criativo", "agendamento"], kind: "Seleção", defaultOn: false },
+  { key: "formato", label: "Formato", scope: "Entrega", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
+  { key: "plataforma", label: "Plataforma", scope: "Entrega", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
   { key: "assignee", label: "Responsável", scope: "Todos", kinds: "base", kind: "Pessoa" },
   { key: "reviewer", label: "Revisor (mesmo com fluxo desligado)", scope: "Todos", kinds: "base", kind: "Pessoa", defaultOn: false },
   { key: "approver", label: "Aprovador (mesmo com fluxo desligado)", scope: "Todos", kinds: "base", kind: "Pessoa", defaultOn: false },
-  // Criativo entrou aqui junto com os fluxos em cascata: a etapa de uma peça
-  // (Roteiro/Captação/Edição/Publicação) é kind=criativo + subtype, então sem
-  // isto o campo que a identifica não apareceria em lugar nenhum.
-  { key: "subtype", label: "Subtipo", scope: "Criativo · Agendamento · Planejamento", kinds: ["criativo", "agendamento", "planejamento"], kind: "Seleção", defaultOn: false },
+  // Só Entrega: a etapa de uma peça (Roteiro/Captação/Edição/Publicação) é
+  // kind=criativo + subtype, e sem isto o campo que a identifica não
+  // apareceria em lugar nenhum. Tarefa não tem subtipo.
+  { key: "subtype", label: "Subtipo", scope: "Entrega", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
   // Ligado por padrão, ao contrário dos outros: numa cascata a etapa ("2/4 ·
   // Captação") é a identidade do card, não um enfeite opcional.
-  { key: "flow_step", label: "Etapa do fluxo", scope: "Criativo", kinds: ["criativo"], kind: "Seleção" },
+  { key: "flow_step", label: "Etapa do fluxo", scope: "Entrega", kinds: ["criativo"], kind: "Seleção" },
   { key: "status", label: "Status", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "priority", label: "Prioridade", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "plan_link", label: "Plano de Ação", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },

@@ -56,14 +56,16 @@ test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend r
     }
   });
 
-  test("sem agendamento cai no fallback estático; com um card real, mostra o evento real; card criado ao vivo aparece sem F5; print da tela", async ({ page }) => {
+  test("sem evento com hora marcada cai no fallback estático; com um card real, mostra o evento real; card criado ao vivo aparece sem F5; print da tela", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page);
 
     await page.goto("/admin/novo");
-    await page.getByPlaceholder("Ex.: Karpinski Detalhamento").fill(NAME);
+    // Seletores defasados desde o cadastro v2 (commit 19fe7c3): o placeholder do
+    // nome mudou e dois campos passaram a usar "cliente@empresa.com".
+    await page.getByPlaceholder("Baita Conveniência").fill(NAME);
     await page.getByRole("textbox", { name: "Slug (URL do portal)" }).fill(SLUG);
-    await page.getByPlaceholder("cliente@empresa.com").fill(`${SLUG}@e2e-test.com`);
+    await page.getByPlaceholder("cliente@empresa.com").first().fill(`${SLUG}@e2e-test.com`);
     await page.getByRole("button", { name: "Criar cliente" }).click();
     await expect(page.getByText("Login de acesso do cliente")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "Ir para o cliente" }).click();
@@ -99,7 +101,10 @@ test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend r
       .from("tasks")
       .insert({
         client_id: clientId,
-        kind: "agendamento",
+        // O que faz uma entrada de agenda é ter HORA MARCADA e ser visível ao
+        // cliente — não uma etiqueta de tipo. O tipo `agendamento` deixou de
+        // existir, e este spec é o teste de aceitação do critério novo.
+        kind: "operacional",
         title: eventTitle,
         status: "backlog",
         client_visible: true,
@@ -109,7 +114,7 @@ test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend r
       })
       .select("id")
       .single();
-    if (taskErr || !task) throw new Error(`seed agendamento failed: ${taskErr?.message}`);
+    if (taskErr || !task) throw new Error(`seed do evento falhou: ${taskErr?.message}`);
 
     await page.reload();
     if (!agendaEnabled) {
@@ -135,8 +140,7 @@ test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend r
     const futureLive = new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString().slice(0, 10);
     await sb.from("tasks").insert({
       client_id: clientId,
-      kind: "agendamento",
-      subtype: "gravacao",
+      kind: "operacional",
       title: liveTitle,
       status: "backlog",
       client_visible: true,

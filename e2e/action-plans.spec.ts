@@ -53,9 +53,9 @@ async function seedPlan(sb: SupabaseClient, clientId: string, title: string, mem
 test.describe("Planos de Ação — dois clientes (e2e contra o backend real)", () => {
   let sb: SupabaseClient;
   let seededIds: string[] = [];
-  // Karpinski: criativo em_producao (30%) + criativo concluido (100%) => 65%
+  // Karpinski: criativo em_producao (35%) + criativo aprovado (100%) => 68%
   const planKarp = `[e2e ${RUN}] Plano Karpinski`;
-  // Baita: agendamento aprovacao (80%) + operacional concluido (100%) => 90%
+  // Baita: operacional aprovacao (80%) + operacional aprovado (100%) => 90%
   const planBaita = `[e2e ${RUN}] Plano Baita`;
 
   test.beforeAll(async () => {
@@ -64,11 +64,11 @@ test.describe("Planos de Ação — dois clientes (e2e contra o backend real)", 
     const baitaId = await clientIdBySlug(sb, "baita-conveniencia");
     const a = await seedPlan(sb, karpId, planKarp, [
       { kind: "criativo", status: "em_producao" },
-      { kind: "criativo", status: "concluido" },
+      { kind: "criativo", status: "aprovado" },
     ]);
     const b = await seedPlan(sb, baitaId, planBaita, [
-      { kind: "agendamento", status: "aprovacao" },
-      { kind: "operacional", status: "concluido" },
+      { kind: "operacional", status: "aprovacao" },
+      { kind: "operacional", status: "aprovado" },
     ]);
     seededIds = [...a, ...b];
   });
@@ -89,10 +89,10 @@ test.describe("Planos de Ação — dois clientes (e2e contra o backend real)", 
     // test keeps asserting the accordion structure even if the default moves.
     await page.getByRole("button", { name: "Lista", exact: true }).click();
 
-    // Karpinski plan: header shows 65%, expanding lists its 2 activities.
+    // Karpinski plan: header shows 68%, expanding lists its 2 activities.
     const karpItem = page.locator(".plan-acc-item", { hasText: planKarp });
     await expect(karpItem).toBeVisible();
-    await expect(karpItem.locator(".plan-acc-progress b")).toHaveText("65%");
+    await expect(karpItem.locator(".plan-acc-progress b")).toHaveText("68%");
     await karpItem.getByRole("button", { name: "Expandir" }).click();
     await expect(karpItem.locator(".plan-acc-list li")).toHaveCount(2);
 

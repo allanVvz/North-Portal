@@ -5,7 +5,6 @@ import {
   canDecideApproval,
   clientApprovalActionSchema,
   flowFlagsCascadeEffects,
-  introducesInvalidPublishedState,
   requiresManagerApproval,
   type ClientFlowFlags,
 } from "./validation";
@@ -19,30 +18,23 @@ const flags = (overrides: Partial<ClientFlowFlags> = {}): ClientFlowFlags => ({
 });
 
 describe("TASK_STATUSES", () => {
-  it("keeps the Kanban column order, with the new Concluído stage between Aprovação and Publicado, and parada last", () => {
-    expect(TASK_STATUSES).toEqual(["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "concluido", "parada"]);
+  it("termina em Concluído, sem Publicado, e mantém parada por último", () => {
+    // `parada` por último de propósito: comparação por índice em qualquer lugar
+    // desta base nunca pode lê-la como "mais adiante".
+    expect(TASK_STATUSES).toEqual(["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "parada"]);
+  });
+
+  it("não tem mais o estágio Publicado", () => {
+    // Publicar deixou de ser nível de tarefa nenhuma: é a última ETAPA de uma
+    // Entrega. O valor `concluido` segue existindo no enum do Postgres, órfão,
+    // porque enum não perde valor em lugar — mas não é vocabulário do app.
+    expect(TASK_STATUSES as readonly string[]).not.toContain("concluido");
   });
 });
 
-describe("introducesInvalidPublishedState", () => {
-  it("allows saving an unrelated field on a historical non-Criativo already in Publicado", () => {
-    expect(introducesInvalidPublishedState(
-      { status: "concluido", kind: "agendamento" },
-      { status: "concluido", kind: "agendamento" },
-    )).toBe(false);
-  });
-
-  it("still blocks entering Publicado as non-Criativo", () => {
-    expect(introducesInvalidPublishedState(
-      { status: "aprovado", kind: "agendamento" },
-      { status: "concluido" },
-    )).toBe(true);
-    expect(introducesInvalidPublishedState(
-      { status: "concluido", kind: "criativo" },
-      { kind: "agendamento" },
-    )).toBe(true);
-  });
-});
+// O describe de `introducesInvalidPublishedState` morava aqui. A regra que ele
+// cobria — só Criativo pode ir para Publicado — existia porque publicar era um
+// estágio que um único tipo alcançava. Sem o estágio, não há o que bloquear.
 
 describe("requiresManagerApproval", () => {
   it("gates moving a card INTO aprovado (approving)", () => {
@@ -60,7 +52,7 @@ describe("requiresManagerApproval", () => {
     expect(requiresManagerApproval("aprovacao", "em_producao")).toBe(false);
     expect(requiresManagerApproval("aprovacao", "revisao")).toBe(false);
     expect(requiresManagerApproval("aprovacao", "backlog")).toBe(false);
-    expect(requiresManagerApproval("aprovacao", "concluido")).toBe(false);
+    expect(requiresManagerApproval("aprovacao", "parada")).toBe(false);
   });
 
   it("does not gate moves that never touch aprovado at all", () => {

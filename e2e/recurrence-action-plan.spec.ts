@@ -122,7 +122,9 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     await page.getByRole("button", { name: "Lista", exact: true }).click();
     const planItem = page.locator(".plan-acc-item", { hasText: planTitle });
     await expect(planItem).toBeVisible({ timeout: 20_000 });
-    await expect(planItem.locator(".plan-acc-progress b")).toHaveText("60%", { timeout: 20_000 });
+    // 35%, não 60%: "Em produção" vale o mesmo para todo tipo desde a
+    // unificação dos workflows — os 60 eram do `simples`, só do operacional.
+    await expect(planItem.locator(".plan-acc-progress b")).toHaveText("35%", { timeout: 20_000 });
     await planItem.getByRole("button", { name: "Expandir" }).click();
     await expect(planItem.locator(".plan-acc-list li")).toHaveCount(1, { timeout: 20_000 });
     await expect(planItem).toContainText(taskTitle);

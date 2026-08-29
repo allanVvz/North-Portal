@@ -78,7 +78,6 @@ describe("isOverdue", () => {
 
   it("não cobra prazo de card já entregue", () => {
     expect(isOverdue("2026-08-01", today, "aprovado")).toBe(false);
-    expect(isOverdue("2026-08-01", today, "concluido")).toBe(false);
   });
 
   it("continua cobrando enquanto o card está em revisão ou aprovação", () => {

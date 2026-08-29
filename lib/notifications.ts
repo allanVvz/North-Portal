@@ -62,7 +62,12 @@ const STATUS_LABEL: Record<string, string> = {
   em_producao: "Em produção",
   revisao: "Revisão",
   aprovacao: "Aprovação",
-  aprovado: "Aprovado",
+  // `aprovado` é o estágio final agora, e o quadro o chama de "Concluído".
+  // Dizer "mudou para Aprovado" numa notificação enquanto a coluna diz
+  // "Concluído" é a mesma coisa com dois nomes.
+  aprovado: "Concluído",
+  // Legado: `concluido` saiu do vocabulário, mas uma notificação antiga ainda
+  // pode carregar a string. Melhor resolver do que mostrar a chave crua.
   concluido: "Concluído",
   parada: "Parada",
 };
@@ -117,7 +122,10 @@ export async function upsertDueSoonNotifications(profileId: string, today: Date 
     .from("tasks")
     .select("id,title,due_date,status")
     .in("id", taskIds)
-    .neq("status", "concluido")
+    // Card entregue não recebe cobrança de prazo. Era `concluido` — o estágio
+    // que deixou de existir —, o que significava que um card já concluído
+    // continuava recebendo "prazo próximo".
+    .neq("status", "aprovado")
     .not("due_date", "is", null);
   if (tasksError) fail("due-soon lookup", tasksError);
 

@@ -5,7 +5,7 @@ import { kindLabel, kindTone } from "@/lib/taskCatalog";
 export type { TaskComment };
 
 // "Parada" vem PRIMEIRO, à esquerda de Entrada. Ela não é a etapa seguinte a
-// Publicado — é onde um card trava quando uma automação falha, antes de qualquer
+// Concluído — é onde um card trava quando uma automação falha, antes de qualquer
 // progresso. Colocada no fim, a coluna sugeria um estágio final do fluxo, que é
 // o oposto do que significa.
 export const COLUMNS: { status: TaskStatus; label: string }[] = [
@@ -15,7 +15,6 @@ export const COLUMNS: { status: TaskStatus; label: string }[] = [
   { status: "revisao", label: "Revisão" },
   { status: "aprovacao", label: "Aprovação" },
   { status: "aprovado", label: "Concluído" },
-  { status: "concluido", label: "Publicado" },
 ];
 export const STATUS_ORDER = COLUMNS.map((c) => c.status);
 
@@ -46,14 +45,10 @@ export const STATUS_LABEL: Record<TaskStatus, string> = Object.fromEntries(
 // `tasks.some(...)` half is a pure safety net — a column that somehow still
 // has a card sitting in it (stale flag, migration gap, whatever) must never
 // disappear out from under that card.
-// "Publicado" (concluido) is gated by one global switch. Hiding its dedicated
-// column keeps published cards visible as a visual projection in Concluído;
-// their persisted status remains `concluido`.
 export function visibleColumnsFor(
   tasks: { status: TaskStatus }[],
   anyClientRevisaoAdmin: boolean,
   anyClientAprovacaoAdmin: boolean,
-  publicadoColumnVisible: boolean,
 ): typeof COLUMNS {
   const hasRevisao = anyClientRevisaoAdmin || tasks.some((t) => t.status === "revisao");
   const hasAprovacao = anyClientAprovacaoAdmin || tasks.some((t) => t.status === "aprovacao");
@@ -65,33 +60,15 @@ export function visibleColumnsFor(
     (c) =>
       (c.status !== "revisao" || hasRevisao) &&
       (c.status !== "aprovacao" || hasAprovacao) &&
-      (c.status !== "concluido" || publicadoColumnVisible) &&
       (c.status !== "parada" || hasParada),
   );
 }
 
-/** Tasks rendered in a status column. With Publicado hidden, Concluído is a
- * visual union of `aprovado` and `concluido` without mutating either status. */
-export function tasksForKanbanColumn<T extends { status: TaskStatus }>(
-  tasks: readonly T[],
-  columnStatus: TaskStatus,
-  publicadoColumnVisible: boolean,
-): T[] {
-  if (columnStatus === "aprovado" && !publicadoColumnVisible) {
-    return tasks.filter((task) => task.status === "aprovado" || task.status === "concluido");
-  }
-  return tasks.filter((task) => task.status === columnStatus);
-}
-
-/** Published cards reordered inside the merged column remain published. */
-export function statusAfterKanbanDrop(
-  currentStatus: TaskStatus,
-  columnStatus: TaskStatus,
-  publicadoColumnVisible: boolean,
-): TaskStatus {
-  if (!publicadoColumnVisible && columnStatus === "aprovado" && currentStatus === "concluido") return "concluido";
-  return columnStatus;
-}
+// `tasksForKanbanColumn` e `statusAfterKanbanDrop` moravam aqui e foram
+// removidas com a etapa "Publicado". As duas existiam só para projetar cards
+// publicados dentro da coluna Concluído sem mexer no status deles — um
+// problema que some junto com o estágio. Agora a coluna filtra por igualdade
+// de status e o drop grava o status da coluna, sem exceção nenhuma.
 
 // Kind vocabulary/labels/icons/tones now live in the in-code catalog
 // (lib/taskCatalog.ts). Re-exported here for the few call sites still importing
@@ -133,7 +110,7 @@ export function commentsOf(task: TaskRecord): TaskComment[] {
 // A reviewer is never a client before Aprovação, and never an admin once the
 // card is client-facing — this decides which reviewer list applies.
 export function reviewerStageFor(status: TaskStatus): "admin" | "client" {
-  return status === "aprovacao" || status === "aprovado" || status === "concluido" ? "client" : "admin";
+  return status === "aprovacao" || status === "aprovado" ? "client" : "admin";
 }
 
 // Flattened, lowercased haystack for the Kanban search bar — title, tipo,

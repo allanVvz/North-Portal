@@ -14,7 +14,8 @@ import { taskCoverCandidates } from "@/lib/taskCover";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatCommentTime } from "@/lib/comments";
-import { TASK_KIND_KEYS, kindDef, kindLabel } from "@/lib/taskCatalog";
+import { kindDef, kindLabel } from "@/lib/taskCatalog";
+import type { TaskTypeDef } from "@/lib/taskTypes";
 import { parentIdsOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
@@ -48,7 +49,21 @@ export default function TaskDetailPanel({
   const [description, setDescription] = useState(task.description ?? "");
   const { name: currentUserName } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
+  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([]);
   useEffect(() => setDescription(task.description ?? ""), [task.id, task.description]);
+  useEffect(() => {
+    fetch("/api/admin/task-types")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (Array.isArray(data?.types)) setTaskTypes(data.types as TaskTypeDef[]); })
+      .catch(() => {});
+  }, []);
+  // Só o que se pode criar — mais o tipo atual, para um card provisionado
+  // (checkpoint) não perder a própria identidade no select. Enquanto a busca
+  // não volta, o tipo do card é a única opção: melhor um select curto do que um
+  // que troca o tipo sozinho.
+  const typeOptions = taskTypes.length
+    ? taskTypes.filter((t) => t.creatable || t.key === task.kind).map((t) => ({ key: t.key, label: t.label }))
+    : [{ key: task.kind, label: kindLabel(task.kind) }];
 
   const payload = (task.payload ?? {}) as Record<string, unknown>;
   const isPlan = kindDef(task.kind).isPlan;
@@ -188,10 +203,14 @@ export default function TaskDetailPanel({
           <span>Cliente</span>
           <span className="tdp-attr-static">{clientName}</span>
         </div>
+        {/* O MESMO vocabulário do card aberto. Este select lia
+            `TASK_KIND_KEYS` direto do catálogo em código, sem passar por
+            `creatable` nem por `active` — um segundo editor de tipo que
+            oferecia opções que o modal já tinha aposentado. */}
         <div className="tdp-attr">
           <span>Tipo</span>
           <select value={task.kind} disabled={busy} onChange={(e) => patch({ kind: e.target.value })}>
-            {TASK_KIND_KEYS.map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
+            {typeOptions.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
         </div>
         {shouldRenderClientVisibilityToggle(planoVisibilityOn) ? (

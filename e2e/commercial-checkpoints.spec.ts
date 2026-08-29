@@ -63,9 +63,14 @@ test.describe("Checkpoints comerciais (e2e contra o backend real)", () => {
 
     // 1. Create the client through the real UI/API flow.
     await page.goto("/admin/novo");
-    await page.getByPlaceholder("Ex.: Karpinski Detalhamento").fill(NAME);
+    // O placeholder do nome mudou no cadastro v2 (commit 19fe7c3) e este spec
+    // ficou para trás — falhava desde então, com timeout de `fill`, que parece
+    // lentidão e não seletor morto.
+    await page.getByPlaceholder("Baita Conveniência").fill(NAME);
     await page.getByRole("textbox", { name: "Slug (URL do portal)" }).fill(SLUG);
-    await page.getByPlaceholder("cliente@empresa.com").fill(`${SLUG}@e2e-test.com`);
+    // Dois campos usam esse placeholder desde o cadastro v2 (o do contato e o do
+    // login); o primeiro é o do login de acesso, que é o que este spec quer.
+    await page.getByPlaceholder("cliente@empresa.com").first().fill(`${SLUG}@e2e-test.com`);
     await page.getByRole("button", { name: "Criar cliente" }).click();
     await expect(page.getByText("Login de acesso do cliente")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "Ir para o cliente" }).click();
@@ -94,18 +99,18 @@ test.describe("Checkpoints comerciais (e2e contra o backend real)", () => {
     await expect(row).toBeVisible();
     await expect(row.locator(".ob-progress span")).toHaveText("0%");
 
-    // 4. Move half the checkpoints to concluido -> onboarding % updates.
+    // 4. Move half the checkpoints to Concluído -> onboarding % updates.
     const ids = (checkpoints ?? []).map((c) => c.id as string);
     const half = ids.slice(0, Math.ceil(ids.length / 2));
-    await sb.from("tasks").update({ status: "concluido" }).in("id", half);
+    await sb.from("tasks").update({ status: "aprovado" }).in("id", half);
 
     await page.reload();
     const rowAfter = page.locator("tr", { hasText: NAME });
     await expect(rowAfter.locator(".ob-progress span")).not.toHaveText("0%");
 
-    // 5. Mark all concluido -> 100%, and the real checkpoints render on the
+    // 5. Mark all Concluído -> 100%, and the real checkpoints render on the
     //    client's own Central Comercial page (not the static demo array).
-    await sb.from("tasks").update({ status: "concluido" }).in("id", ids);
+    await sb.from("tasks").update({ status: "aprovado" }).in("id", ids);
     await page.reload();
     await expect(page.locator("tr", { hasText: NAME }).locator(".ob-progress span")).toHaveText("100%");
 

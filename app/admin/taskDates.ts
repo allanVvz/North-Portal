@@ -51,9 +51,9 @@ export function formatPeriod(start: string | null, end: string | null): string |
   return `${formatShortDate(start)} → ${formatShortDate(end)}`;
 }
 
-// Um card entregue não fica atrasado retroativamente: depois de Concluído /
-// Publicado o prazo deixou de ser uma cobrança e a tag vermelha vira ruído.
-const SETTLED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["aprovado", "concluido"]);
+// Um card entregue não fica atrasado retroativamente: depois de Concluído o
+// prazo deixou de ser uma cobrança e a tag vermelha vira ruído.
+const SETTLED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["aprovado"]);
 
 export function isOverdue(dueDate: string | null, today: string, status: TaskStatus): boolean {
   if (!dueDate || SETTLED.has(status)) return false;

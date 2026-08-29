@@ -52,7 +52,6 @@ describe("plansInProgress / averageProgress", () => {
   it("excludes finished and halted plans", () => {
     const plans = [
       { status: "em_producao" as const, progress: 40 },
-      { status: "concluido" as const, progress: 100 },
       { status: "aprovado" as const, progress: 100 },
       { status: "parada" as const, progress: 10 },
     ];
@@ -61,7 +60,7 @@ describe("plansInProgress / averageProgress", () => {
   });
 
   it("returns 0 rather than NaN when nothing is running", () => {
-    expect(averageProgress([{ status: "concluido", progress: 100 }])).toBe(0);
+    expect(averageProgress([{ status: "aprovado", progress: 100 }])).toBe(0);
     expect(averageProgress([])).toBe(0);
   });
 
@@ -82,7 +81,7 @@ describe("isOverdue", () => {
   });
 
   it("is false for finished work even when the date passed", () => {
-    expect(isOverdue({ id: "1", title: "x", due_date: "2026-08-01", status: "concluido" }, today)).toBe(false);
+    expect(isOverdue({ id: "1", title: "x", due_date: "2026-08-01", status: "aprovado" }, today)).toBe(false);
   });
 
   it("is false on the due date itself", () => {
@@ -102,7 +101,7 @@ describe("weekAhead", () => {
     { id: "soon", title: "soon", due_date: "2026-08-28", status: "backlog" as const },
     { id: "edge", title: "edge", due_date: "2026-09-01", status: "backlog" as const },
     { id: "far", title: "far", due_date: "2026-09-05", status: "backlog" as const },
-    { id: "done", title: "done", due_date: "2026-08-26", status: "concluido" as const },
+    { id: "done", title: "done", due_date: "2026-08-26", status: "aprovado" as const },
   ];
 
   it("keeps today through the 7th day, sorted, excluding finished work", () => {

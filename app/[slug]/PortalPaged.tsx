@@ -997,7 +997,7 @@ function homeFeed(props: { ctx: PageCtx }): { icon: string; title: string; text:
   const { content, payload } = props.ctx;
   const feed: { icon: string; title: string; text: string }[] = [];
   for (const t of (payload?.resolvedApprovals ?? []).slice(0, 2)) {
-    feed.push({ icon: "check", title: t.status === "concluido" ? "Publicado" : "Aprovado", text: `${t.title} · ${fmtWhen(t.updated_at)}` });
+    feed.push({ icon: "check", title: "Concluído", text: `${t.title} · ${fmtWhen(t.updated_at)}` });
   }
   const nextEvent = content.agenda.next;
   if (nextEvent.title) feed.push({ icon: "clock", title: "Próxima reunião", text: `${nextEvent.title} · ${nextEvent.when}` });
@@ -1449,7 +1449,7 @@ function EntregasPage(props: {
                   {t.description ? <div className="np-approval-note"><p>{t.description}</p></div> : null}
                   {materialLink ? (
                     <a className="np-link" href={materialLink} target="_blank" rel="noopener noreferrer">
-                      {t.kind === "criativo" ? "Abrir criativo" : "Ver material"} <Ico name="arrow" />
+                      {t.kind === "criativo" ? "Abrir entrega" : "Ver material"} <Ico name="arrow" />
                     </a>
                   ) : null}
                   {comments.length > 0 ? (
@@ -1492,9 +1492,7 @@ function EntregasPage(props: {
                 <em>{kindLabel(t.kind)}{t.assignee ? ` · ${t.assignee}` : ""}</em>
               </div>
               <span className="np-muted-sm">{fmtWhen(t.updated_at)}</span>
-              <span className={`np-pill ${t.status === "concluido" ? "green" : "blue"}`}>
-                {t.status === "concluido" ? "Publicado" : "Concluído"}
-              </span>
+              <span className="np-pill green">Concluído</span>
             </li>
           ))}
           {resolved.length === 0 ? <li className="np-doc-empty">Nenhuma entrega concluída ainda.</li> : null}

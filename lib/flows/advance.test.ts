@@ -164,7 +164,7 @@ describe("advanceFlow", () => {
     const outcome = await advanceFlow(admin, doneStep("c3", "publicacao"));
     expect(outcome.finished).toEqual(["entrega"]);
     // Sem revisor nem aprovador, encerra direto.
-    expect(state.tasks.find((t) => t.id === "entrega")?.status).toBe("concluido");
+    expect(state.tasks.find((t) => t.id === "entrega")?.status).toBe("aprovado");
   });
 });
 

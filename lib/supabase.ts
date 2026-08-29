@@ -119,7 +119,6 @@ const STATUS_KANBAN: Record<TaskStatus, string> = {
   revisao: "Kanban · Revisão",
   aprovacao: "Kanban · Aprovação",
   aprovado: "Kanban · Concluído",
-  concluido: "Kanban · Publicado",
   parada: "Kanban · Parada",
 };
 
@@ -174,13 +173,17 @@ function taskDate(t: TaskRecord): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-// Real Agenda, built from client-visible `agendamento` cards (meetings, shoots,
-// publications) plus any other client-visible/dated task for the calendar
-// marks. Returns null when the client has no dated agendamento card yet, so
-// the caller can fall back to the static demo content (same pattern as Plano).
+// Agenda real: card VISÍVEL AO CLIENTE com hora marcada (`scheduled_start_at`).
+//
+// O filtro era `kind === "agendamento"`, tipo que deixou de existir. O critério
+// que sobrou é o que sempre definiu de fato uma entrada de agenda — ter hora
+// marcada, não uma etiqueta —, e é mais honesto: uma reunião é uma reunião
+// independentemente do tipo do card. Não muda o que os clientes veem hoje:
+// nenhum card `agendamento` era visível ao cliente, então esta função já
+// devolvia null e o portal já caía no conteúdo estático (mesmo padrão do Plano).
 function agendaFromTasks(rows: TaskRecord[], now: Date = new Date()): PortalContent["agenda"] | null {
   const events = rows
-    .filter((t) => t.kind === "agendamento" && t.client_visible)
+    .filter((t) => t.client_visible && t.scheduled_start_at !== null)
     .map((t) => ({ t, date: taskDate(t) }))
     .filter((x): x is { t: TaskRecord; date: Date } => x.date !== null)
     .sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -294,7 +297,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     supabase.from("client_results").select("insights,top_metrics,report_url,feedback_url").eq("client_id", client.id).limit(1),
     supabase.from("client_content").select("data").eq("client_id", client.id).limit(1),
     supabase.from("client_prefs").select("theme,avatar_style,display_name,username,manual_seen").eq("client_id", client.id).limit(1),
-    // Any card in the approval pipeline (aprovacao/aprovado/concluido) is
+    // Any card in the approval pipeline (aprovacao/aprovado) is
     // client-facing regardless of `client_visible` — that flag only gates
     // the separate "Plano de Ação" feature for earlier Kanban stages.
     // "parada" (automation halted, needs admin attention) is excluded
@@ -304,7 +307,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
       .from("tasks")
       .select(TASK_COLUMNS_WITH_ASSIGNEES)
       .eq("client_id", client.id)
-      .or("client_visible.eq.true,status.in.(aprovacao,aprovado,concluido)")
+      .or("client_visible.eq.true,status.in.(aprovacao,aprovado)")
       .neq("status", "parada")
       .order("position"),
     supabase.from("documents").select(DOC_COLUMNS).eq("client_id", client.id).order("doc_date", { ascending: false, nullsFirst: false }),
@@ -377,7 +380,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
       .filter((t) => t.status === "aprovacao")
       .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
     resolvedApprovals: taskRows
-      .filter((t) => t.status === "aprovado" || t.status === "concluido")
+      .filter((t) => t.status === "aprovado")
       .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
     checkpoints: checkpointRows,
     flowFlags: { revisaoCliente: flowFlags.revisaoCliente, aprovacaoCliente: flowFlags.aprovacaoCliente },
@@ -583,7 +586,6 @@ export async function getAdminTabsVisibility(): Promise<AdminTabsVisibility> {
   return {
     revisoesTabVisible: value?.revisoesTabVisible ?? false,
     aprovacoesTabVisible: value?.aprovacoesTabVisible ?? false,
-    publicadoColumnVisible: value?.publicadoColumnVisible ?? false,
   };
 }
 
@@ -726,7 +728,6 @@ export async function listAdminHomeSummary(): Promise<AdminHomeSummary> {
       .from("tasks")
       .select("id,title,due_date,status,kind,recurrence_cadence,payload,clients(name,slug)")
       .not("due_date", "is", null)
-      .neq("status", "concluido")
       .neq("status", "aprovado"),
   ]);
   if (dated.error) fail(dated.error);
@@ -934,8 +935,8 @@ export async function provisionKickoffTask(clientId: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("tasks").insert({
     client_id: clientId,
-    kind: "planejamento",
-    subtype: "briefing",
+    kind: "operacional",
+    subtype: null,
     title: "Kickoff — revisar onboarding do cliente",
     description: "Conferir o briefing preenchido, os acessos concedidos e as pastas do Drive antes da reunião de kickoff.",
     status: "backlog" as TaskStatus,
@@ -2033,7 +2034,7 @@ export async function listApprovalQueue(): Promise<ApprovalRecord[]> {
 }
 
 // ---- Performance / métricas (admin) -----------------------------------------
-// A published card (status "concluido"/Publicado) can have real-world results
+// Uma Entrega concluída pode ter resultado no mundo real
 // registered against it — cross-client, one row per task in `task_metrics`.
 
 export type PublishedTask = TaskRecord & {
@@ -2045,12 +2046,30 @@ export type PublishedTask = TaskRecord & {
   metricsUpdatedAt: string | null;
 };
 
+// O que o Performance considera "no ar".
+//
+// Era `status = 'concluido'`, o estágio "Publicado" — que deixou de existir.
+// O critério passa a ser a ENTREGA concluída: `kind` é o único tipo com
+// `performance: true` que vai ao ar, e uma Entrega concluída é, por definição,
+// uma peça publicada, já que Publicação é a última etapa da corrente.
+//
+// A alternativa considerada era filtrar por `payload.publicado_em`, a marca
+// que a migração deixa nos 45 cards históricos. Ela foi descartada porque
+// congelaria o módulo nesses 45 para sempre: nenhum card novo passaria a ter a
+// marca, e o Performance pararia de crescer.
 export async function listPublishedTasks(): Promise<PublishedTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
     .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug),task_metrics(metrics,source,updated_at)`)
-    .eq("status", "concluido")
+    .eq("status", "aprovado")
+    .eq("kind", "criativo")
+    // `subtype is null` separa a ENTREGA das ETAPAS dela. Uma etapa concluída
+    // (Roteiro, Captação, Edição) é `criativo` + `aprovado` igual à entrega, e
+    // sem este filtro cada peça no ar traria quatro linhas para o Performance —
+    // três delas de trabalho interno que nunca teve métrica. Entrega e criativo
+    // solto nascem com subtype nulo; etapa sempre tem o subtype da etapa.
+    .is("subtype", null)
     .order("updated_at", { ascending: false });
   if (error) fail(error);
   type JoinedClient = { name: string; slug: string };

@@ -126,9 +126,11 @@ test.describe("Cadastro de cliente v2", () => {
       .from("tasks")
       .select("title,kind,subtype,client_visible")
       .eq("client_id", clientId)
-      .eq("kind", "planejamento")
+      .eq("kind", "operacional")
       .single();
-    expect(kickoffCard).toMatchObject({ subtype: "briefing", client_visible: false });
+    // Sem subtipo: o kickoff era `planejamento/briefing`, e os dois deixaram de
+    // existir — Tarefa não tem subtipo.
+    expect(kickoffCard).toMatchObject({ subtype: null, client_visible: false });
   });
 
   test("mostra os novos campos já preenchidos na edição", async ({ page }) => {

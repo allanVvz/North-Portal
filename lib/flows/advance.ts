@@ -114,6 +114,12 @@ async function advanceOneDelivery(
 
 /** Fecha a entrega se esta conclusão foi a da última etapa. */
 async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: TaskTypeDef): Promise<boolean> {
+  // Uma entrega já encerrada não volta para o funil de conferência. Esta
+  // função é chamada toda vez que o reconciliador vê uma etapa concluída —
+  // inclusive meses depois, e inclusive para etapas que nasceram já
+  // concluídas. Sem esta guarda, qualquer varredura reabre Revisão numa
+  // entrega encerrada só porque ela tem revisor.
+  if (delivery.completed_at) return false;
   const links = await stepsOf(admin, delivery.id);
   if (links.length === 0) return false;
   const { data, error } = await admin.from("tasks").select("completed_at").in("id", links.map((l) => l.id));

@@ -3568,7 +3568,6 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-recurrence-mark { color: var(--a-purple-text); font-size: 12px; }
 .kb-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
 .kb-card-pill { font-size: 10.5px; color: var(--a-sec); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; }
-.kb-published-mark { color: var(--a-teal-text); background: var(--a-teal-soft); font-weight: 700; }
 /* Selo de etapa da cascata. Classe única (nada de `span.kb-flow-step`): um
    seletor elemento+classe perde para regras de classe declaradas depois neste
    cascade — ver CLAUDE.md. Declarado depois de .kb-card-pill de propósito, que

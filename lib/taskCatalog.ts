@@ -1,8 +1,8 @@
 // In-code catalog for the task/Kanban model (v2). The `kind`/`subtype` columns
 // on `tasks` are free TEXT; this file is the single source of truth for the
 // vocabulary (which kinds/subtypes exist, their labels, icons, tones), the
-// progress workflows, and the progress calculation. Adding a kind or tweaking a
-// workflow percentage is a code change here — no DB migration needed. Kept as a
+// the progress calculation. Adding a kind or tweaking a stage percentage is a
+// code change here — no DB migration needed. Kept as a
 // one-way dependency on lib/validation (status list + TaskRecord type) so
 // validation never has to import back.
 
@@ -11,85 +11,63 @@ import { TASK_STATUSES, type TaskRecord, type TaskStatus } from "@/lib/validatio
 // ---- Kinds --------------------------------------------------------------------
 
 export type TaskKind =
+  | "operacional"
   | "plano_acao"
   | "criativo"
-  | "agendamento"
-  | "planejamento"
-  | "operacional"
   | "checkpoint_comercial";
-
-export type WorkflowKey = "padrao" | "criativo_pub" | "simples";
 
 export type KindDef = {
   label: string;
   icon: string;
   tone: "green" | "gold" | "blue" | "purple" | "neutral";
   blurb: string;
-  workflow: WorkflowKey;
   performance: boolean; // eligible to hold task_metrics + show in Performance
   isPlan?: boolean; // aggregates member tasks; progress is a rollup
-  // Kept out of the "Tipo" dropdown when creating a card. `criativo` is hidden
-  // because a creative is no longer a card you make by hand — it's a FLOW you
-  // instantiate (Roteiro → Captação → Edição → Publicação), and the kind
-  // survives only as the internal family those four steps belong to.
-  hidden?: boolean;
   subtypes?: string[]; // subtype keys (labels in SUBTYPE_LABEL)
 };
 
+// Quatro tipos, e o mesmo funil para todos.
+//
+// Antes eram seis, e a relação entre tipo e comportamento era acidental:
+// `agendamento` e `planejamento` existiam só para carregar subtipos, sem
+// nenhuma regra própria, enquanto `criativo` carregava sozinho a etapa
+// "Publicado" e um workflow inteiro só para ela. O vocabulário aqui passa a
+// ser o mesmo que a tela já falava — Tarefas, Planos, Entregas — mais o
+// Checkpoint, que nasce do onboarding.
+//
+// "Rotina" NÃO mora aqui. Recorrência é a coluna `recurrence_cadence`,
+// ortogonal ao tipo, e é justamente isso que permite uma ENTREGA recorrente:
+// um `kind: "rotina"` tornaria a combinação impossível de representar. Na
+// criação ela aparece como uma quinta porta (ver TaskModal), não como kind.
 export const TASK_KINDS: Record<TaskKind, KindDef> = {
+  operacional: {
+    label: "Tarefa",
+    icon: "⚙",
+    tone: "neutral",
+    blurb: "O trabalho do dia a dia. Sem subtipo",
+    performance: false,
+  },
   plano_acao: {
-    label: "Plano de Ação",
+    label: "Plano",
     icon: "◆",
     tone: "green",
     blurb: "Agrega tarefas, datas e progresso do conjunto",
-    workflow: "padrao",
     performance: true,
     isPlan: true,
   },
   criativo: {
-    label: "Criativo",
+    label: "Entrega",
     icon: "✦",
     tone: "purple",
-    blurb: "Etapas de uma peça: roteiro, captação, edição e publicação",
-    workflow: "criativo_pub",
+    blurb: "Uma corrente de etapas: roteiro, captação, edição e publicação",
     performance: true,
-    hidden: true,
     subtypes: ["roteiro", "captacao", "edicao", "publicacao"],
   },
-  agendamento: {
-    label: "Agendamento",
-    icon: "◔",
-    tone: "gold",
-    blurb: "Data, hora, plataforma e publicação",
-    workflow: "padrao",
-    performance: false,
-    subtypes: ["visita_comercial", "gravacao", "reuniao_alinhamento", "publicacao", "apresentacao_resultados"],
-  },
-  planejamento: {
-    label: "Planejamento",
-    icon: "▤",
-    tone: "blue",
-    blurb: "Roteiro, pauta, referências e organização",
-    workflow: "padrao",
-    performance: false,
-    // Curated subset for round 1; the full list comes in round 2.
-    subtypes: ["roteiro", "briefing", "definicao_pauta", "busca_referencias", "checklist_gravacao", "copy_legenda", "organizacao_pastas"],
-  },
-  operacional: {
-    label: "Operacional",
-    icon: "⚙",
-    tone: "neutral",
-    blurb: "Tarefa interna, sem revisão/aprovação",
-    workflow: "simples",
-    performance: false,
-    subtypes: ["relatorio_trafego"],
-  },
   checkpoint_comercial: {
-    label: "Checkpoint Comercial",
+    label: "Checkpoint",
     icon: "◈",
     tone: "green",
     blurb: "Marco do onboarding/relacionamento comercial com o cliente",
-    workflow: "padrao",
     performance: false,
   },
 };
@@ -121,16 +99,19 @@ export const SUBTYPE_LABEL: Record<string, string> = {
 
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];
 
-/** Kinds offered in the "Tipo" dropdown. Hidden kinds still exist, still
- * render, and still carry live data — they just aren't something you pick. */
-export const CREATABLE_TASK_KIND_KEYS = TASK_KIND_KEYS.filter((key) => !TASK_KINDS[key].hidden);
-
 /** Compatibility at the read boundary while old rows are being migrated.
- * Legacy classifications never become selectable kinds again. */
+ * Legacy classifications never become selectable kinds again.
+ *
+ * `agendamento` e `planejamento` entram aqui porque deixaram de ser tipos: a
+ * migração zera o kind das linhas, mas esta função é o que segura a tela entre
+ * o deploy e a migração, e o que impede um card antigo de renderizar cru se
+ * alguma linha escapar. O fallback final para `operacional` é a mesma rede —
+ * com o vocabulário encolhendo, é ele que separa uma linha velha de um crash. */
 export function canonicalTaskClassification(kind: string, subtype?: string | null): { kind: TaskKind; subtype: string | null } {
   if (kind === "publicacao_recorrente") return { kind: "criativo", subtype: subtype ?? null };
-  if (kind === "roteiro") return { kind: "planejamento", subtype: subtype ?? "roteiro" };
-  if (kind === "gravacao") return { kind: "agendamento", subtype: subtype ?? "gravacao" };
+  if (kind === "roteiro") return { kind: "operacional", subtype: subtype ?? "roteiro" };
+  if (kind === "gravacao") return { kind: "operacional", subtype: subtype ?? "gravacao" };
+  if (kind === "agendamento" || kind === "planejamento") return { kind: "operacional", subtype: subtype ?? null };
   return { kind: isTaskKind(kind) ? kind : "operacional", subtype: subtype ?? null };
 }
 
@@ -148,25 +129,32 @@ export const subtypeLabel = (subtype: string | null | undefined) =>
 
 // ---- Workflows / progress -----------------------------------------------------
 
-// Explicit progress percentage per Kanban status, by workflow. Replaces the old
-// hand-typed payload.pct and the STATUS_PCT map. "Concluído" column = status
-// `aprovado`; "Publicado" column = status `concluido` (only publishable kinds
-// reach it). requires_review / requires_approval are routing flags used by the
-// board/modal — they don't re-scale these percentages.
-export const WORKFLOWS: Record<WorkflowKey, Partial<Record<TaskStatus, number>>> = {
-  padrao: { backlog: 0, em_producao: 35, revisao: 60, aprovacao: 80, aprovado: 100, concluido: 100 },
-  criativo_pub: { backlog: 0, em_producao: 30, revisao: 55, aprovacao: 75, aprovado: 90, concluido: 100 },
-  simples: { backlog: 0, em_producao: 60, aprovado: 100, concluido: 100 },
+// Um funil só, para todo tipo de card.
+//
+// Existiam três workflows. O `criativo_pub` era inteiro por causa de uma etapa:
+// ele dava 90% ao `aprovado` para deixar os 100% reservados ao "Publicado", que
+// só o Criativo alcançava. Com Publicado fora do funil — publicar é a última
+// ETAPA de uma Entrega, não um status — a razão de existir dos três sumiu, e o
+// `simples`, que só mudava o 35 para 60, era divergência sem regra por trás.
+//
+// Consequência assumida: card de Tarefa em "Em produção" vai de 60% para 35%,
+// e Entrega concluída vai de 90% para 100%.
+export const STATUS_PCT: Partial<Record<TaskStatus, number>> = {
+  backlog: 0,
+  em_producao: 35,
+  revisao: 60,
+  aprovacao: 80,
+  aprovado: 100,
 };
 
-function workflowPct(workflow: WorkflowKey, status: TaskStatus): number {
-  const wf = WORKFLOWS[workflow];
-  if (wf[status] != null) return wf[status]!;
-  // Status not explicitly in this workflow (e.g. an operacional card that somehow
-  // sits in a skipped stage): fall back to the nearest defined status at or below.
+function statusPct(status: TaskStatus): number {
+  const direct = STATUS_PCT[status];
+  if (direct != null) return direct;
+  // Status fora do mapa (`parada`, ou uma linha antiga em `concluido` antes da
+  // migração): cai no vizinho definido mais próximo abaixo.
   const idx = TASK_STATUSES.indexOf(status);
   for (let i = idx; i >= 0; i--) {
-    const v = wf[TASK_STATUSES[i]];
+    const v = STATUS_PCT[TASK_STATUSES[i]];
     if (v != null) return v;
   }
   return 0;
@@ -180,7 +168,7 @@ type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight"> & {
 
 /** Key an automation writes into payload when it halts a card into `parada`,
  * so progress can stay frozen at its pre-halt value instead of falling
- * through to whatever workflowPct's index-based fallback would pick (wrong,
+ * through to whatever statusPct's index-based fallback would pick (wrong,
  * since `parada` sits last in TASK_STATUSES). See lib/automations/errorHandling.ts. */
 export const PRE_PARADA_STATUS_KEY = "pre_parada_status";
 
@@ -220,7 +208,7 @@ function isRollupParent(task: ProgressTask): boolean {
  *   it; the others divide by the weight of the members they actually have.
  * - `parada` (automation halted the card): frozen at the percentage of
  *   whatever status it was in right before halting (payload.pre_parada_status).
- * - Everything else: the workflow percentage for the card's current status.
+ * - Everything else: the percentage for the card's current status.
  * Pass `members` (tasks whose plan_id === this card's id) for plan rollups.
  * Pass `membersByParent` too when a member can itself be a parent — a delivery
  * inside a Plano de Ação, say. Without it a nested parent is asked for its own
@@ -257,7 +245,6 @@ function progressOf(
   membersByParent: ReadonlyMap<string, ProgressTask[]> | undefined,
   seen: Set<string>,
 ): number {
-  const def = kindDef(task.kind);
   if (isRollupParent(task)) {
     // A malformed graph (a plan that ends up its own descendant) must not blow
     // the stack. Revisiting a card mid-walk means the cycle contributes nothing.
@@ -268,11 +255,11 @@ function progressOf(
   if (task.status === "parada") {
     const frozen = task.payload?.[PRE_PARADA_STATUS_KEY];
     if (typeof frozen === "string" && (TASK_STATUSES as readonly string[]).includes(frozen)) {
-      return workflowPct(def.workflow, frozen as TaskStatus);
+      return statusPct(frozen as TaskStatus);
     }
     return 0;
   }
-  return workflowPct(def.workflow, task.status);
+  return statusPct(task.status);
 }
 
 /**

@@ -109,7 +109,14 @@ export const adminPatchSchema = z.object({
 // "parada" is a lateral halt state (automation error needing human
 // attention), reachable from any status — not a funnel step. Kept last so it
 // never gets mistaken for "further along" by ordinal comparisons elsewhere.
-export const TASK_STATUSES = ["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "concluido", "parada"] as const;
+//
+// "concluido" (rotulado "Publicado") saiu: publicar deixou de ser um nível de
+// tarefa nenhuma. Era um estágio que só um tipo alcançava, travado no servidor
+// em três lugares e com uma coluna de toggle próprio — e, com Entrega existindo
+// de verdade, publicar é a última ETAPA de uma corrente, não um status do
+// funil. O valor segue no enum do Postgres (enum não perde valor em lugar) sem
+// nenhuma linha usando; uma CHECK impede que volte a ser escrito.
+export const TASK_STATUSES = ["backlog", "em_producao", "revisao", "aprovacao", "aprovado", "parada"] as const;
 export const TASK_PRIORITIES = ["baixa", "media", "alta"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
@@ -218,19 +225,10 @@ export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true }).e
 
 export const taskCommentCreateSchema = z.object({ text: z.string().trim().min(1).max(2000) });
 
-/** Blocks only a *new* invalid Publicado combination. Historical rows that
- * already are non-Criativo + Publicado remain editable, so an unrelated save
- * does not brick the card. Moving another card into that combination (or
- * changing a published Criativo into another type) is still rejected. */
-export function introducesInvalidPublishedState(
-  current: Pick<TaskRecord, "status" | "kind">,
-  patch: { status?: TaskStatus; kind?: string },
-): boolean {
-  const currentIsInvalid = current.status === "concluido" && current.kind !== "criativo";
-  const nextStatus = patch.status ?? current.status;
-  const nextKind = patch.kind ?? current.kind;
-  return nextStatus === "concluido" && nextKind !== "criativo" && !currentIsInvalid;
-}
+// `introducesInvalidPublishedState` morava aqui. Ela existia para impedir que
+// um card que não fosse Criativo entrasse em "Publicado" — uma regra que só
+// fazia sentido enquanto publicar era um estágio do funil que um único tipo
+// alcançava. Sem o estágio, não há combinação inválida a bloquear.
 
 // Performance metrics attached to a published card — flexible map so the
 // catalog (app/admin/metricDefs.ts) can grow without a schema change.
@@ -703,19 +701,16 @@ export function flowFlagsCascadeEffects(current: ClientFlowFlags, next: ClientFl
 export const planoVisibilitySchema = z.object({ enabled: z.boolean() });
 
 // ---- Admin nav tabs visibility (Revisões / Aprovações, global) -----------------
-// publicadoColumnVisible lives in this same site_settings row — it's a
-// bespoke global toggle (not a Revisão/Aprovação-style flow pair), gating
-// the Kanban "Publicado" column while that feature (mock metrics, manual
-// post-linking) is still in development.
+// `publicadoColumnVisible` morava nesta mesma linha de site_settings e saiu
+// junto com o estágio. A chave pode continuar gravada no JSON de quem já a
+// tinha: ela é simplesmente ignorada na leitura.
 export type AdminTabsVisibility = {
   revisoesTabVisible: boolean;
   aprovacoesTabVisible: boolean;
-  publicadoColumnVisible: boolean;
 };
 export const adminTabsVisibilitySchema = z.object({
   revisoesTabVisible: z.boolean().optional(),
   aprovacoesTabVisible: z.boolean().optional(),
-  publicadoColumnVisible: z.boolean().optional(),
 });
 
 export type Metric = {
@@ -770,8 +765,8 @@ export type PortalPayload = {
   credentials: CredentialSummary[];
   // Kanban status "aprovacao": the client's pending approval queue (Feedbacks page).
   pendingApprovals: ClientTask[];
-  // Kanban status "aprovado" (Concluído) or "concluido" (Publicado): resolved
-  // history shown at the bottom of the Feedbacks page.
+  // Kanban status "aprovado" (Concluído): resolved history shown at the bottom
+  // of the Feedbacks page.
   resolvedApprovals: ClientTask[];
   // kind='checkpoint_comercial' cards, ordered by position — powers the real
   // "Checkpoints comerciais" list on Central Comercial and the onboarding %.

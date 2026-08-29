@@ -8,7 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { flowStepKeyOf } from "@/lib/taskRelations";
 import { notifyTaskParticipants, statusChangedMessage, taskUpdatedMessage } from "@/lib/notifications";
-import { HttpError, introducesInvalidPublishedState, taskPatchSchema, type TaskRecord } from "@/lib/validation";
+import { HttpError, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -85,12 +85,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       (patch as Record<string, unknown>).client_id = nextClientId;
     }
 
-    // "Publicado" (concluido) is Criativo-only — the correlation with a real
-    // publication (payload.metaPostId) and the metrics it then accumulates
-    // only make sense for that kind.
-    if (introducesInvalidPublishedState(current, patch)) {
-      throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");
-    }
     const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
     if (nextRecurrence) {
       const start = patch.start_date !== undefined ? patch.start_date : current.start_date ?? current.due_date;

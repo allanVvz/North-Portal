@@ -97,9 +97,6 @@ export async function POST(request: Request) {
       throw new HttpError(400, "Uma entrega nao pode ser recorrente.");
     }
 
-    if (fields.status === "concluido" && (fields.kind ?? "criativo") !== "criativo") {
-      throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");
-    }
     if (fields.recurrence_cadence) {
       const start = fields.start_date ?? fields.due_date;
       if (!start) throw new HttpError(400, "Informe o início da recorrência.");

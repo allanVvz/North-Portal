@@ -24,9 +24,8 @@ const FLOWS: FlowDef[] = [
 // global toggles shown once below (not per client) for whether the
 // Revisões/Aprovações tabs even exist in the admin nav. The Kanban column
 // itself has no toggle at all — it's automatic, visible only while at least
-// one card actually sits in that stage. "Publicado" is the exception: a
-// single global switch (no per-client dimension) since it's not a flow stage
-// but a presentation choice: off merges its cards visually into Concluído.
+// one card actually sits in that stage. O toggle da coluna "Publicado" morava
+// aqui e saiu com o estágio: publicar deixou de ser nível de tarefa nenhuma.
 export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
   const [slug, setSlug] = useState(clients[0]?.slug ?? "");
   const [flags, setFlags] = useState<ClientFlowFlags | null>(null);
@@ -97,23 +96,6 @@ export default function EtapasPanel({ clients }: { clients: ClientLite[] }) {
               <span className="sw" /><span>{flow.label}</span>
             </label>
           ))}
-        </div>
-      ) : null}
-
-      {tabs ? (
-        <div className="set-etapas-global">
-          <strong className="set-etapas-label">Coluna "Publicado" (Kanban)</strong>
-          <label className="admin-toggle">
-            <input
-              type="checkbox"
-              checked={tabs.publicadoColumnVisible}
-              onChange={(e) => saveTab({ publicadoColumnVisible: e.target.checked })}
-            />
-            <span className="sw" /><span>Ativa</span>
-          </label>
-          <p className="admin-sub set-etapas-note">
-            Ligada, Concluído e Publicado aparecem em colunas separadas. Desligada, apenas a coluna Publicado some e seus cards são exibidos dentro de Concluído, sem mudar o status; só cards do tipo Criativo podem ser publicados.
-          </p>
         </div>
       ) : null}
 

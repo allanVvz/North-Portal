@@ -24,7 +24,6 @@ describe("groupApprovalQueue", () => {
     row("pending-2", "aprovacao"),
     row("done-1", "aprovado"),
     row("revisao-1", "revisao"),
-    row("publicado-1", "concluido"),
   ];
   const groups = groupApprovalQueue(rows);
 

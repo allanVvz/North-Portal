@@ -20,22 +20,23 @@ describe("progresso de uma entrega em cascata", () => {
   // rollup sobre "os membros que existem" dá 100% e o cliente vê a peça como
   // pronta antes de existir gravação, edição ou publicação.
   it("conta as etapas que ainda não nasceram no denominador", () => {
-    expect(taskProgress(delivery(4), [step("concluido", "roteiro")])).toBe(25);
+    expect(taskProgress(delivery(4), [step("aprovado", "roteiro")])).toBe(25);
   });
 
   it("chega a 100% só quando todas as etapas do molde existem e terminaram", () => {
     const all = [
-      step("concluido", "roteiro"),
-      step("concluido", "captacao"),
-      step("concluido", "edicao"),
-      step("concluido", "publicacao"),
+      step("aprovado", "roteiro"),
+      step("aprovado", "captacao"),
+      step("aprovado", "edicao"),
+      step("aprovado", "publicacao"),
     ];
     expect(taskProgress(delivery(4), all)).toBe(100);
   });
 
   it("pondera a etapa parcial pelo peso do molde, não pela contagem de membros", () => {
-    // roteiro 100% + captação em produção (30% no workflow criativo_pub) sobre 4 etapas.
-    expect(taskProgress(delivery(4), [step("concluido", "roteiro"), step("em_producao", "captacao")])).toBe(33);
+    // roteiro 100% + captação em produção (35%, agora igual para todo tipo)
+    // sobre 4 etapas: 135/4 = 33,75.
+    expect(taskProgress(delivery(4), [step("aprovado", "roteiro"), step("em_producao", "captacao")])).toBe(34);
   });
 
   it("é 0 quando nenhuma etapa foi materializada ainda", () => {
@@ -46,12 +47,12 @@ describe("progresso de uma entrega em cascata", () => {
   // progresso de entregas que já estão em andamento com outra forma.
   it("usa o peso congelado, e não o molde vigente", () => {
     const frozen = delivery(4);
-    expect(taskProgress(frozen, [step("concluido", "roteiro")])).toBe(25);
+    expect(taskProgress(frozen, [step("aprovado", "roteiro")])).toBe(25);
   });
 
   it("cai para o peso dos membros quando o snapshot sumiu (molde apagado)", () => {
     const orphan = { ...delivery(0), payload: { flow_parent: true } };
-    expect(taskProgress(orphan, [step("concluido", "roteiro")])).toBe(100);
+    expect(taskProgress(orphan, [step("aprovado", "roteiro")])).toBe(100);
   });
 });
 
@@ -62,7 +63,7 @@ describe("rollup aninhado", () => {
   it("resolve uma entrega que é membro de um Plano de Ação", () => {
     const plano = { id: "plano", kind: "plano_acao", status: "backlog" as TaskStatus, progress_weight: 1 };
     const entrega = delivery(4);
-    const byParent = new Map([["entrega", [step("concluido", "roteiro"), step("concluido", "captacao")]]]);
+    const byParent = new Map([["entrega", [step("aprovado", "roteiro"), step("aprovado", "captacao")]]]);
 
     expect(taskProgress(plano, [entrega], byParent)).toBe(50);
     // Sem o mapa, o comportamento antigo (0) permanece — nenhum call site quebra.

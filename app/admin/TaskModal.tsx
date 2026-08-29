@@ -108,6 +108,22 @@ function draftFrom(
   };
 }
 
+// A quinta porta de criação. Uma linha de `task_types` NÃO serviria: `behavior`
+// é CHECK-constrained a ('entrega','plano','simples'), e um kind próprio
+// tornaria "entrega recorrente" irrepresentável. Isto é vocabulário de tela.
+const ROTINA_KEY = "__rotina";
+const ROTINA_OPTION = {
+  key: ROTINA_KEY,
+  label: "Rotina",
+  icon: "↻",
+  behavior: "simples" as const,
+  creatable: true,
+  active: true,
+  id: ROTINA_KEY,
+  order_index: 999,
+  subtypes: [],
+};
+
 function Cell({ icon, label, hidden, children }: { icon: string; label: string; hidden?: boolean; children: React.ReactNode }) {
   if (hidden) return null;
   return (
@@ -345,6 +361,16 @@ export default function TaskModal({
   onDeleted: (id: string) => void;
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
+  // "Rotina" é a quinta porta de criação, e é só isso: uma porta.
+  //
+  // Ela NÃO é um kind. Recorrência é a coluna `recurrence_cadence`, ortogonal
+  // ao tipo, e é justamente essa ortogonalidade que permite uma ENTREGA
+  // recorrente — um `kind: "rotina"` tornaria a combinação irrepresentável.
+  // Escolher Rotina aqui é escolher Tarefa com cadência, o que no servidor é
+  // `scope=routine`: cria o MOLDE da recorrência, não um grupo já
+  // materializado (ver POST /api/admin/tasks).
+  const [rotinaMode, setRotinaMode] = useState(false);
+  const effectiveScope: TaskCreationScope = mode === "new" && rotinaMode ? "routine" : creationScope;
   const [liveTask, setLiveTask] = useState<TaskRecord | null>(task);
   // A recurrence template is a parent even if legacy data accidentally still
   // carries a child-only recurrence_parent_id. It must never render a second
@@ -407,12 +433,18 @@ export default function TaskModal({
   // Plano de Ação — escolher o tipo é que decide o que nasce. Fora ficam só os
   // tipos não-criáveis (checkpoint comercial, que é provisionado) e, no modo
   // Plano, os que não são plano.
-  const creationTypes = taskTypes.filter((type) => {
+  const realTypes = taskTypes.filter((type) => {
     if (!type.creatable && type.key !== draft.kind) return false;
     if (creationScope === "plan") return type.behavior === "plano";
     if (mode === "edit" && kd.isPlan) return type.behavior === "plano";
     return true;
   });
+  // A porta extra só existe na criação de uma tarefa avulsa: em modo Plano não
+  // faz sentido, e em edição o Tipo mostra o kind real do card enquanto a
+  // recorrência tem campo próprio.
+  const creationTypes = mode === "new" && creationScope === "task"
+    ? [...realTypes, ROTINA_OPTION]
+    : realTypes;
   const typeLabelOf = (key: string) => taskTypes.find((t) => t.key === key)?.label ?? kindLabel(key);
   const subtypeOptions = currentType?.subtypes ?? [];
   const subtypeLabelOf = (key: string) => subtypeOptions.find((sub) => sub.key === key)?.label ?? subtypeLabel(key);
@@ -449,14 +481,12 @@ export default function TaskModal({
   // the current position never becomes literally invisible.
   const revisaoStepHidden = revisaoOff && !(revisaoVisual && draft.reviewer_id) && draft.status !== "revisao";
   const aprovacaoStepHidden = aprovacaoOff && !(aprovacaoVisual && draft.approver_id) && draft.status !== "aprovacao";
-  // "Publicado" is Criativo-only (server enforces this too, see
-  // PATCH /api/admin/tasks/[id]) — hide the step as an option for every
-  // other kind, but never for a card already sitting there.
-  const publicadoStepHidden = draft.kind !== "criativo" && draft.status !== "concluido";
+  // Revisão e Aprovação são as únicas etapas que somem, e por CLIENTE, não por
+  // tipo: são contrato de cliente, não modelo de card. O recorte por tipo que
+  // existia aqui era o "Publicado", que deixou de ser etapa.
   const progressColumns = COLUMNS.filter((column) => {
     if (column.status === "revisao") return !revisaoStepHidden;
     if (column.status === "aprovacao") return !aprovacaoStepHidden;
-    if (column.status === "concluido") return !publicadoStepHidden;
     return true;
   });
 
@@ -601,7 +631,18 @@ export default function TaskModal({
 
   function pickKind(kind: string) {
     if (mode === "new" && creationScope === "plan" && kind !== "plano_acao") return;
-    if (mode === "new" && creationScope !== "plan" && kind === "plano_acao") return;
+    if (kind === ROTINA_KEY) {
+      setRotinaMode(true);
+      setDraft((d) => ({
+        ...d,
+        kind: "operacional",
+        subtype: "",
+        plan_id: "",
+        recurrence_cadence: d.recurrence_cadence ?? "semanal",
+      }));
+      return;
+    }
+    setRotinaMode(false);
     setDraft((d) => {
       const def = kindDef(kind);
       const type = taskTypes.find((t) => t.key === kind);
@@ -966,9 +1007,9 @@ export default function TaskModal({
       client_visible: planoVisibilityOn ? draft.client_visible : false,
       payload,
     };
-    if (mode === "new" && creationScope === "plan") {
+    if (mode === "new" && effectiveScope === "plan") {
       body.kind = "plano_acao";
-    } else if (mode === "new" && creationScope === "routine" && !body.recurrence_cadence) {
+    } else if (mode === "new" && effectiveScope === "routine" && !body.recurrence_cadence) {
       body.recurrence_cadence = "semanal";
     }
     // Cliente is editable in edit mode too now — always send it (as the
@@ -978,7 +1019,7 @@ export default function TaskModal({
     try {
       const res = liveTask
         ? await fetch(`/api/admin/tasks/${liveTask.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-        : await fetch(`/api/admin/tasks?scope=${creationScope}`, {
+        : await fetch(`/api/admin/tasks?scope=${effectiveScope}`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             // Omit slug entirely for "sem cliente" — the schema treats an empty
             // string as an invalid slug, not as "no client".
@@ -1160,14 +1201,19 @@ export default function TaskModal({
                 <h2>Nova Tarefa</h2>
                 <HeadDropdown
                   className="tm-new-kind"
-                  trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{typeLabelOf(draft.kind)}</span>}
+                  trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{rotinaMode ? ROTINA_OPTION.icon : kindIcon(draft.kind)}</span>{rotinaMode ? ROTINA_OPTION.label : typeLabelOf(draft.kind)}</span>}
                 >
-                  {creationTypes.map((type) => (
-                    <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)}>
-                      <span className="tm-headpick-ico" aria-hidden>{kindIcon(type.key)}</span>{type.label}
-                      {type.behavior === "entrega" ? <span className="tm-headpick-hint">corrente de etapas</span> : null}
-                    </button>
-                  ))}
+                  {creationTypes.map((type) => {
+                    const isRotina = type.key === ROTINA_KEY;
+                    const on = isRotina ? rotinaMode : !rotinaMode && draft.kind === type.key;
+                    return (
+                      <button type="button" key={type.key} className={`tm-headpick-option ${on ? "on" : ""}`} onClick={() => pickKind(type.key)}>
+                        <span className="tm-headpick-ico" aria-hidden>{isRotina ? ROTINA_OPTION.icon : kindIcon(type.key)}</span>{type.label}
+                        {type.behavior === "entrega" ? <span className="tm-headpick-hint">corrente de etapas</span> : null}
+                        {isRotina ? <span className="tm-headpick-hint">se repete sozinha</span> : null}
+                      </button>
+                    );
+                  })}
                 </HeadDropdown>
                 {subtypeOptions.length ? (
                   <HeadDropdown className="tm-new-kind" trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}>
@@ -1183,11 +1229,13 @@ export default function TaskModal({
                 ) : null}
               </div>
               <p className="admin-sub">
-                {currentType?.behavior === "entrega"
-                  ? `Nasce em ${subtypeLabelOf(draft.subtype) || currentType.subtypes[0]?.label || "primeira etapa"}. Cada etapa concluída cria a próxima.`
-                  : currentType?.behavior === "plano"
-                    ? "Um plano agrega outras tarefas e mostra o progresso do conjunto."
-                    : "Conte o essencial e escolha o tipo do card."}
+                {rotinaMode
+                  ? "Uma rotina se repete na cadência escolhida. Cada ciclo nasce como um card próprio."
+                  : currentType?.behavior === "entrega"
+                    ? `Nasce em ${subtypeLabelOf(draft.subtype) || currentType.subtypes[0]?.label || "primeira etapa"}. Cada etapa concluída cria a próxima.`
+                    : currentType?.behavior === "plano"
+                      ? "Um plano agrega outras tarefas e mostra o progresso do conjunto."
+                      : "Conte o essencial e escolha o tipo do card."}
               </p>
             </div>
             <button className="kb-modal-close" onClick={() => void closeAfterSave()} aria-label="Fechar">✕</button>
@@ -1233,7 +1281,7 @@ export default function TaskModal({
                 </Cell>
               ) : null}
               {/* Vínculo com plano (não para o próprio plano) */}
-              {!kd.isPlan && !(mode === "new" && creationScope === "routine") ? (
+              {!kd.isPlan && !(mode === "new" && effectiveScope === "routine") ? (
                 <Cell icon="◆" label="Plano de Ação" hidden={!visible("plan_link")}>
                   <select value={draft.plan_id} onChange={(e) => set("plan_id", e.target.value)}>
                     <option value="">— Sem plano —</option>
@@ -1267,7 +1315,7 @@ export default function TaskModal({
                   recurrence={{ cadence: draft.recurrence_cadence, weekdays: draft.recurrence_weekdays, dayOfMonth: draft.recurrence_day_of_month }}
                   onRecurrenceChange={(value) => setDraft((current) => ({ ...current, recurrence_cadence: value.cadence, recurrence_weekdays: value.weekdays, recurrence_day_of_month: value.dayOfMonth }))}
                   recurrenceFeatureEnabled
-                  recurrenceRequired={mode === "new" && creationScope === "routine"}
+                  recurrenceRequired={mode === "new" && effectiveScope === "routine"}
                   nextExecutionValue={isRecurringParent ? liveTask?.due_date ?? undefined : undefined}
                 />
               </Cell>
@@ -1281,7 +1329,7 @@ export default function TaskModal({
                   </select>
                 </Cell>
               ) : null}
-              {draft.kind === "criativo" || draft.kind === "agendamento" ? (
+              {draft.kind === "criativo" ? (
                 <Cell icon="◔" label="Plataforma" hidden={!visible("plataforma")}>
                   <select value={draft.plataforma} onChange={(e) => set("plataforma", e.target.value)}>
                     <option value="">—</option>

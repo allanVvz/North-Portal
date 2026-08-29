@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { COLUMNS, STATUS_LABEL, WORKFLOW_ORDER, statusAfterKanbanDrop, tasksForKanbanColumn, visibleColumnsFor } from "./kanbanShared";
+import { COLUMNS, STATUS_LABEL, WORKFLOW_ORDER, visibleColumnsFor } from "./kanbanShared";
 
 describe("Kanban COLUMNS", () => {
-  it("has 7 columns, Parada first e Concluído entre Aprovação e Publicado", () => {
+  it("tem 6 colunas, Parada primeiro e Concluído no fim", () => {
     // "Parada" primeiro: é estado de erro de automação, não a etapa seguinte a
-    // Publicado. Ver o comentário em kanbanShared.ts.
+    // Concluído. Ver o comentário em kanbanShared.ts.
+    // Seis, não sete: "Publicado" saiu. Este teste é o que trava o vocabulário
+    // — quem quiser reintroduzir um estágio tem que passar por aqui.
     expect(COLUMNS.map((c) => c.status)).toEqual([
       "parada",
       "backlog",
@@ -12,7 +14,6 @@ describe("Kanban COLUMNS", () => {
       "revisao",
       "aprovacao",
       "aprovado",
-      "concluido",
     ]);
     expect(COLUMNS.map((c) => c.label)).toEqual([
       "Parada",
@@ -21,8 +22,8 @@ describe("Kanban COLUMNS", () => {
       "Revisão",
       "Aprovação",
       "Concluído",
-      "Publicado",
     ]);
+    expect(COLUMNS.some((c) => c.label === "Publicado")).toBe(false);
   });
 
   it("WORKFLOW_ORDER exclui parada — card parado não tem etapa cumprida", () => {
@@ -36,17 +37,16 @@ describe("Kanban COLUMNS", () => {
 
   it("STATUS_LABEL is derived from COLUMNS and covers every status", () => {
     expect(STATUS_LABEL.aprovado).toBe("Concluído");
-    expect(STATUS_LABEL.concluido).toBe("Publicado");
     expect(STATUS_LABEL.parada).toBe("Parada");
-    expect(Object.keys(STATUS_LABEL)).toHaveLength(7);
+    expect(Object.keys(STATUS_LABEL)).toHaveLength(6);
   });
 });
 
 describe("visibleColumnsFor (Revisão/Aprovação column visibility)", () => {
   it("hides Revisão and Aprovação when the toggle is off for every client and no card sits in either status", () => {
     const tasks = [{ status: "backlog" as const }, { status: "em_producao" as const }];
-    expect(visibleColumnsFor(tasks, false, false, true).map((c) => c.status)).toEqual([
-      "backlog", "em_producao", "aprovado", "concluido",
+    expect(visibleColumnsFor(tasks, false, false).map((c) => c.status)).toEqual([
+      "backlog", "em_producao", "aprovado",
     ]);
   });
 
@@ -55,71 +55,41 @@ describe("visibleColumnsFor (Revisão/Aprovação column visibility)", () => {
     // the column show up immediately, not wait for a card to land in it —
     // an admin needs to be able to drag a card into an empty column.
     const noCardsYet: { status: "backlog" | "aprovacao" }[] = [{ status: "backlog" }];
-    expect(visibleColumnsFor(noCardsYet, false, true, true).some((c) => c.status === "aprovacao")).toBe(true);
-    expect(visibleColumnsFor(noCardsYet, false, false, true).some((c) => c.status === "aprovacao")).toBe(false);
+    expect(visibleColumnsFor(noCardsYet, false, true).some((c) => c.status === "aprovacao")).toBe(true);
+    expect(visibleColumnsFor(noCardsYet, false, false).some((c) => c.status === "aprovacao")).toBe(false);
   });
 
   it("shows Aprovação when a card sits in it even if the toggle is currently off (safety net)", () => {
     // Should be unreachable in practice (toggling off cascades cards out
     // immediately) but a column must never hide a card that's still in it.
     const tasks = [{ status: "backlog" as const }, { status: "aprovacao" as const }];
-    expect(visibleColumnsFor(tasks, false, false, true).map((c) => c.status)).toEqual([
-      "backlog", "em_producao", "aprovacao", "aprovado", "concluido",
+    expect(visibleColumnsFor(tasks, false, false).map((c) => c.status)).toEqual([
+      "backlog", "em_producao", "aprovacao", "aprovado",
     ]);
   });
 
   it("shows both Revisão and Aprovação once both toggles are on", () => {
-    expect(visibleColumnsFor([], true, true, true)).toHaveLength(6);
+    expect(visibleColumnsFor([], true, true)).toHaveLength(5);
   });
 
   it("hides Aprovação again once the toggle is off and its last card has moved elsewhere", () => {
-    expect(visibleColumnsFor([{ status: "aprovacao" as const }], false, true, true).some((c) => c.status === "aprovacao")).toBe(true);
-    expect(visibleColumnsFor([{ status: "em_producao" as const }], false, false, true).some((c) => c.status === "aprovacao")).toBe(false);
+    expect(visibleColumnsFor([{ status: "aprovacao" as const }], false, true).some((c) => c.status === "aprovacao")).toBe(true);
+    expect(visibleColumnsFor([{ status: "em_producao" as const }], false, false).some((c) => c.status === "aprovacao")).toBe(false);
   });
 });
 
 describe("visibleColumnsFor (Parada column visibility)", () => {
   it("hides Parada when no card sits in it — no toggle, purely card-driven", () => {
-    expect(visibleColumnsFor([{ status: "backlog" as const }], true, true, true).some((c) => c.status === "parada")).toBe(false);
+    expect(visibleColumnsFor([{ status: "backlog" as const }], true, true).some((c) => c.status === "parada")).toBe(false);
   });
 
   it("shows Parada as soon as a card is halted in it", () => {
     const tasks = [{ status: "backlog" as const }, { status: "parada" as const }];
-    expect(visibleColumnsFor(tasks, false, false, true).some((c) => c.status === "parada")).toBe(true);
+    expect(visibleColumnsFor(tasks, false, false).some((c) => c.status === "parada")).toBe(true);
   });
 });
 
-describe("visibleColumnsFor (Publicado column visibility)", () => {
-  it("hides Publicado when the global switch is off, no card exceptions", () => {
-    expect(visibleColumnsFor([], true, true, false).some((c) => c.status === "concluido")).toBe(false);
-  });
-
-  it("hides Publicado even when a card already sits in that status — no safety net (unlike Revisão/Aprovação)", () => {
-    const tasks = [{ status: "concluido" as const }];
-    expect(visibleColumnsFor(tasks, true, true, false).some((c) => c.status === "concluido")).toBe(false);
-  });
-
-  it("shows Publicado once the global switch is on", () => {
-    expect(visibleColumnsFor([], false, false, true).some((c) => c.status === "concluido")).toBe(true);
-  });
-});
-
-describe("Publicado merged into Concluído", () => {
-  const tasks = [
-    { id: "approved", status: "aprovado" as const },
-    { id: "published", status: "concluido" as const },
-    { id: "production", status: "em_producao" as const },
-  ];
-
-  it("groups approved and published cards only while the Publicado column is hidden", () => {
-    expect(tasksForKanbanColumn(tasks, "aprovado", false).map((task) => task.id)).toEqual(["approved", "published"]);
-    expect(tasksForKanbanColumn(tasks, "aprovado", true).map((task) => task.id)).toEqual(["approved"]);
-    expect(tasksForKanbanColumn(tasks, "concluido", true).map((task) => task.id)).toEqual(["published"]);
-  });
-
-  it("preserves a published status when reordered in the merged column", () => {
-    expect(statusAfterKanbanDrop("concluido", "aprovado", false)).toBe("concluido");
-    expect(statusAfterKanbanDrop("em_producao", "aprovado", false)).toBe("aprovado");
-    expect(statusAfterKanbanDrop("concluido", "aprovado", true)).toBe("aprovado");
-  });
-});
+// Os describes "visibleColumnsFor (Publicado column visibility)" e "Publicado
+// merged into Concluído" moravam aqui. Sumiram com o estágio: publicar deixou
+// de ser nível de tarefa nenhuma, então não há coluna a esconder nem projeção
+// visual a fazer dentro de Concluído.

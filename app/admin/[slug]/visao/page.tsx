@@ -23,14 +23,14 @@ export default async function ClientVisaoPage({ params }: { params: Promise<{ sl
       id: t.id,
       title: t.title,
       status: t.status,
-      done: t.status === "concluido" || t.status === "aprovado",
+      done: t.status === "aprovado",
       dueDate: t.due_date,
     }));
   const plans = allPlans
     .filter((p) => p.clientSlug === slug)
     .map((p) => ({ id: p.id, title: p.title, progress: p.progress, activities: p.activities.length, status: p.status }));
   const openTasks = tasks
-    .filter((t) => t.kind !== "checkpoint_comercial" && t.status !== "concluido" && t.status !== "aprovado")
+    .filter((t) => t.kind !== "checkpoint_comercial" && t.status !== "aprovado")
     .slice(0, 6)
     .map((t) => ({ id: t.id, title: t.title, status: t.status, kind: t.kind, progress: taskProgress(t) }));
 
