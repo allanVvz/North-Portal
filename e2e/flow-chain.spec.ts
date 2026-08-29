@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
@@ -32,6 +32,29 @@ async function insertTask(sb: SupabaseClient, fields: Record<string, unknown>): 
   const { data, error } = await sb.from("tasks").insert(fields).select("id").single();
   if (error || !data) throw new Error(`seed task failed: ${error?.message}`);
   return data.id as string;
+}
+
+// As duas queixas da rodada seguinte, viradas em asserção.
+//
+// "Transparente": o portal ia para o `document.body`, e os tokens do tema
+// (`--a-surface`, `--a-border`, a fonte) são declarados no `.admin-shell`. Fora
+// desse escopo `var(--a-surface)` não resolve, `background` cai para o valor
+// inicial e o painel fica vazado, com o conteúdo do modal aparecendo por trás.
+//
+// "Alinhado à esquerda": o painel abria alinhado pela DIREITA a um botão de
+// ~20px encostado na borda esquerda da linha, então seus 320px iam todos para
+// fora do modal e paravam colados no canto da tela.
+async function expectPanelIsThemedAndInsideModal(panel: Locator, modal: Locator) {
+  const background = await panel.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(background).not.toBe("transparent");
+
+  const panelBox = await panel.boundingBox();
+  const modalBox = await modal.boundingBox();
+  if (!panelBox || !modalBox) throw new Error("painel ou modal sem caixa medível");
+  // 1px de folga para arredondamento de subpixel do zoom.
+  expect(panelBox.x).toBeGreaterThanOrEqual(modalBox.x - 1);
+  expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(modalBox.x + modalBox.width + 1);
 }
 
 test.describe("Corrente de etapas — ligar um card pela interface", () => {
@@ -97,13 +120,15 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     // 1 de 4: só o Roteiro está ligado.
     await expect(stepsBox.locator(".tm-box-label")).toContainText("(1/4)", { timeout: 20_000 });
 
-    // O 🔗 da Captação abre o seletor FLUTUANTE — ele vive no body, por portal,
-    // e não dentro do modal. Se voltar a ser um painel dentro do `.tm`, este
-    // locator falha, que é a regressão que queremos pegar.
+    // O 🔗 da Captação abre o seletor FLUTUANTE — ele sai do `.tm` por portal e
+    // se pendura direto no `.admin-shell`. Se voltar a ser um painel dentro do
+    // `.tm`, este locator falha, que é a regressão que queremos pegar. E tem
+    // que ser o `.admin-shell`, não o body: é lá que moram os tokens do tema.
     await stepsBox.getByRole("button", { name: /Ligar um card existente à etapa Captação/ }).click();
-    const panel = page.locator("body > .tm-chain-panel");
+    const panel = page.locator(".admin-shell > .tm-chain-panel");
     await expect(panel).toBeVisible({ timeout: 15_000 });
     await expect(panel).toContainText(`${PREFIX} Captação A`);
+    await expectPanelIsThemedAndInsideModal(panel, modal);
 
     // Um clique liga. Sem recarregar a página, a etapa tem que sair de vazia
     // para preenchida — era exatamente isto que não acontecia.
@@ -155,8 +180,9 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     await expect(stepsBox).toContainText("você está aqui");
 
     await stepsBox.getByRole("button", { name: /Ligar um card existente à etapa Edição/ }).click();
-    const panel = page.locator("body > .tm-chain-panel");
+    const panel = page.locator(".admin-shell > .tm-chain-panel");
     await expect(panel).toBeVisible({ timeout: 15_000 });
+    await expectPanelIsThemedAndInsideModal(panel, modal);
     // Não há card de Edição neste cliente: o seletor explica em vez de parecer
     // quebrado, e lembra que a etapa nasce pela cascata.
     await expect(panel).toContainText(/nasce sozinha quando a anterior é concluída/i);

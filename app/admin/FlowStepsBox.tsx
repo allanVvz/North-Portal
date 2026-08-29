@@ -30,7 +30,10 @@ function ChainPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const { anchorRef, popoverRef, style } = useFloatingPopover(open, "end");
+  // "start": o 🔗 fica na borda ESQUERDA da linha da etapa, então alinhar pela
+  // direita jogaria os 320px do painel todos para fora do modal. Alinhado pelo
+  // início, ele desce rente à coluna em que o botão está.
+  const { anchorRef, popoverRef, style } = useFloatingPopover(open, "start");
   useDismissOnOutside(open, () => setOpen(false), [anchorRef, popoverRef]);
 
   const needle = q.trim().toLowerCase();

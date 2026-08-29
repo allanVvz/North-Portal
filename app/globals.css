@@ -3553,37 +3553,44 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-flow-step { color: var(--a-purple-text); background: var(--a-purple-soft); font-weight: 600; }
 
 /* ---- Seletor de corrente (ligar um card a uma etapa) ---- */
-/* Portal para o body + position: fixed, porque `.tm` tem overflow-y:auto e
-   clipa qualquer painel absolute — ver app/admin/FloatingPopover.tsx.
+/* Portal + position: fixed, porque `.tm` tem overflow-y:auto e clipa qualquer
+   painel absolute — ver app/admin/FloatingPopover.tsx. O portal mira o
+   `.admin-shell`, não o body: os tokens `--a-*` abaixo são declarados NAQUELE
+   elemento, e um painel pendurado no body ficaria sem fundo, sem borda e com a
+   fonte do documento.
    z-index 340: acima do .kb-modal-backdrop (200) e do .ap-toast (300), abaixo
    do .cal-pop (360), que pode abrir por cima deste no mesmo modal.
+   As medidas seguem .tm-member-search-dropdown / .tm-headpick-panel de
+   propósito: é o mesmo objeto (lista de cards buscável dentro do card aberto),
+   e sair do padrão só fazia este parecer de outra tela.
    Só seletores de classe aqui: um `div.tm-chain-panel` perderia para regras de
    classe declaradas depois neste cascade — ver CLAUDE.md. */
 .tm-chain { display: inline-flex; }
 .tm-chain-panel {
   position: fixed; z-index: 340; width: 320px;
   max-width: calc((100vw / var(--ui-scale)) - 24px);
-  display: flex; flex-direction: column; gap: 8px;
-  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
-  box-shadow: 0 16px 44px rgba(0,0,0,.20); padding: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.18); padding: 8px;
   overscroll-behavior: contain;
 }
-.tm-chain-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--a-sec); }
+.tm-chain-title { margin: 0; padding: 3px 9px 0; font-size: 12px; font-weight: 600; color: var(--a-sec); }
 .tm-chain-search {
-  width: 100%; padding: 7px 10px; font: inherit; font-size: 13px;
-  border: 1px solid var(--a-border); border-radius: 9px;
+  width: 100%; padding: 7px 9px; font: inherit; font-size: 13px;
+  border: 1px solid var(--a-border); border-radius: 8px;
   background: var(--a-surface2); color: var(--a-ink);
 }
-.tm-chain-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.tm-chain-search:focus { outline: none; border-color: var(--a-teal); }
+.tm-chain-list { display: flex; flex-direction: column; gap: 1px; max-height: 260px; overflow-y: auto; }
 .tm-chain-option {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
-  width: 100%; padding: 7px 8px; border: 0; border-radius: 9px; background: none;
+  width: 100%; padding: 8px 9px; border: 0; border-radius: 8px; background: none;
   text-align: left; cursor: pointer; color: var(--a-ink); font: inherit; font-size: 13px;
 }
-.tm-chain-option:hover { background: var(--a-inset); }
+.tm-chain-option:hover { background: var(--a-hover); }
 .tm-chain-option-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tm-chain-option-status { font-size: 11px; color: var(--a-muted); white-space: nowrap; }
-.tm-chain-empty { margin: 0; padding: 4px 2px; }
+.tm-chain-empty { margin: 0; padding: 4px 9px 6px; font-size: 12px; color: var(--a-muted); }
 /* O card aberto no momento, dentro da própria lista de etapas. */
 .tm-member-current { opacity: .75; }
 

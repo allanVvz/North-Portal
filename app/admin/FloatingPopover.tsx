@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-// Popover que flutua de verdade: portal para o body + `position: fixed`.
+// Popover que flutua de verdade: portal para o `.admin-shell` + `position: fixed`.
 //
 // Existe porque o padrão `absolute` + `z-index: 60` que os outros quatro
 // popovers do admin usam (HeadDropdown, SortMenu, AttrVisibilityPopover,
@@ -52,8 +52,21 @@ export function useFloatingPopover(open: boolean, placement: Placement = "start"
       const visualWidth = Math.min(popoverRect.width, viewportWidth - margin * 2);
       const visualHeight = Math.min(popoverRect.height, viewportHeight - margin * 2);
 
+      // A janela horizontal é a do MODAL quando existe um, não a da viewport.
+      // Sem isso um painel de 320px ancorado num botão de 20px encostado na
+      // borda esquerda do card sai inteiro para fora dele e vai parar colado no
+      // canto da tela — o painel abre a partir do modal, então tem que terminar
+      // dentro dele.
+      const boundaryRect = anchor.closest(".tm, .kb-modal")?.getBoundingClientRect() ?? null;
+      const minLeft = Math.max(margin, boundaryRect ? boundaryRect.left : margin);
+      const maxLeft = Math.min(
+        viewportWidth - visualWidth - margin,
+        boundaryRect ? boundaryRect.right - visualWidth : Number.POSITIVE_INFINITY,
+      );
       const rawLeft = placement === "end" ? anchorRect.right - visualWidth : anchorRect.left;
-      const left = Math.min(Math.max(rawLeft, margin), viewportWidth - visualWidth - margin);
+      // Math.max(minLeft, maxLeft) porque um modal mais estreito que o painel
+      // inverteria os limites e prenderia o painel no lugar errado.
+      const left = Math.min(Math.max(rawLeft, minLeft), Math.max(minLeft, maxLeft));
       const spaceBelow = viewportHeight - anchorRect.bottom - gap - margin;
       const spaceAbove = anchorRect.top - gap - margin;
       const openAbove = visualHeight > spaceBelow && spaceAbove > spaceBelow;
@@ -91,9 +104,9 @@ export function useFloatingPopover(open: boolean, placement: Placement = "start"
   return { anchorRef, popoverRef, style };
 }
 
-/** Fecha em clique fora e Escape. Testa OS DOIS refs: como o popover vai para o
- *  body por portal, ele não é descendente da âncora, e checar só a âncora
- *  fecharia o popover no primeiro clique dentro dele. */
+/** Fecha em clique fora e Escape. Testa OS DOIS refs: como o popover sai por
+ *  portal, ele não é descendente da âncora, e checar só a âncora fecharia o
+ *  popover no primeiro clique dentro dele. */
 export function useDismissOnOutside(
   open: boolean,
   onClose: () => void,
@@ -137,6 +150,11 @@ export function FloatingPanel({
     <div ref={popoverRef} className={className} style={style}>
       {children}
     </div>,
-    document.body,
+    // `.admin-shell`, NÃO `document.body`: todos os tokens do tema
+    // (`--a-surface`, `--a-border`, `--a-ink`, a fonte) são declarados naquele
+    // elemento. Um portal para o body cai fora desse escopo, `var(--a-surface)`
+    // não resolve e o painel sai transparente, sem borda e com a fonte errada.
+    // CalendarPicker já mirava aqui pelo mesmo motivo.
+    document.querySelector(".admin-shell") ?? document.body,
   );
 }
