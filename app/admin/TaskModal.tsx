@@ -1130,7 +1130,7 @@ export default function TaskModal({
                   <button
                     type="button"
                     key={column.status}
-                    className={`tm-step ${column.status !== "parada" && stepIdx >= 0 && WORKFLOW_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""}`}
+                    className={`tm-step ${column.status !== "parada" && stepIdx >= 0 && WORKFLOW_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""} ${column.status === "parada" ? "tm-step-halt" : ""}`}
                     onClick={() => set("status", column.status)}
                   >
                     <span className="tm-step-dot" />
@@ -1141,8 +1141,11 @@ export default function TaskModal({
             </div>
             <div className="tm-head-actions">
               {visible("progress") ? (
-                <div className="tm-head-progress" title={`Progresso ${headerPct}%`}>
-                  <span><span style={{ width: `${headerPct}%` }} /></span>
+                <div
+                  className={`tm-head-progress ${draft.status === "parada" ? "tm-head-progress-halt" : ""}`}
+                  title={draft.status === "parada" ? `Parada em ${headerPct}%` : `Progresso ${headerPct}%`}
+                >
+                  <span><span className="tm-head-progress-fill" style={{ width: `${headerPct}%` }} /></span>
                   <b>{headerPct}%</b>
                 </div>
               ) : null}
