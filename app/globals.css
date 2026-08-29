@@ -2920,11 +2920,13 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 /* "Parada" não é uma etapa cumprida, é um alarme: uma automação falhou e o card
    está esperando alguém olhar. A regra .current pintava esse passo do mesmo
    teal das outras etapas, ou seja, o único estado em que algo está errado era o
-   que mais parecia "tudo certo". Duas classes (0-2-0/0-3-0) vencem as regras
-   .tm-step.done/.current declaradas acima sem precisar de seletor de elemento
-   — ver CLAUDE.md. */
-.tm-step-halt .tm-step-dot { box-shadow: 0 0 0 1px var(--a-danger); }
-.tm-step-halt .tm-step-label { color: var(--a-danger); }
+   que mais parecia "tudo certo".
+   SÓ sob .current. Sem esse qualificador o alarme fica aceso em todo card, e um
+   alarme sempre aceso não é alarme — vira ruído que se aprende a ignorar. Um
+   passo "Parada" não alcançado é um passo futuro qualquer, e cai nas regras
+   base de .tm-step-dot/.tm-step-label, que já são tokens do tema.
+   Duas classes (0-3-0) vencem .tm-step.current declarada acima sem precisar de
+   seletor de elemento — ver CLAUDE.md. */
 .tm-step-halt.current .tm-step-dot { background: var(--a-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-danger) 24%, transparent); }
 .tm-step-halt.current .tm-step-label { color: var(--a-danger); font-weight: 700; }
 
