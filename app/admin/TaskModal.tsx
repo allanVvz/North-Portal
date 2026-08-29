@@ -617,14 +617,22 @@ export default function TaskModal({
     : null;
   useEffect(() => {
     if (!flowDeliveryId) { setFlowDelivery(null); return; }
+    // Só ENTREGA vira corrente. `flowDeliveryId` cai no primeiro pai quando
+    // nenhum pai carregado é entrega — e um card pode ter como único pai um
+    // Plano de Ação, que não aparece no quadro e por isso costuma não estar em
+    // clientTasks. Sem esta guarda a caixa "Etapas" renderiza com o Plano no
+    // papel de entrega e mostra uma corrente `(N/0)` que não existe. Filtrar
+    // por id não resolve, porque o pai frequentemente não está carregado; a
+    // checagem tem que ser DEPOIS de ter o card em mãos.
+    const asDelivery = (parent: TaskRecord | null) => (parent && isFlowDelivery(parent) ? parent : null);
     const loaded = clientTasks.find((t) => t.id === flowDeliveryId) ?? null;
-    if (loaded) { setFlowDelivery(loaded); return; }
+    if (loaded) { setFlowDelivery(asDelivery(loaded)); return; }
     let cancelled = false;
     // A entrega não aparece no quadro, então frequentemente não está em
     // clientTasks — buscar por id é o caminho normal aqui, não a exceção.
     fetch(`/api/admin/tasks/${encodeURIComponent(flowDeliveryId)}`)
       .then((response) => response.ok ? response.json() : null)
-      .then((parent: TaskRecord | null) => { if (!cancelled && parent) setFlowDelivery(parent); })
+      .then((parent: TaskRecord | null) => { if (!cancelled) setFlowDelivery(asDelivery(parent)); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [flowDeliveryId, clientTasks]);
