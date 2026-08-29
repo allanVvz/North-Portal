@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 // End-to-end coverage of the Plano de Ação model against the live backend:
 // seeds one plan per client (Karpinski + Baita), each with real member
@@ -7,8 +8,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // plans render with the correct rolled-up progress and their activities. Cleans
 // up everything it creates.
 
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
 const RUN = Date.now();
 
 function serviceClient(): SupabaseClient {
@@ -37,10 +36,15 @@ async function seedPlan(sb: SupabaseClient, clientId: string, title: string, mem
   for (const [i, m] of members.entries()) {
     const { data: mem, error: memErr } = await sb
       .from("tasks")
-      .insert({ client_id: clientId, kind: m.kind, title: `${title} · ativ ${i + 1}`, status: m.status, client_visible: true, plan_id: plan.id })
+      .insert({ client_id: clientId, kind: m.kind, title: `${title} · ativ ${i + 1}`, status: m.status, client_visible: true })
       .select("id")
       .single();
     if (memErr || !mem) throw new Error(`seed member failed: ${memErr?.message}`);
+    // Membership virou elo em `task_links`; `plan_id` hoje significa apenas
+    // "ocorrência de recorrência". Semear pelo campo antigo faria as atividades
+    // simplesmente não aparecerem no plano.
+    const { error: linkErr } = await sb.from("task_links").insert({ parent_id: plan.id, child_id: mem.id, position: i });
+    if (linkErr) throw new Error(`seed link failed: ${linkErr.message}`);
     ids.push(mem.id as string);
   }
   return ids;

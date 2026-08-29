@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 // Real end-to-end coverage of the Agenda page against the live backend — no
 // mocks: (1) a client with no `agendamento` tasks falls back to the static
@@ -9,8 +10,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // design. The test never flips that production-wide setting. Cleans up
 // everything it creates, including the throwaway client.
 
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
 const RUN = Date.now();
 const SLUG = `e2e-agenda-${RUN}`;
 const NAME = `[e2e ${RUN}] Cliente Agenda`;

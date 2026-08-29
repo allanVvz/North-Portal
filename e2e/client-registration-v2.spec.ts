@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 // End-to-end coverage of the rebuilt "Cadastrar cliente" screen against the
 // real backend: the company/contract cards persist to their new tables, the
@@ -7,8 +8,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // only the selected checkpoints become cards, and the kickoff card shows up on
 // the Kanban. Cleans up everything it creates.
 
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
 const RUN = Date.now();
 const SLUG = `e2e-cadastro-${RUN}`;
 const NAME = `[e2e ${RUN}] Cadastro v2`;

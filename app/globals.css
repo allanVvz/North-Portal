@@ -3552,6 +3552,41 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    é o que faz a cor sobrescrever a do pill genérico. */
 .kb-flow-step { color: var(--a-purple-text); background: var(--a-purple-soft); font-weight: 600; }
 
+/* ---- Seletor de corrente (ligar um card a uma etapa) ---- */
+/* Portal para o body + position: fixed, porque `.tm` tem overflow-y:auto e
+   clipa qualquer painel absolute — ver app/admin/FloatingPopover.tsx.
+   z-index 340: acima do .kb-modal-backdrop (200) e do .ap-toast (300), abaixo
+   do .cal-pop (360), que pode abrir por cima deste no mesmo modal.
+   Só seletores de classe aqui: um `div.tm-chain-panel` perderia para regras de
+   classe declaradas depois neste cascade — ver CLAUDE.md. */
+.tm-chain { display: inline-flex; }
+.tm-chain-panel {
+  position: fixed; z-index: 340; width: 320px;
+  max-width: calc((100vw / var(--ui-scale)) - 24px);
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 14px;
+  box-shadow: 0 16px 44px rgba(0,0,0,.20); padding: 12px;
+  overscroll-behavior: contain;
+}
+.tm-chain-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--a-sec); }
+.tm-chain-search {
+  width: 100%; padding: 7px 10px; font: inherit; font-size: 13px;
+  border: 1px solid var(--a-border); border-radius: 9px;
+  background: var(--a-surface2); color: var(--a-ink);
+}
+.tm-chain-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.tm-chain-option {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 8px; border: 0; border-radius: 9px; background: none;
+  text-align: left; cursor: pointer; color: var(--a-ink); font: inherit; font-size: 13px;
+}
+.tm-chain-option:hover { background: var(--a-inset); }
+.tm-chain-option-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-chain-option-status { font-size: 11px; color: var(--a-muted); white-space: nowrap; }
+.tm-chain-empty { margin: 0; padding: 4px 2px; }
+/* O card aberto no momento, dentro da própria lista de etapas. */
+.tm-member-current { opacity: .75; }
+
 /* Caixa "Próxima etapa criada" — destaque de propósito: ela aparece no momento
    exato em que a etapa é concluída e é o único caminho imediato para o trabalho
    seguinte. Classe única, sem `div.tm-flownext`, pelo motivo do CLAUDE.md. */

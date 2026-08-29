@@ -1315,6 +1315,19 @@ export async function linkTasks(parentId: string, childId: string, slot: string 
   if (error && (error as { code?: string }).code !== "23505") fail(error);
 }
 
+/** Já existe card ligado neste slot deste pai? `ignoreChildId` deixa religar o
+ * mesmo card sem falso positivo. */
+export async function slotIsTaken(parentId: string, slot: string, ignoreChildId?: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("task_links")
+    .select("child_id")
+    .eq("parent_id", parentId)
+    .eq("slot", slot);
+  if (error) fail(error);
+  return ((data as { child_id: string }[] | null) ?? []).some((l) => l.child_id !== ignoreChildId);
+}
+
 export async function unlinkTasks(parentId: string, childId: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("task_links").delete().eq("parent_id", parentId).eq("child_id", childId);

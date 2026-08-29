@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
-import { getTaskById, linkTasks } from "@/lib/supabase";
+import { getTaskById, linkTasks, slotIsTaken } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError } from "@/lib/validation";
 
@@ -27,6 +27,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // Uma etapa so encaixa no slot do proprio subtipo: ligar um roteiro na
     // etapa de edicao produziria uma corrente que nao quer dizer nada.
     if (slot && child.subtype !== slot) throw new HttpError(400, "Este card nao e do subtipo desta etapa.");
+
+    // Uma etapa so aceita UM card. Sem esta trava, uma tela desatualizada
+    // (mostrando o slot vazio depois de ja ter ligado algo) faz um segundo
+    // clique criar um segundo elo no mesmo slot -- e a caixa de etapas renderiza
+    // so o primeiro, entao o outro fica invisivel. Ja aconteceu em producao.
+    if (slot && (await slotIsTaken(id, slot, child_id))) {
+      throw new HttpError(409, "Esta etapa ja tem um card ligado.");
+    }
 
     await linkTasks(id, child_id, slot ?? null, child.position);
     return NextResponse.json(await getTaskById(child_id));

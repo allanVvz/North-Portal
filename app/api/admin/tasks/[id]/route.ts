@@ -127,17 +127,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     let task = await updateTaskGroup(id, current, taskPatch);
     if (planLink !== undefined) {
       await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null);
-      task = (await getTaskById(id)) ?? task;
     }
     if (payload_patch) task = await updateTaskPayloadPatch(id, payload_patch);
-    if (assignee_profile_ids !== undefined) {
-      await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
-      const full = await getTaskById(task.id);
-      await notifyTaskChange(current, full ?? task);
-      return NextResponse.json(await withFlowNextTask(current, full ?? task));
-    }
-    await notifyTaskChange(current, task);
-    return NextResponse.json(await withFlowNextTask(current, task));
+    if (assignee_profile_ids !== undefined) await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
+
+    // Reler pelo caminho completo antes de responder. As escritas devolvem só
+    // as colunas de `tasks`, sem os joins — então a resposta saía sem `parents`
+    // (e sem os responsáveis vinculados). Como o cliente FUNDE essa resposta no
+    // estado local, uma resposta incompleta apagava os elos que a tela acabara
+    // de aprender: a caixa de etapas voltava a mostrar o slot vazio.
+    const saved = (await getTaskById(task.id)) ?? task;
+    await notifyTaskChange(current, saved);
+    return NextResponse.json(await withFlowNextTask(current, saved));
   } catch (error) {
     return apiError(error);
   }

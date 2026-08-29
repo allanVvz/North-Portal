@@ -1,12 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 // The admin Home is assembled entirely from existing data (no new table), so
 // this checks the wiring: KPIs render real numbers and link to the screen that
 // resolves them, the notifications panel is fed by the same API as the bell,
 // and "+ Nova tarefa" opens the shared TaskModal in creation mode.
-
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
 
 // The dev server compiles routes on first hit, so the first assertion on a
 // fresh route can outlast the default 5s expect timeout. Waiting for the

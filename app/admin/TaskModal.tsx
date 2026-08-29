@@ -5,6 +5,7 @@ import AttrVisibilityPopover from "./AttrVisibilityPopover";
 import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
+import FlowStepsBox from "./FlowStepsBox";
 import VisibleToggleField from "./VisibleToggleField";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { ATTR_DEFS, useAttrVisibility } from "./kanbanAttrs";
@@ -638,37 +639,47 @@ export default function TaskModal({
   const linkableCandidates = liveTask
     ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !parentIdsOf(t).length && t.client_id === liveTask.client_id)
     : [];
-  // Estado do botão de corrente: qual etapa está com o seletor aberto.
-  const [chainSlot, setChainSlot] = useState<string | null>(null);
+  /** A entrega a que a caixa de etapas se refere: o próprio card quando ele é a
+   * entrega, ou o pai quando estamos olhando uma etapa. É isso que faz a mesma
+   * caixa (e o mesmo botão de corrente) funcionar nos dois lugares. */
+  const chainDelivery = isDelivery ? liveTask : flowDelivery;
+
+  // As etapas da corrente a que este card pertence — as do próprio card quando
+  // ele é a entrega, as do pai quando ele é uma etapa.
+  const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
 
   /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo tipo, mesmo
    * subtipo, e ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
-   * entrega aparece de propósito — compartilhar é o objetivo. */
+   * entrega aparece de propósito — compartilhar é o objetivo. E nada de filtrar
+   * por status: um card concluído continua associável. */
   function chainCandidates(slot: string) {
-    if (!liveTask) return [];
+    if (!chainDelivery) return [];
     return clientTasks.filter(
       (t) =>
-        t.id !== liveTask.id &&
-        t.client_id === liveTask.client_id &&
-        t.kind === liveTask.kind &&
+        t.id !== chainDelivery.id &&
+        t.client_id === chainDelivery.client_id &&
+        t.kind === chainDelivery.kind &&
         t.subtype === slot &&
-        !t.parents.some((parent) => parent.id === liveTask.id),
+        !t.parents.some((parent) => parent.id === chainDelivery.id),
     );
   }
 
-  async function linkStepCard(taskId: string, slot: string) {
-    if (!liveTask) return;
+  async function linkStepCard(task: TaskRecord, slot: string) {
+    if (!chainDelivery) return;
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}/relations`, {
+      const res = await fetch(`/api/admin/tasks/${chainDelivery.id}/relations`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ child_id: taskId, slot }),
+        body: JSON.stringify({ child_id: task.id, slot }),
       });
-      const body = await res.json().catch(() => null) as { error?: string } | null;
+      const body = await res.json().catch(() => null) as (TaskRecord & { error?: string }) | null;
       if (!res.ok) throw new Error(body?.error ?? "Não foi possível ligar o card.");
-      setChainSlot(null);
-      onTaskPatched?.(liveTask);
+      // O card que MUDOU é o filho — ele ganhou um pai novo. Passar a entrega
+      // aqui (que não mudou) era o bug: `clientTasks` nunca aprendia o elo, a
+      // etapa continuava aparecendo vazia, e um segundo clique criava um
+      // segundo elo no mesmo slot.
+      if (body?.id) onTaskPatched?.(body as TaskRecord);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível ligar o card.");
     } finally {
@@ -1403,83 +1414,22 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {liveTask && isDelivery ? (
-              <div className="tm-box tm-planmembers">
-                <p className="tm-box-label">
-                  Etapas{deliveryType ? ` · ${deliveryType.label}` : ""} ({flowSteps.length}/{deliveryType?.subtypes.length ?? flowSteps.length})
-                </p>
-                <div className="tm-member-list">
-                  {/* A lista vem do TIPO, não dos cards: numa cascata as etapas
-                      seguintes ainda não existem, e mostrar só o que já nasceu
-                      esconderia justamente o que falta. */}
-                  {(deliveryType?.subtypes ?? []).map((step) => {
-                    const card = flowSteps.find((t) => flowStepKeyOf(t) === step.key) ?? null;
-                    return (
-                      <div className="tm-member" key={step.key}>
-                        {card ? (
-                          <>
-                            <button
-                              type="button"
-                              className="tm-member-unlink"
-                              title="Desligar este card da entrega"
-                              aria-label={`Desligar ${card.title} da entrega`}
-                              onClick={() => void unlinkMember(card.id, liveTask.id)}
-                              disabled={busy}
-                            >✕</button>
-                            <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(card)} disabled={!onOpenRelatedTask || busy}>
-                              <TaskKindIcon kind={card.kind} size="sm" />
-                              <span className="tm-member-title">{step.label}</span>
-                              <span className="tm-member-status">{STATUS_LABEL[card.status]}</span>
-                              <span className="tm-member-arrow" aria-hidden>↗</span>
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            {/* Botão de corrente: liga um card que JÁ EXISTE a
-                                esta etapa, em vez de esperar a cascata criar um
-                                novo. É assim que o mesmo roteiro serve três
-                                peças e uma diária de gravação serve vários
-                                criativos — ligar compartilha, não copia. */}
-                            <button
-                              type="button"
-                              className="tm-member-unlink tm-member-chain"
-                              title={`Ligar um card existente à etapa ${step.label}`}
-                              aria-label={`Ligar um card existente à etapa ${step.label}`}
-                              onClick={() => setChainSlot(chainSlot === step.key ? null : step.key)}
-                              disabled={busy}
-                            >🔗</button>
-                            <span className="tm-member-open tm-member-pending">
-                              <TaskKindIcon kind={liveTask.kind} size="sm" />
-                              <span className="tm-member-title">{step.label}</span>
-                              <span className="tm-member-status">Aguardando a etapa anterior</span>
-                            </span>
-                          </>
-                        )}
-                        {chainSlot === step.key ? (
-                          <div className="tm-chain-picker">
-                            {/* Só cards do MESMO subtipo e do mesmo cliente:
-                                ligar um roteiro na etapa de edição produziria
-                                uma corrente que não quer dizer nada. */}
-                            {chainCandidates(step.key).map((candidate) => (
-                              <button
-                                type="button"
-                                key={candidate.id}
-                                className="tm-headpick-option"
-                                onClick={() => void linkStepCard(candidate.id, step.key)}
-                                disabled={busy}
-                              >{candidate.title}</button>
-                            ))}
-                            {chainCandidates(step.key).length === 0 ? (
-                              <p className="admin-sub" style={{ margin: 0 }}>Nenhum card de {step.label} disponível neste cliente.</p>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                  {!deliveryType ? <p className="admin-sub" style={{ margin: 0 }}>Carregando etapas…</p> : null}
-                </div>
-              </div>
+            {/* A corrente aparece tanto no card da ENTREGA quanto no de uma
+                ETAPA: quem abre uma etapa pelo quadro precisa conseguir ligar
+                um card ali mesmo, sem descobrir antes que existe uma tela de
+                Entregas. */}
+            {liveTask && chainDelivery ? (
+              <FlowStepsBox
+                type={deliveryType}
+                steps={chainSteps}
+                currentTaskId={liveTask.id}
+                candidatesFor={chainCandidates}
+                busy={busy}
+                canOpen={Boolean(onOpenRelatedTask)}
+                onOpenStep={(card) => void openRelatedTask(card)}
+                onUnlinkStep={(card) => void unlinkMember(card.id, chainDelivery.id)}
+                onLinkStep={(card, slot) => void linkStepCard(card, slot)}
+              />
             ) : null}
 
             {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
