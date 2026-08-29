@@ -33,14 +33,20 @@ function toneFor(who: string): (typeof TONES)[number] {
 // by Responsável (quem) — each chip shows o que (título/tipo) and quando
 // (prazo). Wraps instead of scrolling horizontally so it stays fully
 // responsive down to mobile widths.
-export default function StrategicView({
+// Genérico sobre ActionPlan para servir também às Entregas de fluxo, que são
+// estruturalmente um plano (mesmo pai, mesmas `activities`) agregado por
+// sequência em vez de por composição. Sem isso, os handlers do chamador
+// chegariam alargados para ActionPlan e ele perderia os próprios campos.
+export default function StrategicView<T extends ActionPlan>({
   plans,
   onOpenPlan,
   onOpenActivity,
+  emptyMessage = "Nenhum plano de ação ainda. Crie um card do tipo “Plano de Ação” no Kanban.",
 }: {
-  plans: ActionPlan[];
-  onOpenPlan: (plan: ActionPlan) => void;
-  onOpenActivity: (plan: ActionPlan, activityId: string) => void;
+  plans: T[];
+  onOpenPlan: (plan: T) => void;
+  onOpenActivity: (plan: T, activityId: string) => void;
+  emptyMessage?: string;
 }) {
   // Todo plano nasce recolhido — a tela abria como uma parede de swimlanes de
   // todos os clientes ao mesmo tempo. Um Set (e não um único id) porque
@@ -54,10 +60,10 @@ export default function StrategicView({
     });
 
   if (plans.length === 0) {
-    return <p className="admin-empty">Nenhum plano de ação ainda. Crie um card do tipo “Plano de Ação” no Kanban.</p>;
+    return <p className="admin-empty">{emptyMessage}</p>;
   }
 
-  const groups = new Map<string, { clientName: string; items: ActionPlan[] }>();
+  const groups = new Map<string, { clientName: string; items: T[] }>();
   for (const p of plans) {
     const key = p.clientSlug || NO_CLIENT;
     const g = groups.get(key);

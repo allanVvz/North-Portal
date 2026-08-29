@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  actionPlanIdOf,
-  actionPlanMembersOf,
   activatedTaskPayload,
   belongsToTaskScreen,
+  childrenByParent,
   childrenOf,
-  detachedTaskRelationPatch,
+  detachedRecurrencePatch,
+  flowStepKeyOf,
+  hasParent,
   isDeferredTask,
+  isFlowDelivery,
+  parentIdsOf,
   recurrenceParentOf,
-  recurringActionPlanPatch,
+  slotOf,
   visibleOnTaskBoard,
 } from "./taskRelations";
 
@@ -20,9 +23,8 @@ describe("relações entre tarefas", () => {
     expect(recurrenceParentOf(null, tasks)).toBeNull();
   });
 
-  it("mantém a execução futura sob o pai sem exibi-la no quadro", () => {
-    const child = { id: "child", plan_id: "parent", payload: { deferred_until_accessed: true } };
-    expect(childrenOf("parent", [child])).toEqual([child]);
+  it("mantém a execução futura escondida do quadro", () => {
+    const child = { parents: [], payload: { deferred_until_accessed: true } };
     expect(isDeferredTask(child)).toBe(true);
     expect(visibleOnTaskBoard(child)).toBe(false);
   });
@@ -32,80 +34,76 @@ describe("relações entre tarefas", () => {
     expect(payload).toEqual({ recurrence_parent_id: "parent", accessed_at: "2026-07-21T12:00:00.000Z" });
   });
 
-  it("separa o plano de ação do pai de uma ocorrência recorrente", () => {
-    const ordinary = { plan_id: "plan", payload: {} };
+  // Desvincular uma ocorrência limpa a metadata de recorrência junto com o FK:
+  // deixá-la para trás faria o card continuar parecendo relacionado.
+  it("torna uma execução recorrente independente sem perder seu conteúdo", () => {
     const occurrence = {
       plan_id: "recurrence-parent",
-      payload: { recurrence_parent_id: "recurrence-parent", action_plan_id: "plan" },
+      payload: { recurrence_parent_id: "recurrence-parent", recurrence_cycle: 2, comments: [{ text: "oi" }] },
     };
-    expect(actionPlanIdOf(ordinary)).toBe("plan");
-    expect(actionPlanIdOf(occurrence)).toBe("plan");
-    expect(childrenOf("recurrence-parent", [occurrence])).toEqual([occurrence]);
-    expect(actionPlanMembersOf("plan", [ordinary, occurrence])).toEqual([ordinary, occurrence]);
-  });
-
-  it("vincula e desvincula uma ocorrência sem sobrescrever seu plan_id", () => {
-    const current = {
-      plan_id: "recurrence-parent",
-      payload: { recurrence_parent_id: "recurrence-parent", comments: [] },
-    };
-    const linked = recurringActionPlanPatch(current, { plan_id: "action-plan", status: "em_producao" });
-    expect(linked).not.toHaveProperty("plan_id");
-    expect(linked).toMatchObject({ status: "em_producao", payload: { recurrence_parent_id: "recurrence-parent", action_plan_id: "action-plan" } });
-
-    const unlinked = recurringActionPlanPatch(
-      { ...current, payload: linked.payload as Record<string, unknown> },
-      { plan_id: null },
-    );
-    expect(unlinked.payload).toEqual({ recurrence_parent_id: "recurrence-parent", comments: [] });
-  });
-
-  it("torna uma execução recorrente independente sem perder seu conteúdo", () => {
-    const patch = detachedTaskRelationPatch({
-      plan_id: "recurrence-parent",
-      payload: {
-        recurrence_parent_id: "recurrence-parent",
-        recurrence_cycle: 2,
-        occurrence_date: "2026-08-05",
-        deferred_until_accessed: true,
-        comments: [{ text: "conteúdo preservado" }],
-        action_plan_id: "action-plan",
-      },
-    }, "recurrence-parent");
-
-    expect(patch).toEqual({
+    expect(detachedRecurrencePatch(occurrence, "recurrence-parent")).toEqual({
       plan_id: null,
-      payload: {
-        comments: [{ text: "conteúdo preservado" }],
-        action_plan_id: "action-plan",
-      },
+      payload: { comments: [{ text: "oi" }] },
     });
-  });
-
-  it("remove apenas a ligação secundária com o plano", () => {
-    const patch = detachedTaskRelationPatch({
-      plan_id: "recurrence-parent",
-      payload: {
-        recurrence_parent_id: "recurrence-parent",
-        action_plan_id: "action-plan",
-        comments: [],
-      },
-    }, "action-plan");
-
-    expect(patch).toEqual({
-      payload: { recurrence_parent_id: "recurrence-parent", comments: [] },
-    });
+    expect(detachedRecurrencePatch(occurrence, "outro-pai")).toBeNull();
   });
 });
 
-describe("separação da tela Tarefas", () => {
-  const base = { kind: "operacional", recurrence_cadence: null, payload: {} } as const;
+describe("pertencimento N:N (task_links)", () => {
+  // O ponto todo da mudança: o mesmo roteiro serve várias peças, a mesma
+  // diária de gravação serve vários criativos.
+  const roteiro = { parents: [{ id: "entrega-a", slot: "roteiro" }, { id: "entrega-b", slot: "roteiro" }] };
+  const avulsa = { parents: [] };
 
-  it("aceita apenas tarefas comuns", () => {
-    expect(belongsToTaskScreen(base)).toBe(true);
-    expect(belongsToTaskScreen({ ...base, kind: "plano_acao" })).toBe(false);
-    expect(belongsToTaskScreen({ ...base, recurrence_cadence: "semanal" })).toBe(false);
-    expect(belongsToTaskScreen({ ...base, payload: { deferred_until_accessed: true } })).toBe(false);
-    expect(belongsToTaskScreen({ ...base, payload: { recurrence_group: true } })).toBe(false);
+  it("um card pertence a vários pais ao mesmo tempo", () => {
+    expect(parentIdsOf(roteiro)).toEqual(["entrega-a", "entrega-b"]);
+    expect(hasParent(roteiro, "entrega-b")).toBe(true);
+    expect(hasParent(avulsa, "entrega-a")).toBe(false);
+  });
+
+  it("conta o card em cada pai de que participa", () => {
+    const map = childrenByParent([roteiro, avulsa]);
+    expect(map.get("entrega-a")).toEqual([roteiro]);
+    expect(map.get("entrega-b")).toEqual([roteiro]);
+    expect(childrenOf("entrega-a", [roteiro, avulsa])).toEqual([roteiro]);
+  });
+
+  it("o slot é por pai — o mesmo card pode ocupar etapas diferentes", () => {
+    const compartilhado = { parents: [{ id: "p1", slot: "roteiro" }, { id: "p2", slot: null }] };
+    expect(slotOf(compartilhado, "p1")).toBe("roteiro");
+    expect(slotOf(compartilhado, "p2")).toBeNull();
+    expect(slotOf(compartilhado, "inexistente")).toBeNull();
+  });
+});
+
+describe("entregas de fluxo", () => {
+  // A etapa que um card É vem do próprio subtipo: os subtipos de um
+  // tipo-entrega SÃO as etapas dele, sem segunda lista para sincronizar.
+  it("lê a etapa a partir do subtipo do card", () => {
+    expect(flowStepKeyOf({ subtype: "captacao" })).toBe("captacao");
+    expect(flowStepKeyOf({ subtype: null })).toBeNull();
+  });
+
+  // Marca explícita, e não inferida do tipo: há cards `criativo` legados que
+  // são trabalho comum e não podem virar pais de uma hora para outra.
+  it("reconhece a entrega pela marca no payload, não pelo tipo", () => {
+    expect(isFlowDelivery({ payload: { flow_parent: true } })).toBe(true);
+    expect(isFlowDelivery({ payload: {} })).toBe(false);
+  });
+
+  it("mantém a entrega fora do quadro Tarefas e a etapa dentro", () => {
+    const entrega = { kind: "criativo", recurrence_cadence: null, payload: { flow_parent: true } } as const;
+    const etapa = { kind: "criativo", recurrence_cadence: null, payload: {} } as const;
+    const legado = { kind: "criativo", recurrence_cadence: null, payload: {} } as const;
+    expect(belongsToTaskScreen(entrega)).toBe(false);
+    expect(belongsToTaskScreen(etapa)).toBe(true);
+    // O card criativo antigo continua sendo trabalho comum no quadro.
+    expect(belongsToTaskScreen(legado)).toBe(true);
+  });
+
+  it("mantém plano e pai recorrente fora do quadro, como antes", () => {
+    expect(belongsToTaskScreen({ kind: "plano_acao", recurrence_cadence: null, payload: {} })).toBe(false);
+    expect(belongsToTaskScreen({ kind: "operacional", recurrence_cadence: "semanal", payload: {} })).toBe(false);
+    expect(belongsToTaskScreen({ kind: "operacional", recurrence_cadence: null, payload: {} })).toBe(true);
   });
 });

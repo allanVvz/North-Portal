@@ -13,7 +13,7 @@
 // lib/automations/run.ts's job, kept separate so this file stays pure
 // card-shape branching.
 
-import { TASK_COLUMNS } from "@/lib/supabase";
+import { TASK_COLUMNS } from "@/lib/taskColumns";
 import type { TaskRecord } from "@/lib/validation";
 import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "@/lib/recurrence";
 import { recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "@/lib/recurrenceState";

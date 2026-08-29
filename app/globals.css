@@ -2917,6 +2917,16 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-step.done .tm-step-label, .tm-step.current .tm-step-label { color: var(--a-ink); }
 .tm-step-line { position: absolute; top: 5px; left: 50%; width: 100%; height: 2px; background: var(--a-border-strong); z-index: -1; }
 .tm-step.done .tm-step-line { background: var(--a-teal); }
+/* "Parada" não é uma etapa cumprida, é um alarme: uma automação falhou e o card
+   está esperando alguém olhar. A regra .current pintava esse passo do mesmo
+   teal das outras etapas, ou seja, o único estado em que algo está errado era o
+   que mais parecia "tudo certo". Duas classes (0-2-0/0-3-0) vencem as regras
+   .tm-step.done/.current declaradas acima sem precisar de seletor de elemento
+   — ver CLAUDE.md. */
+.tm-step-halt .tm-step-dot { box-shadow: 0 0 0 1px var(--a-danger); }
+.tm-step-halt .tm-step-label { color: var(--a-danger); }
+.tm-step-halt.current .tm-step-dot { background: var(--a-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-danger) 24%, transparent); }
+.tm-step-halt.current .tm-step-label { color: var(--a-danger); font-weight: 700; }
 
 .tm-box { margin: 20px 30px 0; background: var(--a-inset); border-radius: 14px; padding: 18px 20px; }
 .tm-box-label { margin: 0 0 10px; font-size: 12px; font-weight: 700; color: var(--a-sec); }
@@ -3010,10 +3020,15 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-comment-text a { overflow-wrap: anywhere; word-break: break-all; }
 
 /* "Criado em <data hora>", uma linha só no topo da coluna de comentários. */
+/* 9.6px = 12px - 20%. É metadado de canto: fica acima da conversa o tempo todo
+   e não é o que se vem ler aqui, então cede tamanho para os comentários. O
+   corte é só desta linha de propósito — "Comentários e atividade" é
+   `.tm-box-label` e "Nenhum comentário" é `.admin-sub`, classes que servem o
+   admin inteiro e encolheriam telas que ninguém pediu para mexer. */
 .tm-createdline {
   display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
   margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--a-border);
-  font-size: 12px;
+  font-size: 9.6px;
 }
 .tm-createdline span { color: var(--a-muted); }
 .tm-createdline b { color: var(--a-ink); font-weight: 600; }
@@ -3076,7 +3091,13 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-visible-toggle { margin: 20px 30px 0; }
 .tm .kb-visible-fields { margin: 14px 30px 0; }
 .tm .admin-error { margin: 10px 30px 0; }
-.tm .kb-modal-actions { margin: 20px 0 0; padding: 20px 30px 26px; border-top: 1px solid var(--a-border); }
+/* Barra compacta: 74px de rodapé para uma fileira de botões era mais espaço em
+   branco do que o card tem para dar — a conversa e a descrição rolam, o rodapé
+   é fixo e cobrava essa altura em toda tela. Padding e botões encolhem juntos
+   porque só o padding não chegaria à metade: 32.8px de botão já ocupavam quase
+   metade dos 74px. */
+.tm .kb-modal-actions { margin: 20px 0 0; padding: 4px 30px 5px; border-top: 1px solid var(--a-border); }
+.tm .kb-modal-actions .admin-btn { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
 
 @media (max-width: 640px) {
   .tm-typepicker, .tm-grid { grid-template-columns: 1fr; }
@@ -3546,6 +3567,58 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
 .kb-card-pill { font-size: 10.5px; color: var(--a-sec); background: var(--a-inset); padding: 2px 8px; border-radius: 999px; }
 .kb-published-mark { color: var(--a-teal-text); background: var(--a-teal-soft); font-weight: 700; }
+/* Selo de etapa da cascata. Classe única (nada de `span.kb-flow-step`): um
+   seletor elemento+classe perde para regras de classe declaradas depois neste
+   cascade — ver CLAUDE.md. Declarado depois de .kb-card-pill de propósito, que
+   é o que faz a cor sobrescrever a do pill genérico. */
+.kb-flow-step { color: var(--a-purple-text); background: var(--a-purple-soft); font-weight: 600; }
+
+/* ---- Seletor de corrente (ligar um card a uma etapa) ---- */
+/* Portal + position: fixed, porque `.tm` tem overflow-y:auto e clipa qualquer
+   painel absolute — ver app/admin/FloatingPopover.tsx. O portal mira o
+   `.admin-shell`, não o body: os tokens `--a-*` abaixo são declarados NAQUELE
+   elemento, e um painel pendurado no body ficaria sem fundo, sem borda e com a
+   fonte do documento.
+   z-index 340: acima do .kb-modal-backdrop (200) e do .ap-toast (300), abaixo
+   do .cal-pop (360), que pode abrir por cima deste no mesmo modal.
+   As medidas seguem .tm-member-search-dropdown / .tm-headpick-panel de
+   propósito: é o mesmo objeto (lista de cards buscável dentro do card aberto),
+   e sair do padrão só fazia este parecer de outra tela.
+   Só seletores de classe aqui: um `div.tm-chain-panel` perderia para regras de
+   classe declaradas depois neste cascade — ver CLAUDE.md. */
+.tm-chain { display: inline-flex; }
+.tm-chain-panel {
+  position: fixed; z-index: 340; width: 320px;
+  max-width: calc((100vw / var(--ui-scale)) - 24px);
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.18); padding: 8px;
+  overscroll-behavior: contain;
+}
+.tm-chain-title { margin: 0; padding: 3px 9px 0; font-size: 12px; font-weight: 600; color: var(--a-sec); }
+.tm-chain-search {
+  width: 100%; padding: 7px 9px; font: inherit; font-size: 13px;
+  border: 1px solid var(--a-border); border-radius: 8px;
+  background: var(--a-surface2); color: var(--a-ink);
+}
+.tm-chain-search:focus { outline: none; border-color: var(--a-teal); }
+.tm-chain-list { display: flex; flex-direction: column; gap: 1px; max-height: 260px; overflow-y: auto; }
+.tm-chain-option {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 9px; border: 0; border-radius: 8px; background: none;
+  text-align: left; cursor: pointer; color: var(--a-ink); font: inherit; font-size: 13px;
+}
+.tm-chain-option:hover { background: var(--a-hover); }
+.tm-chain-option-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-chain-option-status { font-size: 11px; color: var(--a-muted); white-space: nowrap; }
+.tm-chain-empty { margin: 0; padding: 4px 9px 6px; font-size: 12px; color: var(--a-muted); }
+/* O card aberto no momento, dentro da própria lista de etapas. */
+.tm-member-current { opacity: .75; }
+
+/* Caixa "Próxima etapa criada" — destaque de propósito: ela aparece no momento
+   exato em que a etapa é concluída e é o único caminho imediato para o trabalho
+   seguinte. Classe única, sem `div.tm-flownext`, pelo motivo do CLAUDE.md. */
+.tm-flownext { border-color: var(--a-teal); background: var(--a-teal-soft); }
 
 /* ---- Visible-to-client toggle (shared TaskModal/TaskDetailPanel component) ---- */
 .vtf { display: flex; flex-direction: column; gap: 6px; }
@@ -3653,6 +3726,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-head-progress > span { width: 82px; height: 6px; overflow: hidden; border-radius: 999px; background: var(--a-border); }
 .tm-head-progress > span > span { display: block; height: 100%; border-radius: inherit; background: var(--a-teal); transition: width .2s ease; }
 .tm-head-progress b { min-width: 34px; font-size: 12px; color: var(--a-sec); font-variant-numeric: tabular-nums; text-align: right; }
+/* O mesmo alarme da etapa "Parada", na barra: um card travado exibia uma barra
+   teal parada num número qualquer, que lê como progresso normal. `.tm-head-
+   progress-fill` existe só para esta regra ganhar por classe (0-2-0) em vez de
+   empatar com `.tm-head-progress > span > span` e depender de ordem de fonte —
+   ver CLAUDE.md. */
+.tm-head-progress-halt { border-color: color-mix(in srgb, var(--a-danger) 40%, transparent); }
+.tm-head-progress-halt .tm-head-progress-fill { background: var(--a-danger); }
+.tm-head-progress-halt b { color: var(--a-danger); }
 .tm-stepper-head { width: min(620px, 100%); min-width: 0; justify-self: center; padding: 0 6px; margin: 0; border: 0; overflow: visible; }
 .tm-lg .tm-head-actions { justify-self: end; }
 .tm-stepper-head .tm-step-label { font-size: 11px; }

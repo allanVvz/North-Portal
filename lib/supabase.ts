@@ -1,4 +1,5 @@
 import { createClient } from "./supabase/server";
+import { TASK_COLUMNS } from "./taskColumns";
 import {
   currentRecurringExecutionFields,
   explicitDateExecutionFields,
@@ -9,7 +10,7 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { actionPlanIdOf, actionPlanMembersOf, belongsToTaskScreen, detachedTaskRelationPatch, recurrenceParentIdOf, visibleOnTaskBoard, withActionPlanId } from "./taskRelations";
+import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, detachedRecurrencePatch, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
@@ -34,6 +35,7 @@ import {
   type ResponsibilityKey,
   type TaskRecord,
   type TaskStatus,
+  type TaskParentLink,
 } from "./validation";
 import { createAdminClient } from "./supabase/admin";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
@@ -46,7 +48,11 @@ import {
   type PerformanceTemplate,
   type PerformanceTemplateConfig,
 } from "./performanceTemplates";
-import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
+import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel, FLOW_STEP_COUNT_KEY, FLOW_TOTAL_WEIGHT_KEY } from "./taskCatalog";
+import { deliveryTypeProblem, findType, isDeliveryType, listTaskTypes, typeTotalWeight, type TaskBehavior } from "./taskTypes";
+import { DELIVERY_INITIAL_STATUS } from "./flows/parentStatus";
+import { advanceFlowAfterUpdate } from "./flows/advance";
+import { flowStepFields } from "./flows/stepFields";
 import { averageProgress, isOverdue, plansInProgress, weekAhead } from "./adminHome";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
@@ -54,22 +60,30 @@ import type { MetaAdAccount } from "./meta";
 type ContentRow = { data: Record<string, unknown> | null };
 type PrefsRow = { theme: string | null; avatar_style: number | null; display_name: string | null; username: string | null; manual_seen: boolean | null };
 
-export const TASK_COLUMNS =
-  "id,client_id,kind,subtype,title,status,priority,assignee,reviewer_id,approver_id,plan_id,requires_review,requires_approval,due_date,start_date,end_date,scheduled_start_at,scheduled_end_at,progress_weight,description,client_visible,payload,position,recurrence_cadence,recurrence_weekdays,recurrence_day_of_month,updated_at,created_by,created_at,completed_at";
+// Reexportada de lib/taskColumns.ts (módulo folha, para não ciclar com o motor
+// de fluxos) — os call sites que já importavam daqui seguem funcionando.
+export { TASK_COLUMNS } from "./taskColumns";
 
 // Responsável linked to a real account (task_assignees), merged into the
 // legacy `assignee` free-text column at read time — see mergeAssigneeDisplay.
 // Every read path that ends up in a UI-facing response selects this instead
 // of the bare TASK_COLUMNS so `assignee` always reflects linked accounts too.
 const TASK_ASSIGNEES_JOIN = "task_assignees(profile:profiles(id,full_name))";
+// !inner NÃO: um card sem pai nenhum é o caso comum e precisa vir mesmo assim.
+const TASK_LINKS_JOIN = "task_links!task_links_child_id_fkey(parent_id,slot)";
 const TASK_AUTHOR_JOIN = "created_by_profile:profiles!tasks_created_by_fkey(full_name)";
-const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN},${TASK_AUTHOR_JOIN}`;
+const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN},${TASK_AUTHOR_JOIN},${TASK_LINKS_JOIN}`;
 
 type JoinedAssigneeProfile = { id: string; full_name: string | null };
 type JoinedAuthor = { full_name: string | null };
 type TaskAssigneesJoin = {
   task_assignees?: { profile: JoinedAssigneeProfile | JoinedAssigneeProfile[] | null }[] | null;
   created_by_profile?: JoinedAuthor | JoinedAuthor[] | null;
+  // Elos de pertencimento (task_links) onde ESTE card é o filho. Vêm junto na
+  // mesma consulta, como os responsáveis: todo o front trabalha com arrays de
+  // TaskRecord e resolve pai/filho de forma síncrona (KanbanBoard, TaskModal,
+  // portal). Buscar os elos à parte obrigaria a tornar assíncrono tudo isso.
+  task_links?: { parent_id: string; slot: string | null }[] | null;
 };
 
 // Merges linked-account names into the legacy free-text `assignee` column
@@ -79,8 +93,12 @@ type TaskAssigneesJoin = {
 // same precedent as reviewer_id/approver_id already being plain fields.
 function mergeTaskAssigneeRow<T extends { assignee: string | null } & TaskAssigneesJoin>(
   row: T,
-): Omit<T, "task_assignees" | "created_by_profile"> & { assignee_profile_ids: string[]; created_by_name: string | null } {
-  const { task_assignees, created_by_profile, ...rest } = row;
+): Omit<T, "task_assignees" | "created_by_profile" | "task_links"> & {
+  assignee_profile_ids: string[];
+  created_by_name: string | null;
+  parents: TaskParentLink[];
+} {
+  const { task_assignees, created_by_profile, task_links, ...rest } = row;
   const linkedProfiles = (task_assignees ?? [])
     .map((r) => (Array.isArray(r.profile) ? r.profile[0] : r.profile))
     .filter((p): p is JoinedAssigneeProfile => Boolean(p));
@@ -90,6 +108,7 @@ function mergeTaskAssigneeRow<T extends { assignee: string | null } & TaskAssign
     assignee: mergeAssigneeDisplay(rest.assignee, linkedProfiles.map((p) => p.full_name)),
     assignee_profile_ids: linkedProfiles.map((p) => p.id),
     created_by_name: author?.full_name ?? null,
+    parents: (task_links ?? []).map((l) => ({ id: l.parent_id, slot: l.slot })),
   };
 }
 
@@ -1196,55 +1215,156 @@ export async function listAllTasks(): Promise<BoardTask[]> {
     });
 }
 
+// ---- Entregas de fluxo (admin) -----------------------------------------------
+// Uma entrega é o card com flow_template_id: ela agrega as etapas da cascata
+// por plan_id. Não aparece no quadro Tarefas (belongsToTaskScreen a exclui —
+// seu status é derivado dos filhos), então esta é a lista onde ela existe.
+
+// Estruturalmente um ActionPlan (mesmos campos, incluindo `activities`) mais o
+// nome do molde. É de propósito: a tela de Entregas reusa PlanSearchBar,
+// StrategicView e a ordenação do Plano de Ação sem adaptador nenhum — as duas
+// telas são a mesma leitura ("um pai e o que pende dele"), só que uma agrega
+// por composição e a outra por sequência.
+export type FlowDelivery = ParentCard;
+
+/**
+ * Pais de um comportamento, com os filhos já agrupados.
+ *
+ * Plano de Ação e entrega deixaram de ser duas consultas: são o mesmo formato
+ * lido por `behavior`. Duas consultas em lote (pais, depois filhos pelos elos)
+ * e o agrupamento em memória — nunca varrer `tasks` inteira para montar a tela.
+ */
+async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
+  const supabase = await createClient();
+  const types = (await listTaskTypes(supabase)).filter((t) => t.behavior === behavior);
+  if (!types.length) return [];
+  const labelByKind = new Map(types.map((t) => [t.key, t.label]));
+
+  let query = supabase
+    .from("tasks")
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug)`)
+    .in("kind", types.map((t) => t.key))
+    .order("updated_at", { ascending: false });
+  // Uma entrega é marcada no payload, não inferida do tipo: existem cards
+  // `criativo` antigos que são trabalho comum e não podem virar pais.
+  if (behavior === "entrega") query = query.eq(`payload->>${FLOW_PARENT_KEY}`, "true");
+  const { data, error } = await query;
+  if (error) fail(error);
+
+  type JoinedClient = { name: string; slug: string };
+  type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
+  // Um template de recorrência é um pai de outra natureza e não entra aqui.
+  const rows = ((data as unknown as Row[] | null) ?? []).filter((t) => t.payload?.[RECURRENCE_GROUP_KEY] !== true);
+  if (!rows.length) return [];
+
+  const { data: childData, error: childError } = await supabase
+    .from("tasks")
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
+    .in("id", await childIdsOf(supabase, rows.map((r) => r.id)))
+    .order("position")
+    .order("created_at");
+  if (childError) fail(childError);
+  const childrenOfParent = childrenByParent(
+    ((childData as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow),
+  );
+
+  return rows.map(mergeTaskAssigneeRow).map(({ clients, ...task }) => {
+    const c = Array.isArray(clients) ? clients[0] : clients;
+    const members = childrenOfParent.get(task.id) ?? [];
+    return {
+      ...task,
+      clientName: c?.name ?? "Outros",
+      clientSlug: c?.slug ?? "",
+      typeLabel: labelByKind.get(task.kind) ?? task.kind,
+      progress: taskProgress(task, members),
+      activities: members.map((member) => ({ ...member, progress: taskProgress(member) })),
+    };
+  });
+}
+
+export async function listActionPlans(): Promise<ActionPlan[]> {
+  return listParentCards("plano");
+}
+
+export async function listFlowDeliveries(): Promise<FlowDelivery[]> {
+  return listParentCards("entrega");
+}
+
+// ---- Elos de pertencimento (task_links) --------------------------------------
+//
+// Um card pode ter vários pais — o mesmo roteiro serve três peças, a mesma
+// diária de gravação serve vários criativos. Plano de Ação e entrega usam este
+// mesmo mecanismo; o que os diferencia é o `behavior` do tipo do pai.
+
+type LinkRow = { parent_id: string; child_id: string; slot: string | null };
+type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
+
+/** Ids dos filhos de um conjunto de pais, em uma consulta. */
+async function childIdsOf(supabase: SupabaseLike, parentIds: readonly string[]): Promise<string[]> {
+  if (!parentIds.length) return [];
+  const { data, error } = await supabase.from("task_links").select("child_id").in("parent_id", parentIds);
+  if (error) fail(error);
+  return ((data as { child_id: string }[] | null) ?? []).map((r) => r.child_id);
+}
+
+export async function linkTasks(parentId: string, childId: string, slot: string | null = null, position = 0): Promise<void> {
+  if (parentId === childId) throw new HttpError(400, "Um card nao pode ser pai de si mesmo.");
+  const supabase = await createClient();
+  const { error } = await supabase.from("task_links").insert({ parent_id: parentId, child_id: childId, slot, position });
+  // 23505 = já ligado. Ligar duas vezes é a mesma coisa que ligar uma.
+  if (error && (error as { code?: string }).code !== "23505") fail(error);
+}
+
+/** Já existe card ligado neste slot deste pai? `ignoreChildId` deixa religar o
+ * mesmo card sem falso positivo. */
+export async function slotIsTaken(parentId: string, slot: string, ignoreChildId?: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("task_links")
+    .select("child_id")
+    .eq("parent_id", parentId)
+    .eq("slot", slot);
+  if (error) fail(error);
+  return ((data as { child_id: string }[] | null) ?? []).some((l) => l.child_id !== ignoreChildId);
+}
+
+export async function unlinkTasks(parentId: string, childId: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("task_links").delete().eq("parent_id", parentId).eq("child_id", childId);
+  if (error) fail(error);
+}
+
+/** O atributo "Plano de Ação" do card continua sendo um campo único na
+ * interface, então escrever nele substitui o elo SEM slot — os elos de etapa
+ * (slot preenchido) pertencem à corrente e não podem ser derrubados por uma
+ * edição de plano. */
+export async function setTaskPlanLink(taskId: string, parentId: string | null): Promise<void> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("task_links").select("parent_id,child_id,slot").eq("child_id", taskId);
+  if (error) fail(error);
+  const current = ((data as LinkRow[] | null) ?? []).filter((l) => l.slot === null);
+  for (const link of current) {
+    if (link.parent_id !== parentId) await unlinkTasks(link.parent_id, taskId);
+  }
+  if (parentId && !current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null);
+}
+
 // ---- Planos de Ação (admin) --------------------------------------------------
 // A `plano_acao` card with its member activities (plan_id) grouped under it, each
 // with its own workflow progress, plus the plan's rolled-up progress. Powers the
 // /admin/plano accordion.
 
 export type PlanActivity = TaskRecord & { progress: number };
-export type ActionPlan = TaskRecord & { clientName: string; clientSlug: string; progress: number; activities: PlanActivity[] };
+export type ParentCard = TaskRecord & {
+  clientName: string;
+  clientSlug: string;
+  /** Rótulo do tipo do pai ("Criativo", "Plano de Ação") — vem de task_types. */
+  typeLabel: string;
+  progress: number;
+  activities: PlanActivity[];
+};
+export type ActionPlan = ParentCard;
 
-export async function listActionPlans(): Promise<ActionPlan[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("tasks")
-    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug)`)
-    .eq("kind", "plano_acao")
-    .order("updated_at", { ascending: false });
-  if (error) fail(error);
-  type JoinedClient = { name: string; slug: string };
-  type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
-  const rows = ((data as unknown as Row[] | null) ?? []).filter((task) => task.payload?.[RECURRENCE_GROUP_KEY] !== true);
-  if (!rows.length) return [];
-  const planIds = rows.map((plan) => plan.id);
-  const { data: memberData, error: memberError } = await supabase
-    .from("tasks")
-    .select(TASK_COLUMNS_WITH_ASSIGNEES)
-    .or(`plan_id.in.(${planIds.join(",")}),payload->>action_plan_id.in.(${planIds.join(",")})`)
-    .order("position")
-    .order("created_at");
-  if (memberError) fail(memberError);
-  const membersByPlan = new Map<string, TaskRecord[]>();
-  for (const r of ((memberData as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow)) {
-    const planId = actionPlanIdOf(r);
-    if (!planId) continue;
-    const list = membersByPlan.get(planId);
-    if (list) list.push(r); else membersByPlan.set(planId, [r]);
-  }
-  return rows
-    .map(mergeTaskAssigneeRow)
-    .map(({ clients, ...task }) => {
-      const c = Array.isArray(clients) ? clients[0] : clients;
-      const members = membersByPlan.get(task.id) ?? [];
-      return {
-        ...task,
-        clientName: c?.name ?? "—",
-        clientSlug: c?.slug ?? "",
-        progress: taskProgress(task, members),
-        activities: members.map((member) => ({ ...member, progress: taskProgress(member) })),
-      };
-    });
-}
 
 /** Direct children are intentionally queried separately from board feeds: this
  * makes future recurrence cards immediate in their parent without materializing
@@ -1254,7 +1374,10 @@ export async function listRelatedTasks(parentId: string): Promise<TaskRecord[]> 
   const { data, error } = await supabase
     .from("tasks")
     .select(TASK_COLUMNS_WITH_ASSIGNEES)
-    .or(`plan_id.eq.${parentId},payload->>action_plan_id.eq.${parentId}`)
+    // Filhos por elo (plano/entrega) OU por plan_id (ocorrência de recorrência,
+    // a única relação que continua sendo uma coluna).
+    .or(`id.in.(${[...(await childIdsOf(supabase, [parentId])), parentId].join(",")}),plan_id.eq.${parentId}`)
+    .neq("id", parentId)
     .order("position")
     .order("due_date", { nullsFirst: false });
   if (error) fail(error);
@@ -1319,14 +1442,75 @@ export async function createExplicitDateTaskGroup(clientId: string | null, input
     recurrence_cadence: rule.cadence,
     recurrence_weekdays: rule.weekdays,
     recurrence_day_of_month: rule.dayOfMonth,
-    payload: { ...withActionPlanId((input.payload ?? {}) as Record<string, unknown>, null), explicit_occurrence_dates: dates },
+    payload: { ...((input.payload ?? {}) as Record<string, unknown>), explicit_occurrence_dates: dates },
   });
   try {
     const first = explicitDateExecutionFields(parent, recurringExecutionId(parent.id, dates[0]), dates[0]);
-    first.payload = withActionPlanId(first.payload as Record<string, unknown>, actionPlanId);
     return await createTask(clientId, first);
   } catch (error) {
     await deleteTask(parent.id).catch(() => undefined);
+    throw error;
+  }
+}
+
+// ---- Fluxos em cascata ---------------------------------------------------
+// Cria a ENTREGA (o card-pai, marcado por flow_template_id) junto com a
+// PRIMEIRA etapa, e devolve a etapa. Devolver a etapa e não a entrega é
+// deliberado e segue createRecurringTaskGroup, que devolve a primeira
+// execução: a entrega não ocupa coluna no quadro (status derivado dos
+// filhos), então abrir a entrega logo após criar deixaria o usuário olhando
+// um card que ele não pode mover. A etapa é o trabalho que existe agora.
+
+export async function createFlowDelivery(
+  clientId: string | null,
+  input: Record<string, unknown>,
+  typeKey: string,
+  startAtSubtype?: string | null,
+): Promise<TaskRecord> {
+  const supabase = await createClient();
+  const type = findType(await listTaskTypes(supabase), typeKey);
+  if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
+  const problem = deliveryTypeProblem(type);
+  if (problem) throw new HttpError(400, problem);
+
+  // Começar por uma etapa do meio é legítimo (a peça pode chegar com o roteiro
+  // pronto de fora); as anteriores simplesmente nunca nascem e contam como
+  // puladas no denominador.
+  const startIndex = startAtSubtype ? type.subtypes.findIndex((sub) => sub.key === startAtSubtype) : 0;
+  const firstStep = type.subtypes[startIndex >= 0 ? startIndex : 0];
+
+  const delivery = await createTask(clientId, {
+    ...input,
+    kind: type.key,
+    subtype: null,
+    plan_id: null,
+    // Uma entrega existe porque o trabalho começou — e ela não aparece no
+    // quadro, então esperar em Entrada por um arrasto que ninguém vai dar
+    // deixaria o progresso preso em 0.
+    status: DELIVERY_INITIAL_STATUS,
+    recurrence_cadence: null,
+    recurrence_weekdays: [],
+    recurrence_day_of_month: null,
+    payload: {
+      ...((input.payload ?? {}) as Record<string, unknown>),
+      [FLOW_PARENT_KEY]: true,
+      // Denominador congelado do progresso — ver FLOW_TOTAL_WEIGHT_KEY em
+      // lib/taskCatalog.ts. Sem ele a entrega marcaria 100% com só a primeira
+      // etapa pronta. Congelado também para que editar o tipo não reescreva o
+      // progresso de entregas em andamento.
+      [FLOW_TOTAL_WEIGHT_KEY]: typeTotalWeight(type),
+      [FLOW_STEP_COUNT_KEY]: type.subtypes.length,
+    },
+  });
+
+  try {
+    const step = await createTask(clientId, flowStepFields(delivery, firstStep, null));
+    await linkTasks(delivery.id, step.id, firstStep.key, firstStep.order_index);
+    return step;
+  } catch (error) {
+    // Uma entrega sem etapa nenhuma não é recuperável pela cascata (nada
+    // conclui, nada nasce) e ficaria invisível no quadro.
+    await deleteTask(delivery.id).catch(() => undefined);
     throw error;
   }
 }
@@ -1435,7 +1619,7 @@ function recurringParentInput(current: TaskRecord, patch: Record<string, unknown
     progress_weight: next.progress_weight,
     description: next.description,
     client_visible: next.client_visible,
-    payload: recurrenceParentPayload(withActionPlanId(next.payload, null)),
+    payload: recurrenceParentPayload(next.payload),
     position: next.position,
     recurrence_cadence: next.recurrence_cadence,
     recurrence_weekdays: next.recurrence_weekdays,
@@ -1456,12 +1640,11 @@ export async function createRecurringTaskGroup(clientId: string | null, input: R
     due_date: startDate,
     start_date: startDate,
     end_date: typeof input.end_date === "string" && input.end_date >= startDate ? input.end_date : startDate,
-    payload: recurrenceParentPayload(withActionPlanId((input.payload ?? {}) as Record<string, unknown>, null)),
+    payload: recurrenceParentPayload((input.payload ?? {}) as Record<string, unknown>),
   });
   try {
     const firstId = recurringExecutionId(parent.id, 0);
     const fields = currentRecurringExecutionFields(parent, firstId, startDate);
-    fields.payload = withActionPlanId(fields.payload as Record<string, unknown>, actionPlanId);
     return await createTask(clientId, fields);
   } catch (error) {
     await deleteTask(parent.id).catch(() => undefined);
@@ -1472,7 +1655,6 @@ export async function createRecurringTaskGroup(clientId: string | null, input: R
 async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<string, unknown>): Promise<TaskRecord> {
   const next = { ...current, ...patch } as TaskRecord;
   if (!next.recurrence_cadence || !next.due_date) return updateTask(current.id, patch);
-  const actionPlanId = actionPlanIdOf(next);
   const clientId = patch.client_id === null || typeof patch.client_id === "string" ? patch.client_id : current.client_id;
   const parent = await createTask(clientId, recurringParentInput(current, patch));
   const fields = isExplicitDateParent(parent)
@@ -1480,7 +1662,6 @@ async function convertTaskToRecurringGroup(current: TaskRecord, patch: Record<st
     : currentRecurringExecutionFields(parent, current.id, next.due_date);
   const { id: _id, ...executionFields } = fields;
   void _id;
-  executionFields.payload = withActionPlanId(executionFields.payload as Record<string, unknown>, actionPlanId);
   try {
     return await updateTask(current.id, {
       ...executionFields,
@@ -1615,7 +1796,13 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   const recurrenceParentId = current.recurrence_cadence || historical ? null : recurrenceParentIdOf(current);
   const parent = recurrenceParentId ? await getTaskById(recurrenceParentId) : null;
   const nextRecurrence = patch.recurrence_cadence !== undefined ? patch.recurrence_cadence : current.recurrence_cadence;
-  return routeTaskGroupUpdate(id, current, patch, parent, recurrenceParentId, historical, nextRecurrence);
+  const updated = await routeTaskGroupUpdate(id, current, patch, parent, recurrenceParentId, historical, nextRecurrence);
+  // Cascata de fluxo. Fica aqui, e não nas rotas, porque este é o ponto que o
+  // PATCH do admin E a aprovação do cliente (app/api/client/[slug]/tasks/[id])
+  // compartilham — plugar na rota admin deixaria a aprovação do cliente, que é
+  // justamente onde uma etapa costuma se concluir, fora da cascata.
+  await advanceFlowAfterUpdate(current, updated);
+  return updated;
 }
 
 async function completeTaskCycleForRequest(
@@ -1710,15 +1897,22 @@ export async function completeTaskCycle(
 export async function detachTaskRelation(taskId: string, parentId: string): Promise<TaskRecord> {
   const task = await getTaskById(taskId);
   if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
-  const patch = detachedTaskRelationPatch(task, parentId);
-  if (!patch) throw new HttpError(409, "Esta ligacao nao existe mais.");
-  return updateTask(taskId, patch);
+  const isLinked = task.parents.some((p) => p.id === parentId);
+  const recurrencePatch = detachedRecurrencePatch(task, parentId);
+  if (!isLinked && !recurrencePatch) throw new HttpError(409, "Esta ligacao nao existe mais.");
+  if (isLinked) await unlinkTasks(parentId, taskId);
+  if (recurrencePatch) return updateTask(taskId, recurrencePatch);
+  const refreshed = await getTaskById(taskId);
+  return refreshed ?? task;
 }
 
+/** Excluir um pai nunca exclui os filhos. Os elos somem sozinhos (FK on delete
+ * cascade em task_links); o que precisa de limpeza explícita é a metadata de
+ * recorrência, que mora no payload do filho. */
 async function detachChildrenBeforeDelete(parentId: string): Promise<void> {
   const children = await listRelatedTasks(parentId);
   await Promise.all(children.map(async (child) => {
-    const patch = detachedTaskRelationPatch(child, parentId);
+    const patch = detachedRecurrencePatch(child, parentId);
     if (patch) await updateTask(child.id, patch);
   }));
 }

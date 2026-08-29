@@ -1,8 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
 const RUN = Date.now();
 
 function serviceClient(): SupabaseClient {
@@ -79,7 +78,11 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     expect(createdResponse.status()).toBe(201);
     const ordinary = await createdResponse.json();
     taskId = ordinary.id;
-    expect(ordinary.plan_id).toBe(planId);
+    // `plan_id` no corpo continua sendo o campo público de "Plano de Ação", mas
+    // hoje ele vira um ELO: a coluna passou a significar só "ocorrência de
+    // recorrência".
+    expect(ordinary.plan_id).toBeNull();
+    expect(ordinary.parents.map((p: { id: string }) => p.id)).toContain(planId);
 
     const convertedResponse = await page.request.patch(`/api/admin/tasks/${ordinary.id}`, {
       data: {
@@ -95,18 +98,21 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     expect(parentId).toBeTruthy();
     expect(parentId).not.toBe(planId);
     expect(first).toMatchObject({ recurrence_cadence: null, status: "em_producao" });
-    expect(first.payload).toMatchObject({ recurrence_parent_id: parentId, action_plan_id: planId });
+    // Os DOIS vínculos convivem sem workaround: o pai da recorrência na coluna,
+    // o plano no elo. Era exatamente para isso que existia `action_plan_id`.
+    expect(first.payload).toMatchObject({ recurrence_parent_id: parentId });
+    expect(first.parents.map((p: { id: string }) => p.id)).toContain(planId);
 
     const parent = await (await page.request.get(`/api/admin/tasks/${parentId}`)).json();
     expect(parent).toMatchObject({ plan_id: null, recurrence_cadence: "semanal", due_date: "2026-08-03" });
-    expect(parent.payload).not.toHaveProperty("action_plan_id");
+    expect(parent.parents).toHaveLength(0);
 
     const unlinked = await (await page.request.patch(`/api/admin/tasks/${first.id}`, { data: { plan_id: null } })).json();
     expect(unlinked.plan_id).toBe(parentId);
-    expect(unlinked.payload).not.toHaveProperty("action_plan_id");
+    expect(unlinked.parents).toHaveLength(0);
     const relinked = await (await page.request.patch(`/api/admin/tasks/${first.id}`, { data: { plan_id: planId } })).json();
     expect(relinked.plan_id).toBe(parentId);
-    expect(relinked.payload.action_plan_id).toBe(planId);
+    expect(relinked.parents.map((p: { id: string }) => p.id)).toEqual([planId]);
 
     // These assertions all follow a fresh page navigation/fetch against the
     // live DB — this suite has observed prod-network latency well past the
@@ -127,7 +133,9 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     expect(completedResponse.ok()).toBeTruthy();
     const completed = await completedResponse.json();
     expect(completed.task).toMatchObject({ plan_id: parentId, due_date: "2026-08-10", recurrence_cadence: null });
-    expect(completed.task.payload).not.toHaveProperty("action_plan_id");
+    // A ocorrência seguinte nasce fora do plano: o elo é da execução que estava
+    // vinculada, não da regra de recorrência.
+    expect(completed.task.parents ?? []).toHaveLength(0);
 
     const recurrenceMembers = (await (await page.request.get(`/api/admin/tasks?parentId=${parentId}`)).json()).tasks;
     expect(recurrenceMembers).toHaveLength(2);
@@ -163,7 +171,9 @@ test.describe("ocorrência recorrente em Plano de Ação", () => {
     const standalone = await (await page.request.get(`/api/admin/tasks/${first.id}`)).json();
     expect(standalone.plan_id).toBeNull();
     expect(standalone.payload).not.toHaveProperty("recurrence_parent_id");
-    expect(standalone.payload.action_plan_id).toBe(planId);
+    // Soltar da recorrência não solta do plano: são dois vínculos separados, e
+    // agora de fato independentes (um é coluna, o outro é elo).
+    expect(standalone.parents.map((p: { id: string }) => p.id)).toEqual([planId]);
 
     const deletedParent = await page.request.delete(`/api/admin/tasks/${parentId}`);
     expect(deletedParent.ok()).toBeTruthy();

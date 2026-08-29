@@ -7,7 +7,8 @@ import KanbanBoard from "../KanbanBoard";
 import CardCover from "../CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
 import ActionPlansBoard from "../plano/ActionPlansBoard";
-import type { ActionPlan } from "@/lib/supabase";
+import ParentCardsBoard from "./ParentCardsBoard";
+import type { FlowDelivery, ActionPlan } from "@/lib/supabase";
 import HScrollRail from "../HScrollRail";
 import RecurringSearchBar from "../RecurringSearchBar";
 import { recurringMatchesFilters, recurringSearchText, type RecurringActiveFilter } from "../recurringTaskFilters";
@@ -26,7 +27,7 @@ import TaskKindIcon from "../TaskKindIcon";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import type { TaskRecord } from "@/lib/validation";
 
-type Section = "tarefas" | "recorrencias" | "plano";
+type Section = "tarefas" | "entregas" | "recorrencias" | "plano";
 type RecurrenceView = "colunas" | "lista" | "calendario";
 
 const CADENCE_LABEL: Record<RecurringTask["cadence"], string> = {
@@ -106,12 +107,14 @@ function RecurrenceCard({
 export default function OperacaoWorkspace({
   clients,
   plans,
+  deliveries,
   recurringTasks,
   assignees,
   recurringStorageAvailable,
 }: {
   clients: { slug: string; name: string; disabled?: boolean }[];
   plans: ActionPlan[];
+  deliveries: FlowDelivery[];
   recurringTasks: RecurringTask[];
   assignees: string[];
   recurringStorageAvailable: boolean;
@@ -369,6 +372,7 @@ export default function OperacaoWorkspace({
 
       <nav className="clients-section-tabs" aria-label="Seções da operação">
         <button type="button" className={section === "tarefas" ? "on" : ""} onClick={() => setSection("tarefas")}>Tarefas</button>
+        <button type="button" className={section === "entregas" ? "on" : ""} onClick={() => setSection("entregas")}>Entregas <span>{deliveries.length}</span></button>
         <button type="button" className={section === "recorrencias" ? "on" : ""} onClick={() => setSection("recorrencias")}>Rotinas <span>{rows.length}</span></button>
         <button type="button" className={section === "plano" ? "on" : ""} onClick={() => setSection("plano")}>Plano de Ação <span>{plans.length}</span></button>
       </nav>
@@ -379,6 +383,23 @@ export default function OperacaoWorkspace({
         ) : (
           <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
         )
+      ) : section === "entregas" ? (
+        <ParentCardsBoard
+          initial={deliveries}
+          clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))}
+          assignees={assignees}
+          scope="task"
+          initialKind="criativo"
+          sortScope="entregas.lista"
+          showStepCount
+          texts={{
+            newLabel: "+ Entrega",
+            empty: "Nenhuma entrega em andamento. Crie uma tarefa do tipo Criativo — cada etapa concluída cria a próxima.",
+            emptyQuery: "Nenhuma entrega para essa busca.",
+            searchPlaceholder: "Buscar por entrega, cliente, tipo ou etapa…",
+            descriptionHint: "Adicione à descrição o que esta entrega precisa ser quando ficar pronta.",
+          }}
+        />
       ) : section === "plano" ? (
         <ActionPlansBoard initial={plans} clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
       ) : (

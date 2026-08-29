@@ -332,6 +332,8 @@ export const performanceSyncSchema = z.object({
   links: z.array(z.object({ taskId: z.string().uuid(), postId: z.string().min(1).max(200) })).min(1).max(100),
 });
 
+export type TaskParentLink = { id: string; slot: string | null };
+
 export type TaskRecord = {
   id: string;
   // null = unassigned ("Outros") — a task with no client.
@@ -351,6 +353,11 @@ export type TaskRecord = {
   reviewer_id: string | null;
   approver_id: string | null;
   plan_id: string | null;
+  // Pais deste card, via task_links. N:N: um mesmo roteiro serve várias peças
+  // e uma diária de gravação serve vários criativos. `slot` diz qual etapa o
+  // card ocupa naquele pai (null em membro de Plano de Ação). Sempre presente
+  // na leitura; nunca escrito direto — ver linkTasks/unlinkTasks.
+  parents: TaskParentLink[];
   requires_review: boolean;
   requires_approval: boolean;
   due_date: string | null;

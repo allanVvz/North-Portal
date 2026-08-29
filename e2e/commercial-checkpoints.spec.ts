@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 // Real end-to-end coverage of the "Checkpoints comerciais" feature against the
 // live Supabase backend — no mocks: (1) a brand-new client auto-provisions one
@@ -9,8 +10,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // real checkpoint cards, not the static demo array. Cleans up everything it
 // creates (including the client itself).
 
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
 const RUN = Date.now();
 const SLUG = `e2e-checkpoints-${RUN}`;
 const NAME = `[e2e ${RUN}] Cliente Checkpoints`;

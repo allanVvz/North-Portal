@@ -35,14 +35,13 @@ describe("agrupamento de tarefas por datas explícitas", () => {
     expect(nextExplicitOccurrenceDate(dates, dates[1])).toBeNull();
   });
 
-  it("não replica o Plano de Ação local entre ocorrências", () => {
+  // Pertencimento a um plano saiu do payload e virou elo em task_links, então
+  // não há mais o que impedir de replicar aqui — o que continua local à
+  // ocorrência é o estado dela (deferred/accessed/data).
+  it("não replica o estado local de uma ocorrência para a seguinte", () => {
     expect(replicatedExecutionPayload(
-      { comments: [], action_plan_id: "plano-da-atual" },
+      { comments: [], accessed_at: "ontem" },
       { deferred_until_accessed: true },
     )).toEqual({ comments: [], deferred_until_accessed: true });
-    expect(replicatedExecutionPayload(
-      { comments: [] },
-      { action_plan_id: "plano-da-futura" },
-    )).toEqual({ comments: [], action_plan_id: "plano-da-futura" });
   });
 });

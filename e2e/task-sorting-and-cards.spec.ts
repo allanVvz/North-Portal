@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 // Cobre, contra o backend real, o que foi entregue nas telas Tarefas, Clientes
 // e Plano de Ação:
@@ -10,8 +11,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 //   - Plano de Ação abrindo na Lista, com os cards da Estratégica recolhidos.
 // Semeia tudo o que usa e limpa no final.
 
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
 const RUN = Date.now();
 const TAG = `[e2e ${RUN}]`;
 

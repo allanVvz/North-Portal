@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
+import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
-import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
+import { recurrenceParentIdOf } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
+import { flowStepKeyOf } from "@/lib/taskRelations";
 import { notifyTaskParticipants, statusChangedMessage, taskUpdatedMessage } from "@/lib/notifications";
 import { HttpError, introducesInvalidPublishedState, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
@@ -33,6 +36,22 @@ async function notifyTaskChange(before: TaskRecord, after: TaskRecord): Promise<
     return;
   }
   await notifyTaskParticipants(after.id, "task_updated", taskUpdatedMessage(after.title));
+}
+
+// Concluir uma etapa cria a próxima dentro deste mesmo request. Devolvê-la
+// junto é o que permite a interface oferecer o acesso na hora, em vez de deixar
+// a pessoa fechar e reabrir o card para descobrir que o trabalho seguinte já
+// existe. Campo extra no JSON, fora do TaskRecord — nenhum leitor atual quebra.
+async function withFlowNextTask(before: TaskRecord, after: TaskRecord): Promise<TaskRecord & { flow_next_task?: TaskRecord }> {
+  if (!justCompleted(before, after) || !flowStepKeyOf(after)) return after;
+  try {
+    const next = await nextFlowStepCardOf(createAdminClient(), after);
+    return next ? { ...after, flow_next_task: next } : after;
+  } catch {
+    // A cascata em si já aconteceu; não conseguir ANUNCIAR a próxima etapa é
+    // cosmético e não pode transformar um salvamento bem-sucedido em erro.
+    return after;
+  }
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -100,16 +119,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    let task = await updateTaskGroup(id, current, recurringActionPlanPatch(current, patch));
-    if (payload_patch) task = await updateTaskPayloadPatch(id, payload_patch);
-    if (assignee_profile_ids !== undefined) {
-      await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
-      const full = await getTaskById(task.id);
-      await notifyTaskChange(current, full ?? task);
-      return NextResponse.json(full ?? task);
+    // "Plano de Ação" continua sendo um campo único no card, mas agora ele
+    // escreve um ELO, não uma coluna: `plan_id` passou a significar só
+    // "ocorrência de recorrência". setTaskPlanLink mexe apenas no elo sem
+    // slot, para não derrubar as ligações de etapa de uma corrente.
+    const { plan_id: planLink, ...taskPatch } = patch as Record<string, unknown>;
+    let task = await updateTaskGroup(id, current, taskPatch);
+    if (planLink !== undefined) {
+      await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null);
     }
-    await notifyTaskChange(current, task);
-    return NextResponse.json(task);
+    if (payload_patch) task = await updateTaskPayloadPatch(id, payload_patch);
+    if (assignee_profile_ids !== undefined) await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
+
+    // Reler pelo caminho completo antes de responder. As escritas devolvem só
+    // as colunas de `tasks`, sem os joins — então a resposta saía sem `parents`
+    // (e sem os responsáveis vinculados). Como o cliente FUNDE essa resposta no
+    // estado local, uma resposta incompleta apagava os elos que a tela acabara
+    // de aprender: a caixa de etapas voltava a mostrar o slot vazio.
+    const saved = (await getTaskById(task.id)) ?? task;
+    await notifyTaskChange(current, saved);
+    return NextResponse.json(await withFlowNextTask(current, saved));
   } catch (error) {
     return apiError(error);
   }

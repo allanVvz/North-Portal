@@ -7,7 +7,10 @@ Tudo que representa trabalho vive em `public.tasks`. Não criar tabelas paralela
 - Tarefa comum: qualquer `kind` sem recorrência.
 - Plano de Ação: `kind = 'plano_acao'`; pode ser uma execução comum ou um template recorrente.
 - Pai recorrente: qualquer `kind` com `recurrence_cadence` preenchido e `payload.recurrence_group = true`.
-- Filho: tarefa independente cujo `plan_id` aponta para o pai.
+- Entrega de fluxo: qualquer card com `payload.flow_parent = true`, de um tipo cujo `behavior` é `entrega`.
+- Filho: tarefa independente ligada ao pai por uma linha em `task_links`.
+
+São três eixos de agregação com três significados: `plano_acao` agrega atividades por composição manual, `recurrence_cadence` agrega execuções por tempo, `payload.flow_parent` agrega etapas por sequência. **Plano e entrega compartilham o mesmo mecanismo de vínculo**; só a recorrência continua usando `plan_id`.
 
 ### Classificação canônica
 
@@ -16,13 +19,33 @@ Tudo que representa trabalho vive em `public.tasks`. Não criar tabelas paralela
 - `gravacao` é `kind = 'agendamento'` + `subtype = 'gravacao'`.
 - Compatibilidade de leitura para valores antigos vive em `canonicalTaskClassification()`, mas o seletor nunca os oferece como tipos primários.
 
-O significado do pai é determinado por seus atributos: `kind = 'plano_acao'` agrega atividades; `recurrence_cadence` agrega execuções. Um filho continua sendo uma tarefa completa, com status, responsável, comentários e prazo próprios.
+O significado do pai é determinado por seus atributos, nunca inferido do tipo sozinho. Um filho continua sendo uma tarefa completa, com status, responsável, comentários e prazo próprios.
 
-### Duas relações em uma ocorrência
+A marca `payload.flow_parent` é explícita de propósito: existem cards `criativo` anteriores aos fluxos que são trabalho comum, e inferir "criativo sem subtipo = entrega" os transformaria em pais de uma hora para outra — sumiriam do quadro e passariam a marcar 0% com as etapas todas faltando.
 
-`tasks.plan_id` continua sendo a relação estrutural principal. Em uma tarefa comum ele pode apontar para um Plano de Ação; em uma ocorrência recorrente ele sempre aponta para o pai da recorrência. Quando somente essa ocorrência também pertence a um Plano de Ação, a relação secundária fica em `payload.action_plan_id`.
+### Pertencimento é N:N e mora em `task_links`
 
-Esse campo JSON é um workaround intencional, sem chave estrangeira e sem migration. Leitores de planos e progresso aceitam `plan_id` ou `payload.action_plan_id`, enquanto leitores da recorrência continuam seguindo o `plan_id` direto. Vincular ou desvincular uma ocorrência nunca altera seu pai, e a próxima ocorrência nasce sem `action_plan_id`.
+Um card pode pertencer a **vários** pais: o mesmo roteiro serve várias peças, a mesma diária de gravação serve vários criativos. `task_links(parent_id, child_id, slot, position)` é o mecanismo, o mesmo para Plano de Ação e para entrega. `slot` diz qual etapa o filho ocupa naquele pai (null em membro de plano).
+
+`plan_id` sobreviveu com um significado só: **ocorrência de recorrência**, que é 1:1 por natureza. O antigo `payload.action_plan_id` — workaround que existia porque um card podia ter dois pais — foi removido junto com a migração dos elos (`20260828210000_task_types_e_links.sql`); nenhuma linha o usava.
+
+Excluir um pai nunca exclui os filhos: os elos somem por `on delete cascade` em `task_links`, os cards ficam.
+
+## Fluxos em cascata
+
+Um criativo não é um card: é uma corrente de trabalhos diferentes feitos por pessoas diferentes — Roteiro → Captação → Edição → Publicação. A **entrega** é o pai (`flow_template_id` preenchido) e cada **etapa** é um filho comum ligado por `plan_id`, com `payload.flow_step_key` marcando qual etapa do molde ela é. Os dois marcadores são disjuntos de propósito: só o pai tem a coluna, só a etapa tem a chave no payload.
+
+**O molde é o próprio vocabulário.** `task_types` é auto-referenciada: linha sem pai é um Tipo, linha com pai é um Subtipo. Um fluxo É um tipo (`behavior = 'entrega'`) e suas etapas SÃO os subtipos dele, na ordem de `order_index` — não existe uma segunda lista para manter em sincronia. `behavior` também distingue `plano` e `simples`.
+
+`lib/taskCatalog.ts` continua sendo a fonte do **visual** (tom, ícone) e do **progresso** (workflow, percentuais); a tabela é a fonte do **vocabulário**. Os campos do catálogo são lidos de forma síncrona em dezenas de componentes, e trazê-los para o banco tornaria assíncronos o Kanban, o Calendário, a Performance e o portal.
+
+1. **Uma porta só de criação.** Não existe botão de entrega: o TIPO escolhido decide o que nasce. Um tipo `entrega` cria o pai e a primeira etapa juntos e devolve a etapa — o pai não ocupa coluna no quadro. O subtipo escolhido diz por qual etapa a corrente começa; as anteriores contam como puladas.
+2. Concluir uma etapa materializa a próxima. O gatilho é `completed_at` passar de null para não-null, não um status: o trigger `tasks_sync_completed_at` já carimba essa coluna em `('aprovado','concluido')` por qualquer caminho de escrita, inclusive a aprovação feita pelo cliente no portal.
+3. Concluir uma etapa avança **todas** as entregas de que ela participa, cada uma no seu slot. O id da etapa nova é determinístico por (entrega, subtipo) — `lib/derivedTaskId.ts`, o mesmo hash da recorrência; e a trava que mais importa é o **slot ocupado**, porque um card pode ter sido ligado à mão ali pelo botão de corrente.
+5. O pai nasce em `em_producao` e, quando a última etapa conclui, vai para `revisao` se tiver revisor, `aprovacao` se só tiver aprovador, e `concluido` se não tiver nenhum dos dois.
+4. `reconcileFlows()` roda na cron diária e varre etapas concluídas sem sucessor. É essa camada que garante a corretude; o gatilho síncrono em `updateTaskGroup` só existe para a próxima etapa aparecer na hora.
+
+O progresso da entrega divide pelo peso do MOLDE, congelado em `payload.flow_total_weight` na criação, e não pelo peso das etapas existentes — senão uma entrega com só o roteiro pronto marcaria 100%. Congelar também impede que editar o molde reescreva o progresso de entregas em andamento.
 
 ## Ciclo de recorrência
 
@@ -78,12 +101,17 @@ O campo físico continua `tasks.assignee text` para evitar uma tabela adicional.
 - Excluir um pai nunca exclui seus filhos: todas as ligações diretas e secundárias são removidas antes da exclusão.
 - Um registro legado não-Criativo que já esteja em `Publicado` pode salvar campos não relacionados. A API continua proibindo novas entradas nessa combinação.
 - Progresso de pai é sempre rollup dos filhos; não é persistido.
+- Etapa de fluxo nunca recebe `payload.flow_parent`; caso contrário geraria uma árvore infinita, mesma razão do filho recorrente não herdar recorrência.
+- Cascata é append-only: reabrir uma etapa nunca apaga a seguinte, que já pode carregar comentários, anexos e a decisão de um revisor.
+- Ligar um card a uma etapa compartilha, não copia: é um elo a mais, e o card continua contando em todas as entregas de que participa.
+- A entrega fica fora do quadro Tarefas (`belongsToTaskScreen`), como o Plano de Ação e o pai recorrente — status derivado não tem coluna honesta. Ela vive em Operação › Entregas.
+- O denominador do progresso de uma entrega é congelado em `payload.flow_total_weight` na criação: editar o tipo depois não reescreve o progresso de entregas em andamento.
 - O toggle “Visível para o cliente” é fail-closed enquanto a feature flag carrega.
 - Funções críticas têm limite automatizado de complexidade ciclomática em `lib/cyclomaticComplexity.test.ts`.
 
 ## Checklist para mudanças futuras
 
-1. Alterou relação pai/filho? Validar Plano de Ação e recorrência juntos.
+1. Alterou relação pai/filho? Validar Plano de Ação, recorrência e fluxo juntos.
 2. Alterou feed de Tarefas? Testar que execução futura continua oculta.
 3. Alterou abertura de card? Testar ativação e navegação do filho.
 4. Alterou responsável? Testar múltiplos nomes e agrupamento por pessoa.

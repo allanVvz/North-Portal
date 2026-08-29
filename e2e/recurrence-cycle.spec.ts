@@ -1,8 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-const ADMIN_EMAIL = "admin@north.com";
-const ADMIN_PASSWORD = "SenhaForte123!";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 function serviceClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

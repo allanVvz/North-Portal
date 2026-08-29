@@ -37,7 +37,13 @@ export const ATTR_DEFS: AttrDef[] = [
   { key: "assignee", label: "Responsável", scope: "Todos", kinds: "base", kind: "Pessoa" },
   { key: "reviewer", label: "Revisor (mesmo com fluxo desligado)", scope: "Todos", kinds: "base", kind: "Pessoa", defaultOn: false },
   { key: "approver", label: "Aprovador (mesmo com fluxo desligado)", scope: "Todos", kinds: "base", kind: "Pessoa", defaultOn: false },
-  { key: "subtype", label: "Subtipo", scope: "Agendamento", kinds: ["agendamento"], kind: "Seleção", defaultOn: false },
+  // Criativo entrou aqui junto com os fluxos em cascata: a etapa de uma peça
+  // (Roteiro/Captação/Edição/Publicação) é kind=criativo + subtype, então sem
+  // isto o campo que a identifica não apareceria em lugar nenhum.
+  { key: "subtype", label: "Subtipo", scope: "Criativo · Agendamento · Planejamento", kinds: ["criativo", "agendamento", "planejamento"], kind: "Seleção", defaultOn: false },
+  // Ligado por padrão, ao contrário dos outros: numa cascata a etapa ("2/4 ·
+  // Captação") é a identidade do card, não um enfeite opcional.
+  { key: "flow_step", label: "Etapa do fluxo", scope: "Criativo", kinds: ["criativo"], kind: "Seleção" },
   { key: "status", label: "Status", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "priority", label: "Prioridade", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "plan_link", label: "Plano de Ação", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
