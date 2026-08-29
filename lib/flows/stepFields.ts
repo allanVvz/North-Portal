@@ -1,12 +1,10 @@
 // Monta a linha da etapa que nasce de uma conclusão. Puro de propósito
 // (nenhum IO) — é o que torna as regras de cascata testáveis sem banco.
-// Espelho direto de recurringExecutionFields (lib/recurrence.ts), que faz o
-// mesmo papel para a recorrência.
 
-import { ACTION_PLAN_PAYLOAD_KEY, FLOW_PREV_TASK_KEY, FLOW_STEP_KEY } from "@/lib/taskRelations";
 import { AUTOMATION_ASSIGNEE } from "@/lib/automations/taskAccess";
+import { FLOW_PREV_TASK_KEY } from "@/lib/taskRelations";
 import type { TaskRecord } from "@/lib/validation";
-import type { FlowStepDef } from "./types";
+import type { TaskSubtypeDef } from "@/lib/taskTypes";
 import { flowStepTaskId } from "./ids";
 
 function addDays(isoDate: string, days: number): string {
@@ -20,47 +18,45 @@ export function todayIso(now = new Date()): string {
 }
 
 /**
- * Fields for the step that follows `previous` inside `delivery`.
+ * Campos da etapa que segue `previous` dentro de `delivery`.
  *
- * What carries forward is deliberate rather than a blanket copy of the
- * previous card: client, the delivery's own Plano de Ação membership (a step
- * can't hold one of its own — its plan_id is the delivery), and the mold's
- * declared kind/subtype/weight/assignee/visibility. What does NOT carry are
- * the previous step's status, comments, attachments and reviewer decisions:
- * each step is a different job for a different person, and inheriting the
- * roteiro's approval would make the captação look approved before it exists.
+ * O que passa adiante é declarado, não copiado em bloco: cliente, tipo, e o que
+ * o subtipo declara (prazo, peso, responsável padrão, visibilidade). O que NÃO
+ * passa é o estado do card anterior — status, descrição, comentários, decisão
+ * de revisor: cada etapa é um trabalho diferente, de outra pessoa, e herdar a
+ * aprovação do roteiro faria a captação nascer aprovada.
+ *
+ * O vínculo com a entrega NÃO sai daqui: ele é uma linha em `task_links`,
+ * escrita pelo chamador, porque um mesmo card pode pertencer a vários pais.
  */
 export function flowStepFields(
   delivery: TaskRecord,
-  step: FlowStepDef,
+  step: TaskSubtypeDef,
   previous: TaskRecord | null,
   today = todayIso(),
 ): Record<string, unknown> {
-  const deliveryPlan = delivery.payload?.[ACTION_PLAN_PAYLOAD_KEY];
-  const payload: Record<string, unknown> = { [FLOW_STEP_KEY]: step.step_key };
+  const payload: Record<string, unknown> = {};
   if (previous) payload[FLOW_PREV_TASK_KEY] = previous.id;
-  if (typeof deliveryPlan === "string" && deliveryPlan) payload[ACTION_PLAN_PAYLOAD_KEY] = deliveryPlan;
 
   return {
-    id: flowStepTaskId(delivery.id, step.step_key),
+    id: flowStepTaskId(delivery.id, step.key),
     client_id: delivery.client_id,
-    kind: step.kind,
-    subtype: step.subtype,
-    title: `${delivery.title} — ${step.title}`,
+    // A etapa é do mesmo TIPO da entrega — o que a distingue é o subtipo.
+    kind: delivery.kind,
+    subtype: step.key,
+    title: `${delivery.title} — ${step.label}`,
     status: "backlog",
     priority: delivery.priority,
     assignee: step.default_assignee || previous?.assignee || AUTOMATION_ASSIGNEE,
     reviewer_id: delivery.reviewer_id,
     approver_id: delivery.approver_id,
-    // The step's structural parent is the delivery. A step never carries
-    // flow_template_id — that is what keeps it from starting a flow of its own.
-    plan_id: delivery.id,
-    flow_template_id: null,
+    // plan_id agora significa exclusivamente "ocorrência de recorrência".
+    plan_id: null,
     requires_review: delivery.requires_review,
     requires_approval: delivery.requires_approval,
-    // Forward scheduling from the moment the previous step actually finished,
-    // not from the delivery's creation: a chain that slipped a week should
-    // move its remaining deadlines with it, not report them all as overdue.
+    // Agenda a partir de hoje, não da criação da entrega: uma corrente que
+    // atrasou uma semana move os prazos que faltam junto, em vez de nascer
+    // com todos vencidos.
     due_date: addDays(today, Math.max(0, step.lead_days)),
     start_date: today,
     end_date: null,

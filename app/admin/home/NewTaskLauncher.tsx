@@ -6,10 +6,14 @@ import TaskModal, { type TaskCreationScope } from "../TaskModal";
 
 type ClientOption = { slug: string; name: string; is_active: boolean };
 
-// "+ Nova tarefa" on the admin Home. Opens the same TaskModal the Kanban uses
-// rather than a second, thinner form — CardModalLauncher is edit-only
-// (mode="edit" is hardcoded), so this follows the mode="new" pattern from
-// ClientsWorkspace instead of extending it.
+// "+ Nova tarefa" on the admin Home — a ÚNICA porta de criação.
+//
+// Houve por um tempo um segundo botão, "+ Nova entrega". Era o mesmo gesto
+// (criar um card) partido em dois por uma distinção que só fazia sentido para
+// quem escreveu o código: quem cria não deveria ter que escolher a porta antes
+// de escolher o que está fazendo. Hoje o TIPO decide o que nasce — um tipo com
+// behavior 'entrega' vira uma corrente de etapas, 'plano' vira um agregador, e
+// o resto vira um card comum.
 export default function NewTaskLauncher() {
   const router = useRouter();
   const [scope, setScope] = useState<TaskCreationScope | null>(null);
@@ -38,11 +42,6 @@ export default function NewTaskLauncher() {
     <>
       <button type="button" className="admin-btn primary" onClick={() => void openModal("task")} disabled={loading}>
         {loading ? "Abrindo…" : "+ Nova tarefa"}
-      </button>
-      {/* Uma entrega não é um tipo de tarefa, é uma corrente delas — daí um
-          botão próprio em vez de mais uma opção no dropdown de Tipo. */}
-      <button type="button" className="admin-btn" onClick={() => void openModal("flow")} disabled={loading}>
-        + Nova entrega
       </button>
       {scope ? (
         <TaskModal

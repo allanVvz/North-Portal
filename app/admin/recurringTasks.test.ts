@@ -33,7 +33,7 @@ const task: RecurringTask = {
   reviewer_id: null,
   approver_id: null,
   plan_id: null,
-  flow_template_id: null,
+  parents: [],
   requires_review: false,
   requires_approval: false,
   due_date: "2026-07-27",

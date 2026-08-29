@@ -22,7 +22,7 @@ import { formatCommentTime } from "@/lib/comments";
 import { FLOW_STEP_COUNT_KEY, kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
-import { actionPlanIdOf, belongsToTaskScreen, flowStepKeyOf } from "@/lib/taskRelations";
+import { belongsToTaskScreen, childrenByParent, flowStepKeyOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 import { calendarMonthDates } from "./calendarUtils";
 
@@ -251,13 +251,13 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // Member tasks per plan (unfiltered — a plan's progress should reflect all its
   // tasks, not just the ones passing the current board filter).
   const membersByPlan = useMemo(() => {
-    const m = new Map<string, TaskRecord[]>();
+    // Elos (plano/entrega) + plan_id (ocorrência de recorrência, a única
+    // relação que ainda é coluna). Com N:N o mesmo card cai em vários baldes.
+    const m = childrenByParent(tasks);
     for (const t of tasks) {
-      const parentIds = new Set([t.plan_id, actionPlanIdOf(t)].filter((id): id is string => Boolean(id)));
-      for (const parentId of parentIds) {
-        const list = m.get(parentId);
-        if (list) list.push(t); else m.set(parentId, [t]);
-      }
+      if (!t.plan_id || parentIdsOf(t).includes(t.plan_id)) continue;
+      const list = m.get(t.plan_id);
+      if (list) list.push(t); else m.set(t.plan_id, [t]);
     }
     return m;
   }, [tasks]);
@@ -267,7 +267,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // com os filhos dele em mãos, em vez de responder 0.
   const progressOf = useCallback(
     (t: TaskRecord) =>
-      kindDef(t.kind).isPlan || t.recurrence_cadence || t.flow_template_id
+      kindDef(t.kind).isPlan || t.recurrence_cadence || isFlowDelivery(t)
         ? taskProgress(t, membersByPlan.get(t.id) ?? [], membersByPlan)
         : taskProgress(t),
     [membersByPlan],
@@ -281,7 +281,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const flowBadges = useMemo(() => {
     const badges = new Map<string, { step: number; total: number; delivery: string }>();
     for (const delivery of tasks) {
-      if (!delivery.flow_template_id) continue;
+      if (!isFlowDelivery(delivery)) continue;
       const steps = (membersByPlan.get(delivery.id) ?? [])
         .filter((t) => flowStepKeyOf(t))
         .sort((a, b) => a.position - b.position);
@@ -574,7 +574,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         <div className="kb-card-top">
           {t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
           {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
-          {visible("plan_link") && actionPlanIdOf(t) ? <span className="kb-plan-link" title="Vinculado a um Plano de Ação">◆</span> : null}
+          {visible("plan_link") && parentIdsOf(t).length ? <span className="kb-plan-link" title="Vinculado a um pai (plano ou entrega)">◆</span> : null}
           {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
         </div>
         <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} /><p className="kb-card-title">{t.title}</p></div>

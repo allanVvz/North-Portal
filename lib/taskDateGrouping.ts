@@ -1,10 +1,11 @@
 import type { RecurrenceRule } from "./recurrence";
 import type { TaskRecord } from "./validation";
-import { ACTION_PLAN_PAYLOAD_KEY } from "./taskRelations";
 
 export const EXPLICIT_DATES_KEY = "explicit_occurrence_dates";
 export const EXPLICIT_GROUP_KEY = "explicit_date_group_id";
-const EXECUTION_LOCAL_PAYLOAD_KEYS = [EXPLICIT_GROUP_KEY, "occurrence_date", "deferred_until_accessed", "accessed_at", ACTION_PLAN_PAYLOAD_KEY] as const;
+// action_plan_id saiu da lista junto com o workaround: pertencimento virou
+// elo em task_links, e elo não mora no payload de execução nenhuma.
+const EXECUTION_LOCAL_PAYLOAD_KEYS = [EXPLICIT_GROUP_KEY, "occurrence_date", "deferred_until_accessed", "accessed_at"] as const;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isRealDate(value: string): boolean {

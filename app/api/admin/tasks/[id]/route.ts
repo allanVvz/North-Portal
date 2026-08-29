@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
+import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
-import { recurrenceParentIdOf, recurringActionPlanPatch } from "@/lib/taskRelations";
+import { recurrenceParentIdOf } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
@@ -85,15 +85,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       (patch as Record<string, unknown>).client_id = nextClientId;
     }
 
-    // Um card não vira entrega (nem deixa de ser) por PATCH. Marcar
-    // flow_template_id num card qualquer criaria um pai que agrega etapas sem
-    // nunca ter uma — progresso travado em 0 e card fora do quadro. Entregas
-    // nascem por POST /api/admin/tasks?scope=flow, que cria a primeira etapa junto.
-    if (patch.flow_template_id !== undefined && patch.flow_template_id !== current.flow_template_id) {
-      throw new HttpError(400, "O fluxo de uma entrega nao pode ser alterado.");
-    }
-    delete patch.flow_template_id;
-
     // "Publicado" (concluido) is Criativo-only — the correlation with a real
     // publication (payload.metaPostId) and the metrics it then accumulates
     // only make sense for that kind.
@@ -128,7 +119,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    let task = await updateTaskGroup(id, current, recurringActionPlanPatch(current, patch));
+    // "Plano de Ação" continua sendo um campo único no card, mas agora ele
+    // escreve um ELO, não uma coluna: `plan_id` passou a significar só
+    // "ocorrência de recorrência". setTaskPlanLink mexe apenas no elo sem
+    // slot, para não derrubar as ligações de etapa de uma corrente.
+    const { plan_id: planLink, ...taskPatch } = patch as Record<string, unknown>;
+    let task = await updateTaskGroup(id, current, taskPatch);
+    if (planLink !== undefined) {
+      await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null);
+      task = (await getTaskById(id)) ?? task;
+    }
     if (payload_patch) task = await updateTaskPayloadPatch(id, payload_patch);
     if (assignee_profile_ids !== undefined) {
       await setTaskAssigneeProfiles(task.id, assignee_profile_ids);

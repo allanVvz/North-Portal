@@ -19,9 +19,9 @@ import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
-import type { FlowTemplate } from "@/lib/flows/types";
+import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanIdOf, actionPlanMembersOf, activatedTaskPayload, flowParentIdOf, flowStepKeyOf, flowStepsOf, isDeferredTask, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, parentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
 import type { AdminDocument } from "@/lib/supabase";
@@ -56,15 +56,9 @@ type Draft = {
   barTone: string;
   formato: string;
   plataforma: string;
-  // Só usado por creationScope="flow": qual molde a entrega segue. Não é
-  // editável depois — trocar o fluxo de uma entrega em andamento reescreveria
-  // o denominador do progresso e deixaria etapas órfãs no meio da corrente.
-  flow_template_id: string;
 };
 
-// "flow" cria uma ENTREGA: o card-pai marcado por flow_template_id mais a
-// primeira etapa do molde. Ver createFlowDelivery em lib/supabase.ts.
-export type TaskCreationScope = "task" | "plan" | "routine" | "flow";
+export type TaskCreationScope = "task" | "plan" | "routine";
 
 type PendingMember =
   | { key: string; kind: "existing"; taskId: string; title: string }
@@ -95,7 +89,7 @@ function draftFrom(
     assignee_profile_ids: task?.assignee_profile_ids ?? [],
     reviewer_id: task?.reviewer_id ?? "",
     approver_id: task?.approver_id ?? "",
-    plan_id: task ? actionPlanIdOf(task) ?? "" : "",
+    plan_id: task ? task.parents[0]?.id ?? "" : "",
     due_date: task?.due_date ?? "",
     recurrence_cadence: task?.recurrence_cadence ?? (creationScope === "routine" || initialRecurrence ? "semanal" : null),
     recurrence_weekdays: task?.recurrence_weekdays ?? [],
@@ -110,7 +104,6 @@ function draftFrom(
     barTone: str("barTone") || "green",
     formato: str("formato"),
     plataforma: str("plataforma"),
-    flow_template_id: task?.flow_template_id ?? "",
   };
 }
 
@@ -358,21 +351,22 @@ export default function TaskModal({
   const isRecurringParent = Boolean(liveTask?.recurrence_cadence || liveTask?.payload?.recurrence_group === true);
   const recurrenceParentId = liveTask && !isRecurringParent ? recurrenceParentIdOf(liveTask) : null;
   const [recurrenceParent, setRecurrenceParent] = useState<TaskRecord | null>(() => recurrenceParentOf(recurrenceParentId, clientTasks));
-  // Fluxos em cascata. A ENTREGA é o card com flow_template_id; a ETAPA é o
-  // filho com payload.flow_step_key. Os dois precisam do molde — a entrega para
-  // listar as etapas que ainda não nasceram, a etapa para saber que número ela
-  // é dentro do fluxo — e o molde não está em `tasks`, daí o fetch.
-  const flowStepKey = liveTask ? flowStepKeyOf(liveTask) : null;
-  const flowDeliveryId = liveTask ? flowParentIdOf(liveTask) : null;
+  // Vocabulário (tipos + subtipos) vindo de task_types. É a fonte dos dois
+  // dropdowns do cabeçalho E das etapas de uma entrega — um fluxo É um tipo e
+  // suas etapas SÃO os subtipos dele, então não há duas listas para sincronizar.
+  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([]);
+  // A ENTREGA é o card marcado com payload.flow_parent; a ETAPA é um filho dela
+  // cujo subtipo diz que etapa é.
+  const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
   const [flowDelivery, setFlowDelivery] = useState<TaskRecord | null>(null);
-  const [flowTemplates, setFlowTemplates] = useState<FlowTemplate[]>([]);
   // A etapa recém-criada pela conclusão desta, devolvida pelo PATCH.
   const [flowNext, setFlowNext] = useState<TaskRecord | null>(null);
-  const flowTemplate = flowTemplates.find((t) => t.id === (liveTask?.flow_template_id ?? flowDelivery?.flow_template_id)) ?? null;
-  // Índice 1-based da etapa dentro do molde, para o "2/4" do cabeçalho. -1
-  // quando o molde ainda não chegou ou a etapa foi removida do molde depois de
-  // já existir como card — nesse caso o card continua válido, só não numera.
-  const flowStepIndex = flowTemplate && flowStepKey ? flowTemplate.steps.findIndex((step) => step.step_key === flowStepKey) : -1;
+  const currentType = taskTypes.find((t) => t.key === draft.kind) ?? null;
+  const deliveryType = taskTypes.find((t) => t.key === (flowDelivery?.kind ?? (isDelivery ? liveTask?.kind : null))) ?? null;
+  // Índice 1-based da etapa dentro do tipo, para o "2/4". -1 enquanto o
+  // vocabulário não chegou, ou se o subtipo saiu do tipo depois de o card já
+  // existir — nesse caso o card segue válido, só não numera.
+  const flowStepIndex = deliveryType && liveTask ? deliveryType.subtypes.findIndex((sub) => sub.key === liveTask.subtype) : -1;
   const [comment, setComment] = useState("");
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
@@ -405,15 +399,22 @@ export default function TaskModal({
 
   const kd = kindDef(draft.kind);
   const tone = kindTone(draft.kind);
-  const subtypes = kd.subtypes ?? [];
   // Um card já existente sempre mostra o próprio tipo, mesmo que ele seja
   // oculto (uma etapa de fluxo é kind=criativo, que saiu do dropdown) — senão
   // o pill viria vazio ou trocaria o tipo do card sozinho ao abrir.
-  const selectableKinds = TASK_KIND_KEYS.filter((kind) => !TASK_KINDS[kind].hidden || kind === draft.kind);
-  const creationKinds = selectableKinds.filter((kind) => {
-    if (mode === "edit") return kd.isPlan ? kind === "plano_acao" : kind !== "plano_acao";
-    return creationScope === "plan" ? kind === "plano_acao" : kind !== "plano_acao";
+  // Uma porta só: o dropdown de Tipo lista TUDO que se pode criar, inclusive
+  // Plano de Ação — escolher o tipo é que decide o que nasce. Fora ficam só os
+  // tipos não-criáveis (checkpoint comercial, que é provisionado) e, no modo
+  // Plano, os que não são plano.
+  const creationTypes = taskTypes.filter((type) => {
+    if (!type.creatable && type.key !== draft.kind) return false;
+    if (creationScope === "plan") return type.behavior === "plano";
+    if (mode === "edit" && kd.isPlan) return type.behavior === "plano";
+    return true;
   });
+  const typeLabelOf = (key: string) => taskTypes.find((t) => t.key === key)?.label ?? kindLabel(key);
+  const subtypeOptions = currentType?.subtypes ?? [];
+  const subtypeLabelOf = (key: string) => subtypeOptions.find((sub) => sub.key === key)?.label ?? subtypeLabel(key);
   // The Cliente attribute can change the target client in both modes now, so
   // the header label tracks the draft instead of the (possibly stale) prop.
   // Falls back to the prop for edit mode before `clients` has loaded.
@@ -564,23 +565,25 @@ export default function TaskModal({
     return () => { cancelled = true; };
   }, [recurrenceParentId, clientTasks]);
 
-  // Um GET por abertura de modal de fluxo, e só então: o molde é config
-  // pequena e estável, e a maioria dos cards não é etapa nenhuma.
-  const needsFlowTemplates = Boolean(liveTask?.flow_template_id || flowStepKey || creationScope === "flow");
+  // Um GET por abertura de modal: o vocabulário é config pequena e estável, e
+  // agora todo card precisa dele (os dropdowns de Tipo e Subtipo saem daqui).
   useEffect(() => {
-    if (!needsFlowTemplates || flowTemplates.length) return;
+    if (taskTypes.length) return;
     let cancelled = false;
-    fetch("/api/admin/flow-templates")
+    fetch("/api/admin/task-types")
       .then((response) => response.ok ? response.json() : null)
-      .then((data: { templates: FlowTemplate[] } | null) => {
-        if (!cancelled && data?.templates) setFlowTemplates(data.templates);
+      .then((data: { types: TaskTypeDef[] } | null) => {
+        if (!cancelled && data?.types) setTaskTypes(data.types);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [needsFlowTemplates, flowTemplates.length]);
+  }, [taskTypes.length]);
 
   useEffect(() => { setFlowNext(null); }, [liveTask?.id]);
 
+  const flowDeliveryId = liveTask && !isDelivery
+    ? parentIdsOf(liveTask).find((id) => clientTasks.find((t) => t.id === id && isFlowDelivery(t))) ?? parentIdsOf(liveTask)[0] ?? null
+    : null;
   useEffect(() => {
     if (!flowDeliveryId) { setFlowDelivery(null); return; }
     const loaded = clientTasks.find((t) => t.id === flowDeliveryId) ?? null;
@@ -600,10 +603,14 @@ export default function TaskModal({
     if (mode === "new" && creationScope !== "plan" && kind === "plano_acao") return;
     setDraft((d) => {
       const def = kindDef(kind);
+      const type = taskTypes.find((t) => t.key === kind);
       return {
         ...d,
         kind,
-        subtype: "", // reset — subtype vocabulary is per-kind
+        // Trocar de tipo troca o vocabulário de subtipo. Uma entrega começa
+        // pela primeira etapa; os demais tipos abrem no primeiro subtipo
+        // declarado (é assim que Operacional já nasce em "Gestão").
+        subtype: type?.subtypes[0]?.key ?? "",
         // A plan can't belong to another plan.
         plan_id: def.isPlan ? "" : d.plan_id,
         recurrence_cadence: d.recurrence_cadence,
@@ -619,18 +626,56 @@ export default function TaskModal({
   const planMembers = liveTask
     ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
-  const flowSteps = liveTask?.flow_template_id ? flowStepsOf(liveTask.id, clientTasks) : [];
+  const flowSteps = liveTask && isDelivery ? flowStepsOf(liveTask.id, clientTasks) : [];
   // Unsaved status changes are the task's current UI truth. Reading liveTask
   // here left the percentage frozen until Save, even while the stepper moved.
   const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: draft.status } : null;
   const headerPct = progressTask
-    ? (progressTask.flow_template_id
+    ? (isDelivery
         ? taskProgress(progressTask, flowSteps)
         : kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers) : taskProgress(progressTask))
     : 0;
   const linkableCandidates = liveTask
-    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !actionPlanIdOf(t) && t.client_id === liveTask.client_id)
+    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !parentIdsOf(t).length && t.client_id === liveTask.client_id)
     : [];
+  // Estado do botão de corrente: qual etapa está com o seletor aberto.
+  const [chainSlot, setChainSlot] = useState<string | null>(null);
+
+  /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo tipo, mesmo
+   * subtipo, e ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
+   * entrega aparece de propósito — compartilhar é o objetivo. */
+  function chainCandidates(slot: string) {
+    if (!liveTask) return [];
+    return clientTasks.filter(
+      (t) =>
+        t.id !== liveTask.id &&
+        t.client_id === liveTask.client_id &&
+        t.kind === liveTask.kind &&
+        t.subtype === slot &&
+        !t.parents.some((parent) => parent.id === liveTask.id),
+    );
+  }
+
+  async function linkStepCard(taskId: string, slot: string) {
+    if (!liveTask) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/relations`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ child_id: taskId, slot }),
+      });
+      const body = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(body?.error ?? "Não foi possível ligar o card.");
+      setChainSlot(null);
+      onTaskPatched?.(liveTask);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível ligar o card.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function linkMember(taskId: string, planId: string | null) {
     try {
       const res = await fetch(`/api/admin/tasks/${taskId}`, {
@@ -665,8 +710,6 @@ export default function TaskModal({
   // typed here are queued locally and only actually created/linked once the
   // plan itself is saved (see save()).
   const isNewPlan = mode === "new" && creationScope === "plan";
-  const isNewFlow = mode === "new" && creationScope === "flow";
-  const selectedFlowTemplate = flowTemplates.find((t) => t.id === draft.flow_template_id) ?? null;
   const [pendingMembers, setPendingMembers] = useState<PendingMember[]>([]);
   const [newPlanClientTasks, setNewPlanClientTasks] = useState<TaskRecord[]>([]);
   useEffect(() => {
@@ -679,7 +722,7 @@ export default function TaskModal({
     return () => { cancelled = true; };
   }, [isNewPlan, draft.clientSlug]);
   const newPlanCandidates = isNewPlan
-    ? newPlanClientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !actionPlanIdOf(t) && !pendingMembers.some((m) => m.kind === "existing" && m.taskId === t.id))
+    ? newPlanClientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !t.parents.length && !pendingMembers.some((m) => m.kind === "existing" && m.taskId === t.id))
     : [];
   function addPendingExisting(candidate: { id: string; title: string }) {
     setPendingMembers((current) => [...current, { key: `e-${candidate.id}`, kind: "existing", taskId: candidate.id, title: candidate.title }]);
@@ -916,13 +959,6 @@ export default function TaskModal({
       body.kind = "plano_acao";
     } else if (mode === "new" && creationScope === "routine" && !body.recurrence_cadence) {
       body.recurrence_cadence = "semanal";
-    } else if (isNewFlow) {
-      // A entrega agrega etapas; ela mesma não tem recorrência nem prazo
-      // próprio (o prazo real é o da última etapa). O tipo vem do molde.
-      body.flow_template_id = draft.flow_template_id;
-      body.recurrence_cadence = null;
-      body.recurrence_weekdays = [];
-      body.recurrence_day_of_month = null;
     }
     // Cliente is editable in edit mode too now — always send it (as the
     // current draft, whether changed or not) so a real change actually moves
@@ -1049,27 +1085,27 @@ export default function TaskModal({
                     <span className="tm-head-sep">·</span>
                     <HeadDropdown
                       className="tm-headpick-kind"
-                      trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{kindLabel(draft.kind)}</span>}
+                      trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{typeLabelOf(draft.kind)}</span>}
                     >
-                      {creationKinds.map((k) => (
-                        <button type="button" key={k} className={`tm-headpick-option ${draft.kind === k ? "on" : ""}`} onClick={() => pickKind(k)}>
-                          <span className="tm-headpick-ico" aria-hidden>{kindIcon(k)}</span>{kindLabel(k)}
+                      {creationTypes.map((type) => (
+                        <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)}>
+                          <span className="tm-headpick-ico" aria-hidden>{kindIcon(type.key)}</span>{type.label}
                         </button>
                       ))}
                     </HeadDropdown>
                   </>
                 ) : null}
-                {subtypes.length ? (
+                {subtypeOptions.length ? (
                   <>
                     <span className="tm-head-sep">·</span>
                     <HeadDropdown
                       className="tm-headpick-subtype"
-                      trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabel(draft.subtype) : "Subtipo"}</span>}
+                      trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}
                     >
                       <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
-                      {subtypes.map((subtype) => (
-                        <button type="button" key={subtype} className={`tm-headpick-option ${draft.subtype === subtype ? "on" : ""}`} onClick={() => set("subtype", subtype)}>
-                          {subtypeLabel(subtype)}
+                      {subtypeOptions.map((sub) => (
+                        <button type="button" key={sub.key} className={`tm-headpick-option ${draft.subtype === sub.key ? "on" : ""}`} onClick={() => set("subtype", sub.key)}>
+                          {sub.label}
                         </button>
                       ))}
                     </HeadDropdown>
@@ -1107,53 +1143,37 @@ export default function TaskModal({
           <div className="tm-head tm-head-plain">
             <div className="tm-head-text">
               <div className="tm-new-headline">
-                <h2>{isNewFlow ? "Nova Entrega" : "Nova Tarefa"}</h2>
-                {isNewFlow ? (
-                  // Numa entrega o usuário escolhe o FLUXO, não o tipo: o tipo
-                  // de cada card vem do molde (Roteiro é planejamento, Captação
-                  // é agendamento…), e deixá-lo escolher tipo aqui só criaria a
-                  // chance de contradizer o molde.
-                  <HeadDropdown
-                    className="tm-new-kind"
-                    trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>⇉</span>{selectedFlowTemplate?.name ?? "Escolher fluxo"}</span>}
-                  >
-                    {flowTemplates.filter((t) => t.active).map((template) => (
-                      <button
-                        type="button"
-                        key={template.id}
-                        className={`tm-headpick-option ${draft.flow_template_id === template.id ? "on" : ""}`}
-                        onClick={() => set("flow_template_id", template.id)}
-                      >
-                        <span className="tm-headpick-ico" aria-hidden>⇉</span>{template.name}
-                      </button>
-                    ))}
-                    {flowTemplates.length === 0 ? <span className="tm-headpick-option">Carregando fluxos…</span> : null}
-                  </HeadDropdown>
-                ) : (
+                <h2>Nova Tarefa</h2>
                 <HeadDropdown
                   className="tm-new-kind"
-                  trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{kindLabel(draft.kind)}</span>}
+                  trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{typeLabelOf(draft.kind)}</span>}
                 >
-                  {creationKinds.map((kind) => (
-                    <button type="button" key={kind} className={`tm-headpick-option ${draft.kind === kind ? "on" : ""}`} onClick={() => pickKind(kind)}>
-                      <span className="tm-headpick-ico" aria-hidden>{kindIcon(kind)}</span>{kindLabel(kind)}
+                  {creationTypes.map((type) => (
+                    <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)}>
+                      <span className="tm-headpick-ico" aria-hidden>{kindIcon(type.key)}</span>{type.label}
+                      {type.behavior === "entrega" ? <span className="tm-headpick-hint">corrente de etapas</span> : null}
                     </button>
                   ))}
                 </HeadDropdown>
-                )}
-                {!isNewFlow && subtypes.length ? (
-                  <HeadDropdown className="tm-new-kind" trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabel(draft.subtype) : "Subtipo"}</span>}>
-                    <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
-                    {subtypes.map((subtype) => <button type="button" key={subtype} className={`tm-headpick-option ${draft.subtype === subtype ? "on" : ""}`} onClick={() => set("subtype", subtype)}>{subtypeLabel(subtype)}</button>)}
+                {subtypeOptions.length ? (
+                  <HeadDropdown className="tm-new-kind" trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}>
+                    {/* Num tipo-entrega o subtipo É a etapa por onde a corrente
+                        começa, então "sem subtipo" não faz sentido ali. */}
+                    {currentType?.behavior === "entrega" ? null : (
+                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
+                    )}
+                    {subtypeOptions.map((sub) => (
+                      <button type="button" key={sub.key} className={`tm-headpick-option ${draft.subtype === sub.key ? "on" : ""}`} onClick={() => set("subtype", sub.key)}>{sub.label}</button>
+                    ))}
                   </HeadDropdown>
                 ) : null}
               </div>
               <p className="admin-sub">
-                {isNewFlow
-                  ? selectedFlowTemplate
-                    ? `Nasce em ${selectedFlowTemplate.steps[0]?.title ?? "primeira etapa"}. Cada etapa concluída cria a próxima.`
-                    : "Escolha o fluxo que a entrega vai seguir."
-                  : "Conte o essencial e escolha o tipo do card."}
+                {currentType?.behavior === "entrega"
+                  ? `Nasce em ${subtypeLabelOf(draft.subtype) || currentType.subtypes[0]?.label || "primeira etapa"}. Cada etapa concluída cria a próxima.`
+                  : currentType?.behavior === "plano"
+                    ? "Um plano agrega outras tarefas e mostra o progresso do conjunto."
+                    : "Conte o essencial e escolha o tipo do card."}
               </p>
             </div>
             <button className="kb-modal-close" onClick={() => void closeAfterSave()} aria-label="Fechar">✕</button>
@@ -1365,16 +1385,15 @@ export default function TaskModal({
                   {flowDelivery ? (
                     <div className="tm-member">
                       {/* Sem ✕: uma etapa não é um vínculo que se revoga, é um
-                          estágio da entrega. O servidor recusa o detach
-                          (detachedTaskRelationPatch), e oferecer o botão aqui
-                          só produziria um erro. */}
+                          estágio da entrega. Desligar é feito pelo botão de
+                          corrente, do lado da entrega. */}
                       <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(flowDelivery)} disabled={!onOpenRelatedTask || busy}>
                         <TaskKindIcon kind={flowDelivery.kind} size="sm" />
                         <span className="tm-member-title">{flowDelivery.title}</span>
                         <span className="tm-member-status">
-                          {flowStepIndex >= 0 && flowTemplate
-                            ? `Etapa ${flowStepIndex + 1}/${flowTemplate.steps.length}`
-                            : subtypeLabel(liveTask.subtype) || "Etapa do fluxo"}
+                          {flowStepIndex >= 0 && deliveryType
+                            ? `Etapa ${flowStepIndex + 1}/${deliveryType.subtypes.length}`
+                            : subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo"}
                         </span>
                         <span className="tm-member-arrow" aria-hidden>↗</span>
                       </button>
@@ -1384,37 +1403,81 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {liveTask?.flow_template_id ? (
+            {liveTask && isDelivery ? (
               <div className="tm-box tm-planmembers">
                 <p className="tm-box-label">
-                  Etapas do fluxo{flowTemplate ? ` · ${flowTemplate.name}` : ""} ({flowSteps.length}/{flowTemplate?.steps.length ?? flowSteps.length})
+                  Etapas{deliveryType ? ` · ${deliveryType.label}` : ""} ({flowSteps.length}/{deliveryType?.subtypes.length ?? flowSteps.length})
                 </p>
                 <div className="tm-member-list">
-                  {/* A lista vem do MOLDE, não dos cards: numa cascata as etapas
+                  {/* A lista vem do TIPO, não dos cards: numa cascata as etapas
                       seguintes ainda não existem, e mostrar só o que já nasceu
                       esconderia justamente o que falta. */}
-                  {(flowTemplate?.steps ?? []).map((step) => {
-                    const card = flowSteps.find((t) => flowStepKeyOf(t) === step.step_key) ?? null;
+                  {(deliveryType?.subtypes ?? []).map((step) => {
+                    const card = flowSteps.find((t) => flowStepKeyOf(t) === step.key) ?? null;
                     return (
-                      <div className="tm-member" key={step.step_key}>
+                      <div className="tm-member" key={step.key}>
                         {card ? (
-                          <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(card)} disabled={!onOpenRelatedTask || busy}>
-                            <TaskKindIcon kind={card.kind} size="sm" />
-                            <span className="tm-member-title">{step.title}</span>
-                            <span className="tm-member-status">{STATUS_LABEL[card.status]}</span>
-                            <span className="tm-member-arrow" aria-hidden>↗</span>
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="tm-member-unlink"
+                              title="Desligar este card da entrega"
+                              aria-label={`Desligar ${card.title} da entrega`}
+                              onClick={() => void unlinkMember(card.id, liveTask.id)}
+                              disabled={busy}
+                            >✕</button>
+                            <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(card)} disabled={!onOpenRelatedTask || busy}>
+                              <TaskKindIcon kind={card.kind} size="sm" />
+                              <span className="tm-member-title">{step.label}</span>
+                              <span className="tm-member-status">{STATUS_LABEL[card.status]}</span>
+                              <span className="tm-member-arrow" aria-hidden>↗</span>
+                            </button>
+                          </>
                         ) : (
-                          <span className="tm-member-open tm-member-pending">
-                            <TaskKindIcon kind={step.kind} size="sm" />
-                            <span className="tm-member-title">{step.title}</span>
-                            <span className="tm-member-status">Aguardando a etapa anterior</span>
-                          </span>
+                          <>
+                            {/* Botão de corrente: liga um card que JÁ EXISTE a
+                                esta etapa, em vez de esperar a cascata criar um
+                                novo. É assim que o mesmo roteiro serve três
+                                peças e uma diária de gravação serve vários
+                                criativos — ligar compartilha, não copia. */}
+                            <button
+                              type="button"
+                              className="tm-member-unlink tm-member-chain"
+                              title={`Ligar um card existente à etapa ${step.label}`}
+                              aria-label={`Ligar um card existente à etapa ${step.label}`}
+                              onClick={() => setChainSlot(chainSlot === step.key ? null : step.key)}
+                              disabled={busy}
+                            >🔗</button>
+                            <span className="tm-member-open tm-member-pending">
+                              <TaskKindIcon kind={liveTask.kind} size="sm" />
+                              <span className="tm-member-title">{step.label}</span>
+                              <span className="tm-member-status">Aguardando a etapa anterior</span>
+                            </span>
+                          </>
                         )}
+                        {chainSlot === step.key ? (
+                          <div className="tm-chain-picker">
+                            {/* Só cards do MESMO subtipo e do mesmo cliente:
+                                ligar um roteiro na etapa de edição produziria
+                                uma corrente que não quer dizer nada. */}
+                            {chainCandidates(step.key).map((candidate) => (
+                              <button
+                                type="button"
+                                key={candidate.id}
+                                className="tm-headpick-option"
+                                onClick={() => void linkStepCard(candidate.id, step.key)}
+                                disabled={busy}
+                              >{candidate.title}</button>
+                            ))}
+                            {chainCandidates(step.key).length === 0 ? (
+                              <p className="admin-sub" style={{ margin: 0 }}>Nenhum card de {step.label} disponível neste cliente.</p>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
-                  {!flowTemplate ? <p className="admin-sub" style={{ margin: 0 }}>Carregando fluxo…</p> : null}
+                  {!deliveryType ? <p className="admin-sub" style={{ margin: 0 }}>Carregando etapas…</p> : null}
                 </div>
               </div>
             ) : null}
@@ -1668,8 +1731,8 @@ export default function TaskModal({
             </button> : null}
             {liveTask?.recurrence_cadence ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
             {mode === "new" ? <button className="admin-btn ghost" onClick={() => void closeAfterSave()} disabled={busy}>Cancelar</button> : null}
-            {mode === "new" ? <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim() || (isNewFlow && !draft.flow_template_id)}>
-              {busy ? "Salvando…" : isNewFlow ? "Criar entrega" : "Criar card"}
+            {mode === "new" ? <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
+              {busy ? "Salvando…" : currentType?.behavior === "entrega" ? "Criar entrega" : "Criar card"}
             </button> : null}
           </div>
         </footer>

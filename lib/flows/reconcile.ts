@@ -14,7 +14,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, errorMessage } from "@/lib/automations/taskAccess";
-import { FLOW_STEP_KEY } from "@/lib/taskRelations";
 import { advanceFlow } from "./advance";
 
 export type ReconcileSummary = { checked: number; created: number; errors: { taskId: string; message: string }[] };
@@ -32,7 +31,7 @@ export async function reconcileFlows(): Promise<ReconcileSummary> {
     .from("tasks")
     .select(TASK_COLUMNS)
     .not("completed_at", "is", null)
-    .not(`payload->>${FLOW_STEP_KEY}`, "is", null)
+    .not("subtype", "is", null)
     .order("completed_at", { ascending: false })
     .limit(BATCH);
   if (error) throw error;
@@ -41,10 +40,9 @@ export async function reconcileFlows(): Promise<ReconcileSummary> {
     const step = asTaskRecord(row);
     summary.checked += 1;
     try {
-      // advanceFlow is idempotent by deterministic id: a step whose successor
-      // already exists comes back as "already_exists" without writing.
+      // advanceFlow é idempotente: um slot já ocupado não escreve nada.
       const outcome = await advanceFlow(admin, step);
-      if (outcome.status === "created") summary.created += 1;
+      summary.created += outcome.created.length;
     } catch (advanceError) {
       // Per-step isolation: one broken template must not stop the sweep for
       // every other flow in the agency.

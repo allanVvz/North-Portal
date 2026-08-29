@@ -3,15 +3,16 @@ import { FLOW_TOTAL_WEIGHT_KEY, taskProgress } from "@/lib/taskCatalog";
 import type { TaskStatus } from "@/lib/validation";
 
 const step = (status: TaskStatus, id: string = status, progress_weight = 1) =>
-  ({ id, kind: "criativo", status, progress_weight, payload: { flow_step_key: id } });
+  ({ id, kind: "criativo", status, progress_weight, payload: {} });
 
+// A entrega é reconhecida pela marca no payload, não pelo tipo: existem cards
+// `criativo` legados que são trabalho comum e não podem virar pais.
 const delivery = (totalWeight: number) => ({
   id: "entrega",
   kind: "criativo",
-  status: "backlog" as TaskStatus,
+  status: "em_producao" as TaskStatus,
   progress_weight: 1,
-  flow_template_id: "tpl",
-  payload: { [FLOW_TOTAL_WEIGHT_KEY]: totalWeight },
+  payload: { flow_parent: true, [FLOW_TOTAL_WEIGHT_KEY]: totalWeight },
 });
 
 describe("progresso de uma entrega em cascata", () => {
@@ -49,7 +50,7 @@ describe("progresso de uma entrega em cascata", () => {
   });
 
   it("cai para o peso dos membros quando o snapshot sumiu (molde apagado)", () => {
-    const orphan = { ...delivery(0), payload: {} };
+    const orphan = { ...delivery(0), payload: { flow_parent: true } };
     expect(taskProgress(orphan, [step("concluido", "roteiro")])).toBe(100);
   });
 });

@@ -4,6 +4,7 @@ import {
   createFlowDelivery,
   createRecurringTaskGroup,
   createTask,
+  linkTasks,
   getClient,
   getClientFlowFlags,
   getTaskById,
@@ -17,6 +18,13 @@ import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from
 import { recurrenceParentPayload } from "@/lib/recurrenceState";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, taskCreateSchema, validateSlug } from "@/lib/validation";
+import { createClient } from "@/lib/supabase/server";
+import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
+
+async function taskBehaviorOf(kind: string): Promise<TaskBehavior> {
+  const supabase = await createClient();
+  return findType(await listTaskTypes(supabase), kind)?.behavior ?? "simples";
+}
 
 // GET /api/admin/tasks?slug=<client>  → all tasks for a client's board
 // GET /api/admin/tasks?unassigned=1   → tasks with no client ("Outros" filter)
@@ -54,7 +62,7 @@ export async function POST(request: Request) {
   try {
     await requireAdmin();
     const scope = new URL(request.url).searchParams.get("scope");
-    if (scope && !["task", "plan", "routine", "flow"].includes(scope)) throw new HttpError(400, "Contexto de criacao invalido.");
+    if (scope && !["task", "plan", "routine"].includes(scope)) throw new HttpError(400, "Contexto de criacao invalido.");
     const body = taskCreateSchema.parse(await request.json());
     const client = body.slug ? await getClient(body.slug, true) : null;
     if (body.slug && !client) throw new HttpError(404, "Cliente nao encontrado.");
@@ -73,21 +81,21 @@ export async function POST(request: Request) {
       if (fields.payload) delete fields.payload[EXPLICIT_DATES_KEY];
     }
 
+    // Uma porta só: o TIPO escolhido decide o que nasce, não o botão que a
+    // pessoa clicou. Um tipo com behavior 'entrega' vira uma corrente de
+    // etapas; 'plano' vira um agregador; o resto vira um card comum.
+    const behavior = await taskBehaviorOf(fields.kind ?? "operacional");
     if (scope === "plan") {
       fields.kind = "plano_acao";
-    } else if (scope === "task") {
-      if (fields.kind === "plano_acao") throw new HttpError(400, "A tela Tarefas nao cria Planos de Acao.");
     } else if (scope === "routine") {
       if (!fields.recurrence_cadence) throw new HttpError(400, "Uma Rotina precisa ter recorrencia.");
-    } else if (scope === "flow") {
-      if (!fields.flow_template_id) throw new HttpError(400, "Escolha um fluxo para a entrega.");
-      // A entrega não é um card de trabalho: ela agrega etapas. Recorrência
-      // sobre ela geraria um pai de pai, que nenhum rollup sabe ler.
-      if (fields.recurrence_cadence) throw new HttpError(400, "Uma entrega de fluxo nao pode ser recorrente.");
+      if (behavior === "entrega") throw new HttpError(400, "Uma entrega nao pode ser uma rotina.");
     }
-    // flow_template_id só entra por scope=flow: qualquer outro caminho que o
-    // aceitasse criaria um card que agrega etapas sem nunca ter uma.
-    if (scope !== "flow") fields.flow_template_id = null;
+    // A entrega agrega etapas; recorrência sobre ela geraria um pai de pai, que
+    // nenhum rollup sabe ler.
+    if (behavior === "entrega" && fields.recurrence_cadence) {
+      throw new HttpError(400, "Uma entrega nao pode ser recorrente.");
+    }
 
     if (fields.status === "concluido" && (fields.kind ?? "criativo") !== "criativo") {
       throw new HttpError(400, "Apenas cards do tipo Criativo podem ir para Publicado.");
@@ -113,12 +121,15 @@ export async function POST(request: Request) {
       if (!flags.aprovacaoAdmin) { fields.approver_id = null; fields.requires_approval = false; }
     }
 
-    const { flow_template_id: flowTemplateId, ...taskFields } = fields;
-    const task = scope === "flow"
-      ? await createFlowDelivery(client?.id ?? null, taskFields, flowTemplateId!)
+    // plan_id é elo, não coluna: sai dos campos do insert e vira uma ligação
+    // depois que o card existe.
+    const { plan_id: planLink, ...taskFields } = fields;
+    const task = behavior === "entrega"
+      ? await createFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
       : fields.recurrence_cadence && scope !== "routine"
-        ? await createRecurringTaskGroup(client?.id ?? null, fields)
-        : await createTask(client?.id ?? null, fields);
+        ? await createRecurringTaskGroup(client?.id ?? null, taskFields)
+        : await createTask(client?.id ?? null, taskFields);
+    if (planLink) await linkTasks(planLink, task.id);
     if (assignee_profile_ids?.length) {
       await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
       // A recurring group's returned row is the first execution, and a flow's

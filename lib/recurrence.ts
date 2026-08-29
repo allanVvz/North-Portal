@@ -1,6 +1,6 @@
 import type { RecurringCadence, TaskRecord } from "./validation";
 import { derivedTaskId } from "./derivedTaskId";
-import { ACTION_PLAN_PAYLOAD_KEY, DEFERRED_TASK_FLAG } from "./taskRelations";
+import { DEFERRED_TASK_FLAG } from "./taskRelations";
 import { EXPLICIT_DATES_KEY, EXPLICIT_GROUP_KEY } from "./taskDateGrouping";
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf } from "./recurrenceState";
 
@@ -110,7 +110,6 @@ export function recurringExecutionFields(parent: TaskRecord, id: string, occurre
   delete payload.last_completed_at;
   delete payload[RECURRENCE_GROUP_KEY];
   delete payload[RECURRENCE_REVISION_KEY];
-  delete payload[ACTION_PLAN_PAYLOAD_KEY];
   delete payload.accessed_at;
   return {
     id,

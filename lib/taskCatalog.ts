@@ -175,7 +175,6 @@ function workflowPct(workflow: WorkflowKey, status: TaskStatus): number {
 type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight"> & {
   id?: string;
   recurrence_cadence?: TaskRecord["recurrence_cadence"];
-  flow_template_id?: TaskRecord["flow_template_id"];
   payload?: TaskRecord["payload"];
 };
 
@@ -206,9 +205,11 @@ function flowTotalWeight(task: ProgressTask): number {
   return typeof value === "number" && value > 0 ? value : 0;
 }
 
-/** A card that aggregates children instead of holding a status of its own. */
+/** A card that aggregates children instead of holding a status of its own.
+ * A entrega é reconhecida pela marca no payload, não pelo tipo — ver
+ * FLOW_PARENT_KEY em lib/taskRelations.ts. */
 function isRollupParent(task: ProgressTask): boolean {
-  return Boolean(kindDef(task.kind).isPlan || task.recurrence_cadence || task.flow_template_id);
+  return Boolean(kindDef(task.kind).isPlan || task.recurrence_cadence || task.payload?.flow_parent === true);
 }
 
 /**
@@ -241,7 +242,7 @@ function rollupProgress(
   seen: Set<string>,
 ): number {
   const memberWeight = members.reduce((s, m) => s + (m.progress_weight || 1), 0);
-  const totalWeight = task.flow_template_id ? flowTotalWeight(task) || memberWeight : memberWeight;
+  const totalWeight = flowTotalWeight(task) || memberWeight;
   if (totalWeight === 0) return 0;
   const weighted = members.reduce(
     (s, m) => s + progressOf(m, membersByParent?.get(m.id ?? "") ?? [], membersByParent, seen) * (m.progress_weight || 1),

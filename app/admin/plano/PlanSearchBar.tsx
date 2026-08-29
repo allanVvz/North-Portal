@@ -11,10 +11,12 @@ export default function PlanSearchBar({
   q,
   onQChange,
   plans,
+  placeholder,
 }: {
   q: string;
   onQChange: (value: string) => void;
   plans: ActionPlan[];
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -51,7 +53,7 @@ export default function PlanSearchBar({
           value={q}
           onChange={(e) => onQChange(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="Todos os clientes · buscar por cliente, responsável, prazo…"
+          placeholder={placeholder ?? "Todos os clientes · buscar por cliente, responsável, prazo…"}
         />
         {q ? (
           <button type="button" className="kb-searchbar-clear" aria-label="Limpar busca" onClick={(e) => { e.stopPropagation(); onQChange(""); }}>✕</button>

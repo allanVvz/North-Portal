@@ -7,7 +7,7 @@ import KanbanBoard from "../KanbanBoard";
 import CardCover from "../CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
 import ActionPlansBoard from "../plano/ActionPlansBoard";
-import FlowDeliveriesBoard from "./FlowDeliveriesBoard";
+import ParentCardsBoard from "./ParentCardsBoard";
 import type { FlowDelivery, ActionPlan } from "@/lib/supabase";
 import HScrollRail from "../HScrollRail";
 import RecurringSearchBar from "../RecurringSearchBar";
@@ -384,7 +384,22 @@ export default function OperacaoWorkspace({
           <p className="admin-empty">Cadastre um cliente para montar o quadro.</p>
         )
       ) : section === "entregas" ? (
-        <FlowDeliveriesBoard initial={deliveries} clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
+        <ParentCardsBoard
+          initial={deliveries}
+          clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))}
+          assignees={assignees}
+          scope="task"
+          initialKind="criativo"
+          sortScope="entregas.lista"
+          showStepCount
+          texts={{
+            newLabel: "+ Entrega",
+            empty: "Nenhuma entrega em andamento. Crie uma tarefa do tipo Criativo — cada etapa concluída cria a próxima.",
+            emptyQuery: "Nenhuma entrega para essa busca.",
+            searchPlaceholder: "Buscar por entrega, cliente, tipo ou etapa…",
+            descriptionHint: "Adicione à descrição o que esta entrega precisa ser quando ficar pronta.",
+          }}
+        />
       ) : section === "plano" ? (
         <ActionPlansBoard initial={plans} clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
       ) : (
