@@ -1974,7 +1974,11 @@ body.menu-open {
    invólucro sumir do layout e nav e rodapé voltam a ser filhos diretos da
    lateral — a trilha de ícones que abre no hover continua exatamente igual. */
 .admin-drawer { display: contents; }
-.admin-menu-btn { display: none; }
+/* Dois seletores de uma classe: `.admin-icon-btn { display: grid }` é declarado
+   depois (na seção do botão de ícone) e ganhava daqui por ordem de fonte, então
+   o botão vazava no desktop. Subir a especificidade para dois níveis resolve
+   sem depender de ordem — ver o gotcha de cascata no CLAUDE.md. */
+.admin-topline-actions .admin-menu-btn { display: none; }
 
 @media (max-width: 720px) {
   .admin-shell { flex-direction: column; }
@@ -1993,7 +1997,7 @@ body.menu-open {
   }
   .admin-sidebar-content { height: auto; }
   .admin-topline { padding: 0; }
-  .admin-menu-btn { display: inline-flex; }
+  .admin-topline-actions .admin-menu-btn { display: inline-flex; }
 
   .admin-drawer {
     display: flex; flex-direction: column;
