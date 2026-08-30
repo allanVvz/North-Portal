@@ -10,7 +10,7 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, detachedRecurrencePatch, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
+import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
 import {
   HttpError,
   normalizeInsights,
@@ -50,7 +50,7 @@ import {
   type PerformanceTemplate,
   type PerformanceTemplateConfig,
 } from "./performanceTemplates";
-import { taskProgress, checkpointsProgress, kindLabel, kindTone, subtypeLabel, FLOW_STEP_COUNT_KEY, FLOW_TOTAL_WEIGHT_KEY } from "./taskCatalog";
+import { taskProgress, checkpointsProgress, dedupePlanMembers, isRollupParent, kindLabel, kindTone, subtypeLabel, FLOW_STEP_COUNT_KEY, FLOW_TOTAL_WEIGHT_KEY } from "./taskCatalog";
 import { deliveryTypeProblem, findType, isDeliveryType, listTaskTypes, typeTotalWeight, type TaskBehavior } from "./taskTypes";
 import { DELIVERY_INITIAL_STATUS } from "./flows/parentStatus";
 import { advanceFlowAfterUpdate } from "./flows/advance";
@@ -1280,27 +1280,57 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
   const rows = ((data as unknown as Row[] | null) ?? []).filter((t) => t.payload?.[RECURRENCE_GROUP_KEY] !== true);
   if (!rows.length) return [];
 
-  const { data: childData, error: childError } = await supabase
-    .from("tasks")
-    .select(TASK_COLUMNS_WITH_ASSIGNEES)
-    .in("id", await childIdsOf(supabase, rows.map((r) => r.id)))
-    .order("position")
-    .order("created_at");
-  if (childError) fail(childError);
-  const childrenOfParent = childrenByParent(
-    ((childData as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow),
-  );
+  const fetchChildren = async (parentIds: string[]) => {
+    if (!parentIds.length) return [] as (TaskRecord & TaskAssigneesJoin)[];
+    const ids = await childIdsOf(supabase, parentIds);
+    if (!ids.length) return [] as (TaskRecord & TaskAssigneesJoin)[];
+    const { data, error: childError } = await supabase
+      .from("tasks")
+      .select(TASK_COLUMNS_WITH_ASSIGNEES)
+      .in("id", ids)
+      .order("position")
+      .order("created_at");
+    if (childError) fail(childError);
+    return ((data as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []);
+  };
+
+  const level1 = (await fetchChildren(rows.map((r) => r.id))).map(mergeTaskAssigneeRow);
+  // DOIS níveis, e o segundo não é luxo: um membro que é ele mesmo um pai de
+  // rollup — uma Entrega dentro de um Plano — calcula o próprio progresso a
+  // partir dos FILHOS dele. Sem buscar os netos, `taskProgress` recebe uma
+  // lista vazia, divide pelo peso congelado do molde e devolve 0. Era por isso
+  // que uma Entrega 75% pronta contribuía zero para o plano.
+  //
+  // Para em dois de propósito. Plano › Entrega › etapas é a forma que existe
+  // hoje; um Plano DENTRO de um fluxo acrescentaria um terceiro nível e voltaria
+  // a rolar 0 — a hora de trocar `childIdsOf` por um CTE recursivo é quando
+  // essa forma existir, não antes.
+  const nested = level1.filter((t) => isRollupParent(t)).map((t) => t.id);
+  const level2 = (await fetchChildren(nested)).map(mergeTaskAssigneeRow);
+  // Deduplicar por id antes de agrupar. Um card que é etapa de uma Entrega E
+  // membro do Plano aparece nos DOIS níveis, e `childrenByParent` o colocaria
+  // duas vezes no balde da entrega — que passaria a somar a mesma etapa duas
+  // vezes contra o peso congelado do molde. Foi exatamente o que aconteceu:
+  // uma entrega de 2/4 etapas marcou 75% em vez de 50%.
+  const byId = new Map([...level1, ...level2].map((t) => [t.id, t]));
+  const childrenOfParent = childrenByParent([...byId.values()]);
 
   return rows.map(mergeTaskAssigneeRow).map(({ clients, ...task }) => {
     const c = Array.isArray(clients) ? clients[0] : clients;
-    const members = childrenOfParent.get(task.id) ?? [];
+    const members = behavior === "entrega"
+      ? flowStepsOf(task.id, level1)
+      : actionPlanMembersOf(task.id, level1);
+    const counted = dedupePlanMembers(members, childrenOfParent);
     return {
       ...task,
       clientName: c?.name ?? "Outros",
       clientSlug: c?.slug ?? "",
       typeLabel: labelByKind.get(task.kind) ?? task.kind,
-      progress: taskProgress(task, members),
-      activities: members.map((member) => ({ ...member, progress: taskProgress(member) })),
+      progress: taskProgress(task, counted, childrenOfParent),
+      activities: members.map((member) => ({
+        ...member,
+        progress: taskProgress(member, childrenOfParent.get(member.id) ?? [], childrenOfParent),
+      })),
     };
   });
 }
@@ -1489,7 +1519,7 @@ export async function createFlowDelivery(
   input: Record<string, unknown>,
   typeKey: string,
   startAtSubtype?: string | null,
-): Promise<TaskRecord> {
+): Promise<{ delivery: TaskRecord; step: TaskRecord }> {
   const supabase = await createClient();
   const type = findType(await listTaskTypes(supabase), typeKey);
   if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
@@ -1529,7 +1559,9 @@ export async function createFlowDelivery(
   try {
     const step = await createTask(clientId, flowStepFields(delivery, firstStep, null));
     await linkTasks(delivery.id, step.id, firstStep.key, firstStep.order_index);
-    return step;
+    // Os DOIS. Devolver só o passo fazia quem chamava tratá-lo como "o card
+    // criado" — e ligar ao Plano de Ação o primeiro passo em vez da entrega.
+    return { delivery, step };
   } catch (error) {
     // Uma entrega sem etapa nenhuma não é recuperável pela cascata (nada
     // conclui, nada nasce) e ficaria invisível no quadro.

@@ -16,7 +16,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatCommentTime } from "@/lib/comments";
 import { kindDef, kindLabel } from "@/lib/taskCatalog";
 import type { TaskTypeDef } from "@/lib/taskTypes";
-import { parentIdsOf } from "@/lib/taskRelations";
+import { planParentIdOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
 
@@ -181,7 +181,7 @@ export default function TaskDetailPanel({
           <div className="tdp-attr">
             <span>Plano de Ação</span>
             <select
-              value={parentIdsOf(task)[0] ?? ""} disabled={busy}
+              value={planParentIdOf(task) ?? ""} disabled={busy}
               onChange={(e) => patch({ plan_id: e.target.value || null })}
             >
               <option value="">— Sem plano —</option>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLOW_TOTAL_WEIGHT_KEY, taskProgress } from "@/lib/taskCatalog";
+import { FLOW_TOTAL_WEIGHT_KEY, dedupePlanMembers, taskProgress } from "@/lib/taskCatalog";
 import type { TaskStatus } from "@/lib/validation";
 
 const step = (status: TaskStatus, id: string = status, progress_weight = 1) =>
@@ -53,6 +53,26 @@ describe("progresso de uma entrega em cascata", () => {
   it("cai para o peso dos membros quando o snapshot sumiu (molde apagado)", () => {
     const orphan = { ...delivery(0), payload: { flow_parent: true } };
     expect(taskProgress(orphan, [step("aprovado", "roteiro")])).toBe(100);
+  });
+});
+
+// A regra de "a Entrega conta como UM item": se alguém ligar também as etapas
+// ao mesmo Plano, a peça pesaria cinco vezes na média.
+describe("dedupePlanMembers — a peça não conta cinco vezes", () => {
+  it("tira do peso a etapa que já pertence a uma Entrega da mesma lista", () => {
+    const entrega = delivery(4);
+    const roteiro = step("aprovado", "roteiro");
+    const avulsa = { id: "avulsa", kind: "operacional", status: "aprovado" as TaskStatus, progress_weight: 1, payload: {} };
+    const byParent = new Map([["entrega", [roteiro]]]);
+
+    // Alguém ligou a entrega E o roteiro dela ao mesmo plano.
+    const membros = [entrega, roteiro, avulsa];
+    expect(dedupePlanMembers(membros, byParent).map((m) => m.id)).toEqual(["entrega", "avulsa"]);
+  });
+
+  it("sem o mapa não há o que deduzir, e nada é removido", () => {
+    const entrega = delivery(4);
+    expect(dedupePlanMembers([entrega], undefined)).toEqual([entrega]);
   });
 });
 

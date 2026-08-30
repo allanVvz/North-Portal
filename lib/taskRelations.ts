@@ -118,10 +118,36 @@ export function childrenOf<T extends TaskRelation>(parentId: string, tasks: read
   return tasks.filter((task) => hasParent(task, parentId));
 }
 
-/** Mesmos filtros, nomes diferentes: mantidos porque os call sites leem melhor
- * dizendo o que estão buscando. Plano e entrega são a mesma arquitetura agora. */
-export const actionPlanMembersOf = childrenOf;
-export const flowStepsOf = childrenOf;
+// Os dois nomes abaixo ERAM o mesmo `childrenOf`, sem filtro nenhum. Isso só
+// era inofensivo enquanto os dois mundos não se encontravam: os filhos de uma
+// entrega eram todos etapas, os de um plano eram todos membros. No momento em
+// que uma Entrega pode estar dentro de um Plano, e uma etapa também, os nomes
+// passariam a mentir — e o `slot` é justamente o discriminador que a tabela de
+// elos já carrega para isso.
+
+/** Etapas de uma entrega: filhos ligados COM slot. */
+export function flowStepsOf<T extends TaskRelation>(parentId: string, tasks: readonly T[]): T[] {
+  return tasks.filter((task) => (task.parents ?? []).some((p) => p.id === parentId && p.slot !== null));
+}
+
+/** Membros de um Plano de Ação: filhos ligados SEM slot. */
+export function actionPlanMembersOf<T extends TaskRelation>(parentId: string, tasks: readonly T[]): T[] {
+  return tasks.filter((task) => (task.parents ?? []).some((p) => p.id === parentId && p.slot === null));
+}
+
+/** O Plano de Ação a que este card pertence — o único elo SEM slot.
+ *
+ * Ler `parents[0]` no lugar disto é o que fazia uma etapa perder a associação
+ * com o plano: a consulta não tem ORDER BY, então "o primeiro pai" podia ser a
+ * entrega, e o autosave mandava o id dela como se fosse o plano. */
+export function planParentIdOf(task: TaskRelation): string | null {
+  return (task.parents ?? []).find((p) => p.slot === null)?.id ?? null;
+}
+
+/** As entregas de que este card é etapa — elos COM slot. */
+export function deliveryParentIdsOf(task: TaskRelation): string[] {
+  return (task.parents ?? []).filter((p) => p.slot !== null).map((p) => p.id);
+}
 
 export function recurrenceExecutionsOf<T extends Pick<TaskRecord, "payload">>(parentId: string, tasks: readonly T[]): T[] {
   return tasks.filter((task) => recurrenceParentIdOf(task) === parentId);

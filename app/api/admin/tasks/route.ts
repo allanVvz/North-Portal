@@ -122,18 +122,28 @@ export async function POST(request: Request) {
     // plan_id é elo, não coluna: sai dos campos do insert e vira uma ligação
     // depois que o card existe.
     const { plan_id: planLink, ...taskFields } = fields;
-    const task = behavior === "entrega"
+    const flow = behavior === "entrega"
       ? await createFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
+      : null;
+    // A resposta continua sendo o PASSO — é o card que a pessoa vai abrir, já
+    // que a entrega não aparece no quadro.
+    const task = flow
+      ? flow.step
       : fields.recurrence_cadence && scope !== "routine"
         ? await createRecurringTaskGroup(client?.id ?? null, taskFields)
         : await createTask(client?.id ?? null, taskFields);
-    if (planLink) await linkTasks(planLink, task.id);
+    // Mas quem entra no Plano de Ação é a ENTREGA, não o primeiro passo dela.
+    // Ligar o passo, como se fazia, punha um pedaço da corrente no plano e
+    // deixava a peça inteira de fora.
+    if (planLink) await linkTasks(planLink, flow ? flow.delivery.id : task.id);
     if (assignee_profile_ids?.length) {
       await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
-      // A recurring group's returned row is the first execution, and a flow's
-      // is the first step; in both cases the parent needs the same linked
-      // accounts, since it is the card the person actually searched for.
-      if (task.plan_id && task.plan_id !== task.id) await setTaskAssigneeProfiles(task.plan_id, assignee_profile_ids);
+      // O pai precisa dos mesmos responsáveis, porque é o card que a pessoa
+      // realmente procurou. Numa recorrência ele vem por `plan_id`; numa
+      // entrega, `flowStepFields` grava `plan_id: null` de propósito, então
+      // sem o ramo explícito abaixo a entrega NUNCA recebia responsável.
+      if (flow) await setTaskAssigneeProfiles(flow.delivery.id, assignee_profile_ids);
+      else if (task.plan_id && task.plan_id !== task.id) await setTaskAssigneeProfiles(task.plan_id, assignee_profile_ids);
     }
     // Ser entregue um card é a coisa mais importante a saber sobre ele, e até
     // agora a criação era o único evento totalmente mudo — inclusive a etapa

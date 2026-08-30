@@ -177,7 +177,22 @@ export const taskPayloadSchema = z
   .passthrough();
 export type TaskComment = z.infer<typeof taskCommentSchema>;
 
-export const taskCreateSchema = z.object({
+// Plano agrega membros; Entrega agrega etapas por um molde congelado. Ser os
+// dois não tem progresso definido — ver a CHECK `tasks_plano_nao_e_entrega`.
+//
+// A guarda real é a do banco, e ela é que precisa existir: um PATCH que mande
+// SÓ `payload.flow_parent` num card que já é plano passa por aqui em branco,
+// porque `kind` não vem no corpo. Isto é para o 400 legível, não para a
+// integridade.
+const PLAN_AND_DELIVERY_ERROR = {
+  message: "Um Plano de Ação não pode ser uma entrega.",
+  path: ["payload", "flow_parent"],
+};
+function notPlanAndDelivery(value: { kind?: string | null; payload?: Record<string, unknown> | null }): boolean {
+  return !(value.kind === "plano_acao" && value.payload?.flow_parent === true);
+}
+
+const taskFieldsShape = z.object({
   // Omitted/empty = "sem cliente" (unassigned) — the "Outros" filter.
   slug: slugSchema.optional(),
   title: z.string().min(1).max(MAX_TEXT_BYTES),
@@ -208,10 +223,11 @@ export const taskCreateSchema = z.object({
   recurrence_weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
   recurrence_day_of_month: z.number().int().min(1).max(31).nullable().optional(),
 });
+export const taskCreateSchema = taskFieldsShape.refine(notPlanAndDelivery, PLAN_AND_DELIVERY_ERROR);
 // slug is nullable here (unlike taskCreateSchema): null explicitly means
 // "unassign the client", undefined means "leave the client unchanged" — the
 // route resolves it to client_id since tasks has no slug column of its own.
-export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true }).extend({
+export const taskPatchSchema = taskFieldsShape.partial().omit({ slug: true }).extend({
   slug: slugSchema.nullable().optional(),
   payload_patch: z.object({
     barTone: taskTone.nullable().optional(),
@@ -221,7 +237,7 @@ export const taskPatchSchema = taskCreateSchema.partial().omit({ slug: true }).e
     plataforma: z.string().max(80).nullable().optional(),
     hora: z.string().max(20).nullable().optional(),
   }).strict().optional(),
-});
+}).refine(notPlanAndDelivery, PLAN_AND_DELIVERY_ERROR);
 
 export const taskCommentCreateSchema = z.object({ text: z.string().trim().min(1).max(2000) });
 

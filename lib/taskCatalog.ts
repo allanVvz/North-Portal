@@ -7,6 +7,7 @@
 // validation never has to import back.
 
 import { TASK_STATUSES, type TaskRecord, type TaskStatus } from "@/lib/validation";
+import { FLOW_PARENT_KEY } from "@/lib/taskRelations";
 
 // ---- Kinds --------------------------------------------------------------------
 
@@ -196,7 +197,7 @@ function flowTotalWeight(task: ProgressTask): number {
 /** A card that aggregates children instead of holding a status of its own.
  * A entrega é reconhecida pela marca no payload, não pelo tipo — ver
  * FLOW_PARENT_KEY em lib/taskRelations.ts. */
-function isRollupParent(task: ProgressTask): boolean {
+export function isRollupParent(task: ProgressTask): boolean {
   return Boolean(kindDef(task.kind).isPlan || task.recurrence_cadence || task.payload?.flow_parent === true);
 }
 
@@ -215,6 +216,28 @@ function isRollupParent(task: ProgressTask): boolean {
  * progress with no children in hand and honestly answers 0, dragging the outer
  * average down. Callers that never nest can keep omitting it.
  */
+/** Membros de um Plano que devem CONTAR no progresso dele.
+ *
+ * Uma Entrega dentro de um Plano vale UM item, pelo progresso já rolado dela —
+ * que é a média ponderada das próprias etapas. Se alguém ligar também as etapas
+ * ao mesmo Plano, a peça passaria a pesar cinco vezes na média. Esta função é
+ * onde essa regra vive: membro que já é etapa de outra Entrega presente na
+ * mesma lista sai da contagem.
+ *
+ * Ele continua aparecendo na tela como atividade — o que muda é só o peso. */
+export function dedupePlanMembers<T extends { id: string; payload?: TaskRecord["payload"] }>(
+  members: readonly T[],
+  membersByParent: ReadonlyMap<string, { id: string }[]> | undefined,
+): T[] {
+  if (!membersByParent) return [...members];
+  const stepIds = new Set<string>();
+  for (const member of members) {
+    if (member.payload?.[FLOW_PARENT_KEY] !== true) continue;
+    for (const step of membersByParent.get(member.id) ?? []) stepIds.add(step.id);
+  }
+  return members.filter((member) => !stepIds.has(member.id));
+}
+
 export function taskProgress(
   task: ProgressTask,
   members: ProgressTask[] = [],

@@ -8,8 +8,12 @@ import {
   flowStepKeyOf,
   hasParent,
   isDeferredTask,
+  actionPlanMembersOf,
+  deliveryParentIdsOf,
+  flowStepsOf,
   isFlowDelivery,
   parentIdsOf,
+  planParentIdOf,
   recurrenceParentOf,
   slotOf,
   visibleOnTaskBoard,
@@ -73,6 +77,41 @@ describe("pertencimento N:N (task_links)", () => {
     expect(slotOf(compartilhado, "p1")).toBe("roteiro");
     expect(slotOf(compartilhado, "p2")).toBeNull();
     expect(slotOf(compartilhado, "inexistente")).toBeNull();
+  });
+});
+
+// `flowStepsOf` e `actionPlanMembersOf` ERAM a mesma função, sem filtro nenhum.
+// Isso só não doía enquanto os dois mundos não se encontravam. Estes testes são
+// o que impede o alias de voltar.
+describe("etapa de entrega × membro de plano", () => {
+  const entregaId = "entrega-1";
+  const planoId = "plano-1";
+  // O card difícil: etapa de uma entrega E membro de um plano ao mesmo tempo.
+  const etapaNoPlano = { id: "s1", parents: [{ id: entregaId, slot: "roteiro" }, { id: planoId, slot: null }] };
+  const soEtapa = { id: "s2", parents: [{ id: entregaId, slot: "captacao" }] };
+  const soMembro = { id: "m1", parents: [{ id: planoId, slot: null }] };
+  const todos = [etapaNoPlano, soEtapa, soMembro];
+
+  it("etapa é filho COM slot; membro de plano é filho SEM slot", () => {
+    expect(flowStepsOf(entregaId, todos).map((t) => t.id)).toEqual(["s1", "s2"]);
+    expect(actionPlanMembersOf(planoId, todos).map((t) => t.id)).toEqual(["s1", "m1"]);
+    // E o cruzado tem que dar vazio — era exatamente isto que o alias não fazia.
+    expect(flowStepsOf(planoId, todos)).toEqual([]);
+    expect(actionPlanMembersOf(entregaId, todos)).toEqual([]);
+  });
+
+  it("o plano de um card é o elo SEM slot, em qualquer ordem do array", () => {
+    // A consulta de pais não tem ORDER BY. Ler `parents[0]` fazia o autosave
+    // mandar o id da ENTREGA como se fosse o plano — e apagar a associação
+    // real. Por isso as duas ordens são afirmadas.
+    expect(planParentIdOf(etapaNoPlano)).toBe(planoId);
+    expect(planParentIdOf({ parents: [{ id: planoId, slot: null }, { id: entregaId, slot: "roteiro" }] })).toBe(planoId);
+    expect(planParentIdOf(soEtapa)).toBeNull();
+  });
+
+  it("as entregas de que um card é etapa saem separadas do plano", () => {
+    expect(deliveryParentIdsOf(etapaNoPlano)).toEqual([entregaId]);
+    expect(deliveryParentIdsOf(soMembro)).toEqual([]);
   });
 });
 

@@ -22,7 +22,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, parentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
 import type { AdminDocument } from "@/lib/supabase";
@@ -90,7 +90,11 @@ function draftFrom(
     assignee_profile_ids: task?.assignee_profile_ids ?? [],
     reviewer_id: task?.reviewer_id ?? "",
     approver_id: task?.approver_id ?? "",
-    plan_id: task ? task.parents[0]?.id ?? "" : "",
+    // O elo SEM slot. `parents[0]` era cego a slot e a consulta não tem
+    // ORDER BY: numa etapa que também é membro de plano, "o primeiro pai"
+    // podia ser a entrega, e o autosave mandava o id dela como plano —
+    // apagando a associação real.
+    plan_id: task ? planParentIdOf(task) ?? "" : "",
     due_date: task?.due_date ?? "",
     recurrence_cadence: task?.recurrence_cadence ?? (creationScope === "routine" || initialRecurrence ? "semanal" : null),
     recurrence_weekdays: task?.recurrence_weekdays ?? [],
@@ -612,9 +616,11 @@ export default function TaskModal({
 
   useEffect(() => { setFlowNext(null); }, [liveTask?.id]);
 
-  const flowDeliveryId = liveTask && !isDelivery
-    ? parentIdsOf(liveTask).find((id) => clientTasks.find((t) => t.id === id && isFlowDelivery(t))) ?? parentIdsOf(liveTask)[0] ?? null
-    : null;
+  // O `slot` do elo já diz qual pai é entrega — a resposta é síncrona e exata,
+  // sem depender de o pai estar carregado. O fallback "pega o primeiro pai" que
+  // morava aqui é o que fazia um card cujo único pai é um Plano abrir com a
+  // caixa "Entrega / Carregando entrega…" para sempre.
+  const flowDeliveryId = liveTask && !isDelivery ? deliveryParentIdsOf(liveTask)[0] ?? null : null;
   useEffect(() => {
     if (!flowDeliveryId) { setFlowDelivery(null); return; }
     // Só ENTREGA vira corrente. `flowDeliveryId` cai no primeiro pai quando
@@ -686,7 +692,10 @@ export default function TaskModal({
         : kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers) : taskProgress(progressTask))
     : 0;
   const linkableCandidates = liveTask
-    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !parentIdsOf(t).length && t.client_id === liveTask.client_id)
+    // Ter uma entrega como pai não impede mais entrar num plano — é
+    // justamente a combinação que passou a ser suportada. O que impede é já
+    // estar em outro plano.
+    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdOf(t) && t.client_id === liveTask.client_id)
     : [];
   /** A entrega a que a caixa de etapas se refere: o próprio card quando ele é a
    * entrega, ou o pai quando estamos olhando uma etapa. É isso que faz a mesma
