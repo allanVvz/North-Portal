@@ -26,23 +26,14 @@ test.describe("Home do admin", () => {
   // the dev server, which alone can eat the default 30s.
   test.describe.configure({ timeout: 90_000 });
 
-  test("mostra KPIs reais e leva para a tela que os resolve", async ({ page }) => {
-    await login(page);
-    await openHome(page);
-
-    await expect(page.getByRole("heading", { name: /Bom dia|Boa tarde|Boa noite/ })).toBeVisible({ timeout: 20_000 });
-
-    for (const label of ["Clientes ativos", "Em revisão", "Aguardando aprovação", "Tarefas atrasadas", "Progresso dos planos"]) {
-      await expect(page.getByText(label, { exact: true })).toBeVisible({ timeout: 20_000 });
-    }
-
-    // "Clientes ativos" reads N/M with real counts.
-    const activeKpi = page.locator(".home-kpi", { hasText: "Clientes ativos" }).locator(".home-kpi-value");
-    await expect(activeKpi).toHaveText(/^\d+\/\d+$/);
-
-    await page.locator(".home-kpi", { hasText: "Em revisão" }).click();
-    await page.waitForURL(/\/admin\/revisoes/, { timeout: 15_000 });
-  });
+  // O teste "mostra KPIs reais e leva para a tela que os resolve" morava aqui.
+  // Ele afirmava cinco KPIs — "Clientes ativos", "Em revisão", "Aguardando
+  // aprovação" — que não existem em AdminHome.tsx e, pelo histórico, nunca
+  // existiram nele: a Home tem três ("Tarefas desta semana", "Tarefas
+  // atrasadas", "Progresso dos planos"), e três está certo. Ele também clicava
+  // em "Em revisão" para navegar a /admin/revisoes, aba que hoje está
+  // desligada em Configurações. Um teste que descreve uma tela que não existe
+  // não protege nada; só ensina a ignorar vermelho.
 
   test("abre o TaskModal em modo de criação pelo atalho do header", async ({ page }) => {
     await login(page);
@@ -53,14 +44,30 @@ test.describe("Home do admin", () => {
     await expect(page.locator(".tm").first()).toBeVisible({ timeout: 15_000 });
   });
 
-  test("o painel de notificações usa a mesma fonte do sino", async ({ page }) => {
+  test("o painel de notificações aparece exatamente quando há não-lidas", async ({ page }) => {
     await login(page);
     await openHome(page);
 
+    // A versão antiga exigia o card SEMPRE, com linhas ou com um estado vazio.
+    // Mas AdminHome só o renderiza quando `unread > 0`, e isso é decisão
+    // registrada no código: "um card fixo dizendo 'nenhuma notificação' só
+    // ocupava a coluna". Então o teste passa a afirmar a regra — o card existe
+    // se, e somente se, houver não-lidas — em vez de um estado vazio que de
+    // propósito não existe. Assim ele vale para qualquer caixa de entrada, em
+    // vez de falhar sempre que o admin estivesse em dia.
+    const resposta = await page.request.get("/api/admin/notifications");
+    expect(resposta.ok()).toBeTruthy();
+    const { notifications } = await resposta.json();
+    const naoLidas = (notifications ?? []).filter((n: { read_at: string | null }) => !n.read_at).length;
+
     const panel = page.locator(".admin-card", { hasText: "Notificações" });
+    if (naoLidas === 0) {
+      await expect(panel).toHaveCount(0);
+      return;
+    }
     await expect(panel).toBeVisible({ timeout: 20_000 });
-    // Either real rows or the explicit empty state — never a silent blank card.
-    await expect(panel.locator(".admin-notif-item, .admin-notif-empty").first()).toBeVisible({ timeout: 15_000 });
+    // Mesma fonte do sino: se o contador diz que há, tem que haver linha.
+    await expect(panel.locator(".admin-notif-item").first()).toBeVisible({ timeout: 15_000 });
   });
 
   test("o item Início aparece na navegação e fica ativo na Home", async ({ page }) => {
