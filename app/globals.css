@@ -2543,27 +2543,61 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .kb-cal-nav:hover { background: var(--a-hover); }
 .kb-cal-today { margin-left: 2px; border: 1px solid var(--a-border); background: var(--a-surface); border-radius: 8px; cursor: pointer; color: var(--a-sec); font: inherit; font-size: 12.5px; line-height: 1; padding: 5px 12px; flex-shrink: 0; }
 .kb-cal-today:hover { background: var(--a-hover); }
-.kb-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--a-border); border: 1px solid var(--a-border); border-radius: 14px; overflow: hidden; }
+.kb-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--a-border); border: 1px solid var(--a-border); border-radius: 14px; overflow: hidden; }
 .kb-cal-wd { background: var(--a-surface2); text-align: center; padding: 9px 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--a-muted); }
 .kb-cal-cell { background: var(--a-surface); min-height: 104px; padding: 7px 8px; display: flex; flex-direction: column; gap: 5px; }
 .kb-cal-cell.out { background: var(--a-surface2); }
 .kb-cal-cell.out .kb-cal-daynum { color: var(--a-muted); opacity: .6; }
 .kb-cal-daynum { font-size: 12.5px; font-weight: 600; color: var(--a-sec); }
 .kb-cal-cell.today .kb-cal-daynum { color: #fff; background: var(--a-teal); width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; }
-.kb-cal-items { display: flex; flex-direction: column; gap: 4px; }
-.kb-cal-pill { border: none; text-align: left; cursor: grab; font: inherit; font-size: 11.5px; padding: 3px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-cal-items { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* O "+N" que mantém a semana com altura previsível: sem ele, um dia com nove
+   cards fazia a linha inteira ficar 3,3× mais alta que a primeira do mês, e a
+   grade passava a ler como gráfico de carga em vez de calendário. Abrir é um
+   gesto de quem quer ver — o padrão é a forma regular. */
+.kb-cal-more {
+  border: none; background: none; cursor: pointer; font: inherit; font-size: 11px;
+  font-weight: 600; color: var(--a-teal-text); text-align: left; padding: 2px 8px;
+  border-radius: 6px;
+}
+.kb-cal-more:hover { background: var(--a-hover); }
+/* A pílula QUEBRA, em até duas linhas. Era uma linha só com reticências, e
+   isso tinha dois custos: o título virava "IA ATENDIMENTO - VERSÃO FINAL…" sem
+   dizer o que era, e — pior — `white-space: nowrap` fazia o texto inteiro
+   virar a largura MÍNIMA da célula, o que estourava a coluna do dia (ver
+   minmax(0,1fr) abaixo). Duas linhas dão o resumo do card sem virar parágrafo:
+   uma terceira linha faria a semana crescer por causa de um título comprido. */
+.kb-cal-pill {
+  border: none; text-align: left; cursor: grab; font: inherit; font-size: 11.5px;
+  padding: 3px 8px; border-radius: 6px;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; white-space: normal; overflow-wrap: anywhere; line-height: 1.3;
+}
 .kb-cal-pill.dragging { opacity: .4; cursor: grabbing; }
 .kb-cal-cell.dragover { background: var(--a-teal-soft); outline: 2px dashed var(--a-teal); outline-offset: -2px; }
 .kb-cal-hint { font-size: 12px; color: var(--a-muted); margin: 0; }
 /* Month view as week-rows so plans span days as continuous bars */
-.kb-cal-wds { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid var(--a-border); border-bottom: none; border-radius: 14px 14px 0 0; overflow: hidden; }
+.kb-cal-wds { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--a-border); border-bottom: none; border-radius: 14px 14px 0 0; overflow: hidden; }
 .kb-cal-weeks { display: flex; flex-direction: column; border: 1px solid var(--a-border); border-top: none; border-radius: 0 0 14px 14px; overflow: hidden; }
 .kb-cal-week { display: flex; flex-direction: column; border-top: 1px solid var(--a-border); }
 .kb-cal-week:first-child { border-top: none; }
 .kb-cal-week-plans { display: flex; flex-direction: column; gap: 3px; padding: 5px 5px 0; }
-.kb-cal-planrow { display: grid; grid-template-columns: repeat(7, 1fr); }
+.kb-cal-planrow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .kb-cal-planrow .kb-week-plan { font-size: 11px; padding: 3px 8px; }
-.kb-cal-week-days { display: grid; grid-template-columns: repeat(7, 1fr); }
+/* minmax(0, 1fr), e NÃO 1fr — a diferença aqui não é estética, é estrutural.
+   Conferido: `1fr` e o `nowrap` da pílula quebravam a grade JUNTOS, e reverter
+   qualquer um dos dois sozinho já devolve as sete faixas iguais. Os dois ficam
+   assim mesmo: um título sem espaços continuaria estourando a coluna com `1fr`,
+   e o zero no mínimo custa nada.
+   `1fr` é `minmax(auto, 1fr)`, e esse mínimo `auto` é o tamanho mín-conteúdo da
+   célula. Com uma pílula `nowrap` dentro, o mín-conteúdo passa a ser o título
+   INTEIRO, então um card de nome longo alargava a própria coluna e sufocava as
+   vizinhas. Medido antes do conserto, numa semana real: 121, 275, 20, 211,
+   203, 254, 219 — um dia com vinte pixels de largura. E como cada semana é uma
+   grade própria, cada linha se deformava de um jeito diferente e as colunas
+   não se alinhavam entre si. O zero no mínimo devolve as sete faixas iguais e
+   deixa a pílula ser recortada, que é o que ela sempre quis fazer. */
+.kb-cal-week-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .kb-cal-week-days .kb-cal-cell { border-left: 1px solid var(--a-border); min-height: 88px; }
 .kb-cal-week-days .kb-cal-cell:first-child { border-left: none; }
 .tone-green { background: var(--a-teal-soft); color: var(--a-teal-text); }
@@ -2576,6 +2610,28 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   .kb-modal-row { grid-template-columns: 1fr 1fr; }
   .kb-cal-cell { min-height: 76px; }
   .kb-cal-wd { font-size: 10px; }
+}
+
+/* No telefone o mês vira MAPA DE DENSIDADE, não lista.
+   Sete colunas em 390px dão ~48px cada — largura em que um título não é curto,
+   é ilegível: "CA…", "Diá…", "Rev…". Fragmentos de duas letras ocupam a célula
+   inteira e não dizem nada, e nenhuma quebra de linha resolve isso, porque o
+   problema é a largura, não o número de linhas.
+   Então a pílula perde o texto e vira um traço colorido pelo tom do tipo. O
+   mês passa a responder o que um mês responde bem num telefone — ONDE o
+   trabalho está e quanto tem — e quem quer os títulos usa a visão de Semana,
+   que já existe ao lado. O texto continua no DOM e no `title`, então leitor de
+   tela e toque longo seguem lendo o nome inteiro. */
+@media (max-width: 720px) {
+  .kb-cal-items { flex-direction: row; flex-wrap: wrap; gap: 3px; align-content: flex-start; }
+  .kb-cal-pill {
+    display: block; width: 11px; height: 6px; padding: 0; border-radius: 3px;
+    font-size: 0; line-height: 0; overflow: hidden;
+  }
+  .kb-cal-pill svg { display: none; }
+  .kb-cal-more { font-size: 10px; padding: 0 2px; flex-basis: 100%; }
+  .kb-cal-cell { min-height: 62px; padding: 5px; gap: 4px; }
+  .kb-cal-daynum { font-size: 11.5px; }
 }
 
 /* ---- shared: section kicker above serif titles ---- */

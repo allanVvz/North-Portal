@@ -46,6 +46,11 @@ const VIEW_TITLE: Record<View, string> = {
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const MES_SHORT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+// Quantos cards um dia mostra antes do "+N". Três porque é o que cabe numa
+// célula de mês sem a semana crescer, e porque o mês serve para ver ONDE o
+// trabalho está — quem quer a lista do dia tem a visão de Semana e o quadro.
+const CAL_DAY_LIMIT = 3;
+
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 /** Parse a `YYYY-MM-DD` due date; free-text prazos ("hoje", "2 dias") return null. */
@@ -123,6 +128,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const todayIso = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
   const [cal, setCal] = useState(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
   const [calMode, setCalMode] = useState<"mes" | "semana">("mes");
+  // Dia com a lista aberta no mês. Um por vez: abrir dois já traz de volta a
+  // grade irregular que o limite existe para evitar.
+  const [calOpenDay, setCalOpenDay] = useState<string | null>(null);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const { map: attrMap, save: saveAttrMap, visible } = useAttrVisibility();
   const tableColCount = 3 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
@@ -732,7 +740,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                               >
                                 <span className="kb-cal-daynum">{d.getDate()}</span>
                                 <div className="kb-cal-items">
-                                  {items.map((t) => (
+                                  {(calOpenDay === key ? items : items.slice(0, CAL_DAY_LIMIT)).map((t) => (
                                     <button
                                       className={`kb-cal-pill tone-${taskTone(t)} ${dragId === t.id ? "dragging" : ""}`}
                                       key={t.id}
@@ -745,6 +753,15 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                                       <TaskKindIcon kind={t.kind} size="sm" />{t.title}
                                     </button>
                                   ))}
+                                  {items.length > CAL_DAY_LIMIT ? (
+                                    <button
+                                      type="button"
+                                      className="kb-cal-more"
+                                      onClick={() => setCalOpenDay((open) => (open === key ? null : key))}
+                                    >
+                                      {calOpenDay === key ? "− ver menos" : `+${items.length - CAL_DAY_LIMIT} mais`}
+                                    </button>
+                                  ) : null}
                                 </div>
                               </div>
                             );
