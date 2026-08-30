@@ -118,6 +118,39 @@ async function advanceOneDelivery(
   return created;
 }
 
+/** Materializa a PRIMEIRA etapa de uma entrega que ainda não tem nenhuma.
+ *
+ * Existe por causa da entrega recorrente: cada ocorrência nasce como uma
+ * entrega própria — ela herda as marcas de fluxo do template —, mas nasce
+ * VAZIA. `advanceFlow` não a resgata, porque aquela varredura é movida por
+ * etapa concluída, e uma entrega sem etapa nenhuma nunca conclui nada. Ficaria
+ * parada em 0% para sempre.
+ *
+ * Idempotente por construção: se já existe qualquer elo com slot, não faz
+ * nada; e o id da etapa é determinístico, então uma corrida colide na chave
+ * primária em vez de duplicar. */
+export async function materializeFirstStep(admin: AdminClient, delivery: TaskRecord): Promise<TaskRecord | null> {
+  if (!isFlowDelivery(delivery)) return null;
+  const existing = await stepsOf(admin, delivery.id);
+  if (existing.some((s) => s.slot !== null)) return null;
+
+  const types = await listTaskTypes(admin);
+  const type = findType(types, delivery.kind);
+  if (!type || !type.subtypes.length) return null;
+
+  const first = type.subtypes[0];
+  const fields = flowStepFields(delivery, first, null);
+  const id = String(fields.id);
+  const { data, error } = await admin.from("tasks").insert(fields).select(TASK_COLUMNS).limit(1);
+  if (error && !isDuplicate(error)) throw error;
+  await linkStep(admin, delivery.id, id, first.key, first.order_index);
+  if (error) return await getAdminTask(admin, id);
+
+  const created = asTaskRecord(data![0]);
+  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`);
+  return created;
+}
+
 /** Fecha a entrega se esta conclusão foi a da última etapa. */
 async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: TaskTypeDef): Promise<boolean> {
   // Uma entrega já encerrada não volta para o funil de conferência. Esta

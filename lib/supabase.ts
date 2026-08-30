@@ -40,6 +40,7 @@ import {
   type TaskParentLink,
 } from "./validation";
 import { createAdminClient } from "./supabase/admin";
+import { materializeFirstStep } from "./flows/advance";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
 import { AI_PROVIDER_SETTINGS_DEFAULT, type AiProviderSettings, type AiVendor } from "./aiProviders";
@@ -1937,6 +1938,14 @@ async function completeTaskCycleForRequest(
     task = existing?.[0] as TaskRecord | undefined;
   }
   if (!task) throw new HttpError(503, "Não foi possível materializar a execução.");
+  // Ocorrência de uma ENTREGA recorrente nasce como entrega própria (herda as
+  // marcas de fluxo do template) mas nasce vazia. Criar a primeira etapa aqui é
+  // o que faz a pessoa ver o trabalho na hora; `reconcileFlows` repete a
+  // checagem por estado como rede. Best-effort: falhar aqui não pode desfazer
+  // o ciclo que acabou de ser concluído.
+  await materializeFirstStep(createAdminClient(), task).catch((error) => {
+    console.error("materializeFirstStep falhou", { taskId: task!.id, error });
+  });
   return { parent: updatedParent, task, created: Boolean(inserted?.length) };
 }
 

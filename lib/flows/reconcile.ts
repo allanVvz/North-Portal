@@ -14,7 +14,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, errorMessage } from "@/lib/automations/taskAccess";
-import { advanceFlow } from "./advance";
+import { advanceFlow, materializeFirstStep } from "./advance";
 
 export type ReconcileSummary = { checked: number; created: number; errors: { taskId: string; message: string }[] };
 
@@ -42,6 +42,27 @@ export async function reconcileFlows(): Promise<ReconcileSummary> {
     .order("completed_at", { ascending: false })
     .limit(BATCH);
   if (error) throw error;
+
+  // Entregas VAZIAS. Toda ocorrência de uma entrega recorrente nasce assim, e
+  // a varredura por etapa concluída abaixo nunca as alcança — sem etapa, não há
+  // conclusão que a dispare. O gatilho síncrono no momento da criação é quem
+  // resolve na hora; esta passagem é a rede, pelo mesmo princípio do arquivo:
+  // perguntar pelo ESTADO ("existe entrega sem etapa?"), não por quem escreveu.
+  const { data: vazias, error: vaziasError } = await admin
+    .from("tasks")
+    .select(TASK_COLUMNS)
+    .eq("payload->>flow_parent", "true")
+    .limit(BATCH);
+  if (vaziasError) throw vaziasError;
+  for (const row of vazias ?? []) {
+    const entrega = asTaskRecord(row);
+    try {
+      const criada = await materializeFirstStep(admin, entrega);
+      if (criada) summary.created += 1;
+    } catch (error) {
+      summary.errors.push({ taskId: entrega.id, message: errorMessage(error) });
+    }
+  }
 
   for (const row of data ?? []) {
     const step = asTaskRecord(row);

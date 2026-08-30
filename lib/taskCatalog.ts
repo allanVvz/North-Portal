@@ -8,6 +8,7 @@
 
 import { TASK_STATUSES, type TaskRecord, type TaskStatus } from "@/lib/validation";
 import { FLOW_PARENT_KEY } from "@/lib/taskRelations";
+import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
 
 // ---- Kinds --------------------------------------------------------------------
 
@@ -190,6 +191,13 @@ export const FLOW_TOTAL_WEIGHT_KEY = "flow_total_weight";
 export const FLOW_STEP_COUNT_KEY = "flow_step_count";
 
 function flowTotalWeight(task: ProgressTask): number {
+  // Um TEMPLATE de recorrência de entrega carrega as marcas de fluxo, porque é
+  // delas que cada ocorrência herda o próprio molde. Mas o template não é uma
+  // entrega: os filhos dele são as OCORRÊNCIAS, não as etapas. Se ele dividisse
+  // pelo peso congelado do molde, a quinta ocorrência levaria a rotina a mais
+  // de 100%. O denominador dele são os próprios filhos, como em qualquer
+  // recorrência — e é isso que o zero aqui devolve.
+  if (task.payload?.[RECURRENCE_GROUP_KEY] === true) return 0;
   const value = task.payload?.[FLOW_TOTAL_WEIGHT_KEY];
   return typeof value === "number" && value > 0 ? value : 0;
 }
