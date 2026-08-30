@@ -83,6 +83,12 @@ export default function ParentCardsBoard({
   showStepCount: boolean;
 }) {
   const router = useRouter();
+  // O rótulo do tipo só informa quando há MAIS DE UM tipo na lista. Dentro da
+  // aba Entregas, "ADM NORTH · Entrega · etapa 3/4" gasta uma palavra para
+  // repetir o nome da aba; o mesmo valia em Plano de Ação. Com dois ou mais
+  // tipos (o desenho já prevê outros fluxos) ele volta sozinho, porque aí
+  // passa a distinguir de verdade.
+  const showTypeLabel = new Set(initial.map((d) => d.typeLabel)).size > 1;
   const [view, setView] = useState<View>("lista");
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -169,13 +175,15 @@ export default function ParentCardsBoard({
                       <TaskKindIcon kind={d.kind} size="lg" /><strong>{d.title}</strong>
                     </span>
                     <em>
-                      {d.clientName} · {d.typeLabel} ·{" "}
+                      {d.clientName} · {showTypeLabel ? `${d.typeLabel} · ` : ""}
                       {showStepCount
                         ? `etapa ${d.activities.length}/${total}`
                         : `${d.activities.length} atividade${d.activities.length === 1 ? "" : "s"}`}
                       {showStepCount && current ? ` · ${subtypeLabel(current.subtype) || current.title}` : ""}
                     </em>
-                    <span className="plan-acc-description">{d.description || texts.descriptionHint}</span>
+                    <span className={`plan-acc-description ${d.description ? "" : "is-hint"}`}>
+                      {d.description || texts.descriptionHint}
+                    </span>
                   </button>
                   <span className="plan-acc-progress">
                     <span className="plan-acc-bar"><span className="plan-acc-fill" style={{ width: `${d.progress}%` }} /></span>

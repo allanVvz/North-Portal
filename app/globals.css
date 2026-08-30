@@ -1975,6 +1975,19 @@ body.menu-open {
   .admin-sidebar { position: static; width: 100%; height: auto; flex-basis: auto; }
   .admin-nav-group { flex-direction: row; flex-wrap: wrap; }
   .admin-nav-head { width: 100%; }
+  /* A marca do item ativo é uma barra em `left: -16px`, desenhada para a
+     trilha VERTICAL, onde ela cai na calha à esquerda do item. Virando linha
+     horizontal, esses 16px negativos aterrissam em cima do texto do item
+     ANTERIOR — era o que fazia "Início" aparecer como "Iníci" ao lado de
+     "Clientes" ativo. Não era truncamento; era uma barra pintando por cima.
+     Aqui ela vira sublinhado, que é a convenção da navegação horizontal. */
+  .admin-nav-item.active::before {
+    left: 10px; right: 10px; top: auto; bottom: -1px; width: auto; height: 2px;
+    border-radius: 2px 2px 0 0;
+  }
+  /* E o item para de encolher abaixo do próprio conteúdo quando a linha
+     enche — em vez de espremer, ele quebra para a linha de baixo. */
+  .admin-nav-item { flex: 0 0 auto; }
 }
 
 /* ================================================================ */
@@ -2351,8 +2364,22 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .card-cover img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: center; }
 
 /* Sangria até a borda: a margem negativa anula o padding do card, então a capa
-   encosta no canto arredondado em vez de flutuar numa moldura. */
-.kb-card-cover { margin: -14px -14px 12px; }
+   encosta no canto arredondado em vez de flutuar numa moldura.
+
+   E FAIXA, não quadrado. `.card-cover` é 1:1, o que numa coluna de ~280px dá
+   uma capa de 280px de altura — quatro vezes todo o resto do card somado
+   (título, datas e responsável dão ~80px). Num quadro de 55 cards isso é
+   rolagem paga em decoração: a capa serve para reconhecer a peça de relance,
+   e 96px reconhecem tão bem quanto 280. O modal já tinha chegado nesse número
+   sozinho (`--tm-cover-h: 88px`); o card do quadro é que ficou para trás.
+
+   Altura fixa em vez de outra proporção porque a largura da coluna varia com o
+   número de colunas visíveis, e a capa não pode crescer junto.
+
+   Declarada DEPOIS de .card-cover: mesma especificidade, vence por ordem — o
+   mesmo padrão que o override do modal usa logo abaixo, e a razão pela qual
+   nenhuma das duas usa seletor de elemento (ver CLAUDE.md). */
+.kb-card-cover { margin: -14px -14px 12px; aspect-ratio: auto; height: 96px; }
 
 /* No modal a capa NÃO ocupa faixa própria: ela fica atrás do cabeçalho, na
    mesma altura. Antes era uma faixa de 5/1 empilhada acima do header, e as
@@ -3333,6 +3360,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .plan-acc-title strong { font-size: 15.5px; color: var(--a-ink); }
 .plan-acc-title em { font-style: normal; font-size: 12.5px; color: var(--a-muted); }
 .plan-acc-description { margin-top: 4px; max-width: 760px; color: var(--a-sec); font-size: 12.5px; line-height: 1.45; white-space: normal; }
+/* O convite de "escreva uma descrição" era renderizado igual a uma descrição
+   de verdade — mesma classe, mesma cor, mesmo peso. Numa lista em que nenhuma
+   entrega tem descrição ainda, a mesma frase se repetia linha após linha e
+   passava a ler como conteúdo, não como campo vazio. Itálico e apagado é o que
+   distingue "não há texto aqui" de "o texto é este". */
+.plan-acc-description.is-hint { color: var(--a-muted); font-style: italic; }
 .plan-acc-progress { display: flex; align-items: center; gap: 10px; min-width: 180px; }
 .plan-acc-bar { flex: 1; height: 6px; border-radius: 999px; background: var(--a-border); overflow: hidden; }
 .plan-acc-fill { display: block; height: 100%; background: var(--a-teal); border-radius: 999px; }

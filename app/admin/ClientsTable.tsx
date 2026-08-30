@@ -48,7 +48,7 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
     const wantsDisabled = filters.some((f) => f.attr === "desabilitado" && f.value === "Sim");
     return clients.filter((c) => {
       // Disabled clients only ever show up when explicitly searched for —
-      // that's what makes "Remover do sistema" actually hide them.
+      // that's what makes "Ocultar" actually hide them.
       if (c.disabled && !wantsDisabled) return false;
       if (!clientMatchesFilters(c, filters)) return false;
       if (needle && !`${c.name} ${c.slug}`.toLowerCase().includes(needle)) return false;
@@ -73,9 +73,14 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
     setBusyId(null);
   }
 
+  // A ação se chamava "Remover", e a confirmação gastava uma frase inteira
+  // desmentindo o próprio botão: "isso só oculta — nada é apagado". Quando o
+  // aviso precisa desfazer a impressão que o rótulo criou, quem está errado é
+  // o rótulo. "Ocultar" também faz par com o "Reabilitar" que já existe do
+  // outro lado; "Remover"/"Reabilitar" não fazia par nenhum.
   function confirmRemove(c: ClientRow) {
     const ok = window.confirm(
-      `Remover "${c.name}" do sistema? Isso só oculta o cliente (de dropdowns, do Kanban e daqui) — nada é apagado, e dá pra reabilitar depois pelo filtro "Desabilitado".`,
+      `Ocultar "${c.name}"? Ele sai dos dropdowns, do Kanban e desta lista. Nada é apagado, e dá pra trazer de volta pelo filtro "Desabilitado".`,
     );
     if (ok) void setDisabled(c, true);
   }
@@ -149,7 +154,7 @@ export default function ClientsTable({ clients }: { clients: ClientRow[] }) {
                   </button>
                 ) : (
                   <button className="admin-btn ghost danger" disabled={busyId === c.id} onClick={() => confirmRemove(c)}>
-                    Remover
+                    Ocultar
                   </button>
                 )}
               </div>

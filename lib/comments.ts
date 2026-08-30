@@ -63,6 +63,30 @@ export function splitCommentText(text: string): Array<{ text: string } | { url: 
 
 const DAY_MS = 86400000;
 
+/** Idade de um card, sempre relativa e sempre curta ("há 3 d", "há 5 sem").
+ *
+ *  Diferente de formatCommentTime de propósito. Num comentário a data exata
+ *  importa — é um registro, e "há 12 dias" seria vago. Num card do quadro a
+ *  última atualização é só um sinal de frescor, e ali `28/08/2026 22:02`
+ *  gastava a linha inteira competindo em precisão com o PRAZO, que é a data
+ *  que a pessoa está lendo o quadro para descobrir. Dois carimbos por card, e
+ *  o menos útil era o mais preciso. */
+export function formatRelativeAge(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diff = Math.max(0, now - then);
+  if (diff < 60_000) return "agora";
+  const minutos = Math.floor(diff / 60_000);
+  if (minutos < 60) return `há ${minutos} min`;
+  const horas = Math.floor(diff / 3.6e6);
+  if (horas < 24) return `há ${horas} h`;
+  const dias = Math.floor(diff / DAY_MS);
+  if (dias < 7) return `há ${dias} d`;
+  const semanas = Math.floor(dias / 7);
+  if (semanas < 9) return `há ${semanas} sem`;
+  return `há ${Math.floor(dias / 30)} m`;
+}
+
 /** Comment publish time: relative for the first 24h ("agora" / "há X min" /
  *  "há X h"), then an absolute pt-BR date/time past that — so an old comment
  *  never reads as a vague "há 12 dias". */

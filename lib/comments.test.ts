@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractLatestLink, formatCommentTime, splitCommentText } from "./comments";
+import { extractLatestLink, formatCommentTime, formatRelativeAge, splitCommentText } from "./comments";
 
 describe("splitCommentText", () => {
   it("mantém texto sem link como um único segmento", () => {
@@ -80,5 +80,29 @@ describe("formatCommentTime", () => {
     expect(formatCommentTime(iso, now)).toBe(
       `${new Date(iso).toLocaleDateString("pt-BR")} ${new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`,
     );
+  });
+});
+
+// O carimbo do card do quadro é sinal de frescor, não registro: sempre
+// relativo, sempre curto. É o que impede ele de voltar a competir com o prazo.
+describe("formatRelativeAge", () => {
+  const agora = Date.UTC(2026, 7, 30, 12, 0, 0);
+  const atras = (ms: number) => new Date(agora - ms).toISOString();
+
+  it("nunca devolve data absoluta, por mais velho que seja", () => {
+    expect(formatRelativeAge(atras(400 * 86400000), agora)).toBe("há 13 m");
+    expect(formatRelativeAge(atras(400 * 86400000), agora)).not.toMatch(/\d{2}\/\d{2}\/\d{4}/);
+  });
+
+  it("encurta conforme a idade cresce", () => {
+    expect(formatRelativeAge(atras(30_000), agora)).toBe("agora");
+    expect(formatRelativeAge(atras(5 * 60_000), agora)).toBe("há 5 min");
+    expect(formatRelativeAge(atras(8 * 3.6e6), agora)).toBe("há 8 h");
+    expect(formatRelativeAge(atras(3 * 86400000), agora)).toBe("há 3 d");
+    expect(formatRelativeAge(atras(21 * 86400000), agora)).toBe("há 3 sem");
+  });
+
+  it("data inválida vira string vazia em vez de NaN na tela", () => {
+    expect(formatRelativeAge("não é data", agora)).toBe("");
   });
 });
