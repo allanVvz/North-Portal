@@ -31,9 +31,24 @@ type IconName =
   | "sun"
   | "settings"
   | "logOut"
-  | "chevronDown";
+  | "chevronDown"
+  | "menu"
+  | "x";
 
 const ICON_PATHS: Record<IconName, React.ReactNode> = {
+  menu: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </>
+  ),
+  x: (
+    <>
+      <path d="M6 6l12 12" />
+      <path d="M18 6 6 18" />
+    </>
+  ),
   home: (
     <>
       <path d="M3 10.5 12 3l9 7.5" />
@@ -199,6 +214,32 @@ export default function AdminShell({
   const [theme, setTheme] = useState<Theme>("light");
   const [accountOpen, setAccountOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  // Gaveta do mobile. No desktop a lateral é uma trilha de ícones que se abre
+  // no hover e este estado não é usado — ver `.admin-drawer { display: contents }`
+  // acima de 720px, que devolve nav e rodapé ao fluxo normal da lateral.
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Fechar ao NAVEGAR é o que separa uma gaveta de um menu que atrapalha:
+  // sem isto, tocar num item leva para a página nova com a gaveta ainda por
+  // cima dela, e a pessoa precisa fechá-la para ver o que pediu.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  // Escape fecha, e o fundo para de rolar enquanto a gaveta está aberta —
+  // sem a trava, arrastar sobre a cortina rola a página atrás dela, que é o
+  // jeito mais rápido de a gaveta parecer quebrada.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [menuOpen]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const accountRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -309,6 +350,20 @@ export default function AdminShell({
               <BrandLockup variant="admin" />
             </Link>
             <div className="admin-topline-actions">
+              {/* Só no mobile (escondido por CSS acima de 720px): no desktop a
+                  própria lateral já é o menu, e abrir no hover é mais rápido
+                  que um clique. */}
+              <button
+                type="button"
+                className="admin-icon-btn admin-menu-btn"
+                onClick={() => setMenuOpen((open) => !open)}
+                aria-expanded={menuOpen}
+                aria-controls="admin-drawer"
+                aria-label={menuOpen ? "Fechar menu" : "Abrir menu"}
+                title="Menu"
+              >
+                <Icon name={menuOpen ? "x" : "menu"} size={16} />
+              </button>
               <div className="admin-notif" ref={notifRef}>
                 <button
                   type="button"
@@ -336,6 +391,7 @@ export default function AdminShell({
             </div>
           </div>
 
+          <div id="admin-drawer" className={`admin-drawer ${menuOpen ? "open" : ""}`}>
           <div className="admin-nav-group">
             {NAV_ITEMS.filter((item) => {
               if (item.href === "/admin/revisoes") return revisoesTabVisible;
@@ -414,6 +470,19 @@ export default function AdminShell({
               </button>
             </div>
           </div>
+          </div>
+
+          {/* A cortina fecha ao toque e, mais importante, dá ao gesto de
+              "clicar fora" um alvo de verdade — sem ela a única saída seria
+              achar o X de novo. */}
+          {menuOpen ? (
+            <button
+              type="button"
+              className="admin-drawer-scrim"
+              aria-label="Fechar menu"
+              onClick={() => setMenuOpen(false)}
+            />
+          ) : null}
         </div>
       </aside>
 

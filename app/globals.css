@@ -1970,24 +1970,63 @@ body.menu-open {
   .admin-summary { position: static; }
   .admin-field-row { grid-template-columns: 1fr; }
 }
+/* A gaveta só existe abaixo de 721px. Acima, `display: contents` faz o
+   invólucro sumir do layout e nav e rodapé voltam a ser filhos diretos da
+   lateral — a trilha de ícones que abre no hover continua exatamente igual. */
+.admin-drawer { display: contents; }
+.admin-menu-btn { display: none; }
+
 @media (max-width: 720px) {
   .admin-shell { flex-direction: column; }
-  .admin-sidebar { position: static; width: 100%; height: auto; flex-basis: auto; }
-  .admin-nav-group { flex-direction: row; flex-wrap: wrap; }
-  .admin-nav-head { width: 100%; }
-  /* A marca do item ativo é uma barra em `left: -16px`, desenhada para a
-     trilha VERTICAL, onde ela cai na calha à esquerda do item. Virando linha
-     horizontal, esses 16px negativos aterrissam em cima do texto do item
-     ANTERIOR — era o que fazia "Início" aparecer como "Iníci" ao lado de
-     "Clientes" ativo. Não era truncamento; era uma barra pintando por cima.
-     Aqui ela vira sublinhado, que é a convenção da navegação horizontal. */
-  .admin-nav-item.active::before {
-    left: 10px; right: 10px; top: auto; bottom: -1px; width: auto; height: 2px;
-    border-radius: 2px 2px 0 0;
+  /* A lateral vira só a barra de cima: marca, menu e sino. O resto do menu
+     saiu do fluxo e virou gaveta.
+
+     Antes disto o menu inteiro ficava SEMPRE aberto no topo — seis itens em
+     duas linhas mais o cartão da conta, ~190px antes de qualquer conteúdo, em
+     toda página. Numa tela de 844px isso é um quinto da altura gasto num menu
+     que se usa uma vez por visita. */
+  .admin-sidebar {
+    position: sticky; top: 0; z-index: 60;
+    width: 100%; height: auto; flex-basis: auto;
+    padding: 8px 14px; background: var(--a-surface);
+    border-bottom: 1px solid var(--a-border);
   }
-  /* E o item para de encolher abaixo do próprio conteúdo quando a linha
-     enche — em vez de espremer, ele quebra para a linha de baixo. */
-  .admin-nav-item { flex: 0 0 auto; }
+  .admin-sidebar-content { height: auto; }
+  .admin-topline { padding: 0; }
+  .admin-menu-btn { display: inline-flex; }
+
+  .admin-drawer {
+    display: flex; flex-direction: column;
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 70;
+    /* 260px, não 300. Seis itens curtos cabem folgados, e numa tela de 390px
+       uma gaveta de 300 deixa só 90px de "fora" para tocar — larga demais para
+       ler como gaveta e estreita demais para se fechar sozinha. */
+    width: min(260px, 72vw);
+    padding: 16px 14px; overflow-y: auto; overscroll-behavior: contain;
+    background: var(--a-surface); border-right: 1px solid var(--a-border);
+    box-shadow: 0 18px 48px rgba(12, 44, 44, 0.28);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+  .admin-drawer.open { transform: none; }
+  /* O rodapé (cartão da conta) cola no fim da gaveta em vez de flutuar logo
+     abaixo do último item. */
+  .admin-side-foot { margin-top: auto; padding-top: 18px; }
+
+  .admin-drawer-scrim {
+    position: fixed; inset: 0; z-index: 65;
+    border: 0; padding: 0; cursor: pointer;
+    background: rgba(12, 32, 30, 0.45);
+  }
+
+  .admin-shell[data-theme="dark"] .admin-drawer {
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* Quem pediu menos movimento não recebe o deslize: a gaveta aparece e some. */
+@media (prefers-reduced-motion: reduce) {
+  .admin-drawer { transition: none; }
 }
 
 /* ================================================================ */
