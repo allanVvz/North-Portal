@@ -1,16 +1,21 @@
 "use client";
 
 import { formatCommentTime } from "@/lib/comments";
-import { useMutedNotificationTypes } from "@/lib/notificationPrefs";
 import type { NotificationRecord, NotificationType } from "@/lib/notificationTypes";
 
 // Shared body of the notifications inbox: the bell dropdown in AdminShell and
 // the wider panel on the admin Home render the same rows, so they can't drift.
+//
+// Sem filtro de tipo aqui. Existia um, por `localStorage`, e ele era pior que
+// não ter: a linha continuava sendo gravada, o sino continuava CONTANDO
+// (AdminShell conta `notifications`, não o que esta lista mostra), e a
+// preferência valia só naquele navegador. A regra agora é do servidor — o tipo
+// desligado não vira linha nenhuma.
 
 const TYPE_ICON: Record<NotificationType, string> = {
   task_review_assigned: "◉",
   task_due_soon: "◔",
-  metric_collection_requested: "✎",
+  task_created: "✦",
   task_commented: "💬",
   task_updated: "✎",
   task_status_changed: "⇄",
@@ -26,14 +31,11 @@ export default function NotificationsList({
   /** Quando informado, a linha de uma notificação com card vira clicável. */
   onOpenTask?: (taskId: string) => void;
 }) {
-  const { muted } = useMutedNotificationTypes();
-  const visible = notifications.filter((notif) => !muted.has(notif.type));
-
-  if (visible.length === 0) return <p className="admin-notif-empty">{emptyLabel}</p>;
+  if (notifications.length === 0) return <p className="admin-notif-empty">{emptyLabel}</p>;
 
   return (
     <>
-      {visible.map((notif) => {
+      {notifications.map((notif) => {
         const body = (
           <>
             <span className="admin-notif-ico" aria-hidden="true">

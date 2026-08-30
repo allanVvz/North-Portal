@@ -7,6 +7,7 @@
 import { PRE_PARADA_STATUS_KEY } from "@/lib/taskCatalog";
 import type { TaskRecord } from "@/lib/validation";
 import { appendedCommentPayload, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { notifyFromAutomation } from "./notify";
 
 /** Appends an "Automação" comment to `taskId` and moves it to `parada`,
  * freezing its progress at whatever status it was in before (see
@@ -25,6 +26,10 @@ export async function markTaskParada(admin: AdminClient, taskId: string, message
       .update({ status: "parada", payload, assignee: AUTOMATION_ASSIGNEE })
       .eq("id", taskId);
     if (updateError) throw updateError;
+    // Um card travado por falha de automação é justamente o que alguém precisa
+    // saber sem ir procurar. Este caminho escreve com o service role, então
+    // nunca passou pelo leque das rotas.
+    await notifyFromAutomation(admin, taskId, "task_status_changed", `"${task.title}" parou: ${message}`);
   } catch (loggingError) {
     console.error("markTaskParada failed", { taskId, message: message.slice(0, 200), loggingError });
   }

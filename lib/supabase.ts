@@ -20,6 +20,8 @@ import {
   ACCESS_PLATFORMS,
   type AccessPlatformKey,
   type AdminTabsVisibility,
+  NOTIFICATION_RULES_DEFAULT,
+  type NotificationRules,
   type ClientFlowFlags,
   type ClientTask,
   type CompanyInfo,
@@ -587,6 +589,26 @@ export async function getAdminTabsVisibility(): Promise<AdminTabsVisibility> {
     revisoesTabVisible: value?.revisoesTabVisible ?? false,
     aprovacoesTabVisible: value?.aprovacoesTabVisible ?? false,
   };
+}
+
+// Regras de notificação — mesma forma de getAdminTabsVisibility: o default
+// mora no getter, não no banco, e chave desconhecida no JSON é ignorada.
+export async function getNotificationRules(): Promise<NotificationRules> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("site_settings").select("value").eq("key", "notification_rules").limit(1);
+  if (error) fail(error);
+  const value = (data?.[0] as { value: Partial<NotificationRules> } | undefined)?.value;
+  return { ...NOTIFICATION_RULES_DEFAULT, ...(value ?? {}) };
+}
+
+export async function saveNotificationRules(patch: Partial<NotificationRules>): Promise<NotificationRules> {
+  const supabase = await createClient();
+  const next = { ...(await getNotificationRules()), ...patch };
+  const { error } = await supabase
+    .from("site_settings")
+    .upsert({ key: "notification_rules", value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  if (error) fail(error);
+  return next;
 }
 
 export async function saveAdminTabsVisibility(patch: Partial<AdminTabsVisibility>): Promise<AdminTabsVisibility> {

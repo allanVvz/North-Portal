@@ -11,6 +11,7 @@
 // silently or aborting the rest of the run.
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyFromAutomation } from "./notify";
 import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
 import {
@@ -208,6 +209,12 @@ async function runOneReportAutomation(
       .update({ status: "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
       .eq("id", actingTask.id);
     if (statusError) throw statusError;
+    await notifyFromAutomation(
+      admin,
+      actingTask.id,
+      "task_commented",
+      `Automação comentou em "${actingTask.title}".`,
+    );
   } catch (error) {
     const message = errorMessage(error);
     await markTaskParada(admin, actingTask.id, `Falha ao gerar o relatório de anúncios: ${message}`);

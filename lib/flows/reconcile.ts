@@ -18,6 +18,13 @@ import { advanceFlow } from "./advance";
 
 export type ReconcileSummary = { checked: number; created: number; errors: { taskId: string; message: string }[] };
 
+// Esta varredura NÃO notifica, e é decisão, não esquecimento: ela pode tocar
+// meses de histórico num tique só (BATCH abaixo), e avisar a partir daqui
+// carpetearia a caixa de entrada com trabalho antigo. Quem notifica é
+// `advanceFlow`, no momento em que a etapa nasce de verdade — e ele é chamado
+// daqui também, então uma etapa criada pelo reconciliador avisa uma vez, pelo
+// caminho certo.
+
 /** How many completed steps one tick will look at. A cap keeps a backlog from
  * turning the daily cron into a long-running job; anything left over is picked
  * up by the next tick, since the query is driven by state, not by a queue. */

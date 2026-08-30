@@ -76,6 +76,10 @@ export function statusChangedMessage(title: string, status: string): string {
   return `"${title}" mudou para ${STATUS_LABEL[status] ?? status}.`;
 }
 
+export function taskCreatedMessage(title: string): string {
+  return `"${title}" foi criado.`;
+}
+
 export function taskUpdatedMessage(title: string): string {
   return `"${title}" foi editado.`;
 }

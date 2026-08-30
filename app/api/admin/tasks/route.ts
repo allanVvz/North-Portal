@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
+import { notifyTaskParticipants, taskCreatedMessage } from "@/lib/notifications";
 import {
   createFlowDelivery,
   createRecurringTaskGroup,
@@ -134,6 +135,12 @@ export async function POST(request: Request) {
       // accounts, since it is the card the person actually searched for.
       if (task.plan_id && task.plan_id !== task.id) await setTaskAssigneeProfiles(task.plan_id, assignee_profile_ids);
     }
+    // Ser entregue um card é a coisa mais importante a saber sobre ele, e até
+    // agora a criação era o único evento totalmente mudo — inclusive a etapa
+    // que a cascata cria, que já nasce com responsável e revisor herdados.
+    // Cai na mesma regra `updates`: nascer é uma atualização para quem
+    // acompanha.
+    await notifyTaskParticipants(task.id, "task_created", taskCreatedMessage(task.title));
     const full = await getTaskById(task.id);
     return NextResponse.json(full ?? task, { status: 201 });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
+import { notifyTaskParticipants, statusChangedMessage, taskCommentedMessage } from "@/lib/notifications";
 import { getProfileName, getTaskById, updateTaskGroup } from "@/lib/supabase";
 import { requireClientAccess } from "@/lib/supabase/auth";
 import { clientApprovalActionSchema, HttpError, validateSlug } from "@/lib/validation";
@@ -38,10 +39,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     if (action === "aprovar") {
       patch.status = "aprovado";
     }
+    let commentAuthor: string | null = null;
     if (comment?.trim()) {
       const existing = task.payload as Record<string, unknown>;
       const comments = Array.isArray(existing.comments) ? existing.comments : [];
       const authorName = (await getProfileName(session.userId)) ?? session.email ?? "Cliente";
+      commentAuthor = authorName;
       patch.payload = {
         ...existing,
         comments: [...comments, { author: authorName, text: comment.trim(), at: new Date().toISOString() }],
@@ -49,6 +52,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     }
 
     const updated = await updateTaskGroup(id, task, patch);
+
+    // O cliente comentando no portal era o caminho MUDO mais importante — e é
+    // exatamente o caso para o qual `notify_task_participants` foi feita
+    // SECURITY DEFINER (o cliente não tem permissão de escrever na caixa de
+    // entrada de ninguém), coisa que nunca chegou a ser ligada. A regra é lida
+    // dentro do banco, o que aqui é obrigatório: `site_settings` tem RLS
+    // admin-only e uma sessão de cliente não conseguiria consultá-la.
+    if (commentAuthor) {
+      await notifyTaskParticipants(id, "task_commented", taskCommentedMessage(task.title, commentAuthor));
+    }
+    if (action === "aprovar") {
+      await notifyTaskParticipants(id, "task_status_changed", statusChangedMessage(task.title, "aprovado"));
+    }
     return NextResponse.json(updated);
   } catch (error) {
     return apiError(error);

@@ -713,6 +713,40 @@ export const adminTabsVisibilitySchema = z.object({
   aprovacoesTabVisible: z.boolean().optional(),
 });
 
+// ---- Regras de notificação (globais da agência) --------------------------------
+// Cinco chaves, não uma por tipo. `task_updated` e `task_status_changed` são o
+// mesmo evento com dois rótulos — a rota de PATCH emite exatamente um dos dois
+// por salvamento —, então dividem a mesma regra; `task_created` também, porque
+// nascer é uma atualização do ponto de vista de quem acompanha o card.
+//
+// A regra é lida DENTRO do banco (`public.notification_rule_on`), não aqui. Não
+// é preferência de arquitetura, é necessidade: três dos quatro produtores de
+// notificação nunca passam por uma rota Next.js (o gatilho do revisor, as
+// automações sob service role, a cascata de fluxo) e, decisivo, `site_settings`
+// tem RLS admin-only — o portal do cliente, justamente quem o leque
+// SECURITY DEFINER existe para atender, não consegue ler a configuração.
+export type NotificationRules = {
+  comments: boolean;
+  updates: boolean;
+  reviewAssigned: boolean;
+  dueSoon: boolean;
+  /** Conta de cliente recebe linha? Falso por padrão: não existe sino no
+   *  portal, então hoje elas só acumulam sem que ninguém veja. */
+  notifyClients: boolean;
+};
+export const NOTIFICATION_RULES_DEFAULT: NotificationRules = {
+  comments: true, updates: true, reviewAssigned: true, dueSoon: true, notifyClients: false,
+};
+// `.optional()` em tudo porque o PATCH é uma fusão parcial — mesma forma de
+// adminTabsVisibilitySchema.
+export const notificationRulesSchema = z.object({
+  comments: z.boolean().optional(),
+  updates: z.boolean().optional(),
+  reviewAssigned: z.boolean().optional(),
+  dueSoon: z.boolean().optional(),
+  notifyClients: z.boolean().optional(),
+});
+
 export type Metric = {
   label: string;
   value: string;

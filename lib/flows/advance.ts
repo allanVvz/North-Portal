@@ -18,6 +18,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, errorMessage, getAdminTask, type AdminClient } from "@/lib/automations/taskAccess";
+import { notifyFromAutomation } from "@/lib/automations/notify";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { flowStepKeyOf, isFlowDelivery } from "@/lib/taskRelations";
 import { deliveryIsFinished, deliveryStatusOnFinish } from "./parentStatus";
@@ -109,7 +110,12 @@ async function advanceOneDelivery(
     const recovered = await getAdminTask(admin, id);
     return recovered;
   }
-  return asTaskRecord(data![0]);
+  const created = asTaskRecord(data![0]);
+  // A etapa nasce com responsável e revisor herdados da entrega, então o leque
+  // já endereça as pessoas certas na primeira linha — é a propriedade "passou a
+  // estar envolvido depois" funcionando de graça.
+  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`);
+  return created;
 }
 
 /** Fecha a entrega se esta conclusão foi a da última etapa. */
@@ -131,6 +137,10 @@ async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: Ta
   if (delivery.status === nextStatus) return false;
   const { error: updateError } = await admin.from("tasks").update({ status: nextStatus }).eq("id", delivery.id);
   if (updateError) throw updateError;
+  // Só quando o status REALMENTE virou — as guardas acima já garantiram isso.
+  // Criar a etapa seguinte e encerrar a entrega são dois fatos distintos, não o
+  // mesmo aviso duas vezes.
+  await notifyFromAutomation(admin, delivery.id, "task_status_changed", `"${delivery.title}" mudou para ${nextStatus === "aprovado" ? "Concluído" : nextStatus === "revisao" ? "Revisão" : "Aprovação"}.`);
   return true;
 }
 
