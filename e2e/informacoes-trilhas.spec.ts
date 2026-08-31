@@ -67,7 +67,7 @@ test.describe("Informações — Trilhas North lista global (e2e contra o backen
 
   test.afterAll(async () => {
     if (created.length) await sb.from("north_trilhas").delete().in("id", created);
-    await sb.from("north_trilhas").delete().like("title", `Trilha vídeo%${RUN}`);
+    await sb.from("north_trilhas").delete().like("title", `Trilha %${RUN}`);
     if (userId) await sb.auth.admin.deleteUser(userId);
   });
 
@@ -128,20 +128,21 @@ test.describe("Informações — Trilhas North lista global (e2e contra o backen
 
   test("o portal do cliente mostra a mesma lista global", async ({ page }) => {
     test.setTimeout(90_000);
-    // Garante pelo menos um item além do Manual.
+    const PORTAL_ITEM = `Trilha portal ${RUN}`;
     const { data: seeded } = await sb
       .from("north_trilhas")
-      .insert({ kind: "video_youtube", title: V1, youtube_id: "dQw4w9WgXcQ", position: 100 })
+      .insert({ kind: "video_youtube", title: PORTAL_ITEM, youtube_id: "dQw4w9WgXcQ", position: 500 })
       .select("id")
       .single();
     if (seeded?.id) created.push(seeded.id as string);
 
     await login(page);
-    await page.goto(`/${clientSlug}`);
-    // Navega até Trilhas North no portal.
-    await page.getByRole("button", { name: /Trilhas North/ }).first().click();
-    await expect(page.getByRole("heading", { name: /Trilhas/ })).toBeVisible({ timeout: 20_000 });
+    // O portal usa rota por hash — vai direto pra Trilhas North.
+    await page.goto(`/${clientSlug}#trilhas`);
+    await expect(page.locator(".np-trail-list")).toBeVisible({ timeout: 30_000 });
+    // A lista global (a mesma pra todo cliente): o Manual é o hero, e o item que
+    // o admin adicionou aparece na lista.
     await expect(page.locator(".np-trail-hero", { hasText: "Manual do Cliente" })).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".np-trail-row", { hasText: V1 })).toBeVisible();
+    await expect(page.locator(".np-trail-row", { hasText: PORTAL_ITEM })).toBeVisible();
   });
 });

@@ -51,6 +51,7 @@ export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[
     setVideoUrl("");
     setError("");
     setProgress(null);
+    setBusy(false);
   }
 
   async function onHtmlPicked(file: File) {

@@ -70,16 +70,17 @@ existe.
 
 </details>
 
-### R0.2 — Trilhas North: vínculo real admin ↔ cliente, lista global — ✅ CÓDIGO FEITO (2026-08-31), migração pendente
+### R0.2 — Trilhas North: vínculo real admin ↔ cliente, lista global — ✅ FEITO (2026-08-31)
 
-Entregue: tabela `north_trilhas` (global, RLS authenticated-read / admin-write),
+Entregue e verificado: tabela `north_trilhas` (global, RLS authenticated-read /
+admin-write) **aplicada em prod via MCP** (versão remota `20260831024000`),
 `NorthTrilhasManager` (add HTML + YouTube, drag-reorder), rotas
 `/api/admin/north-trilhas`, `TrilhaViewer` no portal, `TrilhasPage` lendo
 `payload.northTrilhas`, Manual do Cliente virou linha `kind='manual'` semeada.
-`content.trilhas` saiu do editor de cliente. Progresso per-client fica pra fase 2
-(R6.7/R6.8). **Falta:** aplicar `supabase/migrations/20260831030000_north_trilhas.sql`
-no backend (o código degrada gracioso até lá — lista vazia), depois rodar
-`e2e/informacoes-trilhas.spec.ts` (reescrito) e conferir no app.
+`content.trilhas` saiu do editor de cliente. `e2e/informacoes-trilhas.spec.ts`
+reescrito e **verde contra o backend real** (3 casos: abas navegam, vídeo cai em
+`north_trilhas` sem client_id + reorder persiste, portal mostra a mesma lista).
+Progresso per-client fica pra fase 2 (R6.7/R6.8).
 
 <details><summary>spec original</summary>
 
