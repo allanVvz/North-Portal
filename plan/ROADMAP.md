@@ -18,7 +18,14 @@ mobile gaveta. Ver `CHANGELOG.md`.
 
 ## Tier 0 — Frentes definidas pelo usuário
 
-### R0.1 — Unificação total do botão e do modal de criação de tarefa
+### R0.1 — Unificação total do botão e do modal de criação de tarefa — ✅ FEITO (2026-08-30)
+
+Entregue: `NewTaskButton` único em toda tela; `TaskModal` deriva o
+`creationScope` do tipo escolhido; `scope=flow-step` cria só o card da etapa;
+`NewTaskLauncher` e os 5 pontos de criação fragmentados removidos. Spec
+`e2e/task-creation-unificada.spec.ts`. Detalhe em `plan/CRIACAO-TAREFA-UNIFICADA.md`.
+
+<details><summary>spec original</summary>
 
 **Pedido do usuário (2026-08-30), verbatim:**
 > Ao selecionar um fluxo, deve ter um default para criar o fluxo completo, linkado
@@ -60,6 +67,8 @@ do `TaskModal` (arquivo grande, muitos ramos por `mode`/`scope`); precisa de e2e
 cobrindo criação a partir de cada tela. **Dependência:** nenhuma bloqueante; o
 backend de fluxos (`createFlowDelivery`, `GET /api/admin/flow-templates`) já
 existe.
+
+</details>
 
 ### R0.2 — Trilhas North: vínculo real admin ↔ cliente, lista global
 

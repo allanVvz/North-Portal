@@ -7,6 +7,7 @@ import HScrollRail from "./HScrollRail";
 import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
+import NewTaskButton from "./NewTaskButton";
 import TaskKindIcon from "./TaskKindIcon";
 import CardCover from "./CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
@@ -30,7 +31,6 @@ type ClientLite = { slug: string; name: string };
 type View = "quadro" | "tabela" | "calendario";
 type BoardMode = "status" | "responsavel";
 type ModalState =
-  | { mode: "new"; initialStatus?: TaskStatus; initialAssignee?: string }
   | { mode: "edit"; taskId: string }
   | null;
 // clientName/clientSlug are attached by the API for every task now that the
@@ -648,12 +648,11 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           </div>
         ) : null}
         <div className="kb-spacer" />
-        <button
+        <NewTaskButton
+          label="+ Tarefa"
           className="admin-btn primary kb-newtask-btn"
-          onClick={() => { setSelectedId(null); setModalState({ mode: "new" }); }}
-        >
-          + Tarefa
-        </button>
+          onCreated={(t) => applySaved(t, true)}
+        />
         {view !== "calendario" ? (
           <SortMenu sort={sort} onChange={setSort} allowManual={view === "quadro" && boardMode === "status"} />
         ) : null}
@@ -848,13 +847,12 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                       {columnTasks.map((t) => renderCard(t, () => void dropInColumn(col.status, t.id)))}
                       {columnTasks.length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
                     </div>
-                    <button
-                      type="button"
+                    <NewTaskButton
+                      label="+ Adicionar tarefa"
                       className="kb-col-add"
-                      onClick={() => { setSelectedId(null); setModalState({ mode: "new", initialStatus: col.status }); }}
-                    >
-                      + Adicionar tarefa
-                    </button>
+                      prefill={{ status: col.status }}
+                      onCreated={(t) => applySaved(t, true)}
+                    />
                   </div>
                   );
                 })
@@ -874,13 +872,12 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                       {(byAssignee.get(who) ?? []).map((t) => renderCard(t, () => void dropInAssigneeColumn(who)))}
                       {(byAssignee.get(who) ?? []).length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
                     </div>
-                    <button
-                      type="button"
+                    <NewTaskButton
+                      label="+ Adicionar tarefa"
                       className="kb-col-add"
-                      onClick={() => { setSelectedId(null); setModalState({ mode: "new", initialAssignee: who === SEM_RESPONSAVEL ? undefined : who }); }}
-                    >
-                      + Adicionar tarefa
-                    </button>
+                      prefill={{ assignee: who === SEM_RESPONSAVEL ? undefined : who }}
+                      onCreated={(t) => applySaved(t, true)}
+                    />
                   </div>
                 ))
               )}
@@ -952,16 +949,13 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
 
       {modalState ? (
         <TaskModal
-          key={`${modalState.mode}:${modalState.mode === "edit" ? modalState.taskId : `${modalState.initialStatus ?? ""}:${modalState.initialAssignee ?? ""}`}`}
-          mode={modalState.mode}
+          key={modalState.taskId}
+          mode="edit"
           task={editingTask}
           slug={modalSlug}
           clients={clients}
           assignees={assignees}
           clientName={modalClientName}
-          initialStatus={modalState.mode === "new" ? modalState.initialStatus : undefined}
-          initialAssignee={modalState.mode === "new" ? modalState.initialAssignee : undefined}
-          creationScope="task"
           adminReviewers={adminReviewers}
           clientReviewers={clientReviewers}
           planCandidates={planCandidates}

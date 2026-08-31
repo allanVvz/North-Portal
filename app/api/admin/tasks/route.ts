@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   try {
     await requireAdmin();
     const scope = new URL(request.url).searchParams.get("scope");
-    if (scope && !["task", "plan", "routine"].includes(scope)) throw new HttpError(400, "Contexto de criacao invalido.");
+    if (scope && !["task", "plan", "routine", "flow-step"].includes(scope)) throw new HttpError(400, "Contexto de criacao invalido.");
     const body = taskCreateSchema.parse(await request.json());
     const client = body.slug ? await getClient(body.slug, true) : null;
     if (body.slug && !client) throw new HttpError(404, "Cliente nao encontrado.");
@@ -85,7 +85,16 @@ export async function POST(request: Request) {
     // Uma porta só: o TIPO escolhido decide o que nasce, não o botão que a
     // pessoa clicou. Um tipo com behavior 'entrega' vira uma corrente de
     // etapas; 'plano' vira um agregador; o resto vira um card comum.
+    //
+    // A exceção: `scope=flow-step` diz "crie SÓ o card daquela etapa, não a
+    // corrente". Vem de escolher um subtipo específico de uma Entrega no modal
+    // (em vez de "Fluxo completo"). O card nasce solto — sem entrega-pai — e é
+    // inofensivo: `chainDelivery` fica nulo, `reconcileFlows` acha zero pais.
+    // Pode ser ligado a uma entrega depois pelo botão de corrente.
     const behavior = await taskBehaviorOf(fields.kind ?? "operacional");
+    const flowStepOnly = scope === "flow-step";
+    if (flowStepOnly && behavior !== "entrega") throw new HttpError(400, "Etapa de fluxo exige um tipo de entrega.");
+    if (flowStepOnly && !fields.subtype) throw new HttpError(400, "Escolha a etapa do fluxo.");
     if (scope === "plan") {
       fields.kind = "plano_acao";
     } else if (scope === "routine") {
@@ -122,7 +131,7 @@ export async function POST(request: Request) {
     // plan_id é elo, não coluna: sai dos campos do insert e vira uma ligação
     // depois que o card existe.
     const { plan_id: planLink, ...taskFields } = fields;
-    const flow = behavior === "entrega"
+    const flow = behavior === "entrega" && !flowStepOnly
       ? await createFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
       : null;
     // A resposta continua sendo o PASSO — é o card que a pessoa vai abrir, já

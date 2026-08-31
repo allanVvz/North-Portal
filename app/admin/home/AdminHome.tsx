@@ -10,7 +10,7 @@ import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
 import type { NotificationRecord } from "@/lib/notificationTypes";
 import { useCurrentAdminUser } from "../CurrentUserContext";
 import NotificationsList from "../NotificationsList";
-import NewTaskLauncher from "./NewTaskLauncher";
+import NewTaskButton from "../NewTaskButton";
 import WeekCalendar from "./WeekCalendar";
 
 // Admin landing page. Every number here links to the screen that resolves it —
@@ -109,7 +109,7 @@ export default function AdminHome({ summary, userName }: { summary: AdminHomeSum
           </p>
         </div>
         <div className="admin-head-actions">
-          <NewTaskLauncher />
+          <NewTaskButton />
         </div>
       </header>
 

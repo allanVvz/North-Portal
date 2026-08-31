@@ -172,8 +172,6 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
           clients={clients}
           assignees={assignees}
           clientName=""
-          initialKind="operacional"
-          creationScope="task"
           adminReviewers={[]}
           clientReviewers={[]}
           planoVisibilityOn={false}

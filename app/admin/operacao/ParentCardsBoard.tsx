@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import CardModalLauncher from "../CardModalLauncher";
-import TaskModal, { type TaskCreationScope } from "../TaskModal";
+import NewTaskButton from "../NewTaskButton";
 import TaskKindIcon from "../TaskKindIcon";
 import SortMenu from "../SortMenu";
 import { STATUS_LABEL } from "../kanbanShared";
@@ -63,20 +63,12 @@ function stepTotal(d: ParentCard): number {
 
 export default function ParentCardsBoard({
   initial,
-  clients,
-  assignees,
   texts,
-  scope,
-  initialKind,
   sortScope,
   showStepCount,
 }: {
   initial: ParentCard[];
-  clients: { slug: string; name: string }[];
-  assignees: string[];
   texts: ParentBoardTexts;
-  scope: TaskCreationScope;
-  initialKind?: string;
   sortScope: SortScope;
   /** Entregas contam "3/4 etapas" porque as próximas ainda vão nascer; um
    *  plano conta só quantas atividades tem. */
@@ -93,20 +85,7 @@ export default function ParentCardsBoard({
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingTarget | null>(null);
-  const [creating, setCreating] = useState(false);
-  // Fail-closed enquanto carrega, como em CardModalLauncher: um pai novo nunca
-  // pode nascer visível ao cliente por causa de um fetch que ainda não resolveu.
-  const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
   const { sort, setSort } = useSortPref(sortScope);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/admin/settings/plano-visibility")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => { if (!cancelled && data) setPlanoVisibilityOn(Boolean(data.enabled)); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
 
   const parents = useMemo(() => {
     const needle = q.trim();
@@ -144,7 +123,7 @@ export default function ParentCardsBoard({
         </div>
         <PlanSearchBar q={q} onQChange={setQ} plans={initial} placeholder={texts.searchPlaceholder} />
         <div className="kb-spacer" />
-        <button type="button" className="admin-btn primary kb-newtask-btn" onClick={() => setCreating(true)}>{texts.newLabel}</button>
+        <NewTaskButton label={texts.newLabel} className="admin-btn primary kb-newtask-btn" />
         {view === "lista" ? <SortMenu sort={sort} onChange={setSort} /> : null}
       </div>
 
@@ -234,25 +213,6 @@ export default function ParentCardsBoard({
           onSaved={() => { setEditing(null); router.refresh(); }}
           onDeleted={() => { setEditing(null); router.refresh(); }}
           onChanged={() => router.refresh()}
-        />
-      ) : null}
-
-      {creating ? (
-        <TaskModal
-          mode="new"
-          task={null}
-          slug=""
-          clients={clients}
-          assignees={assignees}
-          clientName=""
-          creationScope={scope}
-          initialKind={initialKind}
-          adminReviewers={[]}
-          clientReviewers={[]}
-          planoVisibilityOn={planoVisibilityOn}
-          onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); router.refresh(); }}
-          onDeleted={() => {}}
         />
       ) : null}
     </div>

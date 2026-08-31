@@ -59,7 +59,16 @@ type Draft = {
   plataforma: string;
 };
 
-export type TaskCreationScope = "task" | "plan" | "routine";
+// O contexto de criação NÃO vem mais de fora — o botão é o mesmo em toda tela.
+// O que nasce é decidido pelo TIPO escolhido no dropdown do modal, e este valor
+// é derivado desse tipo (ver `effectiveScope`), só para dizer ao servidor qual
+// caminho seguir. "flow-step" = escolher um subtipo de entrega em vez de "Fluxo
+// completo": cria só o card daquela etapa, solto.
+export type TaskCreationScope = "task" | "plan" | "routine" | "flow-step";
+
+/** Pré-preenchimento opcional que uma tela pode passar — nunca comportamento.
+ *  Ex.: o "+" embaixo de uma coluna do quadro abre o modal já com aquele status. */
+export type TaskCreationPrefill = { clientSlug?: string; status?: TaskStatus; assignee?: string };
 
 type PendingMember =
   | { key: string; kind: "existing"; taskId: string; title: string }
@@ -67,22 +76,19 @@ type PendingMember =
 
 function draftFrom(
   task: TaskRecord | null,
-  initialStatus: TaskStatus | undefined,
   initialSlug: string,
-  initialAssignee?: string,
-  initialKind?: string,
-  initialRecurrence = false,
-  creationScope = "task",
+  prefill?: TaskCreationPrefill,
 ): Draft {
-  const requestedKind = task?.kind ?? (creationScope === "plan" ? "plano_acao" : initialKind ?? "operacional");
-  const scopedKind = !task && creationScope !== "plan" && requestedKind === "plano_acao" ? "operacional" : requestedKind;
-  const classification = canonicalTaskClassification(scopedKind, task?.subtype);
+  const initialStatus = prefill?.status;
+  const initialAssignee = prefill?.assignee;
+  const requestedKind = task?.kind ?? "operacional";
+  const classification = canonicalTaskClassification(requestedKind, task?.subtype);
   const p = (task?.payload ?? {}) as Record<string, unknown>;
   const str = (k: string) => (typeof p[k] === "string" ? (p[k] as string) : "");
   return {
     title: task?.title ?? "",
     kind: classification.kind,
-    clientSlug: initialSlug,
+    clientSlug: prefill?.clientSlug ?? initialSlug,
     subtype: classification.subtype ?? "",
     status: task?.status ?? initialStatus ?? "backlog",
     priority: task?.priority ?? "media",
@@ -96,7 +102,7 @@ function draftFrom(
     // apagando a associação real.
     plan_id: task ? planParentIdOf(task) ?? "" : "",
     due_date: task?.due_date ?? "",
-    recurrence_cadence: task?.recurrence_cadence ?? (creationScope === "routine" || initialRecurrence ? "semanal" : null),
+    recurrence_cadence: task?.recurrence_cadence ?? null,
     recurrence_weekdays: task?.recurrence_weekdays ?? [],
     recurrence_day_of_month: task?.recurrence_day_of_month ?? null,
     start_date: task?.start_date ?? "",
@@ -322,11 +328,7 @@ export default function TaskModal({
   clients,
   assignees,
   clientName,
-  initialStatus,
-  initialAssignee,
-  initialKind,
-  initialRecurrence = false,
-  creationScope = "task",
+  prefill,
   adminReviewers,
   clientReviewers,
   planCandidates = [],
@@ -346,11 +348,7 @@ export default function TaskModal({
   clients: { slug: string; name: string }[];
   assignees: string[];
   clientName: string;
-  initialStatus?: TaskStatus;
-  initialAssignee?: string;
-  initialKind?: string;
-  initialRecurrence?: boolean;
-  creationScope?: TaskCreationScope;
+  prefill?: TaskCreationPrefill;
   adminReviewers: ReviewerCandidate[];
   clientReviewers: ReviewerCandidate[];
   planCandidates?: { id: string; title: string }[];
@@ -364,7 +362,7 @@ export default function TaskModal({
   onSaved: (task: TaskRecord, isNew: boolean) => void;
   onDeleted: (id: string) => void;
 }) {
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(task, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(task, slug, prefill));
   // "Rotina" é a quinta porta de criação, e é só isso: uma porta.
   //
   // Ela NÃO é um kind. Recorrência é a coluna `recurrence_cadence`, ortogonal
@@ -374,7 +372,6 @@ export default function TaskModal({
   // `scope=routine`: cria o MOLDE da recorrência, não um grupo já
   // materializado (ver POST /api/admin/tasks).
   const [rotinaMode, setRotinaMode] = useState(false);
-  const effectiveScope: TaskCreationScope = mode === "new" && rotinaMode ? "routine" : creationScope;
   const [liveTask, setLiveTask] = useState<TaskRecord | null>(task);
   // A recurrence template is a parent even if legacy data accidentally still
   // carries a child-only recurrence_parent_id. It must never render a second
@@ -393,6 +390,16 @@ export default function TaskModal({
   // A etapa recém-criada pela conclusão desta, devolvida pelo PATCH.
   const [flowNext, setFlowNext] = useState<TaskRecord | null>(null);
   const currentType = taskTypes.find((t) => t.key === draft.kind) ?? null;
+  // O que o servidor vai criar, derivado do TIPO escolhido no dropdown — não de
+  // uma prop. Rotina (porta sintética) → molde recorrente; tipo-entrega com
+  // "Fluxo completo" → a corrente; tipo-entrega com um subtipo → só aquele card
+  // ("flow-step"); Plano de Ação → agregador; o resto → card comum.
+  const effectiveScope: TaskCreationScope =
+    mode !== "new" ? "task"
+    : rotinaMode ? "routine"
+    : currentType?.behavior === "entrega" && draft.subtype ? "flow-step"
+    : draft.kind === "plano_acao" ? "plan"
+    : "task";
   const deliveryType = taskTypes.find((t) => t.key === (flowDelivery?.kind ?? (isDelivery ? liveTask?.kind : null))) ?? null;
   // Índice 1-based da etapa dentro do tipo, para o "2/4". -1 enquanto o
   // vocabulário não chegou, ou se o subtipo saiu do tipo depois de o card já
@@ -433,22 +440,19 @@ export default function TaskModal({
   // Um card já existente sempre mostra o próprio tipo, mesmo que ele seja
   // oculto (uma etapa de fluxo é kind=criativo, que saiu do dropdown) — senão
   // o pill viria vazio ou trocaria o tipo do card sozinho ao abrir.
-  // Uma porta só: o dropdown de Tipo lista TUDO que se pode criar, inclusive
-  // Plano de Ação — escolher o tipo é que decide o que nasce. Fora ficam só os
-  // tipos não-criáveis (checkpoint comercial, que é provisionado) e, no modo
-  // Plano, os que não são plano.
+  // Uma porta só: na criação o dropdown de Tipo lista TUDO que se pode criar —
+  // Tarefa, Plano de Ação, cada entrega, e a porta sintética Rotina. Escolher o
+  // tipo é que decide o que nasce; nenhuma tela restringe mais essa lista. Fora
+  // ficam só os tipos não-criáveis (checkpoint comercial, que é provisionado);
+  // em edição, um card que já é plano só troca por outro plano.
   const realTypes = taskTypes.filter((type) => {
     if (!type.creatable && type.key !== draft.kind) return false;
-    if (creationScope === "plan") return type.behavior === "plano";
     if (mode === "edit" && kd.isPlan) return type.behavior === "plano";
     return true;
   });
-  // A porta extra só existe na criação de uma tarefa avulsa: em modo Plano não
-  // faz sentido, e em edição o Tipo mostra o kind real do card enquanto a
-  // recorrência tem campo próprio.
-  const creationTypes = mode === "new" && creationScope === "task"
-    ? [...realTypes, ROTINA_OPTION]
-    : realTypes;
+  // Rotina só aparece na criação: em edição o Tipo mostra o kind real do card e
+  // a recorrência tem campo próprio.
+  const creationTypes = mode === "new" ? [...realTypes, ROTINA_OPTION] : realTypes;
   const typeLabelOf = (key: string) => taskTypes.find((t) => t.key === key)?.label ?? kindLabel(key);
   const subtypeOptions = currentType?.subtypes ?? [];
   const subtypeLabelOf = (key: string) => subtypeOptions.find((sub) => sub.key === key)?.label ?? subtypeLabel(key);
@@ -644,7 +648,6 @@ export default function TaskModal({
   }, [flowDeliveryId, clientTasks]);
 
   function pickKind(kind: string) {
-    if (mode === "new" && creationScope === "plan" && kind !== "plano_acao") return;
     if (kind === ROTINA_KEY) {
       setRotinaMode(true);
       setDraft((d) => ({
@@ -663,10 +666,11 @@ export default function TaskModal({
       return {
         ...d,
         kind,
-        // Trocar de tipo troca o vocabulário de subtipo. Uma entrega começa
-        // pela primeira etapa; os demais tipos abrem no primeiro subtipo
-        // declarado (é assim que Operacional já nasce em "Gestão").
-        subtype: type?.subtypes[0]?.key ?? "",
+        // Trocar de tipo troca o vocabulário de subtipo. Uma entrega abre em
+        // "Fluxo completo" (subtype vazio) — a corrente inteira; escolher um
+        // subtipo ali cria só aquele card. Os demais tipos abrem no primeiro
+        // subtipo declarado (é assim que Operacional já nasce em "Gestão").
+        subtype: type?.behavior === "entrega" ? "" : type?.subtypes[0]?.key ?? "",
         // A plan can't belong to another plan.
         plan_id: def.isPlan ? "" : d.plan_id,
         recurrence_cadence: d.recurrence_cadence,
@@ -765,7 +769,7 @@ export default function TaskModal({
       const updated = body as TaskRecord;
       if (liveTask?.id === updated.id) {
         setLiveTask(updated);
-        setDraft(draftFrom(updated, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
+        setDraft(draftFrom(updated, slug, prefill));
       }
       onTaskPatched?.(updated);
     } catch (cause) {
@@ -778,7 +782,7 @@ export default function TaskModal({
   // Same linking, but for a brand-new plan (mode="new", no id yet): activities
   // typed here are queued locally and only actually created/linked once the
   // plan itself is saved (see save()).
-  const isNewPlan = mode === "new" && creationScope === "plan";
+  const isNewPlan = mode === "new" && effectiveScope === "plan";
   const [pendingMembers, setPendingMembers] = useState<PendingMember[]>([]);
   const [newPlanClientTasks, setNewPlanClientTasks] = useState<TaskRecord[]>([]);
   useEffect(() => {
@@ -946,7 +950,7 @@ export default function TaskModal({
         const body = await res.json().catch(() => null) as { error?: string; code?: string; parent?: TaskRecord } | null;
         if (!retried && body?.code === "recurrence_schedule_changed" && body.parent) {
           setLiveTask(body.parent);
-          setDraft(draftFrom(body.parent, initialStatus, slug, initialAssignee, initialKind, initialRecurrence, creationScope));
+          setDraft(draftFrom(body.parent, slug, prefill));
           onTaskPatched?.(body.parent);
           setBusy(false);
           await completeCycle(true, body.parent);
@@ -1233,10 +1237,15 @@ export default function TaskModal({
                   })}
                 </HeadDropdown>
                 {subtypeOptions.length ? (
-                  <HeadDropdown className="tm-new-kind" trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}>
-                    {/* Num tipo-entrega o subtipo É a etapa por onde a corrente
-                        começa, então "sem subtipo" não faz sentido ali. */}
-                    {currentType?.behavior === "entrega" ? null : (
+                  <HeadDropdown
+                    className="tm-new-kind"
+                    trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : currentType?.behavior === "entrega" ? "Fluxo completo" : "Subtipo"}</span>}
+                  >
+                    {currentType?.behavior === "entrega" ? (
+                      // "Fluxo completo" (default) monta a corrente inteira;
+                      // escolher uma etapa abaixo cria SÓ aquele card, solto.
+                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>Fluxo completo</button>
+                    ) : (
                       <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
                     )}
                     {subtypeOptions.map((sub) => (
@@ -1249,7 +1258,9 @@ export default function TaskModal({
                 {rotinaMode
                   ? "Uma rotina se repete na cadência escolhida. Cada ciclo nasce como um card próprio."
                   : currentType?.behavior === "entrega"
-                    ? `Nasce em ${subtypeLabelOf(draft.subtype) || currentType.subtypes[0]?.label || "primeira etapa"}. Cada etapa concluída cria a próxima.`
+                    ? (draft.subtype
+                        ? `Cria só o card de ${subtypeLabelOf(draft.subtype)}. Pode ser vinculado a uma entrega depois.`
+                        : `Nasce em ${currentType.subtypes[0]?.label ?? "primeira etapa"} e cada etapa concluída cria a próxima.`)
                     : currentType?.behavior === "plano"
                       ? "Um plano agrega outras tarefas e mostra o progresso do conjunto."
                       : "Conte o essencial e escolha o tipo do card."}
@@ -1269,14 +1280,7 @@ export default function TaskModal({
                   onChange={(e) => set("title", e.target.value)}
                   placeholder="Título da tarefa"
                 />
-                <span className="tm-newclient">
-                  {draftClientName}
-                  {initialKind ? (
-                    <span className="tm-newtype-badge">
-                      <span aria-hidden>{kindIcon(initialKind)}</span> {kindLabel(initialKind)}
-                    </span>
-                  ) : null}
-                </span>
+                <span className="tm-newclient">{draftClientName}</span>
                 <AutoGrowTextarea
                   className="tm-desc-input"
                   rows={2}

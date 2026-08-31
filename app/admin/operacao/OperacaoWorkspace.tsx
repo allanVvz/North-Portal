@@ -13,7 +13,7 @@ import HScrollRail from "../HScrollRail";
 import RecurringSearchBar from "../RecurringSearchBar";
 import { recurringMatchesFilters, recurringSearchText, type RecurringActiveFilter } from "../recurringTaskFilters";
 import CardModalLauncher from "../CardModalLauncher";
-import TaskModal from "../TaskModal";
+import NewTaskButton from "../NewTaskButton";
 import { PRIORITY_LABEL } from "../kanbanShared";
 import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, todayInTimezone, type RecurringState } from "../recurringState";
 import { recurringOccurrences } from "../recurringOccurrences";
@@ -126,24 +126,13 @@ export default function OperacaoWorkspace({
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<RecurringActiveFilter[]>([]);
-  const [selected, setSelected] = useState<RecurringTask | null | undefined>(undefined);
-  const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
+  const [selected, setSelected] = useState<RecurringTask | undefined>(undefined);
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-
 
   // One "today", in the agency's timezone, shared by every derived value below —
   // so the badge, the filter and the columns can never disagree about the date.
   const today = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
   const activeClients = useMemo(() => clients.filter((client) => !client.disabled), [clients]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/admin/settings/plano-visibility")
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => { if (!cancelled && data) setPlanoVisibilityOn(Boolean(data.enabled)); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
 
   // Cada visão tem a sua preferência: agrupado por prazo abre no que vence
   // primeiro; por cliente ou por pessoa, no que mudou por último.
@@ -386,22 +375,18 @@ export default function OperacaoWorkspace({
       ) : section === "entregas" ? (
         <ParentCardsBoard
           initial={deliveries}
-          clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))}
-          assignees={assignees}
-          scope="task"
-          initialKind="criativo"
           sortScope="entregas.lista"
           showStepCount
           texts={{
-            newLabel: "+ Entrega",
-            empty: "Nenhuma entrega em andamento. Crie uma tarefa do tipo Criativo — cada etapa concluída cria a próxima.",
+            newLabel: "+ Nova tarefa",
+            empty: "Nenhuma entrega em andamento. Crie uma tarefa do tipo Entrega — cada etapa concluída cria a próxima.",
             emptyQuery: "Nenhuma entrega para essa busca.",
             searchPlaceholder: "Buscar por entrega, cliente, tipo ou etapa…",
             descriptionHint: "Adicione à descrição o que esta entrega precisa ser quando ficar pronta.",
           }}
         />
       ) : section === "plano" ? (
-        <ActionPlansBoard initial={plans} clients={activeClients.map((c) => ({ slug: c.slug, name: c.name }))} assignees={assignees} />
+        <ActionPlansBoard initial={plans} />
       ) : (
         <>
           <div className="rec-summary-head">
@@ -440,7 +425,7 @@ export default function OperacaoWorkspace({
             ) : null}
             <div className="kb-spacer" />
             {recurringStorageAvailable ? (
-              <button type="button" className="admin-btn primary kb-newtask-btn" onClick={() => setSelected(null)}>+ Tarefa</button>
+              <NewTaskButton label="+ Nova tarefa" className="admin-btn primary kb-newtask-btn" onCreated={saved} />
             ) : null}
             {/* O calendário é posicionado por data; ordenar ali não significa nada. */}
             {view !== "calendario" ? <SortMenu sort={sort} onChange={setSort} /> : null}
@@ -585,24 +570,6 @@ export default function OperacaoWorkspace({
           onSaved={saved}
           onDeleted={saved}
           onChanged={() => router.refresh()}
-        />
-      ) : selected === null ? (
-        <TaskModal
-          mode="new"
-          task={null}
-          slug=""
-          clients={activeClients}
-          assignees={assignees}
-          clientName=""
-          initialKind="operacional"
-          initialRecurrence
-          creationScope="routine"
-          adminReviewers={[]}
-          clientReviewers={[]}
-          planoVisibilityOn={planoVisibilityOn}
-          onClose={() => setSelected(undefined)}
-          onSaved={saved}
-          onDeleted={saved}
         />
       ) : null}
     </section>
