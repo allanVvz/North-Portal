@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { advanceFlow, justCompleted, nextFlowStepCardOf } from "./advance";
+import { advanceFlow, justCompleted, materializeFirstStep, nextFlowStepCardOf } from "./advance";
 import { flowStepTaskId } from "./ids";
+import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
 import type { AdminClient } from "@/lib/automations/taskAccess";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -165,6 +166,26 @@ describe("advanceFlow", () => {
     expect(outcome.finished).toEqual(["entrega"]);
     // Sem revisor nem aprovador, encerra direto.
     expect(state.tasks.find((t) => t.id === "entrega")?.status).toBe("aprovado");
+  });
+});
+
+describe("materializeFirstStep", () => {
+  it("cria a primeira etapa de uma ocorrência vazia e a liga por slot", async () => {
+    const state = { tasks: [delivery("occ", "Vídeo institucional") as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS] };
+    const { admin, inserts } = fakeAdmin(state);
+    const created = await materializeFirstStep(admin, delivery("occ", "Vídeo institucional"));
+    expect(created?.subtype).toBe("roteiro");
+    expect(inserts.filter((i) => i.subtype === "roteiro")).toHaveLength(1);
+    expect(state.task_links.some((l) => l.parent_id === "occ" && l.slot === "roteiro")).toBe(true);
+  });
+
+  it("NÃO materializa etapa num molde de recorrência (flow_parent + recurrence_group)", async () => {
+    const molde = { ...delivery("molde", "Rotina de vídeo"), payload: { flow_parent: true, [RECURRENCE_GROUP_KEY]: true } } as TaskRecord;
+    const state = { tasks: [molde as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS] };
+    const { admin, inserts } = fakeAdmin(state);
+    expect(await materializeFirstStep(admin, molde)).toBeNull();
+    expect(inserts).toHaveLength(0);
+    expect(state.task_links).toHaveLength(0);
   });
 });
 
