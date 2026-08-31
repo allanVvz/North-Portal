@@ -39,11 +39,11 @@ describe("taskProgress — parada (automation halted the card)", () => {
 });
 
 describe("catálogo canônico de tipos", () => {
-  it("são exatamente quatro tipos — Rotina é porta de criação, não kind", () => {
+  it("os tipos primários — Rotina é porta de criação, não kind", () => {
     // Rotina não entra aqui de propósito: recorrência é a coluna
     // `recurrence_cadence`, e um kind próprio tornaria "entrega recorrente"
     // irrepresentável. Ver ROTINA_OPTION em app/admin/TaskModal.tsx.
-    expect(TASK_KIND_KEYS).toEqual(["operacional", "plano_acao", "criativo", "checkpoint_comercial"]);
+    expect(TASK_KIND_KEYS).toEqual(["operacional", "plano_acao", "criativo", "checkpoint_comercial", "relatorio_conversao"]);
     expect(TASK_KIND_KEYS).not.toContain("rotina");
   });
 
