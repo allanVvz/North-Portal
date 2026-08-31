@@ -39,11 +39,11 @@ Referência canônica — conferida no prod `rqwycltgnnvaunvmyxea`. Quando o có
 | `client_visible` | bool | default `false`; fail-closed enquanto a flag global carrega |
 | `payload` | jsonb | default `{}` — **sem schema no banco** (ver "chaves de `payload`") |
 | `position` | int | ordem manual dentro da coluna |
-| `kind` | **text** | default **`'operacional'`** (era `'criativo'` até `20260831042902`); sem FK ao vocabulário |
-| `subtype` | text? | sem FK ao vocabulário |
+| `kind` | **text** | default **`'operacional'`** (era `'criativo'` até `20260831042902`); validado pelo trigger `tasks_valida_vocabulario` contra `task_types` de topo |
+| `subtype` | text? | validado pelo mesmo trigger contra os filhos do `kind` |
 | `plan_id` | uuid? | FK `tasks` on delete set null — **só ocorrência de recorrência** (filho → template) |
 | `reviewer_id` / `approver_id` / `created_by` | uuid? | FK `profiles` on delete set null |
-| `requires_review` / `requires_approval` | bool | default `true`; a API deriva de reviewer/approver presente |
+| `requires_review` / `requires_approval` | bool | default **`false`**; a verdade é `Boolean(reviewer_id)` / `Boolean(approver_id)` + a etapa ligada em Configurações › Etapas |
 | `recurrence_cadence` | text? | CHECK: null ou `semanal` / `quinzenal` / `mensal` |
 | `recurrence_weekdays` | smallint[] | default `{}`; CHECK: subconjunto de {0..6} |
 | `recurrence_day_of_month` | smallint? | CHECK: 1..31; obrigatório se cadence `mensal` |
@@ -58,6 +58,10 @@ Referência canônica — conferida no prod `rqwycltgnnvaunvmyxea`. Quando o có
 - `tasks_recurrence_weekdays_valid` — weekdays ⊆ {0,1,2,3,4,5,6}
 - `tasks_plano_nao_e_entrega` — **não** (`kind = 'plano_acao'` **e** `payload.flow_parent = 'true'`)
 - `tasks_status_sem_concluido` — `status ≠ 'concluido'`
+
+### Triggers de validação
+
+- `tasks_valida_vocabulario` (`BEFORE INSERT OR UPDATE OF kind, subtype`) — `kind` tem que existir como `task_types` de topo (`parent_id IS NULL`); `subtype`, se preenchido, tem que ser filho desse `kind`. É trigger e não FK porque `task_types` só tem `UNIQUE (parent_id, key)` — `key` sozinho repete entre subtipos. Dispara só quando `kind`/`subtype` mudam e consulta uma tabela de ~23 linhas em cache.
 
 ### Enums
 
@@ -198,17 +202,15 @@ O `payload` é `jsonb` livre (`taskPayloadSchema` é `.passthrough()` / a API va
 
 ## Pontos frágeis / a decidir
 
-Cada linha é uma frente própria — nada disso está feito.
-
-| # | O quê | Risco hoje | Recomendação |
-|---|---|---|---|
-| A | `kind` / `subtype` são `text` livre, **sem FK** a `task_types(key)` | baixo — 0 linhas fora do vocabulário | FK em `kind` é seguro hoje. `subtype` idem se auditado. Mexe na compat de `canonicalTaskClassification`. |
-| B | 2 filhos com `plan_id` → um `plano_acao` **não-recorrente** (elos que não migraram pro `task_links` em `bd1cbb0`) | baixo — `planParentIdOf` lê `task_links` primeiro | migração de dados curta: mover os 2 para `task_links(slot = null)`, limpar `plan_id`. |
-| C | `concluido` órfão no `task_status` (CHECK bloqueia) | nenhum — só confunde | deixar (não dá pra remover label de enum); documentado acima. |
-| ~~D~~ | ~~dias-da-semana exigidos só pela API~~ | — | **Resolvido de outra forma:** dia-da-semana virou **opcional** (`recurrenceWeekdays()` cai no dia da `start_date`). Sem CHECK novo — decisão deliberada de manter a recorrência flexível. |
-| E | `requires_review` / `requires_approval` default `true` | baixo — a API deriva de reviewer/approver | default `false` (a presença do revisor é a verdade). |
-| F | `payload` sem schema no banco | médio — chave com typo entra calada | catálogo acima é o contrato; considerar validar as chaves conhecidas na API. |
-| G | ~15 linhas `active = false` em `task_types` (agendamento/planejamento) | nenhum | deixar (histórico) ou limpar numa faxina de vocabulário. |
+| # | O quê | Estado |
+|---|---|---|
+| ~~A~~ | ~~`kind` / `subtype` `text` livre sem trava~~ | **Feito** (`20260831120000`): trigger `tasks_valida_vocabulario`. Não virou FK porque `task_types` só tem `UNIQUE (parent_id, key)`. `subtype` composto (parent-scoped) incluído. |
+| ~~B~~ | ~~filho com `plan_id` → `plano_acao` não-recorrente (elo pré-`bd1cbb0`)~~ | **Feito** (`20260831120000`): elo movido para `task_links(slot = null)`, `plan_id` limpo. |
+| C | `concluido` órfão no `task_status` (CHECK bloqueia) | Deixar — não dá pra remover label de enum; documentado acima. Risco nenhum. |
+| ~~D~~ | ~~dias-da-semana exigidos só pela API~~ | **Resolvido de outra forma:** dia-da-semana virou **opcional** (`recurrenceWeekdays()` cai no dia da `start_date`). Sem CHECK novo — decisão deliberada de manter a recorrência flexível. |
+| ~~E~~ | ~~`requires_review` / `requires_approval` default `true`~~ | **Feito** (`20260831120000`): default `false`, dados alinhados a `Boolean(reviewer_id)` / `Boolean(approver_id)`. Os campos Revisor/Aprovador do modal são amarrados 1:1 à tela Configurações › Etapas (flags `revisaoAdmin` / `aprovacaoAdmin` por cliente) — etapa desligada, o campo some (inclusive do "Configurar atributos"); não há mais override. |
+| F | `payload` sem schema no banco | **Aberto** (frente própria). Risco médio — chave com typo entra calada. Catálogo acima é o contrato; considerar validar as chaves conhecidas na API. |
+| G | ~15 linhas `active = false` em `task_types` (agendamento/planejamento) | Deixar (histórico) ou limpar numa faxina de vocabulário. Risco nenhum. |
 
 ---
 
@@ -229,6 +231,8 @@ Cada linha é uma frente própria — nada disso está feito.
 - Ligar um card a uma etapa **compartilha, não copia** — um elo a mais; o card conta em todas as entregas de que participa.
 - A entrega, o Plano de Ação e o pai recorrente ficam **fora do quadro Tarefas** (`belongsToTaskScreen`) — status derivado não tem coluna honesta.
 - Progresso de pai é sempre rollup dos filhos; nunca persistido.
+- `kind` / `subtype` de toda tarefa existem no vocabulário `task_types` (trigger `tasks_valida_vocabulario`).
+- Revisão / Aprovação são amarradas 1:1 à tela Configurações › Etapas; etapa desligada para o cliente → campo some do modal e `requires_*` fica `false`. Sem override.
 - O toggle "Visível para o cliente" é fail-closed enquanto a flag carrega.
 - Trocar de "Rotina" para outro tipo no modal limpa a recorrência.
 - Funções críticas têm limite automatizado de complexidade ciclomática (`lib/cyclomaticComplexity.test.ts`).

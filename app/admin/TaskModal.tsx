@@ -463,32 +463,18 @@ export default function TaskModal({
     ? (clients.find((c) => c.slug === draft.clientSlug)?.name ?? clientName ?? "Sem cliente")
     : (mode === "new" ? "Sem cliente" : clientName);
   const attrsForKind = ATTR_DEFS.filter((a) => a.kinds === "base" || (a.kinds as string[]).includes(draft.kind));
-  // A client with Revisão/Aprovação admin-disabled never has that stage —
-  // hide the field and force "sem revisor"/"sem aprovador" on save. While
-  // flowFlags hasn't loaded yet (null), default to OFF/hidden rather than
-  // shown — otherwise the field flashes visible for the fetch's duration
-  // before disappearing once the real (usually off) value arrives.
+  // Revisão / Aprovação são amarradas à tela Configurações › Etapas: a flag
+  // `revisaoAdmin` / `aprovacaoAdmin` (por cliente) é o ÚNICO critério. Etapa
+  // desligada → o campo some do modal, `requires_*` vai a false no save, e o
+  // passo some do stepper. Não há override — se está desligado, está desligado.
+  // Enquanto flowFlags não carregou (null), assume desligado (o campo não
+  // pisca visível durante o fetch para sumir logo em seguida).
   const revisaoOff = flowFlags ? !flowFlags.revisaoAdmin : true;
   const aprovacaoOff = flowFlags ? !flowFlags.aprovacaoAdmin : true;
-  // Manual override: even with the flow off for this client, the admin can
-  // reveal Revisor/Aprovador via the attributes popover — shown read-only
-  // ("apenas visual") since assigning here wouldn't actually drive a stage
-  // that's disabled for this client.
-  const revisaoVisual = revisaoOff && visible("reviewer");
-  const aprovacaoVisual = aprovacaoOff && visible("approver");
-  // Revisor is always an admin (internal Revisão); Aprovador is always a client
-  // (Aprovação). "Sem revisor" / "Sem aprovação" skip that stage. Progress is a
-  // rollup shown only for plans — regular cards derive it from their workflow
-  // status silently, so it isn't a per-card attribute.
-
-  // The stepper (progress bar below) must mirror the same gate: with the
-  // stage off for this client, Revisão/Aprovação aren't a reachable option at
-  // all — the ONLY way back in is the manual override above (attribute made
-  // visible + an actual revisor/aprovador already assigned on THIS card).
-  // A card already sitting in the gated stage still shows its own step, so
-  // the current position never becomes literally invisible.
-  const revisaoStepHidden = revisaoOff && !(revisaoVisual && draft.reviewer_id) && draft.status !== "revisao";
-  const aprovacaoStepHidden = aprovacaoOff && !(aprovacaoVisual && draft.approver_id) && draft.status !== "aprovacao";
+  // Um card que JÁ está parado na etapa desligada continua mostrando o próprio
+  // passo, para a posição atual nunca ficar literalmente invisível.
+  const revisaoStepHidden = revisaoOff && draft.status !== "revisao";
+  const aprovacaoStepHidden = aprovacaoOff && draft.status !== "aprovacao";
   // Revisão e Aprovação são as únicas etapas que somem, e por CLIENTE, não por
   // tipo: são contrato de cliente, não modelo de card. O recorte por tipo que
   // existia aqui era o "Publicado", que deixou de ser etapa.
@@ -1372,39 +1358,22 @@ export default function TaskModal({
                 </Cell>
               ) : null}
 
-              {/* Revisor (admin, etapa de Revisão) — "Sem revisor" pula a etapa. Se o
-                  fluxo está desligado pro cliente mas o override do popover está
-                  ligado, mostra só leitura (atribuir aqui não ativaria a etapa). */}
-              {revisaoVisual ? (
-                <Cell icon="✓" label="Revisor">
-                  <span className="tm-cell-static">
-                    {draft.reviewer_id ? (adminReviewers.find((r) => r.id === draft.reviewer_id)?.label ?? "—") : "— Sem revisor —"}
-                  </span>
-                </Cell>
-              ) : (
-                <Cell icon="✓" label="Revisor" hidden={revisaoOff}>
-                  <select value={draft.reviewer_id} onChange={(e) => set("reviewer_id", e.target.value)}>
-                    <option value="">— Sem revisor —</option>
-                    {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-                  </select>
-                </Cell>
-              )}
+              {/* Revisor (admin, etapa de Revisão) — só aparece com a etapa
+                  ligada em Configurações › Etapas. "Sem revisor" pula a etapa. */}
+              <Cell icon="✓" label="Revisor" hidden={revisaoOff}>
+                <select value={draft.reviewer_id} onChange={(e) => set("reviewer_id", e.target.value)}>
+                  <option value="">— Sem revisor —</option>
+                  {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                </select>
+              </Cell>
 
-              {/* Aprovador (cliente, etapa de Aprovação) — mesma lógica do Revisor. */}
-              {aprovacaoVisual ? (
-                <Cell icon="✓" label="Aprovador">
-                  <span className="tm-cell-static">
-                    {draft.approver_id ? (clientReviewers.find((r) => r.id === draft.approver_id)?.label ?? "—") : "— Sem aprovação —"}
-                  </span>
-                </Cell>
-              ) : (
-                <Cell icon="✓" label="Aprovador" hidden={aprovacaoOff}>
-                  <select value={draft.approver_id} onChange={(e) => set("approver_id", e.target.value)}>
-                    <option value="">— Sem aprovação —</option>
-                    {clientReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-                  </select>
-                </Cell>
-              )}
+              {/* Aprovador (cliente, etapa de Aprovação) — mesma regra. */}
+              <Cell icon="✓" label="Aprovador" hidden={aprovacaoOff}>
+                <select value={draft.approver_id} onChange={(e) => set("approver_id", e.target.value)}>
+                  <option value="">— Sem aprovação —</option>
+                  {clientReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                </select>
+              </Cell>
 
               {/* Multiple people stay backwards-compatible in one DB field,
                   but behave as a reusable list in the editor. */}

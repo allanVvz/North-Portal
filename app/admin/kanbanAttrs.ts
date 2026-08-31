@@ -35,8 +35,10 @@ export const ATTR_DEFS: AttrDef[] = [
   { key: "formato", label: "Formato", scope: "Entrega", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
   { key: "plataforma", label: "Plataforma", scope: "Entrega", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
   { key: "assignee", label: "Responsável", scope: "Todos", kinds: "base", kind: "Pessoa" },
-  { key: "reviewer", label: "Revisor (mesmo com fluxo desligado)", scope: "Todos", kinds: "base", kind: "Pessoa", defaultOn: false },
-  { key: "approver", label: "Aprovador (mesmo com fluxo desligado)", scope: "Todos", kinds: "base", kind: "Pessoa", defaultOn: false },
+  // Revisor e Aprovador NÃO são atributos de card: são campos de workflow
+  // amarrados à tela Configurações › Etapas (as flags `revisaoAdmin` /
+  // `aprovacaoAdmin` por cliente). Com a etapa ligada, o modal mostra o campo;
+  // desligada, ele some — não há override por aqui.
   // Só Entrega: a etapa de uma peça (Roteiro/Captação/Edição/Publicação) é
   // kind=criativo + subtype, e sem isto o campo que a identifica não
   // apareceria em lugar nenhum. Tarefa não tem subtipo.
