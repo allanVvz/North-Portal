@@ -4,35 +4,22 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import MetricSettingsMenu from "./MetricSettingsMenu";
 import TrendChart, { type TrendSeriesDefinition } from "./charts/TrendChart";
 import {
-  acquisitionMetricAvailable, acquisitionMetricLabel, acquisitionMetricSeries,
-  ratio, resolveAcquisitionMetric, summarizeAcquisition, totalWhenPresent, type NullableMetric,
+  acquisitionDelta, acquisitionMetricAvailable, acquisitionMetricLabel, acquisitionMetricSeries,
+  acquisitionRateLabel, formatAcquisitionValue as format, ratio, resolveAcquisitionMetric,
+  summarizeAcquisition, totalWhenPresent, type NullableMetric,
 } from "./acquisitionInsights";
 import { isNotIntegrated, metricLabel } from "./insights";
 import { metricRefInverse, metricRefKind, metricRefOptions } from "./performanceLabels";
+import { CHART_W, funnelBandLayout, funnelChartHeight } from "@/lib/reports/funnelGeometry";
 import type { PerformanceWorkspace } from "./usePerformanceWorkspace";
 import { ACQUISITION_VIEW_PREFS_DEFAULT } from "@/lib/acquisitionPrefs";
 import type { CustomMetric, MetricRef } from "@/lib/performancePrefs";
 import type { MetaPost } from "@/lib/windsor";
 
-const number = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const decimal = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
-const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
-
-function format(value: NullableMetric, kind: "number" | "money" | "percent" | "decimal" = "number") {
-  if (value === null) return "—";
-  if (kind === "money") return money.format(value);
-  if (kind === "percent") return `${decimal.format(value)}%`;
-  if (kind === "decimal") return decimal.format(value);
-  return number.format(value);
-}
-
-function delta(current: NullableMetric, previous: NullableMetric) {
-  if (current === null || previous === null || previous === 0) return null;
-  return ((current - previous) / previous) * 100;
-}
 
 function Delta({ current, previous, inverse = false }: { current: NullableMetric; previous: NullableMetric; inverse?: boolean }) {
-  const value = delta(current, previous);
+  const value = acquisitionDelta(current, previous);
   if (value === null) return <span className="acq-delta neutral">Sem comparativo</span>;
   const good = inverse ? value <= 0 : value >= 0;
   return <span className={`acq-delta ${good ? "good" : "bad"}`}>{value >= 0 ? "↑" : "↓"} {decimal.format(Math.abs(value))}% vs. anterior</span>;
@@ -85,7 +72,7 @@ function ConversionFunnel({
 }) {
   const stageValues = stages.map((ref) => resolveAcquisitionMetric(current, ref, customMetrics));
   const stageLabels = stages.map((ref) => acquisitionMetricLabel(ref, customMetrics, metricLabel));
-  const stageRates = stageValues.slice(1).map((value, i) => ratioLabel(value, stageValues[i]));
+  const stageRates = stageValues.slice(1).map((value, i) => acquisitionRateLabel(value, stageValues[i]));
   const spend = totalWhenPresent(current, "custo");
   return (
     <div className="acq-conversion-flow">
@@ -163,54 +150,14 @@ function ResultPanel({
 // legível ao mesmo tempo — as razões reais são extremas (9.000 de alcance para
 // 240 cliques é 2,65%), então com o texto dentro da faixa o rótulo
 // "CLIQUES (TODOS)" ficava cortado numa faixa de 36px. Inflar a largura mínima
-// até o texto caber resolveria a legibilidade mentindo sobre o dado: um estágio
-// de 2,65% desenhado como 42%.
-const FUNNEL_W = 182;   // área de desenho do funil
-const LABEL_X = 202;    // início do rótulo, fora da forma
-const CHART_W = 398;
-const BAND_H = 60;
-const BAND_GAP = 23;
-const BOTTOM_W = 0.20;   // largura da etapa mais estreita do conjunto
-const TAPER_MAX = 0.62;  // teto de segurança: nenhuma etapa passa desta fração da anterior
-
+// até o texto caber resolveria a legibilidade mentindo sobre o dado.
+//
+// A escala LOGARÍTMICA das larguras + todo o layout por faixa moram em
+// `lib/reports/funnelGeometry.ts` — a MESMA geometria desenha o funil do PDF da
+// automação. Não recalcular aqui.
 function FunnelChart({ labels, values, rates }: { labels: string[]; values: NullableMetric[]; rates: string[] }) {
-  const base = values[0];
-  // Largura em escala LOGARÍTMICA, normalizada no intervalo observado.
-  //
-  // As razões de um funil real percorrem ordens de grandeza: nas contas de
-  // produção, 15.100 de alcance viram 248 cliques (1,64%) e 39 conversas
-  // (0,26%). Nem a largura crua nem a raiz quadrada davam conta — as duas
-  // amontoavam as etapas finais perto do piso, e o fundo acabava quase tão largo
-  // quanto o meio. Log é a transformação para dado que varia por ordens de
-  // grandeza, e é o que faz a forma voltar a ler como funil.
-  //
-  // A normalização é sobre o intervalo OBSERVADO, não sobre um máximo fixo: a
-  // etapa mais estreita do conjunto assenta em BOTTOM_W e a mais larga em 1.
-  // Ou seja, a forma mostra o quanto o funil estrangula entre as suas próprias
-  // etapas — que é a pergunta que se faz olhando um funil. O valor absoluto de
-  // cada etapa fica ao lado dela, e a taxa real de conversão no vão entre elas.
-  const logs = values.map((value) => {
-    if (base === null || base === 0 || value === null || value <= 0) return null;
-    return Math.log10(Math.max(value / base, 1e-6));
-  });
-  const known = logs.filter((value): value is number => value !== null);
-  const lo = known.length ? Math.min(...known) : 0;
-  const hi = known.length ? Math.max(...known) : 0;
-  const span = hi - lo;
-  const scaled = logs.map((value) => {
-    // Etapa sem dado, ou funil de etapas todas iguais (span 0, um cilindro):
-    // largura fixa em vez de divisão por zero.
-    if (value === null) return BOTTOM_W;
-    if (span <= 0) return 1;
-    return BOTTOM_W + (1 - BOTTOM_W) * ((value - lo) / span);
-  });
-  // Teto de segurança, aplicado DEPOIS da escala: com log ele quase nunca morde,
-  // mas impede que duas etapas empatem se o dado vier degenerado.
-  const widths = scaled.reduce<number[]>((acc, width, index) => {
-    acc.push(index === 0 ? width : Math.min(width, acc[index - 1] * TAPER_MAX));
-    return acc;
-  }, []);
-  const height = labels.length * BAND_H + (labels.length - 1) * BAND_GAP;
+  const bands = funnelBandLayout(values);
+  const height = funnelChartHeight(labels.length);
 
   return (
     <div className="acq-funnel-chart">
@@ -223,31 +170,22 @@ function FunnelChart({ labels, values, rates }: { labels: string[]; values: Null
           </linearGradient>
         </defs>
         {labels.map((label, index) => {
-          const y = index * (BAND_H + BAND_GAP);
-          const top = widths[index] * FUNNEL_W;
-          // A base já se estreita rumo à próxima etapa, então os trapézios
-          // encaixam em vez de empilharem retângulos soltos.
-          const bottom = (widths[index + 1] ?? widths[index] * 0.8) * FUNNEL_W;
-          const x1 = (FUNNEL_W - top) / 2;
-          const x2 = (FUNNEL_W - bottom) / 2;
-          const missing = values[index] === null;
-          const midY = y + BAND_H / 2;
-          const edge = Math.max(x1 + top, x2 + bottom);
+          const band = bands[index];
           return (
-            <g key={label} className={`acq-band${missing ? " missing" : ""}`} style={{ animationDelay: `${index * 90}ms` }}>
-              <path d={`M${x1} ${y} H${x1 + top} L${x2 + bottom} ${y + BAND_H} H${x2} Z`}
-                fill={missing ? "var(--a-surface2)" : "url(#acqFunnelBand)"}
-                stroke={missing ? "var(--a-border-strong)" : "none"}
-                strokeDasharray={missing ? "3 3" : undefined}
-                opacity={missing ? 1 : 1 - index * 0.12} />
+            <g key={label} className={`acq-band${band.missing ? " missing" : ""}`} style={{ animationDelay: `${index * 90}ms` }}>
+              <path d={band.trapezoid}
+                fill={band.missing ? "var(--a-surface2)" : "url(#acqFunnelBand)"}
+                stroke={band.missing ? "var(--a-border-strong)" : "none"}
+                strokeDasharray={band.missing ? "3 3" : undefined}
+                opacity={band.opacity} />
               {/* Linha guia: sai da borda real da faixa, então ela encurta
                   conforme o funil afunila e o olho segue o estrangulamento. */}
-              <path className="acq-band-leader" d={`M${edge + 4} ${midY} H${LABEL_X - 6}`} />
-              <circle className="acq-band-dot" cx={edge + 4} cy={midY} r="2" />
-              <text x={LABEL_X} y={midY - 4} className="acq-band-label">{label.toUpperCase()}</text>
-              <text x={LABEL_X} y={midY + 15} className="acq-band-value">{format(values[index])}</text>
-              {index < labels.length - 1 ? (
-                <text x={FUNNEL_W / 2} y={y + BAND_H + 14} className="acq-band-rate">{rates[index]}</text>
+              <path className="acq-band-leader" d={band.leader} />
+              <circle className="acq-band-dot" cx={band.dot.cx} cy={band.dot.cy} r="2" />
+              <text x={band.labelAt.x} y={band.labelAt.y} className="acq-band-label">{label.toUpperCase()}</text>
+              <text x={band.valueAt.x} y={band.valueAt.y} className="acq-band-value">{format(values[index])}</text>
+              {band.rateAt ? (
+                <text x={band.rateAt.x} y={band.rateAt.y} className="acq-band-rate">{rates[index]}</text>
               ) : null}
             </g>
           );
@@ -255,11 +193,6 @@ function FunnelChart({ labels, values, rates }: { labels: string[]; values: Null
       </svg>
     </div>
   );
-}
-
-function ratioLabel(numerator: NullableMetric, denominator: NullableMetric) {
-  if (numerator === null || denominator === null || denominator === 0) return "—";
-  return `${decimal.format((numerator / denominator) * 100)}%`;
 }
 
 export default function AcquisitionDashboard({ workspace }: { workspace: PerformanceWorkspace }) {

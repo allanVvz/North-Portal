@@ -54,6 +54,38 @@ export function ratio(numerator: NullableMetric, denominator: NullableMetric, mu
   return (numerator / denominator) * multiplier;
 }
 
+// ---- Formatação null-conscious (compartilhada tela + PDF) ------------------
+// A regra de "— para ausente, nunca 0" só faz sentido junto das funções
+// null-aware acima. `AcquisitionDashboard` e `lib/reports/adsReportPdf.tsx`
+// usam exatamente estas — não recriar uma terceira cópia com opções
+// ligeiramente diferentes.
+
+export type MetricKind = "number" | "money" | "percent" | "decimal";
+
+const NUMBER_FMT = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
+const DECIMAL_FMT = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+const MONEY_FMT = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
+
+export function formatAcquisitionValue(value: NullableMetric, kind: MetricKind = "number"): string {
+  if (value === null) return "—";
+  if (kind === "money") return MONEY_FMT.format(value);
+  if (kind === "percent") return `${DECIMAL_FMT.format(value)}%`;
+  if (kind === "decimal") return DECIMAL_FMT.format(value);
+  return NUMBER_FMT.format(value);
+}
+
+/** Variação percentual; `null` quando não há base de comparação. */
+export function acquisitionDelta(current: NullableMetric, previous: NullableMetric): number | null {
+  if (current === null || previous === null || previous === 0) return null;
+  return ((current - previous) / previous) * 100;
+}
+
+/** Taxa entre duas etapas do funil, já formatada (`"12,3%"` ou `"—"`). */
+export function acquisitionRateLabel(numerator: NullableMetric, denominator: NullableMetric): string {
+  const value = ratio(numerator, denominator, 100);
+  return value === null ? "—" : `${DECIMAL_FMT.format(value)}%`;
+}
+
 export function summarizeAcquisition(posts: MetaPost[]): AcquisitionSummary {
   const spend = totalWhenPresent(posts, "custo");
   const opportunities = totalWhenPresent(posts, "leads");
