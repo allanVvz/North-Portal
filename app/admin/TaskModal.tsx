@@ -659,10 +659,16 @@ export default function TaskModal({
       }));
       return;
     }
+    const wasRotina = rotinaMode;
     setRotinaMode(false);
     setDraft((d) => {
       const def = kindDef(kind);
       const type = taskTypes.find((t) => t.key === kind);
+      // Rotina liga a recorrência de forma implícita (ver acima). Sair dela para
+      // qualquer outro tipo tem que apagar essa recorrência — senão o seletor do
+      // calendário fica marcado num tipo que não pediu. E uma Entrega o servidor
+      // recusa recorrente de qualquer jeito, então limpa também ao escolher uma.
+      const clearRecurrence = wasRotina || type?.behavior === "entrega";
       return {
         ...d,
         kind,
@@ -673,9 +679,9 @@ export default function TaskModal({
         subtype: type?.behavior === "entrega" ? "" : type?.subtypes[0]?.key ?? "",
         // A plan can't belong to another plan.
         plan_id: def.isPlan ? "" : d.plan_id,
-        recurrence_cadence: d.recurrence_cadence,
-        recurrence_weekdays: d.recurrence_weekdays,
-        recurrence_day_of_month: d.recurrence_day_of_month,
+        recurrence_cadence: clearRecurrence ? null : d.recurrence_cadence,
+        recurrence_weekdays: clearRecurrence ? [] : d.recurrence_weekdays,
+        recurrence_day_of_month: clearRecurrence ? null : d.recurrence_day_of_month,
       };
     });
   }

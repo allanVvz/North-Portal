@@ -93,6 +93,35 @@ test.describe("Criação de tarefa unificada", () => {
     expect((links ?? []).length).toBe(0);
   });
 
+  test("Rotina liga a recorrência; trocar de tipo a limpa", async ({ page }) => {
+    await login(page);
+    await page.goto("/admin/home", { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: /Nova tarefa/ }).click();
+    const modal = page.locator(".tm").first();
+    await expect(modal).toBeVisible({ timeout: 15_000 });
+
+    const kindIcon = modal.locator(".cal-pick-ico").first();
+    const recToggle = page.locator(".cal-rec-toggle input");
+    // Troca o tipo pelo dropdown do header. Fecha o popover do calendário antes
+    // (clicar no ícone de novo) — apertar Escape fecharia o modal inteiro.
+    async function pickKind(label: string) {
+      if (await recToggle.isVisible().catch(() => false)) await kindIcon.click();
+      await modal.locator(".tm-new-kind").first().click();
+      await page.locator(".tm-headpick-option", { hasText: label }).first().click();
+      await kindIcon.click();
+      await expect(recToggle).toBeVisible();
+    }
+
+    await pickKind("Rotina");
+    await expect(recToggle).toBeChecked();
+
+    await pickKind("Plano");
+    await expect(recToggle).not.toBeChecked();
+
+    await pickKind("Entrega");
+    await expect(recToggle).not.toBeChecked();
+  });
+
   test("scope=flow-step exige um subtipo e um tipo-entrega", async ({ page }) => {
     await login(page);
     const semSubtipo = await page.request.post("/api/admin/tasks?scope=flow-step", {
