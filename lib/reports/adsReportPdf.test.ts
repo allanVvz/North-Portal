@@ -15,6 +15,7 @@ const base: AdsReportInput = {
   generatedAt: new Date("2026-08-31T09:00:00Z"),
   posts: all.filter((p) => p.source === "paid" && inPeriod(p, period)),
   prevPosts: all.filter((p) => p.source === "paid" && inPeriod(p, previousPeriod(period))),
+  adPosts: [],
 };
 
 const isPdf = (buf: Buffer) => buf.subarray(0, 5).toString("latin1") === "%PDF-";

@@ -22,7 +22,7 @@ import {
 } from "@/lib/performanceTemplates";
 import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
 import { fetchWindsorPosts, type MetaPost, type WindsorDatasource, type WindsorSettings } from "@/lib/windsor";
-import { fetchMetaAdsInsights } from "@/lib/metaInsights";
+import { fetchMetaAdCreativeInsights, fetchMetaAdsInsights } from "@/lib/metaInsights";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { clonePlanForReport, materializeOccurrenceForReport } from "./execute";
@@ -84,26 +84,50 @@ async function resolveTemplateConfig(admin: AdminClient, templateId: string | nu
   return row ? sanitizePerformanceTemplateConfig(row.config) : fallback;
 }
 
-async function fetchPostsForAccount(
+// Teto de campanhas para o fan-out ad-level (uma chamada Meta por campanha —
+// contas de produção têm 3–5, mas um limite protege contra uma conta com
+// dezenas de campanhas antigas ainda ligadas).
+const AD_LEVEL_CAMPAIGN_CAP = 25;
+
+export type ReportPosts = { campaignPosts: MetaPost[]; adPosts: MetaPost[] };
+
+export async function fetchPostsForAccount(
   account: { windsorAccountId: string | null; metaAccountId: string | null; metaAccountName: string | null },
   windsor: WindsorSettings,
   meta: ServiceMetaSettings,
   windowFrom: string,
   windowTo: string,
-): Promise<MetaPost[]> {
-  const posts: MetaPost[] = [];
+): Promise<ReportPosts> {
+  const campaignPosts: MetaPost[] = [];
   if (account.windsorAccountId && windsor.apiKey) {
     const enabled = (Object.keys(windsor.datasources) as WindsorDatasource[]).filter((ds) => windsor.datasources[ds]);
     for (const ds of enabled) {
       const fetched = await fetchWindsorPosts(windsor.apiKey, ds, windowFrom, windowTo);
-      posts.push(...fetched.filter((p) => p.accountId === account.windsorAccountId));
+      campaignPosts.push(...fetched.filter((p) => p.accountId === account.windsorAccountId));
     }
   }
+
+  const adPosts: MetaPost[] = [];
   if (account.metaAccountId && meta.accessToken) {
-    const fetched = await fetchMetaAdsInsights(meta.accessToken, account.metaAccountId, account.metaAccountName ?? "", windowFrom, windowTo);
-    posts.push(...fetched);
+    const token = meta.accessToken;
+    const acctId = account.metaAccountId;
+    const acctName = account.metaAccountName ?? "";
+    const fetched = await fetchMetaAdsInsights(token, acctId, acctName, windowFrom, windowTo);
+    campaignPosts.push(...fetched);
+
+    // Fan-out por criativo: só o path Meta direto tem dados de anúncio. Uma
+    // falha numa campanha não derruba o relatório — o bloco daquela campanha
+    // cai em "sem detalhe por criativo".
+    const campaignIds = [...new Set(fetched.map((p) => p.campaignId).filter((id): id is string => Boolean(id)))].slice(0, AD_LEVEL_CAMPAIGN_CAP);
+    for (const campaignId of campaignIds) {
+      try {
+        adPosts.push(...await fetchMetaAdCreativeInsights(token, acctId, acctName, campaignId, windowFrom, windowTo));
+      } catch (error) {
+        console.warn(`[automations] falha ao buscar criativos da campanha ${campaignId}:`, errorMessage(error));
+      }
+    }
   }
-  return posts;
+  return { campaignPosts, adPosts };
 }
 
 async function fillReportCard(
@@ -128,9 +152,10 @@ async function fillReportCard(
   const cadence: RecurringCadence = target.recurrence_cadence ?? "semanal";
   const period = periodForCadence(cadence, today);
   const prevPeriod = previousPeriod(period);
-  const posts = await fetchPostsForAccount(account, windsor, meta, prevPeriod.from, period.to);
-  const currentPosts = posts.filter((p) => inPeriod(p, period));
-  const prevPosts = posts.filter((p) => inPeriod(p, prevPeriod));
+  const { campaignPosts, adPosts } = await fetchPostsForAccount(account, windsor, meta, prevPeriod.from, period.to);
+  const currentPosts = campaignPosts.filter((p) => inPeriod(p, period));
+  const prevPosts = campaignPosts.filter((p) => inPeriod(p, prevPeriod));
+  const currentAdPosts = adPosts.filter((p) => inPeriod(p, period));
 
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const pdfBuffer = await renderAdsReportPdf({
@@ -140,6 +165,7 @@ async function fillReportCard(
     config: templateConfig,
     posts: currentPosts,
     prevPosts,
+    adPosts: currentAdPosts,
     generatedAt: new Date(),
   });
 

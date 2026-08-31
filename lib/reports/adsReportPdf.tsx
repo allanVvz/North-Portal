@@ -53,6 +53,9 @@ export type AdsReportInput = {
   config: PerformanceTemplateConfig;
   posts: MetaPost[];
   prevPosts: MetaPost[];
+  // Linhas em nível de anúncio (só na conexão direta com a Meta) — a tabela de
+  // criativos por campanha sai daqui. Vazio = conta sem detalhe por criativo.
+  adPosts: MetaPost[];
   generatedAt: Date;
 };
 
