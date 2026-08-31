@@ -2,29 +2,32 @@
 
 import { useState } from "react";
 import DocumentsTable from "./DocumentsTable";
+import NorthTrilhasManager from "./NorthTrilhasManager";
 import OnboardingTable from "../onboarding/OnboardingTable";
 import ClientPipelineBoard from "../ClientPipelineBoard";
 import type { ClientRow } from "../ClientsTable";
 import type { AdminBriefingRow, AdminDocument } from "@/lib/supabase";
-import { isHtmlDocument } from "@/lib/documentFiles";
+import type { NorthTrilha } from "@/lib/validation";
 
 type ClientLite = { slug: string; name: string };
 type Section = "documentos" | "trilhas" | "onboarding";
 
 export default function InformacoesWorkspace({
   documents,
+  trilhas,
   clients,
   briefings,
   clientRows,
 }: {
   documents: AdminDocument[];
+  trilhas: NorthTrilha[];
   clients: ClientLite[];
   briefings: AdminBriefingRow[];
   clientRows: ClientRow[];
 }) {
   const [section, setSection] = useState<Section>("documentos");
-  const docCount = documents.filter((d) => !isHtmlDocument(d)).length;
-  const trilhasCount = documents.filter(isHtmlDocument).length;
+  const docCount = documents.length;
+  const trilhasCount = trilhas.length;
 
   return (
     <>
@@ -36,11 +39,11 @@ export default function InformacoesWorkspace({
 
       <div className="info-content">
         {section === "documentos" ? (
-          <DocumentsTable initial={documents} clients={clients} variant="documentos" />
+          <DocumentsTable initial={documents} clients={clients} />
         ) : null}
 
         {section === "trilhas" ? (
-          <DocumentsTable initial={documents} clients={clients} variant="trilhas" />
+          <NorthTrilhasManager initial={trilhas} />
         ) : null}
 
         {section === "onboarding" ? (

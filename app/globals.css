@@ -2906,6 +2906,15 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .set-badge.publicada { background: var(--a-teal-soft); color: var(--a-teal-text); }
 .set-badge.rascunho { background: var(--a-inset); color: var(--a-muted); }
 .set-legal-editor { flex: 1; }
+
+/* Trilhas North — gerenciador da lista global (app/admin/documentos/NorthTrilhasManager.tsx) */
+.trilha-add { display: flex; align-items: stretch; gap: 12px; margin-top: 14px; }
+.trilha-add .doc-dropzone { flex: 1; margin: 0; }
+.trilha-add > button { flex: none; align-self: stretch; }
+.trilha-list { margin-top: 16px; }
+.trilha-row { cursor: grab; }
+.trilha-row.dragging { opacity: .4; }
+.trilha-row:active { cursor: grabbing; }
 /* appearance */
 .set-appearance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .set-h3 { margin: 0 0 2px; font-size: 14.5px; font-weight: 600; color: var(--a-ink); }

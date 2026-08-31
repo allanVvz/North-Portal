@@ -639,6 +639,18 @@ body.np-menu-open { overflow: hidden; }
   .np-trail-hero { flex-direction: column; align-items: flex-start; }
 }
 
+/* Visualizador de trilha (apresentação HTML ou vídeo do YouTube) — overlay que
+   toma a tela, no espírito do ManualDoCliente mas sem os slides. */
+.np-trail-viewer {
+  position: fixed; inset: 0; z-index: 300; display: flex; flex-direction: column;
+  padding: 20px clamp(16px, 4vw, 48px) 24px; background: #0a1210; color: #f3f1e9;
+  animation: manualViewerIn .28s cubic-bezier(.22,1,.36,1);
+}
+.np-trail-viewer-top { display: flex; align-items: center; justify-content: space-between; flex: none; margin-bottom: 14px; }
+.np-trail-viewer-stage { flex: 1; min-height: 0; border-radius: var(--np-radius-lg); overflow: hidden; background: #000; display: grid; place-items: center; }
+.np-trail-viewer-stage iframe { width: 100%; height: 100%; border: 0; }
+.np-trail-viewer-stage .np-doc-empty { color: rgba(255,255,255,.7); }
+
 /* ============================= Time ============================= */
 .np-lead-contact { display: flex; align-items: center; gap: 18px; background: var(--np-green-soft); border-radius: var(--np-radius-lg); padding: 22px 26px; }
 .np-lead-text { flex: 1; }

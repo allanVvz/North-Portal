@@ -70,7 +70,18 @@ existe.
 
 </details>
 
-### R0.2 — Trilhas North: vínculo real admin ↔ cliente, lista global
+### R0.2 — Trilhas North: vínculo real admin ↔ cliente, lista global — ✅ CÓDIGO FEITO (2026-08-31), migração pendente
+
+Entregue: tabela `north_trilhas` (global, RLS authenticated-read / admin-write),
+`NorthTrilhasManager` (add HTML + YouTube, drag-reorder), rotas
+`/api/admin/north-trilhas`, `TrilhaViewer` no portal, `TrilhasPage` lendo
+`payload.northTrilhas`, Manual do Cliente virou linha `kind='manual'` semeada.
+`content.trilhas` saiu do editor de cliente. Progresso per-client fica pra fase 2
+(R6.7/R6.8). **Falta:** aplicar `supabase/migrations/20260831030000_north_trilhas.sql`
+no backend (o código degrada gracioso até lá — lista vazia), depois rodar
+`e2e/informacoes-trilhas.spec.ts` (reescrito) e conferir no app.
+
+<details><summary>spec original</summary>
 
 **Pedido do usuário (2026-08-30):**
 > O fluxo de Trilhas North deve equivaler dos dois lados. O admin pode adicionar
@@ -109,6 +120,8 @@ que ser reescrito).
 está em não quebrar o `TrilhasPage` do cliente (que está "validado") durante a
 troca de fonte. **Dependência:** casa com R1.2 (parar de depender de
 `content.trilhas`).
+
+</details>
 
 ---
 

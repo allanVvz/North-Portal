@@ -24,12 +24,12 @@ type Props = {
   driveConfigured: boolean;
 };
 
-// The nine sections the client portal actually reads. Two corrections against
-// the previous list: "documentos" is gone (it was written to client_content and
-// never read — the portal's Documentos page comes from the `documents` table),
-// and "trilhas" is here (it IS rendered by the portal but was missing from this
-// list, so every save silently dropped a client's trilhas override).
-// `fallback` marks sections the portal replaces with live data when it exists.
+// As seções do portal do cliente que o admin edita por JSON. "documentos" saiu
+// (era gravado em client_content e nunca lido — a página vem da tabela
+// `documents`); "trilhas" saiu porque Trilhas North virou uma lista GLOBAL
+// (tabela `north_trilhas`, gerenciada em Informações › Trilhas North), não mais
+// um override por cliente. `fallback` marca seções que o portal substitui por
+// dados vivos quando existem.
 const CONTENT_SECTIONS: { key: string; label: string; fallback?: string }[] = [
   { key: "home", label: "Home (banner, stats, faixa)", fallback: "stats e feed vêm de checkpoints/aprovações reais" },
   { key: "pendencias", label: "Central de pendências", fallback: "status recalculado a partir do briefing/acessos" },
@@ -39,7 +39,6 @@ const CONTENT_SECTIONS: { key: string; label: string; fallback?: string }[] = [
   { key: "agenda", label: "Agenda / Calendário", fallback: "substituída quando há cards de agendamento" },
   { key: "dashboard", label: "Dashboard", fallback: "métricas do topo vêm de Resultados quando preenchidas" },
   { key: "plano", label: "Plano de Ação", fallback: "substituído quando há cards de plano visíveis" },
-  { key: "trilhas", label: "Trilhas North" },
 ];
 
 function initialContentText(content: Record<string, unknown>): Record<string, string> {

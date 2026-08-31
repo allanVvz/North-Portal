@@ -6,12 +6,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useParams } from "next/navigation";
 import CommentText from "@/app/CommentText";
 import { commentsOf, extractLatestLink, formatCommentTime } from "@/lib/comments";
-import { ACCESS_PLATFORMS, type ClientTask, type CredentialSummary, type DocumentRecord, type PortalPayload, type PortalPrefs } from "@/lib/validation";
+import { ACCESS_PLATFORMS, type ClientTask, type CredentialSummary, type DocumentRecord, type NorthTrilha, type PortalPayload, type PortalPrefs } from "@/lib/validation";
 import { fileTypeLabel, formatFileSize } from "@/lib/documentFiles";
 import DocumentFilePreview from "@/app/DocumentFilePreview";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { briefSteps, folders } from "./content";
 import ManualDoCliente from "./ManualDoCliente";
+import TrilhaViewer from "./TrilhaViewer";
 import { kindLabel, kindTone, taskProgress, checkpointsProgress } from "@/lib/taskCatalog";
 import { AVATAR_STYLES, briefingNav, defaultContent, type Tone } from "./portalData";
 
@@ -1679,66 +1680,68 @@ function TimePage(props: { ctx: PageCtx }) {
 
 /* ============================= Trilhas North ============================= */
 
-const TRAIL_TYPE_ICON: Record<string, string> = { Slides: "book", Vídeo: "play", Guia: "book" };
-const TRAIL_STATUS_TONE: Record<string, Tone> = {
-  Pendente: "gold", "Em andamento": "blue", Concluído: "green", "Em breve": "neutral",
-};
+// Uma lista GLOBAL (tabela north_trilhas), igual para todo cliente. `manual` é o
+// Manual do Cliente — abre o deck hardcoded e o "Concluído" vem de
+// client_prefs.manual_seen. Os outros itens abrem no TrilhaViewer.
+const TRAIL_KIND_ICON: Record<NorthTrilha["kind"], string> = { manual: "book", slides_html: "book", video_youtube: "play" };
+const TRAIL_KIND_LABEL: Record<NorthTrilha["kind"], string> = { manual: "Slides", slides_html: "Slides", video_youtube: "Vídeo" };
 
 function TrilhasPage(props: { ctx: PageCtx }) {
-  const t = props.ctx.content.trilhas;
-  const hero = t.items.filter((it) => it.hero);
-  const rest = t.items.filter((it) => !it.hero);
+  const items = props.ctx.payload?.northTrilhas ?? [];
   const [manualOpen, setManualOpen] = useState(false);
+  const [viewing, setViewing] = useState<NorthTrilha | null>(null);
   const manualSeen = props.ctx.manualDone;
 
-  const statusFor = (it: (typeof t.items)[number]) =>
-    it.title === "Manual do Cliente" && manualSeen ? "Concluído" : it.status;
+  const [hero, ...rest] = items;
+
+  const openTrilha = (it: NorthTrilha) => {
+    if (it.kind === "manual") setManualOpen(true);
+    else setViewing(it);
+  };
 
   return (
     <section className="np-page">
       <PageHead eyebrow="North · Trilhas North" title={<>Trilhas <i>North</i></>}
         lead="Sua central educacional: slides e vídeos para tirar o máximo da parceria com a North, na ordem certa." />
 
-      {hero.length > 0 && (
+      {hero ? (
         <div className="np-trail-hero-group">
-          {hero.map((it) => (
-            <div className="np-trail-hero" key={it.title}>
-              <span className="np-trail-hero-ico"><Ico name={TRAIL_TYPE_ICON[it.type] ?? "book"} /></span>
-              <div className="np-trail-hero-text">
-                <span className="np-eyebrow">Material principal · {it.etapa}</span>
-                <strong className="np-serif">{it.title}</strong>
-                <p>{it.desc}</p>
-                <div className="np-trail-hero-meta">
-                  <span className="np-pill light">{it.type}</span>
-                  <span className={`np-pill ${TRAIL_STATUS_TONE[statusFor(it)]}`}>{statusFor(it)}</span>
-                </div>
+          <div className="np-trail-hero">
+            <span className="np-trail-hero-ico"><Ico name={TRAIL_KIND_ICON[hero.kind]} /></span>
+            <div className="np-trail-hero-text">
+              <span className="np-eyebrow">Material principal{hero.etapa ? ` · ${hero.etapa}` : ""}</span>
+              <strong className="np-serif">{hero.title}</strong>
+              {hero.description ? <p>{hero.description}</p> : null}
+              <div className="np-trail-hero-meta">
+                <span className="np-pill light">{TRAIL_KIND_LABEL[hero.kind]}</span>
+                {hero.kind === "manual" ? (
+                  <span className={`np-pill ${manualSeen ? "green" : "gold"}`}>{manualSeen ? "Concluído" : "Pendente"}</span>
+                ) : null}
               </div>
-              <button
-                className="np-btn primary"
-                disabled={it.status === "Em breve"}
-                onClick={() => it.title === "Manual do Cliente" && setManualOpen(true)}
-              >
-                {manualSeen && it.title === "Manual do Cliente" ? "Reabrir" : it.cta} <Ico name="arrow" />
-              </button>
             </div>
-          ))}
+            <button className="np-btn primary" onClick={() => openTrilha(hero)}>
+              {hero.kind === "manual" && manualSeen ? "Reabrir" : "Abrir"} <Ico name="arrow" />
+            </button>
+          </div>
         </div>
-      )}
+      ) : null}
 
       <div className="np-card np-trail-list">
         <span className="np-section-label">Todos os materiais</span>
-        {rest.length === 0 && hero.length === 0 ? (
+        {items.length === 0 ? (
           <p className="np-doc-empty">Nenhum material publicado ainda.</p>
-        ) : rest.map((it) => (
-          <div className="np-trail-row" key={it.title}>
-            <span className="np-trail-ord">{String(it.ordem).padStart(2, "0")}</span>
-            <span className="np-doc-badge"><Ico name={TRAIL_TYPE_ICON[it.type] ?? "book"} /></span>
+        ) : rest.map((it, i) => (
+          <div className="np-trail-row" key={it.id}>
+            <span className="np-trail-ord">{String(i + 2).padStart(2, "0")}</span>
+            <span className="np-doc-badge"><Ico name={TRAIL_KIND_ICON[it.kind]} /></span>
             <div className="np-doc-text">
               <strong>{it.title}</strong>
-              <em>{it.type} · Etapa: {it.etapa}{it.doneAt ? ` · concluído em ${it.doneAt}` : ""}</em>
+              <em>{TRAIL_KIND_LABEL[it.kind]}{it.etapa ? ` · Etapa: ${it.etapa}` : ""}</em>
             </div>
-            <span className={`np-pill ${TRAIL_STATUS_TONE[it.status]}`}>{it.status}</span>
-            <button className="np-btn ghost sm" disabled={it.status === "Em breve"}>{it.cta}</button>
+            {it.kind === "manual" ? (
+              <span className={`np-pill ${manualSeen ? "green" : "gold"}`}>{manualSeen ? "Concluído" : "Pendente"}</span>
+            ) : null}
+            <button className="np-btn ghost sm" onClick={() => openTrilha(it)}>Abrir</button>
           </div>
         ))}
       </div>
@@ -1751,6 +1754,7 @@ function TrilhasPage(props: { ctx: PageCtx }) {
           clientName={props.ctx.name}
         />
       ) : null}
+      {viewing ? <TrilhaViewer trilha={viewing} onClose={() => setViewing(null)} /> : null}
     </section>
   );
 }

@@ -560,6 +560,38 @@ export const checkpointTemplateCreateSchema = z.object({
 });
 export const checkpointTemplatePatchSchema = checkpointTemplateCreateSchema.partial();
 
+// ---- Trilhas North (global educational material list) -------------------------
+// One list, same for every client. `manual` is the seeded, single Manual do
+// Cliente row — the client never creates it, and the PATCH can't turn another
+// row into it.
+export const NORTH_TRILHA_KINDS = ["slides_html", "video_youtube", "manual"] as const;
+export type NorthTrilhaKind = (typeof NORTH_TRILHA_KINDS)[number];
+export type NorthTrilha = {
+  id: string;
+  kind: NorthTrilhaKind;
+  title: string;
+  description: string;
+  etapa: string;
+  position: number;
+  storage_path: string | null;
+  file_url: string | null;
+  youtube_id: string | null;
+};
+export const northTrilhaCreateSchema = z.object({
+  kind: z.enum(["slides_html", "video_youtube"]),
+  title: z.string().min(1).max(160),
+  description: z.string().max(MAX_TEXT_BYTES).optional(),
+  etapa: z.string().max(80).optional(),
+  position: z.number().int().min(0).max(100000).optional(),
+  storage_path: storagePathSchema.nullable().optional(),
+  file_url: z.string().url().max(MAX_TEXT_BYTES).nullable().optional(),
+  youtube_id: z.string().min(1).max(32).nullable().optional(),
+});
+export const northTrilhaPatchSchema = northTrilhaCreateSchema
+  .partial()
+  .omit({ kind: true })
+  .extend({ title: z.string().min(1).max(160).optional() });
+
 export type DocumentRecord = {
   id: string;
   client_id: string;
@@ -812,6 +844,9 @@ export type PortalPayload = {
   content: PortalContent;
   prefs: PortalPrefs;
   documents: DocumentRecord[];
+  // The one global Trilhas North list, ordered by position — same for every
+  // client. Empty while the north_trilhas table doesn't exist yet.
+  northTrilhas: NorthTrilha[];
   credentials: CredentialSummary[];
   // Kanban status "aprovacao": the client's pending approval queue (Feedbacks page).
   pendingApprovals: ClientTask[];

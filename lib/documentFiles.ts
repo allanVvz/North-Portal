@@ -21,6 +21,13 @@ export function documentStoragePath(clientSlug: string, fileName: string, id = c
   return `${clientSlug}/${id}/${sanitizeFileName(fileName)}`;
 }
 
+// Trilhas North são globais (não pertencem a um cliente), então o primeiro
+// segmento é uma pasta fixa em vez do slug do cliente. Continua com 3 segmentos,
+// que é o que o storagePathSchema exige, e cai na mesma RLS por bucket_id.
+export function trilhaStoragePath(fileName: string, id = crypto.randomUUID()): string {
+  return `north-trilhas/${id}/${sanitizeFileName(fileName)}`;
+}
+
 export function fileTypeLabel(file: Pick<File, "name" | "type"> | { original_file_name: string | null; mime_type: string | null }): string {
   const name = "name" in file ? file.name : file.original_file_name ?? "";
   const mime = "type" in file ? file.type : file.mime_type ?? "";

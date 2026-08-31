@@ -7,7 +7,7 @@ import DocumentDropZone from "./DocumentDropZone";
 import DocumentsFilterBar, { documentMatchesFilters, type DocActiveFilter } from "./DocumentsFilterBar";
 import type { AdminDocument } from "@/lib/supabase";
 import type { DocumentStatus, DocumentType } from "@/lib/validation";
-import { MAX_DOCUMENT_SIZE_BYTES, documentStoragePath, fileTypeLabel, formatFileSize, isHtmlDocument, removeDocumentFile, uploadDocumentFile } from "@/lib/documentFiles";
+import { MAX_DOCUMENT_SIZE_BYTES, documentStoragePath, fileTypeLabel, formatFileSize, removeDocumentFile, uploadDocumentFile } from "@/lib/documentFiles";
 
 type ClientLite = { slug: string; name: string };
 
@@ -47,11 +47,9 @@ type Draft = {
 export default function DocumentsTable({
   initial,
   clients,
-  variant = "documentos",
 }: {
   initial: AdminDocument[];
   clients: ClientLite[];
-  variant?: "documentos" | "trilhas";
 }) {
   const [docs, setDocs] = useState<AdminDocument[]>(initial);
   const [filters, setFilters] = useState<DocActiveFilter[]>([]);
@@ -64,13 +62,9 @@ export default function DocumentsTable({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
 
-  const scoped = useMemo(
-    () => docs.filter((d) => isHtmlDocument(d) === (variant === "trilhas")),
-    [docs, variant],
-  );
   const rows = useMemo(
-    () => (variant === "trilhas" ? scoped : scoped.filter((d) => documentMatchesFilters(d, filters, TYPE_LABEL, STATUS_LABEL))),
-    [scoped, filters, variant],
+    () => docs.filter((d) => documentMatchesFilters(d, filters, TYPE_LABEL, STATUS_LABEL)),
+    [docs, filters],
   );
 
   function newDoc(fromFile?: File) {
@@ -162,91 +156,58 @@ export default function DocumentsTable({
     setBusy(false);
   }
 
-  const isTrilhas = variant === "trilhas";
-
   return (
     <div className="doc">
       <DocumentDropZone
-        label={isTrilhas ? "Arraste uma apresentação HTML ou clique para enviar" : "Arraste um documento ou clique para enviar"}
-        hint={isTrilhas ? "HTML · máximo 50 MB" : "PDF e outros formatos · máximo 50 MB"}
-        accept={isTrilhas ? ".html,.htm,text/html" : undefined}
+        label="Arraste um documento ou clique para enviar"
+        hint="PDF e outros formatos · máximo 50 MB"
         onFileSelected={(file) => newDoc(file)}
       />
 
-      {!isTrilhas ? (
-        <div className="doc-toolbar">
-          <DocumentsFilterBar docs={scoped} filters={filters} onFiltersChange={setFilters} typeLabel={TYPE_LABEL} statusLabel={STATUS_LABEL} />
-        </div>
-      ) : null}
+      <div className="doc-toolbar">
+        <DocumentsFilterBar docs={docs} filters={filters} onFiltersChange={setFilters} typeLabel={TYPE_LABEL} statusLabel={STATUS_LABEL} />
+      </div>
 
       {error && !draft ? <p className="admin-error">{error}</p> : null}
 
-      {isTrilhas ? (
-        <div className="doc-grid">
-          {rows.map((d) => (
-            <div
-              className="doc-grid-card"
-              key={d.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => setPreviewDoc(d)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPreviewDoc(d); } }}
-            >
-              <span className="doc-ico">{fileTypeLabel(d)}</span>
-              <strong>{d.name}</strong>
-              <span className="doc-client"><span className="doc-avatar">{initials(d.clientName)}</span>{d.clientName}</span>
-              <span className="doc-grid-date">{fmtDate(d.doc_date)}</span>
-              <button
-                type="button"
-                className="doc-open-btn doc-grid-edit"
-                onClick={(e) => { e.stopPropagation(); editDoc(d); }}
-              >
-                Editar
-              </button>
-            </div>
-          ))}
-          {rows.length === 0 ? <p className="admin-empty">Nenhuma trilha enviada ainda.</p> : null}
-        </div>
-      ) : (
-        <div className="doc-table-wrap">
-          <table className="doc-table">
-            <thead>
-              <tr><th>Documento</th><th>Cliente</th><th>Tipo</th><th>Data</th><th>Status</th><th></th></tr>
-            </thead>
-            <tbody>
-              {rows.map((d) => (
-                <tr key={d.id} onClick={() => setPreviewDoc(d)}>
-                  <td>
-                    <span className="doc-name"><span className="doc-ico">{fileTypeLabel(d)}</span>{d.name}</span>
-                  </td>
-                  <td>
-                    <span className="doc-client"><span className="doc-avatar">{initials(d.clientName)}</span>{d.clientName}</span>
-                  </td>
-                  <td>{TYPE_LABEL[d.doc_type]}</td>
-                  <td className="doc-date">{fmtDate(d.doc_date)}</td>
-                  <td><span className={`doc-status tone-${STATUS_TONE[d.status]}`}>{STATUS_LABEL[d.status]}</span></td>
-                  <td className="doc-open">
-                    <button
-                      type="button"
-                      className="doc-open-btn"
-                      onClick={(e) => { e.stopPropagation(); editDoc(d); }}
-                    >
-                      Editar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 ? <tr><td colSpan={6} className="admin-empty" style={{ padding: 28 }}>Nenhum documento nesta visão.</td></tr> : null}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="doc-table-wrap">
+        <table className="doc-table">
+          <thead>
+            <tr><th>Documento</th><th>Cliente</th><th>Tipo</th><th>Data</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {rows.map((d) => (
+              <tr key={d.id} onClick={() => setPreviewDoc(d)}>
+                <td>
+                  <span className="doc-name"><span className="doc-ico">{fileTypeLabel(d)}</span>{d.name}</span>
+                </td>
+                <td>
+                  <span className="doc-client"><span className="doc-avatar">{initials(d.clientName)}</span>{d.clientName}</span>
+                </td>
+                <td>{TYPE_LABEL[d.doc_type]}</td>
+                <td className="doc-date">{fmtDate(d.doc_date)}</td>
+                <td><span className={`doc-status tone-${STATUS_TONE[d.status]}`}>{STATUS_LABEL[d.status]}</span></td>
+                <td className="doc-open">
+                  <button
+                    type="button"
+                    className="doc-open-btn"
+                    onClick={(e) => { e.stopPropagation(); editDoc(d); }}
+                  >
+                    Editar
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 ? <tr><td colSpan={6} className="admin-empty" style={{ padding: 28 }}>Nenhum documento nesta visão.</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
 
       {draft ? (
         <div className="kb-modal-backdrop" onClick={() => !busy && setDraft(null)}>
           <div className="kb-modal" onClick={(e) => e.stopPropagation()}>
             <div className="kb-modal-head">
-              <h2>{draft.id ? "Editar documento" : isTrilhas ? "Enviar trilha" : "Enviar documento"}</h2>
+              <h2>{draft.id ? "Editar documento" : "Enviar documento"}</h2>
               <button className="kb-modal-close" onClick={() => setDraft(null)} aria-label="Fechar">✕</button>
             </div>
             <label className="admin-field"><span>Nome</span>
@@ -281,7 +242,7 @@ export default function DocumentsTable({
               </div>
             ) : (
               <label className="admin-field doc-upload-field"><span>{draft.id ? "Novo arquivo" : "Arquivo"} · máximo 50 MB</span>
-                <input type="file" accept={isTrilhas ? ".html,.htm,text/html" : undefined} onChange={(e) => {
+                <input type="file" onChange={(e) => {
                   const file = e.target.files?.[0] ?? null;
                   setSelectedFile(file);
                   setError(file && file.size > MAX_DOCUMENT_SIZE_BYTES ? "O arquivo excede o limite de 50 MB." : "");

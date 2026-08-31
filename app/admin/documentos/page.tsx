@@ -1,4 +1,4 @@
-import { listAllBriefings, listClients, listDocuments } from "@/lib/supabase";
+import { listAllBriefings, listClients, listDocuments, listNorthTrilhas } from "@/lib/supabase";
 import { clientStageFor } from "../clientPipeline";
 import type { ClientRow } from "../ClientsTable";
 import InformacoesWorkspace from "./InformacoesWorkspace";
@@ -6,10 +6,11 @@ import InformacoesWorkspace from "./InformacoesWorkspace";
 export const dynamic = "force-dynamic";
 
 export default async function DocumentosPage() {
-  const [documents, clientSummaries, briefings] = await Promise.all([
+  const [documents, clientSummaries, briefings, trilhas] = await Promise.all([
     listDocuments(),
     listClients({ includeDisabled: true }),
     listAllBriefings(),
+    listNorthTrilhas().catch(() => []),
   ]);
 
   const checkpointsBySlug = new Map(briefings.map((b) => [b.slug, b.checkpointsPct]));
@@ -29,6 +30,7 @@ export default async function DocumentosPage() {
 
       <InformacoesWorkspace
         documents={documents}
+        trilhas={trilhas}
         clients={clientSummaries.map((c) => ({ slug: c.slug, name: c.name }))}
         briefings={briefings}
         clientRows={clientRows}

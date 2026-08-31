@@ -29,6 +29,7 @@ import {
   type ScopeItem,
   type CredentialSummary,
   type DocumentRecord,
+  type NorthTrilha,
   type PortalPayload,
   type PortalPrefs,
   type ReviewerCandidate,
@@ -294,7 +295,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const client = await getClient(slug);
   if (!client) throw new HttpError(404, "Cliente nao encontrado.");
 
-  const [briefing, links, results, content, prefs, tasks, documents, credentials, planoVisibility, flowFlags] = await Promise.all([
+  const [briefing, links, results, content, prefs, tasks, documents, northTrilhas, credentials, planoVisibility, flowFlags] = await Promise.all([
     supabase.from("briefing_answers").select("answers,submitted,updated_at").eq("client_id", client.id).limit(1),
     supabase.from("client_drive_links").select("brand_url,products_url,uploads_url").eq("client_id", client.id).limit(1),
     supabase.from("client_results").select("insights,top_metrics,report_url,feedback_url").eq("client_id", client.id).limit(1),
@@ -314,6 +315,10 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
       .neq("status", "parada")
       .order("position"),
     supabase.from("documents").select(DOC_COLUMNS).eq("client_id", client.id).order("doc_date", { ascending: false, nullsFirst: false }),
+    // Lista global de Trilhas North — igual para todo cliente, sem filtro de
+    // client_id. Erro aqui não derruba o portal (a tabela pode não existir
+    // ainda); cai para lista vazia logo abaixo.
+    supabase.from("north_trilhas").select(NORTH_TRILHA_COLUMNS).order("position"),
     listClientCredentials(client.id),
     getPlanoVisibility(),
     getClientFlowFlags(client.id),
@@ -333,6 +338,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const p = prefs.data?.[0] as PrefsRow | undefined;
   const taskRows = ((tasks.data as unknown as (ClientTask & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
   const documentRows = (documents.data as DocumentRecord[] | null) ?? [];
+  const trilhaRows = (northTrilhas.data as NorthTrilha[] | null) ?? [];
 
   // Platform-wide master switch: while off, every client_visible flag is
   // treated as false for content built from it (Plano de Ação, Agenda),
@@ -378,6 +384,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     content: content_,
     prefs: toPrefs(p, client.name, client.slug),
     documents: documentRows,
+    northTrilhas: trilhaRows,
     credentials,
     pendingApprovals: taskRows
       .filter((t) => t.status === "aprovacao")
@@ -2397,6 +2404,77 @@ export async function updateCheckpointTemplate(id: string, patch: Record<string,
 export async function deleteCheckpointTemplate(id: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("commercial_checkpoint_templates").delete().eq("id", id);
+  if (error) fail(error);
+}
+
+// ---- Trilhas North (global educational material list) -------------------------
+
+const NORTH_TRILHA_COLUMNS = "id,kind,title,description,etapa,position,storage_path,file_url,youtube_id";
+
+export async function listNorthTrilhas(): Promise<NorthTrilha[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("north_trilhas")
+    .select(NORTH_TRILHA_COLUMNS)
+    .order("position");
+  if (error) fail(error);
+  return (data as NorthTrilha[] | null) ?? [];
+}
+
+export async function createNorthTrilha(input: Record<string, unknown>): Promise<NorthTrilha> {
+  const supabase = await createClient();
+  // Novo item entra sempre no fim da fila, a menos que a posição venha explícita.
+  let position = input.position;
+  if (position === undefined) {
+    const { data: last } = await supabase
+      .from("north_trilhas")
+      .select("position")
+      .order("position", { ascending: false })
+      .limit(1);
+    position = ((last?.[0] as { position: number } | undefined)?.position ?? 0) + 10;
+  }
+  const { data, error } = await supabase
+    .from("north_trilhas")
+    .insert({ ...input, position })
+    .select(NORTH_TRILHA_COLUMNS)
+    .limit(1);
+  if (error) fail(error);
+  const row = data?.[0] as NorthTrilha | undefined;
+  if (!row) throw new HttpError(503, "Nao foi possivel criar a trilha.");
+  return row;
+}
+
+export async function updateNorthTrilha(id: string, patch: Record<string, unknown>): Promise<NorthTrilha> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("north_trilhas")
+    .update(patch)
+    .eq("id", id)
+    .select(NORTH_TRILHA_COLUMNS)
+    .limit(1);
+  if (error) fail(error);
+  const row = data?.[0] as NorthTrilha | undefined;
+  if (!row) throw new HttpError(404, "Trilha nao encontrada.");
+  return row;
+}
+
+export async function deleteNorthTrilha(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { data, error: readError } = await supabase
+    .from("north_trilhas")
+    .select("kind,storage_path")
+    .eq("id", id)
+    .limit(1);
+  if (readError) fail(readError);
+  const row = data?.[0] as { kind: string; storage_path: string | null } | undefined;
+  if (!row) throw new HttpError(404, "Trilha nao encontrada.");
+  // O Manual do Cliente é infraestrutura da plataforma, não um material subido.
+  if (row.kind === "manual") throw new HttpError(400, "O Manual do Cliente nao pode ser removido.");
+  if (row.storage_path) {
+    const { error: storageError } = await supabase.storage.from("documents").remove([row.storage_path]);
+    if (storageError) fail(storageError);
+  }
+  const { error } = await supabase.from("north_trilhas").delete().eq("id", id);
   if (error) fail(error);
 }
 
