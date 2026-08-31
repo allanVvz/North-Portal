@@ -188,7 +188,9 @@ export function normalizeMetaAdsetRow(row: Record<string, unknown>, adAccountId:
     date, accountId: adAccountId, accountName, platform, source: "paid", type: "outro",
     caption: adsetName, permalink: null, metrics: normalizeAdsMetrics(row), campaignId,
     campaignName: str(row.campaign_name) || campaignId, adsetId, adsetName,
-    objective: str(row.objective) || undefined, currency: str(row.account_currency) || undefined,
+    objective: str(row.objective) || undefined,
+    optimizationGoal: str(row.optimization_goal) || undefined,
+    currency: str(row.account_currency) || undefined,
     schemaVersion: META_ADS_SCHEMA_VERSION,
   };
 }
@@ -230,6 +232,7 @@ export function normalizeMetaAdRow(
     thumbnailUrl: creative?.thumbnailUrl ?? null,
     creativeId: creative?.creativeId ?? undefined,
     objective: str(row.objective) || undefined,
+    optimizationGoal: str(row.optimization_goal) || undefined,
     currency: str(row.account_currency) || undefined,
     schemaVersion: META_ADS_SCHEMA_VERSION,
   };
@@ -241,8 +244,9 @@ const ADS_FIELDS = [
   "inline_link_clicks", "inline_post_engagement", "ctr", "cpc", "cpm", "actions",
 ].join(",");
 
-const ADSET_INSIGHTS_FIELDS = ["adset_id", "adset_name", ADS_FIELDS].join(",");
-const AD_INSIGHTS_FIELDS = ["ad_id", "ad_name", "adset_id", "adset_name", ADS_FIELDS].join(",");
+// optimization_goal só existe em nível adset/ad no /insights — não em campanha.
+const ADSET_INSIGHTS_FIELDS = ["adset_id", "adset_name", "optimization_goal", ADS_FIELDS].join(",");
+const AD_INSIGHTS_FIELDS = ["ad_id", "ad_name", "adset_id", "adset_name", "optimization_goal", ADS_FIELDS].join(",");
 
 const MAX_PAGES = 40;
 

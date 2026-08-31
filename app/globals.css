@@ -49,6 +49,7 @@
 .perf-entity-name { display: flex; align-items: center; gap: 9px; min-width: 190px; }
 .perf-entity-name img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; background: var(--a-surface2); }
 .perf-ads-table tbody tr.selected > td { background: color-mix(in srgb, #7357ff 9%, var(--a-surface)); }
+.perf-tag-select { padding: 3px 4px; border: 1px solid var(--a-border); border-radius: 6px; background: var(--a-surface); color: var(--a-ink); font-size: 11px; max-width: 130px; }
 
 @media (max-width: 720px) {
   .perf-level-toggle { width: 100%; overflow-x: auto; }

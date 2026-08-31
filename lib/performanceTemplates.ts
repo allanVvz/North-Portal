@@ -12,6 +12,38 @@ import type { MetaPlatform } from "./windsor";
 
 export type PerformanceEntityLevel = "campaign" | "adset" | "ad";
 export type PerformanceTemplateScope = "builtin" | "personal" | "agency";
+
+// Bloco de objetivo de uma campanha — dita o grupo de KPIs que ela ganha no
+// relatório de anúncios (ver lib/reports/adsReportPdf.tsx). "Site" e "Perfil"
+// nem sempre se separam pelo `objective` do Meta, então a classificação é uma
+// TAG MANUAL por campanha no template (config.campaignBlocks), com
+// suggestCampaignBlock() só como palpite inicial na UI.
+export type CampaignBlock = "trafego_site" | "trafego_perfil" | "mensagens" | "engajamento" | "outro";
+export const CAMPAIGN_BLOCKS: CampaignBlock[] = ["trafego_site", "trafego_perfil", "mensagens", "engajamento", "outro"];
+export const CAMPAIGN_BLOCK_LABEL: Record<CampaignBlock, string> = {
+  trafego_site: "Tráfego para o site",
+  trafego_perfil: "Tráfego para o perfil",
+  mensagens: "Mensagens",
+  engajamento: "Engajamento",
+  outro: "Outras campanhas",
+};
+
+/** Fonte de tráfego de uma conversão — rastreada a partir da primeira mensagem
+ *  ("#1", "#2", "#3" por anúncio). Tag manual por anúncio no template. */
+export type AdSourceTag = "1" | "2" | "3";
+export const AD_SOURCE_TAGS: AdSourceTag[] = ["1", "2", "3"];
+
+/** Palpite do bloco a partir dos campos do Meta — só valor inicial na UI; a tag
+ *  salva no template é quem manda. */
+export function suggestCampaignBlock(objective?: string | null, optimizationGoal?: string | null): CampaignBlock {
+  const o = (objective ?? "").toUpperCase();
+  const g = (optimizationGoal ?? "").toUpperCase();
+  if (o.includes("LEAD") || o.includes("MESSAGE") || g.includes("CONVERSATION") || g.includes("LEAD")) return "mensagens";
+  if (g.includes("PROFILE_VISIT") || g.includes("PAGE_LIKE") || g.includes("FOLLOW")) return "trafego_perfil";
+  if (o.includes("TRAFFIC") || g.includes("LINK_CLICK") || g.includes("LANDING_PAGE")) return "trafego_site";
+  if (o.includes("ENGAGEMENT") || o.includes("AWARENESS") || o.includes("REACH")) return "engajamento";
+  return "outro";
+}
 export type PerformanceTemplateFilters = {
   clientSlug: string;
   category: "ads" | "organico" | "ambos";
@@ -27,6 +59,11 @@ export type PerformanceTemplateConfig = {
   filters: PerformanceTemplateFilters;
   dateRange: { from: string; to: string } | null;
   cardSources: Record<string, "paid" | "organic">;
+  // Bloco de objetivo por campanha (chave = campaignId, ou campaignName quando
+  // não há id — caso Windsor). Additivo: templates antigos sanitizam para `{}`.
+  campaignBlocks: Record<string, CampaignBlock>;
+  // Fonte #1/#2/#3 por anúncio (chave = adId).
+  adSourceTags: Record<string, AdSourceTag>;
   level: PerformanceEntityLevel;
   selectedCampaignIds: string[];
   selectedAdsetIds: string[];
@@ -65,6 +102,15 @@ function sanitizeCardSources(raw: unknown): Record<string, "paid" | "organic"> {
     .slice(0, 100)) as Record<string, "paid" | "organic">;
 }
 
+/** Mapa string→valor-do-enum, mesma forma de sanitizeCardSources. */
+function sanitizeTagMap<T extends string>(raw: unknown, allowed: readonly T[]): Record<string, T> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const set = new Set<string>(allowed);
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>)
+    .filter(([key, value]) => key.length > 0 && key.length <= 200 && typeof value === "string" && set.has(value))
+    .slice(0, 200)) as Record<string, T>;
+}
+
 export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemplateConfig {
   const value = (raw ?? {}) as Partial<PerformanceTemplateConfig>;
   const filters = (value.filters ?? {}) as Partial<PerformanceTemplateFilters>;
@@ -89,6 +135,8 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
     },
     dateRange: sanitizeDateRange(value.dateRange),
     cardSources: sanitizeCardSources(value.cardSources),
+    campaignBlocks: sanitizeTagMap(value.campaignBlocks, CAMPAIGN_BLOCKS),
+    adSourceTags: sanitizeTagMap(value.adSourceTags, AD_SOURCE_TAGS),
     level: LEVELS.has(value.level as PerformanceEntityLevel) ? value.level as PerformanceEntityLevel : "campaign",
     selectedCampaignIds: stringList(value.selectedCampaignIds),
     selectedAdsetIds: stringList(value.selectedAdsetIds),

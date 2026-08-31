@@ -78,6 +78,12 @@ export default function PerformanceScreen({
             onExportCsv={workspace.exportCsv}
             onLoadMore={() => workspace.setVisibleCount((n) => n + 25)}
             categoryNote={workspace.category !== "ads"}
+            canEditTemplate={workspace.canEdit}
+            campaignBlocks={workspace.campaignBlocks}
+            adSourceTags={workspace.adSourceTags}
+            onSetCampaignBlock={workspace.setCampaignBlock}
+            onSetAdSourceTag={workspace.setAdSourceTag}
+            suggestBlock={workspace.suggestCampaignBlock}
           />
         </div>
       ) : (

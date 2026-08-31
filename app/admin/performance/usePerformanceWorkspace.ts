@@ -13,7 +13,9 @@ import {
   type PeriodPreset, type SortDir,
 } from "@/lib/performancePrefs";
 import {
-  sanitizePerformanceTemplateConfig, type PerformanceEntityLevel, type PerformanceTemplate, type PerformanceTemplateConfig,
+  sanitizePerformanceTemplateConfig, suggestCampaignBlock,
+  type AdSourceTag, type CampaignBlock,
+  type PerformanceEntityLevel, type PerformanceTemplate, type PerformanceTemplateConfig,
 } from "@/lib/performanceTemplates";
 import type { MetaPlatform, MetaPost, MetaPostMetricKey, WindsorDatasource } from "@/lib/windsor";
 
@@ -137,6 +139,10 @@ export function usePerformanceWorkspace({ clients, canEdit }: { clients: ClientL
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adRows, setAdRows] = useState<Record<string, AdRowsState>>({});
   const [ambosSource, setAmbosSource] = useState<Record<string, "paid" | "organic">>({});
+  // Tag de bloco por campanha (chave = campaignId) e fonte #1/#2/#3 por anúncio
+  // (chave = adId) — config do template, lida pelo relatório de anúncios.
+  const [campaignBlocks, setCampaignBlocks] = useState<Record<string, CampaignBlock>>({});
+  const [adSourceTags, setAdSourceTags] = useState<Record<string, AdSourceTag>>({});
 
   // Visibilidade de card por tela — cada tela tem seu próprio conjunto de
   // seções (ex.: Analytics tem "trend"/"topCampaigns"/"mix", Aquisição tem
@@ -316,6 +322,24 @@ export function usePerformanceWorkspace({ clients, canEdit }: { clients: ClientL
     setAmbosSource((m) => ({ ...m, [cardKey]: source }));
     markTemplateDirty();
   }
+  function setCampaignBlock(campaignId: string, block: CampaignBlock | "") {
+    if (!campaignId) return;
+    setCampaignBlocks((m) => {
+      const next = { ...m };
+      if (block) next[campaignId] = block; else delete next[campaignId];
+      return next;
+    });
+    markTemplateDirty();
+  }
+  function setAdSourceTag(adId: string, tag: AdSourceTag | "") {
+    if (!adId) return;
+    setAdSourceTags((m) => {
+      const next = { ...m };
+      if (tag) next[adId] = tag; else delete next[adId];
+      return next;
+    });
+    markTemplateDirty();
+  }
 
   function adCacheKey(c: CampaignSummary): string {
     return `${c.key}__${period.from}__${period.to}`;
@@ -407,6 +431,8 @@ export function usePerformanceWorkspace({ clients, canEdit }: { clients: ClientL
     setSortDir(config.prefs.sortDir);
     setVisibleColumns(config.prefs.visibleColumns);
     setAmbosSource(config.cardSources);
+    setCampaignBlocks(config.campaignBlocks);
+    setAdSourceTags(config.adSourceTags);
     // Visibilidade de seção da Aquisição é config do template (o PDF da
     // automação lê daqui). Analytics não é tocado — templates não guardam a
     // visibilidade das seções de Analytics.
@@ -457,6 +483,8 @@ export function usePerformanceWorkspace({ clients, canEdit }: { clients: ClientL
       filters: { clientSlug: "", category, platforms: platformFilterValue ? [platformFilterValue] : [], objectives: objectiveFilterValues },
       dateRange: customRangeValid ? { from: customFrom, to: customTo } : null,
       cardSources: ambosSource,
+      campaignBlocks,
+      adSourceTags,
       level: entityLevel,
       selectedCampaignIds,
       selectedAdsetIds,
@@ -519,6 +547,8 @@ export function usePerformanceWorkspace({ clients, canEdit }: { clients: ClientL
     selectedAdIds, adRowsFor, expanded, toggleExpand, exportCsv, visibleCount, setVisibleCount,
     // ambos toggle
     ambosSource, setAmbosCardSource,
+    // tags do template (bloco por campanha, fonte por criativo)
+    campaignBlocks, setCampaignBlock, adSourceTags, setAdSourceTag, suggestCampaignBlock,
     hiddenSections, toggleSectionVisibility,
     // templates
     templates, activeTemplateId, activeTemplateConfig, templateDirty, markTemplateDirty,
