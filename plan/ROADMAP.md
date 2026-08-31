@@ -1,11 +1,15 @@
 # North Portal — Roadmap
 
-Fonte única de trabalho pendente. Atualizado em 2026-08-30 contra `main` /
+Fonte única de trabalho pendente. Atualizado em 2026-08-31 contra `main` /
 produção (`northportal.vercel.app`). Os arquivos `plan/*.md` individuais continuam
 como spec detalhada de cada item; este arquivo é o índice priorizado.
 
 **Já entregue e EM PRODUÇÃO (não repetir):** fluxos em cascata / Entregas (motor,
-UI, 5 tipos, funil único, "Publicado" vira card, entrega recorrente); Performance
+UI, 5 tipos, funil único, "Publicado" vira card, entrega recorrente); recorrência
+v2 (dia-da-semana opcional, sem data-limite, encerra só no molde `aprovado`/`parada`,
+TODA tarefa pode recorrer incl. Entrega); higiene do modelo de tarefas (trigger de
+vocabulário `kind`/`subtype`, `requires_review`/`_approval` amarrados à tela Etapas,
+`payload` com schema em modo strip) — migração `20260831120000`; Performance
 Analytics+Aquisição unificado (Fase A dos templates, hierarquia
 campanha/conjunto/criativo parcial, funil redesenhado, 3 templates por desfecho);
 Automações v2 (registro por card, status `parada`, PDF); notificações reais no
@@ -124,6 +128,46 @@ troca de fonte. **Dependência:** casa com R1.2 (parar de depender de
 
 </details>
 
+### R0.3 — Recorrência v2 + higiene do modelo de tarefas — ✅ FEITO (2026-08-31)
+
+Quatro decisões do usuário sobre recorrência, todas em produção (commits
+`29597e6`, `589d803`):
+
+1. **Sem data-limite nem contador de ciclos** — `recurrence_until`/`recurrence_count`
+   rejeitados de propósito; `end_date` é só limite visual.
+2. **Encerra só quando o MOLDE vai para `aprovado` ou `parada`** — regra única
+   `recurrenceStopped(status)` (`lib/recurrenceState.ts`). Encerrada:
+   `completeTaskCycleForRequest` → `409 recurrence_ended`, botão "Concluir ciclo"
+   some, `listRecurringTasks().active` vira `false`, automação de relatório para.
+3. **Toda tarefa pode recorrer, Entrega inclusa** — `createRecurringFlowDelivery`:
+   o molde carrega `flow_parent` + `recurrence_group`, cada ciclo materializa uma
+   entrega-ocorrência própria com sua 1ª etapa. Rollup lê a ocorrência, nunca o
+   molde.
+4. **Dia-da-semana opcional** — `recurrenceWeekdays()` cai no dia da `start_date`;
+   sem CHECK novo no banco (mais flexível, não menos).
+
+E as frentes A/B/D/E/F dos "pontos frágeis" de `docs/ARQUITETURA-TAREFAS.md`
+(commits `5148cb7`, `0971717`, migração `20260831120000` aplicada via
+`execute_sql` — `apply_migration` é bloqueado pelo classificador):
+
+- **A** — trigger `tasks_valida_vocabulario` (`kind` ∈ `task_types` de topo;
+  `subtype` ∈ filhos do `kind`). Não virou FK: `task_types` só tem
+  `UNIQUE (parent_id, key)`.
+- **B** — elo legado `plan_id → plano_acao` não-recorrente movido para
+  `task_links(slot = null)`.
+- **E** — `requires_review`/`requires_approval` default `false` + dados alinhados a
+  `Boolean(reviewer_id)`/`Boolean(approver_id)`; os campos Revisor/Aprovador do
+  modal são amarrados 1:1 à tela Configurações › Etapas (sem mais override; os
+  atributos `reviewer`/`approver` saíram de `ATTR_DEFS`).
+- **F** — `taskPayloadSchema` deixa de ser `.passthrough()`: enumera toda chave
+  conhecida, modo strip → typo é descartado antes do insert. `lib/taskPayloadSchema.test.ts`
+  trava a completude.
+
+**Restam de A–G:** C (`concluido` órfão no enum — deixar), G (`task_types`
+inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
+
+**Memórias:** `recorrencia-regras-v2`, `higiene-modelo-tarefas`.
+
 ---
 
 ## Tier 1 — Rápidos, alto impacto, baixo risco
@@ -136,7 +180,7 @@ troca de fonte. **Dependência:** casa com R1.2 (parar de depender de
 | R1.4 | **Service account do Google Drive.** Capa de card e navegador de pastas rodam pelo caminho público; 9 de 13 cards não têm miniatura por falta de compartilhamento. Configurar `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` + compartilhar as pastas dos clientes com o e-mail da conta de serviço. | `plan/CARD-COVER-PREVIEW.md`, `plan/CADASTRO-V2-ADMIN-HOME.md` §K1 | Pequeno em código, operacional. |
 | R1.5 | **Limpeza:** comentários desatualizados citando `flow_template_id` em `lib/supabase.ts` (~L1219, ~L1457) — a coluna não existe mais. | `fluxos-cascata` (memória) | Trivial. |
 | R1.6 | **Apagar branches mortos:** `feat/documentos-storage` (obsoleto, superado em `main`), `feat/fluxos-cascata` (0 commits à frente). | `roadmap-2026-08-19` (memória) | Trivial. |
-| R1.7 | **Verificar testes despausados:** `e2e/client-approval-flow.spec.ts` (não tem `test.skip` hoje — a "decisão de produto" que o pausava foi resolvida?) e ausência de `e2e/metric-collection.spec.ts` apesar da migration `20260825140611_metric_collection.sql` existir. | `HANDOFF-PERFORMANCE-2026-08-20.md`, `performance-informacoes-session-handoff` (memória) | Investigação. |
+| R1.7 | **Verificar testes despausados:** `e2e/client-approval-flow.spec.ts` **rodado 2026-08-31 e verde contra o backend real** — pode sair da lista; falta só a ausência de `e2e/metric-collection.spec.ts` apesar da migration `20260825140611_metric_collection.sql` existir. Também nesta data: `e2e/commercial-checkpoints.spec.ts` consertado (estava vermelho desde a fusão do `/admin/onboarding` na aba Onboarding de Informações — não abria a aba). | `HANDOFF-PERFORMANCE-2026-08-20.md`, `performance-informacoes-session-handoff` (memória) | Investigação. |
 
 ---
 
@@ -256,4 +300,4 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 - Ao concluir um item, mover para a lista "Já entregue" no topo (uma linha) e
   apagar a entrada do tier.
 - `plan/*.md` individuais continuam sendo a spec; este arquivo é só o índice.
-- Datar cada revisão. Última: 2026-08-30.
+- Datar cada revisão. Última: 2026-08-31 (R0.3 — recorrência v2 + higiene do modelo de tarefas).

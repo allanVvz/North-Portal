@@ -1,5 +1,59 @@
 # Changelog
 
+## 30 e 31 de agosto de 2026 — criação de tarefa, Trilhas North, recorrência v2
+
+Três frentes definidas pelo usuário (R0.1–R0.3 no `plan/ROADMAP.md`) e uma
+faxina no modelo de tarefas.
+
+### R0.1 — Um botão só de criação de tarefa (`a8f4a7b`)
+
+Os 6 pontos que abriam o modal de criação com props diferentes viraram **um
+botão idêntico em toda tela** (`NewTaskButton`). O que nasce é decidido pelo
+**tipo escolhido no modal**, não pela tela de origem. Escolher uma Entrega e
+deixar em "Fluxo completo" monta a corrente inteira; escolher um subtipo
+(`scope=flow-step`) cria só aquele card, solto.
+
+### R0.2 — Trilhas North é uma lista global (`4527e2b`→`dd0d0cc`)
+
+Antes: o admin subia um HTML por cliente na tabela `documents` e o portal do
+cliente lia um array escrito à mão — os dois lados não conversavam. Agora existe
+a tabela **`north_trilhas`** (global, igual pra todo cliente): o admin adiciona
+apresentação HTML **ou vídeo do YouTube**, reordena por arraste, e o portal lê a
+mesma lista na mesma ordem. "Visualizar" abre a trilha embutida num modal estilo
+card de documento. O Manual do Cliente virou uma linha dessa lista.
+
+### R0.3 — Recorrência v2 + higiene do modelo de tarefas (`589d803`, `5148cb7`, `0971717`)
+
+**Recorrência:**
+- **Sem data-limite.** Uma recorrência avança a cada conclusão manual, pra
+  sempre, e **só encerra quando o card-pai (o molde) vai para Aprovado ou
+  Parada**. Encerrada, o botão "Concluir ciclo" some e a automação de relatório
+  para de gerar.
+- **Toda tarefa pode ser recorrente — Entrega inclusa.** Antes o servidor
+  recusava; agora cada ciclo de uma Entrega recorrente materializa uma
+  entrega-ocorrência própria com sua primeira etapa.
+- **Dia da semana virou opcional.** Sem marcar nada, a recorrência fica no
+  mesmo dia da semana em que começa.
+- Corrigido: ao trocar o tipo de "Rotina" para outro, a recorrência não fica
+  mais grudada (dava erro ao salvar uma Entrega).
+
+**Modelo de tarefas (migração `20260831120000`):**
+- `kind`/`subtype` agora são validados contra o vocabulário — um valor com typo
+  não entra mais no banco.
+- **Revisão e Aprovação** são amarradas 1:1 à tela **Configurações › Etapas**:
+  etapa desligada para o cliente → o campo Revisor/Aprovador some do modal e do
+  "Configurar atributos". Sem exceção manual.
+- `payload` do card ganhou schema: chave desconhecida é descartada antes de
+  gravar.
+
+### Correções de teste
+
+- `e2e/client-approval-flow.spec.ts` rodado e verde contra o backend real.
+- `e2e/commercial-checkpoints.spec.ts` consertado (estava vermelho desde a
+  fusão do `/admin/onboarding` na aba Onboarding de Informações).
+
+---
+
 ## 20 a 30 de agosto de 2026
 
 Dez dias de trabalho, 75 commits. As três frentes maiores foram **Entregas**
