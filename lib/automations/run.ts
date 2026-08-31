@@ -26,6 +26,7 @@ import { fetchMetaAdsInsights } from "@/lib/metaInsights";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { clonePlanForReport, materializeOccurrenceForReport } from "./execute";
+import { recurrenceStopped } from "@/lib/recurrenceState";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import {
@@ -180,6 +181,10 @@ async function runOneReportAutomation(
 ): Promise<RunOutcome> {
   const target = await getAdminTask(admin, config.target_task_id);
   if (!target || target.due_date !== today) return "not_due";
+  // Recorrência encerrada (card-pai aprovado ou parado) não avança mais nem
+  // gera novo relatório — mesma regra dos ciclos manuais. Vale para o alvo
+  // recorrente e para o plano de ação recorrente.
+  if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return "not_due";
 
   let actingTask: TaskRecord;
   try {

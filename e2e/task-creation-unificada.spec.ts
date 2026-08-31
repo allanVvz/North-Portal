@@ -118,8 +118,49 @@ test.describe("Criação de tarefa unificada", () => {
     await pickKind("Plano");
     await expect(recToggle).not.toBeChecked();
 
+    // Sair da Rotina sempre limpa a recorrência que ela ligou — inclusive indo
+    // direto para Entrega.
     await pickKind("Entrega");
     await expect(recToggle).not.toBeChecked();
+  });
+
+  test("Entrega pode ser recorrente: molde vira flow_parent + recurrence_group, ocorrência tem etapa", async ({ page }) => {
+    await login(page);
+    const res = await page.request.post("/api/admin/tasks?scope=task", {
+      data: {
+        title: `${PREFIX} Entrega recorrente`,
+        kind: "criativo",
+        subtype: null,
+        status: "backlog",
+        priority: "media",
+        start_date: "2026-09-07", // segunda-feira
+        recurrence_cadence: "semanal",
+        recurrence_weekdays: [], // opcional — cai no dia da data de início
+      },
+    });
+    expect(res.ok()).toBeTruthy();
+    const step = await res.json();
+    created.push(step.id);
+
+    // A resposta é a 1ª ETAPA da ocorrência 0; o pai dessa etapa é a
+    // entrega-ocorrência, e o pai DELA é o molde recorrente.
+    const occurrenceId = (step.parents ?? []).find((p: { id: string }) => p.id)?.id;
+    expect(occurrenceId).toBeTruthy();
+    created.push(occurrenceId);
+
+    const { data: occurrence } = await sb.from("tasks").select("payload,kind,plan_id").eq("id", occurrenceId).single();
+    expect(occurrence?.payload?.flow_parent).toBe(true);
+    const templateId = occurrence?.plan_id as string;
+    expect(templateId).toBeTruthy();
+    created.push(templateId);
+
+    const { data: template } = await sb.from("tasks").select("payload,kind,recurrence_cadence,recurrence_weekdays").eq("id", templateId).single();
+    expect(template?.kind).toBe("criativo");
+    expect(template?.payload?.flow_parent).toBe(true);
+    expect(template?.payload?.recurrence_group).toBe(true);
+    expect(template?.recurrence_cadence).toBe("semanal");
+    // Dia-da-semana ausente → fixado no dia da data de início (segunda = 1).
+    expect(template?.recurrence_weekdays).toEqual([1]);
   });
 
   test("scope=flow-step exige um subtipo e um tipo-entrega", async ({ page }) => {

@@ -35,6 +35,17 @@ function uniqueWeekdays(values: number[]): number[] {
   return [...new Set(values)].filter((day) => day >= 0 && day <= 6).sort((a, b) => a - b);
 }
 
+/** Os dias-da-semana a persistir numa recorrência. Uma seleção explícita ganha;
+ * sem nenhuma, a recorrência dispara no dia-da-semana da própria data de início.
+ * A API não exige mais que a pessoa marque um dia — "sem dia" é um atalho válido
+ * para "toda semana no mesmo dia em que começa". O motor (nextRecurringDueDate)
+ * já fazia esse fallback internamente; aqui ele vira o valor guardado, para que
+ * `recurrence_weekdays` nunca fique vazio num card recorrente. */
+export function recurrenceWeekdays(weekdays: number[] | null | undefined, startDate: string): number[] {
+  const explicit = uniqueWeekdays(weekdays ?? []);
+  return explicit.length ? explicit : [atNoon(startDate).getUTCDay()];
+}
+
 function nextWeeklyDate(current: Date, weekdays: number[], weekInterval: 1 | 2, anchor: Date): Date {
   for (let offset = 1; offset <= 28; offset += 1) {
     const candidate = addDays(current, offset);

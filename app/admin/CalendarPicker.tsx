@@ -144,11 +144,12 @@ export default function CalendarPicker({
     };
   }, [open]);
 
-  const recurrenceError = recurrence?.cadence && !value
-    ? "Escolha a data de início da recorrência."
-    : recurrence?.cadence && !recurrence.weekdays.length
-      ? "Selecione pelo menos um dia da semana."
-      : "";
+  // Só a data de início é obrigatória. Sem dia-da-semana marcado a recorrência
+  // fica no mesmo dia da semana em que começa — é um atalho, não um erro.
+  const recurrenceError = recurrence?.cadence && !value ? "Escolha a data de início da recorrência." : "";
+  const recurrenceHint = recurrence?.cadence && !recurrence.weekdays.length && value
+    ? "Sem dia marcado: recorre no mesmo dia da semana da data de início."
+    : "";
 
   function commitTyped() {
     const next = text.trim();
@@ -244,6 +245,7 @@ export default function CalendarPicker({
                     {WEEKDAYS.map((label, day) => <button type="button" aria-pressed={recurrence.weekdays.includes(day)} className={recurrence.weekdays.includes(day) ? "on" : ""} key={day} onClick={() => onRecurrenceChange({ ...recurrence, weekdays: recurrence.weekdays.includes(day) ? recurrence.weekdays.filter((item) => item !== day) : [...recurrence.weekdays, day] })}>{label}</button>)}
                   </div>
                   {recurrence.cadence === "mensal" ? <p className="cal-recurrence-anchor">A data inicial ancora cada mês; será usado o dia marcado mais próximo.</p> : null}
+                  {recurrenceHint ? <p className="cal-recurrence-anchor">{recurrenceHint}</p> : null}
                 </>
               ) : null}
               {recurrenceError ? <p className="cal-local-error" role="alert">{recurrenceError}</p> : null}

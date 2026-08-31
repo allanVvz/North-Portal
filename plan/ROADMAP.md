@@ -184,6 +184,7 @@ Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
 | R4.7 | **Providers alternativos / Open API:** toggle de provedores oficiais, GET em sistemas externos (Google Maps, scraping autorizado), gateway multi-modelo. | Grande. |
 | R4.8 | **Google Drive como integração real** (hoje mock no contexto de automação): preview de imagens/vídeos de pasta direto no card. Casa com R1.4. | |
 | R4.9 | **Fluxo de trabalho pedido pelo usuário:** desenho com Opus → execução com Sonnet → validação e2e com Opus alimentando fixes de volta para múltiplos agentes Sonnet, em loop. Ainda não montado. | `roadmap-2026-08-19` (memória). |
+| R4.10 | **Repensar "automação vira card".** Hoje uma automação de relatório se liga a um card comum (`kind='operacional'`) escolhido à mão como alvo (`automation_configs.target_task_id`); o subtipo `relatorio_trafego` existe mas está `active=false`. Frente: tipo dedicado de card para os alvos de automação (reativar/renomear `relatorio_trafego` ou um `kind` próprio), vínculo 1:1 explícito automação↔card, e criação do card pelo próprio fluxo de automação em vez de o admin ter que criar e apontar. O motor de recorrência **já** foi conciliado (dia-da-semana opcional; para de avançar quando o card-pai está `aprovado`/`parada` — `recurrenceStopped`). | `plan/AUTOMACOES-RELATORIO-TRAFEGO.md`, `docs/ARQUITETURA-TAREFAS.md`, `automacoes-plano-pendente` (memória). Casa com R6.6. Médio. |
 
 ---
 

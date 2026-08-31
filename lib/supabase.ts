@@ -7,7 +7,7 @@ import {
   recurringExecutionFields,
   recurringExecutionId,
 } from "./recurrence";
-import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "./recurrenceState";
+import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf, recurrenceStopped } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
 import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
@@ -1177,7 +1177,9 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
         weekdays: task.recurrence_weekdays,
         day_of_month: task.recurrence_day_of_month, next_due_date: task.due_date,
         time_of_day: typeof payload.hora === "string" ? payload.hora : null,
-        timezone: "America/Sao_Paulo", active: Boolean(task.recurrence_cadence),
+        // "Encerrada" (molde aprovado/parado) conta como inativa: nada de novo
+        // ciclo, a lista mostra "Histórico" em vez do botão de concluir.
+        timezone: "America/Sao_Paulo", active: Boolean(task.recurrence_cadence) && !recurrenceStopped(task.status),
         completed_cycles: typeof payload.completed_cycles === "number" ? payload.completed_cycles : 0,
         last_completed_at: typeof payload.last_completed_at === "string" ? payload.last_completed_at : null,
         template_payload: payload,
@@ -1578,6 +1580,65 @@ export async function createFlowDelivery(
   }
 }
 
+/** Entrega recorrente. O MOLDE carrega ao mesmo tempo as marcas de fluxo
+ * (flow_parent + peso congelado) e as de recorrência (recurrence_group). Cada
+ * ciclo materializa uma entrega-OCORRÊNCIA própria, que herda as marcas de
+ * fluxo do molde e ganha a primeira etapa — então o rollup de progresso sempre
+ * lê uma entrega concreta, nunca o molde, e não existe "pai de pai". A
+ * ocorrência 0 nasce aqui; as seguintes em completeTaskCycleForRequest, via
+ * materializeFirstStep. Começa sempre na primeira etapa do tipo: recorrer é "a
+ * corrente inteira, todo ciclo". Devolve a ocorrência como `delivery` (é a
+ * entrega real do ciclo) e a primeira etapa como `step`. */
+export async function createRecurringFlowDelivery(
+  clientId: string | null,
+  input: Record<string, unknown>,
+  typeKey: string,
+  _startAtSubtype?: string | null,
+): Promise<{ delivery: TaskRecord; step: TaskRecord }> {
+  void _startAtSubtype;
+  const supabase = await createClient();
+  const type = findType(await listTaskTypes(supabase), typeKey);
+  if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
+  const problem = deliveryTypeProblem(type);
+  if (problem) throw new HttpError(400, problem);
+
+  const startDate = typeof input.start_date === "string" && input.start_date
+    ? input.start_date
+    : typeof input.due_date === "string" && input.due_date
+      ? input.due_date
+      : null;
+  if (!startDate || !input.recurrence_cadence) throw new HttpError(400, "Informe o início da recorrência.");
+
+  const template = await createTask(clientId, {
+    ...input,
+    kind: type.key,
+    subtype: null,
+    plan_id: null,
+    status: DELIVERY_INITIAL_STATUS,
+    due_date: startDate,
+    start_date: startDate,
+    end_date: typeof input.end_date === "string" && input.end_date >= startDate ? input.end_date : startDate,
+    payload: recurrenceParentPayload({
+      ...((input.payload ?? {}) as Record<string, unknown>),
+      [FLOW_PARENT_KEY]: true,
+      [FLOW_TOTAL_WEIGHT_KEY]: typeTotalWeight(type),
+      [FLOW_STEP_COUNT_KEY]: type.subtypes.length,
+    }),
+  });
+
+  try {
+    const occurrenceId = recurringExecutionId(template.id, 0);
+    const occurrence = await createTask(clientId, currentRecurringExecutionFields(template, occurrenceId, startDate));
+    const firstStep = type.subtypes[0];
+    const step = await createTask(clientId, flowStepFields(occurrence, firstStep, null));
+    await linkTasks(occurrence.id, step.id, firstStep.key, firstStep.order_index);
+    return { delivery: occurrence, step };
+  } catch (error) {
+    await deleteTask(template.id).catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function updateTask(id: string, patch: Record<string, unknown>): Promise<TaskRecord> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -1878,6 +1939,12 @@ async function completeTaskCycleForRequest(
   const parent = await getTaskById(id);
   if (!parent) throw new HttpError(404, "Tarefa recorrente não encontrada.");
   if (!parent.recurrence_cadence || !parent.due_date) throw new HttpError(409, "Esta tarefa não está recorrente.");
+  // Não há data-limite: a recorrência avança em toda conclusão manual e só
+  // encerra quando o molde é movido para aprovado ou parada. Encerrada, o ciclo
+  // atual não avança e nenhuma ocorrência nova nasce.
+  if (recurrenceStopped(parent.status)) {
+    throw new HttpError(409, "Esta recorrência foi encerrada — o card-pai está aprovado ou parado.", { code: "recurrence_ended", parent });
+  }
   const currentCycle = recurrenceCycleOf(parent);
   const currentRevision = recurrenceRevisionOf(parent);
   const requestedCycle = expectedCycle ?? (expectedDueDate === parent.due_date ? currentCycle : undefined);

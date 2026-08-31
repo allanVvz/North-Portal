@@ -106,5 +106,18 @@ test.describe("conclusão de ciclo três vezes por semana", () => {
       { due_date: "2026-07-27", plan_id: parentId },
       { due_date: "2026-07-30", plan_id: parentId },
     ]);
+
+    // Sem data-limite: a recorrência só encerra quando o molde vai para
+    // aprovado/parada. Aí "Concluir ciclo" recusa e a data não avança.
+    await sb.from("tasks").update({ status: "parada" }).eq("id", parentId);
+    const ended = await page.request.post(`/api/admin/tasks/${parentId}/complete-cycle`, {
+      data: { expectedCycle: 4, expectedRevision: 2, expectedDueDate: "2026-07-30" },
+    });
+    expect(ended.status()).toBe(409);
+    expect((await ended.json()).code).toBe("recurrence_ended");
+    const { data: frozen } = await sb.from("tasks").select("due_date").eq("id", parentId).single();
+    expect(frozen?.due_date).toBe("2026-07-30");
+    const { count } = await sb.from("tasks").select("id", { count: "exact", head: true }).eq("plan_id", parentId);
+    expect(count).toBe(4);
   });
 });

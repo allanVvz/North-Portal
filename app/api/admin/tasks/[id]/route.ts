@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
+import { recurrenceWeekdays } from "@/lib/recurrence";
 import { recurrenceParentIdOf } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -90,7 +91,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const start = patch.start_date !== undefined ? patch.start_date : current.start_date ?? current.due_date;
       const weekdays = patch.recurrence_weekdays ?? current.recurrence_weekdays;
       if (!start) throw new HttpError(400, "Informe o início da recorrência.");
-      if (!weekdays.length) throw new HttpError(400, "Selecione pelo menos um dia da semana.");
+      // Dia-da-semana opcional: sem marcação, fica no dia da data de início.
+      patch.recurrence_weekdays = recurrenceWeekdays(weekdays, start);
       patch.start_date = start;
       patch.recurrence_day_of_month = nextRecurrence === "mensal" ? Number(start.slice(8, 10)) : null;
       const end = patch.end_date !== undefined ? patch.end_date : current.end_date;

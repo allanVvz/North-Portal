@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "./recurrence";
-import { recurrenceParentPayload } from "./recurrenceState";
+import { currentRecurringExecutionFields, explicitDateExecutionFields, nextRecurringDueDate, recurrenceWeekdays, recurringExecutionFields, recurringExecutionId } from "./recurrence";
+import { recurrenceParentPayload, recurrenceStopped } from "./recurrenceState";
 import type { TaskRecord } from "./validation";
 
 describe("concluir ciclo recorrente", () => {
@@ -137,6 +137,24 @@ describe("concluir ciclo recorrente", () => {
     expect(next.payload).not.toHaveProperty("action_plan_id");
     expect(next.payload).not.toHaveProperty("accessed_at");
     expect(next).toMatchObject({ plan_id: parent.id, due_date: "2026-08-10" });
+  });
+
+  it("dia-da-semana é opcional: sem marcação, cai no dia da data de início", () => {
+    // 2026-07-20 é uma segunda-feira (getUTCDay === 1).
+    expect(recurrenceWeekdays([], "2026-07-20")).toEqual([1]);
+    expect(recurrenceWeekdays(undefined, "2026-07-20")).toEqual([1]);
+    // 2026-07-25 é um sábado (6).
+    expect(recurrenceWeekdays(null, "2026-07-25")).toEqual([6]);
+    // Uma seleção explícita ganha e é normalizada (únicos, ordenados, 0..6).
+    expect(recurrenceWeekdays([5, 1, 1, 9], "2026-07-20")).toEqual([1, 5]);
+  });
+
+  it("recorrência só encerra quando o molde vai para aprovado ou parada", () => {
+    expect(recurrenceStopped("aprovado")).toBe(true);
+    expect(recurrenceStopped("parada")).toBe(true);
+    for (const status of ["backlog", "em_producao", "revisao", "aprovacao"] as const) {
+      expect(recurrenceStopped(status)).toBe(false);
+    }
   });
 
   it("combina o horário configurado com a data da nova execução", () => {

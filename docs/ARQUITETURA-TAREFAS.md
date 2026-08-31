@@ -105,16 +105,19 @@ Inativos (`active = false`, guardados, nunca oferecidos): `agendamento`, `planej
 
 | condição | o que a API cria | resposta |
 |---|---|---|
-| `behavior = 'entrega'` e `scope ≠ flow-step` | `createFlowDelivery` — pai (`payload.flow_parent = true`) + 1ª etapa. Recorrência é **rejeitada** (400). | a **etapa** (o pai não ocupa coluna) |
+| `behavior = 'entrega'`, `scope ≠ flow-step`, sem recorrência | `createFlowDelivery` — pai (`payload.flow_parent = true`) + 1ª etapa | a **etapa** (o pai não ocupa coluna) |
+| `behavior = 'entrega'`, `scope ≠ flow-step`, **com** recorrência | `createRecurringFlowDelivery` — molde (`flow_parent` + `recurrence_group`) + ocorrência 0 (entrega própria) + 1ª etapa dela | a **etapa** da ocorrência 0 |
 | `scope = flow-step` | `createTask` só do card da etapa (`kind` da entrega + `subtype`), **solto**, sem pai | o card |
 | `scope = plan` | força `kind = 'plano_acao'` | a execução |
-| `scope = routine` | exige `recurrence_cadence`; `createTask` do **template** (`payload.recurrence_group = true`) | o template |
-| `recurrence_cadence` e `scope ≠ routine` | `createRecurringTaskGroup` — pai template + 1ª execução | a **execução** |
+| `scope = routine` | exige `recurrence_cadence`; `createTask` do **template** (`payload.recurrence_group = true`); rejeita `behavior = 'entrega'` (Rotina = Tarefa recorrente) | o template |
+| `recurrence_cadence` e `scope ≠ routine` (não-entrega) | `createRecurringTaskGroup` — pai template + 1ª execução | a **execução** |
 | resto | `createTask` | o card |
+
+**Toda tarefa pode ser recorrente — entrega ou não.** A entrega recorrente tem o molde carregando as duas marcas (`flow_parent` + `recurrence_group`); cada ciclo materializa uma entrega-ocorrência própria, que herda as marcas de fluxo e ganha a 1ª etapa. O rollup de progresso lê sempre a ocorrência, nunca o molde — não há "pai de pai". Ocorrências recorrentes de entrega começam sempre na 1ª etapa do tipo (`materializeFirstStep`).
 
 `plan_id` no corpo do POST **não é campo do insert**: sai de `fields`, o card nasce, e depois `linkTasks(plan_id, delivery_or_task.id)` cria a linha em `task_links`. Numa entrega, quem entra no plano é a **entrega**, não a primeira etapa.
 
-Recorrência exige, **na API** (não no banco): `start_date` e ≥ 1 dia da semana. `recurrence_day_of_month` é derivado do dia do `start_date` quando cadence é `mensal`, e forçado a null nos outros casos.
+Recorrência exige, **na API**, só `start_date`. Dias-da-semana são **opcionais**: sem marcação, `recurrenceWeekdays()` fixa a recorrência no dia da semana da `start_date` — nunca guardamos lista vazia num card recorrente. `recurrence_day_of_month` é derivado do dia do `start_date` quando cadence é `mensal`, e forçado a null nos outros casos.
 
 **Rotina não é um `kind`.** É a quinta entrada do dropdown (`ROTINA_OPTION` em `TaskModal.tsx`): grava `kind = 'operacional'` + `recurrence_cadence` e manda `scope=routine`. A razão é decisiva: recorrência é a coluna `recurrence_cadence`, ortogonal ao tipo, e é isso que permite uma **Entrega recorrente** — um `kind: "rotina"` tornaria a combinação irrepresentável. Ao trocar de "Rotina" para outro tipo no modal, a recorrência é **limpa** (ela foi ligada implicitamente pela Rotina).
 
@@ -145,9 +148,11 @@ O progresso da entrega divide pelo peso do **molde**, congelado em `payload.flow
 4. O filho nasce com `payload.deferred_until_accessed = true`: aparece sob o pai, mas ainda não no quadro Tarefas.
 5. Clicar no filho remove a marca, registra `accessed_at`, e a tarefa passa a aparecer normalmente.
 
+**Não existe data-limite nem contador de ciclos.** A recorrência avança em toda conclusão manual, para sempre, e só **encerra** quando o molde é movido para `aprovado` (encerrada de propósito) ou `parada` (interrompida — e é onde uma automação estaciona um card com erro). Encerrada: `completeTaskCycleForRequest` recusa com `409 recurrence_ended`, o botão "Concluir ciclo" some, `listRecurringTasks().active` vira `false`, e a automação de relatório para de gerar. A regra única é `recurrenceStopped(status)` em `lib/recurrenceState.ts` (`RECURRENCE_STOP_STATUSES = ['aprovado', 'parada']`). `end_date` continua sendo só limite **visual** do calendário — nunca interrompe.
+
 Ao **converter** uma tarefa existente em recorrente, a API cria um pai separado e preserva o `id` original como primeira execução visível (`recurrence_cadence = null`, `plan_id` → o pai). Invariante: converter nunca faz o card atual sumir de Tarefas.
 
-Não há grupos por datas explícitas (`explicit_occurrence_dates` foi convertido em `20260804000002`). A agenda usa início, fim, frequência e ≥ 1 dia. Semanal emite todos os dias marcados; quinzenal alterna semanas ancoradas pelo início; mensal escolhe, em ±7 dias da âncora, o dia marcado mais próximo.
+Não há grupos por datas explícitas (`explicit_occurrence_dates` foi convertido em `20260804000002`). A agenda usa início, frequência e — opcionalmente — dias da semana. Semanal emite todos os dias marcados (ou o dia da `start_date` se nenhum); quinzenal alterna semanas ancoradas pelo início; mensal escolhe, em ±7 dias da âncora, o dia marcado mais próximo.
 
 Desativar a recorrência mantém `payload.recurrence_group` quando há filhos (preserva histórico, permite reativar o mesmo pai). Sem filhos, o template volta a ser card comum.
 
@@ -200,7 +205,7 @@ Cada linha é uma frente própria — nada disso está feito.
 | A | `kind` / `subtype` são `text` livre, **sem FK** a `task_types(key)` | baixo — 0 linhas fora do vocabulário | FK em `kind` é seguro hoje. `subtype` idem se auditado. Mexe na compat de `canonicalTaskClassification`. |
 | B | 2 filhos com `plan_id` → um `plano_acao` **não-recorrente** (elos que não migraram pro `task_links` em `bd1cbb0`) | baixo — `planParentIdOf` lê `task_links` primeiro | migração de dados curta: mover os 2 para `task_links(slot = null)`, limpar `plan_id`. |
 | C | `concluido` órfão no `task_status` (CHECK bloqueia) | nenhum — só confunde | deixar (não dá pra remover label de enum); documentado acima. |
-| D | dias-da-semana da recorrência exigidos **só pela API** | baixo — 0 linhas violam | CHECK `recurrence_cadence IS NULL OR array_length(recurrence_weekdays, 1) >= 1`. |
+| ~~D~~ | ~~dias-da-semana exigidos só pela API~~ | — | **Resolvido de outra forma:** dia-da-semana virou **opcional** (`recurrenceWeekdays()` cai no dia da `start_date`). Sem CHECK novo — decisão deliberada de manter a recorrência flexível. |
 | E | `requires_review` / `requires_approval` default `true` | baixo — a API deriva de reviewer/approver | default `false` (a presença do revisor é a verdade). |
 | F | `payload` sem schema no banco | médio — chave com typo entra calada | catálogo acima é o contrato; considerar validar as chaves conhecidas na API. |
 | G | ~15 linhas `active = false` em `task_types` (agendamento/planejamento) | nenhum | deixar (histórico) ou limpar numa faxina de vocabulário. |
@@ -210,6 +215,8 @@ Cada linha é uma frente própria — nada disso está feito.
 ## Invariantes protegidos
 
 - Plano de Ação aceita recorrência; o template aparece em Rotinas e suas execuções em Planos.
+- **Toda tarefa pode ser recorrente, entrega inclusa** (`createRecurringFlowDelivery`); o rollup lê a ocorrência, nunca o molde.
+- Uma recorrência só encerra quando o molde vai para `aprovado` ou `parada` — sem data-limite nem contador de ciclos.
 - Filho recorrente não herda recorrência (evita árvore infinita).
 - Execução futura não aparece no quadro antes do primeiro acesso.
 - Converter uma tarefa em recorrência preserva a tarefa original como primeira execução visível; o pai é sempre registro separado.

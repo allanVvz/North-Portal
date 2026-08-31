@@ -23,7 +23,7 @@ import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/c
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
-import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
+import { recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
 import type { AdminDocument } from "@/lib/supabase";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
@@ -666,9 +666,9 @@ export default function TaskModal({
       const type = taskTypes.find((t) => t.key === kind);
       // Rotina liga a recorrência de forma implícita (ver acima). Sair dela para
       // qualquer outro tipo tem que apagar essa recorrência — senão o seletor do
-      // calendário fica marcado num tipo que não pediu. E uma Entrega o servidor
-      // recusa recorrente de qualquer jeito, então limpa também ao escolher uma.
-      const clearRecurrence = wasRotina || type?.behavior === "entrega";
+      // calendário fica marcado num tipo que não pediu. Entrega NÃO limpa mais:
+      // toda tarefa, entrega ou não, pode ser recorrente.
+      const clearRecurrence = wasRotina;
       return {
         ...d,
         kind,
@@ -954,6 +954,15 @@ export default function TaskModal({
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null) as { error?: string; code?: string; parent?: TaskRecord } | null;
+        if (body?.code === "recurrence_ended" && body.parent) {
+          // Molde foi para aprovado/parada: a recorrência encerrou. Sincroniza
+          // o estado (o botão some) e mostra o motivo.
+          setLiveTask(body.parent);
+          onTaskPatched?.(body.parent);
+          setError(body.error ?? "Esta recorrência foi encerrada.");
+          setBusy(false);
+          return;
+        }
         if (!retried && body?.code === "recurrence_schedule_changed" && body.parent) {
           setLiveTask(body.parent);
           setDraft(draftFrom(body.parent, slug, prefill));
@@ -983,10 +992,8 @@ export default function TaskModal({
       setError("Informe o início da recorrência.");
       return;
     }
-    if (draft.recurrence_cadence && !draft.recurrence_weekdays.length) {
-      setError("Selecione pelo menos um dia da semana.");
-      return;
-    }
+    // Dia-da-semana é opcional: sem marcação, o servidor fixa a recorrência no
+    // dia da data de início (ver recurrenceWeekdays em lib/recurrence.ts).
     setBusy(true);
     const existingPayload = (liveTask?.payload ?? {}) as Record<string, unknown>;
     const payload: Record<string, unknown> = { ...existingPayload };
@@ -1757,7 +1764,11 @@ export default function TaskModal({
             {liveTask ? <button type="button" className="admin-btn ghost tm-copylink" onClick={copyCardLink} title="Copiar link direto para este card">
               {linkCopied ? "Link copiado" : "🔗 Copiar link"}
             </button> : null}
-            {liveTask?.recurrence_cadence ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button> : null}
+            {liveTask?.recurrence_cadence && recurrenceStopped(liveTask.status)
+              ? <span className="tm-autosave" title="Mova o card para fora de Aprovado/Parada para retomar">Recorrência encerrada</span>
+              : liveTask?.recurrence_cadence
+                ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button>
+                : null}
             {mode === "new" ? <button className="admin-btn ghost" onClick={() => void closeAfterSave()} disabled={busy}>Cancelar</button> : null}
             {mode === "new" ? <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
               {busy ? "Salvando…" : currentType?.behavior === "entrega" ? "Criar entrega" : "Criar card"}

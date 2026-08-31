@@ -3,6 +3,7 @@ import { apiError } from "@/lib/api";
 import { notifyTaskParticipants, taskCreatedMessage } from "@/lib/notifications";
 import {
   createFlowDelivery,
+  createRecurringFlowDelivery,
   createRecurringTaskGroup,
   createTask,
   linkTasks,
@@ -16,6 +17,7 @@ import {
   setTaskAssigneeProfiles,
 } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
+import { recurrenceWeekdays } from "@/lib/recurrence";
 import { recurrenceParentPayload } from "@/lib/recurrenceState";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, taskCreateSchema, validateSlug } from "@/lib/validation";
@@ -99,18 +101,17 @@ export async function POST(request: Request) {
       fields.kind = "plano_acao";
     } else if (scope === "routine") {
       if (!fields.recurrence_cadence) throw new HttpError(400, "Uma Rotina precisa ter recorrencia.");
+      // "Rotina" é só o rótulo sintético de uma Tarefa recorrente; uma Entrega
+      // recorrente existe, mas nasce pelo tipo Entrega + o toggle, não por aqui.
       if (behavior === "entrega") throw new HttpError(400, "Uma entrega nao pode ser uma rotina.");
-    }
-    // A entrega agrega etapas; recorrência sobre ela geraria um pai de pai, que
-    // nenhum rollup sabe ler.
-    if (behavior === "entrega" && fields.recurrence_cadence) {
-      throw new HttpError(400, "Uma entrega nao pode ser recorrente.");
     }
 
     if (fields.recurrence_cadence) {
       const start = fields.start_date ?? fields.due_date;
       if (!start) throw new HttpError(400, "Informe o início da recorrência.");
-      if (!fields.recurrence_weekdays?.length) throw new HttpError(400, "Selecione pelo menos um dia da semana.");
+      // Dia-da-semana é opcional: sem marcação, a recorrência fica no dia da
+      // data de início (ver recurrenceWeekdays). Nunca guardamos lista vazia.
+      fields.recurrence_weekdays = recurrenceWeekdays(fields.recurrence_weekdays, start);
       fields.start_date = start;
       fields.due_date = start;
       fields.end_date = fields.end_date && fields.end_date >= start ? fields.end_date : start;
@@ -131,8 +132,14 @@ export async function POST(request: Request) {
     // plan_id é elo, não coluna: sai dos campos do insert e vira uma ligação
     // depois que o card existe.
     const { plan_id: planLink, ...taskFields } = fields;
+    // Entrega recorrente: o molde carrega as marcas de fluxo E a recorrência, e
+    // cada ciclo materializa uma entrega-ocorrência própria (com sua primeira
+    // etapa) — o rollup de progresso lê a ocorrência, nunca o molde, então não
+    // há "pai de pai".
     const flow = behavior === "entrega" && !flowStepOnly
-      ? await createFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
+      ? fields.recurrence_cadence
+        ? await createRecurringFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
+        : await createFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
       : null;
     // A resposta continua sendo o PASSO — é o card que a pessoa vai abrir, já
     // que a entrega não aparece no quadro.
@@ -152,6 +159,10 @@ export async function POST(request: Request) {
       // entrega, `flowStepFields` grava `plan_id: null` de propósito, então
       // sem o ramo explícito abaixo a entrega NUNCA recebia responsável.
       if (flow) await setTaskAssigneeProfiles(flow.delivery.id, assignee_profile_ids);
+      // Entrega recorrente: além da ocorrência 0 (flow.delivery), o molde
+      // também — é ele que reaparece a cada ciclo. `flow.delivery.plan_id` é o
+      // molde; para a entrega não-recorrente é null e o ramo não dispara.
+      if (flow?.delivery.plan_id) await setTaskAssigneeProfiles(flow.delivery.plan_id, assignee_profile_ids);
       else if (task.plan_id && task.plan_id !== task.id) await setTaskAssigneeProfiles(task.plan_id, assignee_profile_ids);
     }
     // Ser entregue um card é a coisa mais importante a saber sobre ele, e até
