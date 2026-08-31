@@ -1,0 +1,3 @@
+# Fontes do PDF da automação — binário, nunca normalizar EOL (uma corrupção
+# aqui quebra o cron de relatórios).
+lib/reports/fonts/*.ttf binary
