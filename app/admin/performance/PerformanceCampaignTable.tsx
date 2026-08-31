@@ -93,7 +93,7 @@ export default function PerformanceCampaignTable({
   adSourceTags: Record<string, AdSourceTag>;
   onSetCampaignBlock: (campaignId: string, block: CampaignBlock | "") => void;
   onSetAdSourceTag: (adId: string, tag: AdSourceTag | "") => void;
-  suggestBlock: (objective?: string | null, optimizationGoal?: string | null) => CampaignBlock;
+  suggestBlock: (objective?: string | null, optimizationGoal?: string | null, name?: string | null) => CampaignBlock;
 }) {
   const formatMetric = (value: number | undefined, key: MetaPostMetricKey, currency?: string) => metricValue(value, columnKind[key] ?? "number", currency);
   const selectedEntityIds = level === "adset" ? selectedAdsetIds : selectedAdIds;
@@ -214,7 +214,7 @@ export default function PerformanceCampaignTable({
                               <select
                                 className="perf-tag-select"
                                 aria-label={`Bloco da campanha ${c.caption}`}
-                                value={campaignBlocks[c.campaignId] ?? suggestBlock(c.objective)}
+                                value={campaignBlocks[c.campaignId] ?? suggestBlock(c.objective, undefined, c.caption)}
                                 onChange={(e) => onSetCampaignBlock(c.campaignId as string, e.target.value as CampaignBlock | "")}
                               >
                                 {CAMPAIGN_BLOCKS.map((b) => <option key={b} value={b}>{CAMPAIGN_BLOCK_LABEL[b]}</option>)}

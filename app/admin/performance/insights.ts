@@ -241,7 +241,7 @@ export function topPosts(posts: MetaPost[], metric: MetaPostMetricKey, n: number
 // metrics (ctr/cpc/cpm/frequencia) — those are recomputed from the summed
 // totals afterward by recomputeRatios, not accumulated directly (averaging
 // per-day ratios would weight low-volume days too heavily).
-function sumMetricsInto(target: Partial<Record<MetaPostMetricKey, number>>, metrics: MetaPost["metrics"]) {
+export function sumMetricsInto(target: Partial<Record<MetaPostMetricKey, number>>, metrics: MetaPost["metrics"]) {
   for (const [metricKey, value] of Object.entries(metrics) as [MetaPostMetricKey, number | undefined][]) {
     if (value === undefined || metricKey === "ctr" || metricKey === "cpc" || metricKey === "cpm" || metricKey === "frequencia") continue;
     target[metricKey] = (target[metricKey] ?? 0) + value;
@@ -250,7 +250,7 @@ function sumMetricsInto(target: Partial<Record<MetaPostMetricKey, number>>, metr
 
 const RATIO_METRIC_KEYS = new Set<MetaPostMetricKey>(["ctr", "cpc", "cpm", "frequencia"]);
 
-function recomputeRatios(metrics: Partial<Record<MetaPostMetricKey, number>>) {
+export function recomputeRatios(metrics: Partial<Record<MetaPostMetricKey, number>>) {
   const impressions = metrics.impressoes ?? 0;
   const clicks = metrics.cliques ?? 0;
   const spend = metrics.custo ?? 0;

@@ -10,7 +10,7 @@ import {
 } from "./acquisitionInsights";
 import { isNotIntegrated, metricLabel } from "./insights";
 import { metricRefInverse, metricRefKind, metricRefOptions } from "./performanceLabels";
-import { CHART_W, funnelBandLayout, funnelChartHeight } from "@/lib/reports/funnelGeometry";
+import { CHART_W, funnelBandLayout, funnelChartHeight, funnelStageCount } from "@/lib/reports/funnelGeometry";
 import type { PerformanceWorkspace } from "./usePerformanceWorkspace";
 import { ACQUISITION_SECTION_KEYS, ACQUISITION_VIEW_PREFS_DEFAULT, type AcquisitionSectionKey } from "@/lib/acquisitionPrefs";
 import type { CustomMetric, MetricRef } from "@/lib/performancePrefs";
@@ -70,8 +70,11 @@ function ConversionFunnel({
   current: MetaPost[];
   customMetrics: CustomMetric[];
 }) {
-  const stageValues = stages.map((ref) => resolveAcquisitionMetric(current, ref, customMetrics));
-  const stageLabels = stages.map((ref) => acquisitionMetricLabel(ref, customMetrics, metricLabel));
+  const allValues = stages.map((ref) => resolveAcquisitionMetric(current, ref, customMetrics));
+  // Etapa de cauda sem dado (ex.: "Seguidores" antes da ingestão) sai do funil.
+  const keep = funnelStageCount(allValues);
+  const stageValues = allValues.slice(0, keep);
+  const stageLabels = stages.slice(0, keep).map((ref) => acquisitionMetricLabel(ref, customMetrics, metricLabel));
   const stageRates = stageValues.slice(1).map((value, i) => acquisitionRateLabel(value, stageValues[i]));
   const spend = totalWhenPresent(current, "custo");
   return (

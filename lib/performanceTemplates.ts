@@ -33,15 +33,15 @@ export const CAMPAIGN_BLOCK_LABEL: Record<CampaignBlock, string> = {
 export type AdSourceTag = "1" | "2" | "3";
 export const AD_SOURCE_TAGS: AdSourceTag[] = ["1", "2", "3"];
 
-/** Palpite do bloco a partir dos campos do Meta — só valor inicial na UI; a tag
- *  salva no template é quem manda. */
-export function suggestCampaignBlock(objective?: string | null, optimizationGoal?: string | null): CampaignBlock {
-  const o = (objective ?? "").toUpperCase();
-  const g = (optimizationGoal ?? "").toUpperCase();
-  if (o.includes("LEAD") || o.includes("MESSAGE") || g.includes("CONVERSATION") || g.includes("LEAD")) return "mensagens";
-  if (g.includes("PROFILE_VISIT") || g.includes("PAGE_LIKE") || g.includes("FOLLOW")) return "trafego_perfil";
-  if (o.includes("TRAFFIC") || g.includes("LINK_CLICK") || g.includes("LANDING_PAGE")) return "trafego_site";
-  if (o.includes("ENGAGEMENT") || o.includes("AWARENESS") || o.includes("REACH")) return "engajamento";
+/** Palpite do bloco a partir do objetivo/goal do Meta E do nome da campanha
+ *  (agências nomeiam "[TRAFEGO] ...", "VENDAS | SITE", "Perfil - seguidores").
+ *  Só valor inicial na UI; a tag salva no template é quem manda. */
+export function suggestCampaignBlock(objective?: string | null, optimizationGoal?: string | null, name?: string | null): CampaignBlock {
+  const hay = `${objective ?? ""} ${optimizationGoal ?? ""} ${name ?? ""}`.toUpperCase();
+  if (/MENSAG|MESSAGE|WHATS|CONVERSA|LEAD/.test(hay)) return "mensagens";
+  if (/PERFIL|PROFILE|SEGUID|FOLLOW|PAGE_LIKE/.test(hay)) return "trafego_perfil";
+  if (/SITE|LINK_CLICK|LANDING|TR[AÁ]FEGO|TRAFFIC/.test(hay)) return "trafego_site";
+  if (/ENGAJ|ENGAGEMENT|AWARENESS|ALCANCE|REACH/.test(hay)) return "engajamento";
   return "outro";
 }
 export type PerformanceTemplateFilters = {

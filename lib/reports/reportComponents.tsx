@@ -61,6 +61,13 @@ export const REPORT_STYLES = StyleSheet.create({
   gaugeLabel: { fontFamily: "Inter", fontWeight: 600, fontSize: 6, letterSpacing: 0.5, color: C.sec, textTransform: "uppercase", marginTop: 3 },
   gaugeValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 12, color: C.ink, marginTop: 1 },
 
+  blockGroup: { marginBottom: 9 },
+  blockHead: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
+  blockTitle: { fontFamily: "Inter", fontWeight: 700, fontSize: 9.5, color: C.ink },
+  campaignHead: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 7, marginBottom: 3 },
+  campaignName: { fontFamily: "Inter", fontWeight: 600, fontSize: 7.5, color: C.sec },
+  chip: { fontFamily: "Inter", fontWeight: 700, fontSize: 5.6, letterSpacing: 0.4, color: C.tealText, textTransform: "uppercase", backgroundColor: C.tealSoft, borderRadius: 4, paddingVertical: 1, paddingHorizontal: 4 },
+
   table: { borderWidth: 1, borderColor: C.border, borderRadius: 5 },
   tableRow: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: C.border },
   tableRowLast: { flexDirection: "row" },
