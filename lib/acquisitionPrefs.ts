@@ -18,6 +18,14 @@ import { isValidMetricRef, type CustomMetric, type MetricRef } from "./performan
 // operators (+,-,×,÷) have no built-in "×100", so it stays a fixed display
 // alongside the swappable volume slots rather than becoming one.
 
+// Seções que o operador liga/desliga (mesma lista de `ACQUISITION_SECTIONS` em
+// performanceLabels.ts — mantida aqui como leaf para não criar ciclo de
+// import). Guardadas no template: `hiddenSections` faz parte da config, então
+// o que a pessoa esconde na tela e salva é o que o PDF da automação também
+// deixa de mostrar.
+export const ACQUISITION_SECTION_KEYS = ["kpis", "funnel", "trend", "volume", "gauges"] as const;
+export type AcquisitionSectionKey = (typeof ACQUISITION_SECTION_KEYS)[number];
+
 export type AcquisitionViewPrefs = {
   kpiSlots: MetricRef[];
   volumeSlots: MetricRef[];
@@ -25,6 +33,7 @@ export type AcquisitionViewPrefs = {
   funnelStages: MetricRef[];
   showMessageBranch: boolean;
   trendMetrics: MetricRef[];
+  hiddenSections: AcquisitionSectionKey[];
 };
 
 export const ACQUISITION_VIEW_PREFS_DEFAULT: AcquisitionViewPrefs = {
@@ -39,6 +48,7 @@ export const ACQUISITION_VIEW_PREFS_DEFAULT: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliquesLink", "contatos"],
   showMessageBranch: false,
   trendMetrics: ["custo", "contatos"],
+  hiddenSections: [],
 };
 
 const MAX_SLOTS = 6;
@@ -72,6 +82,10 @@ export function sanitizeAcquisitionViewPrefs(raw: unknown, customMetrics: Custom
   const gaugeSlots = sanitizeMetricRefList(value.gaugeSlots, customIds, MAX_SLOTS);
   const funnelStages = sanitizeMetricRefList(value.funnelStages, customIds, MAX_FUNNEL_STAGES);
   const trendMetrics = sanitizeMetricRefList(value.trendMetrics, customIds, MAX_TREND_METRICS);
+  const validSections = new Set<string>(ACQUISITION_SECTION_KEYS);
+  const hiddenSections = Array.isArray(value.hiddenSections)
+    ? [...new Set(value.hiddenSections.filter((k): k is AcquisitionSectionKey => validSections.has(k as string)))]
+    : [];
 
   return {
     kpiSlots: kpiSlots.length ? kpiSlots : ACQUISITION_VIEW_PREFS_DEFAULT.kpiSlots,
@@ -80,5 +94,6 @@ export function sanitizeAcquisitionViewPrefs(raw: unknown, customMetrics: Custom
     funnelStages: funnelStages.length >= MIN_FUNNEL_STAGES ? funnelStages : ACQUISITION_VIEW_PREFS_DEFAULT.funnelStages,
     showMessageBranch: typeof value.showMessageBranch === "boolean" ? value.showMessageBranch : ACQUISITION_VIEW_PREFS_DEFAULT.showMessageBranch,
     trendMetrics: trendMetrics.length ? trendMetrics : ACQUISITION_VIEW_PREFS_DEFAULT.trendMetrics,
+    hiddenSections,
   };
 }

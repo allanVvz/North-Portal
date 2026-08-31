@@ -1,9 +1,11 @@
 // PDF do "Relatório de anúncios" (Automação 1 — relatorio_trafego_semanal).
 //
 // Reproduz a aba Aquisição da tela de Performance (AcquisitionDashboard.tsx)
-// para o template escolhido — por padrão `builtin-funil-mensagens`. As seções
-// são as mesmas de `ACQUISITION_SECTIONS`: KPIs / funil / evolução / volume /
-// eficiência de mídia; depois, numa página própria, a tabela de campanhas.
+// para o template escolhido — por padrão `builtin-funil-mensagens`. Cabe numa
+// folha A4: KPIs / funil / evolução / volume / eficiência de mídia + tabela de
+// campanhas. As seções que o operador esconde no template
+// (`config.acquisition.hiddenSections`) não entram no PDF — apara a tela,
+// apara o relatório.
 //
 // Renderiza server-side com @react-pdf/renderer (sem browser, sem rede) — Node
 // runtime obrigatório (app/api/admin/automations/run/route.ts).
@@ -43,57 +45,62 @@ import type { ComponentProps, ReactNode } from "react";
 
 registerReportFonts();
 
+// Layout COMPACTO — o relatório cabe numa folha A4. As seções que o operador
+// esconde no template (`config.acquisition.hiddenSections`) não são renderizadas,
+// então a folha respira conforme ele apara. Com as 5 seções + tabela ainda
+// cabe, apertado.
 const S = StyleSheet.create({
-  page: { padding: 30, fontFamily: "Inter", fontSize: 9, color: C.ink, backgroundColor: C.surface },
-  header: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.border },
-  title: { fontFamily: "Inter", fontWeight: 700, fontSize: 15, color: C.ink },
-  subtitle: { fontSize: 8.5, color: C.muted, marginTop: 2 },
+  page: { paddingVertical: 22, paddingHorizontal: 24, fontFamily: "Inter", fontSize: 8, color: C.ink, backgroundColor: C.surface },
+  header: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border },
+  title: { fontFamily: "Inter", fontWeight: 700, fontSize: 12.5, color: C.ink },
+  subtitle: { fontSize: 7.5, color: C.muted, marginTop: 1 },
 
-  section: { marginBottom: 16 },
-  kicker: { fontFamily: "Inter", fontWeight: 600, fontSize: 7.5, letterSpacing: 1, color: C.tealText, textTransform: "uppercase", marginBottom: 2 },
-  sectionTitle: { fontFamily: "Inter", fontWeight: 700, fontSize: 12, color: C.ink, marginBottom: 8 },
+  section: { marginBottom: 10 },
+  kicker: { fontFamily: "Inter", fontWeight: 600, fontSize: 6.8, letterSpacing: 0.9, color: C.tealText, textTransform: "uppercase", marginBottom: 3 },
+  sectionTitle: { fontFamily: "Inter", fontWeight: 700, fontSize: 10, color: C.ink, marginBottom: 6 },
 
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  kpiCard: { width: "31.8%", position: "relative", borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 9, backgroundColor: C.surface, minHeight: 58 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  kpiCard: { width: "32%", position: "relative", borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: C.surface },
   kpiCardGap: { borderStyle: "dashed", borderColor: C.borderStrong, backgroundColor: C.surface2 },
-  kpiAccent: { position: "absolute", top: 0, right: 0, width: 34, height: 3, borderTopRightRadius: 8, backgroundColor: C.teal },
-  kpiLabel: { fontFamily: "Inter", fontWeight: 600, fontSize: 6.8, letterSpacing: 0.6, color: C.sec, textTransform: "uppercase", marginBottom: 4 },
-  kpiValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 15, color: C.ink },
+  kpiAccent: { position: "absolute", top: 0, right: 0, width: 28, height: 2.5, borderTopRightRadius: 6, backgroundColor: C.teal },
+  kpiLabel: { fontFamily: "Inter", fontWeight: 600, fontSize: 6, letterSpacing: 0.5, color: C.sec, textTransform: "uppercase", marginBottom: 3 },
+  kpiValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 13, color: C.ink },
   kpiValueGap: { color: C.muted },
-  kpiHint: { fontSize: 6.8, color: C.muted, marginTop: 2 },
-  delta: { fontSize: 7.5, fontWeight: 600, marginTop: 3 },
+  kpiHint: { fontSize: 6, color: C.muted, marginTop: 1 },
+  delta: { fontSize: 6.6, fontWeight: 600, marginTop: 2 },
   deltaGood: { color: C.tealText },
   deltaBad: { color: C.danger },
   deltaNeutral: { color: C.muted },
   deltaGap: { color: C.goldText },
 
-  funnelRow: { flexDirection: "row", gap: 16, alignItems: "center" },
-  resultPanel: { flex: 1, borderWidth: 1, borderColor: C.tealSoft, borderRadius: 12, padding: 14, backgroundColor: C.tealSoft },
-  resultLabel: { fontFamily: "Inter", fontWeight: 700, fontSize: 7, letterSpacing: 0.8, color: C.tealText, textTransform: "uppercase" },
-  resultValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 28, color: C.ink, marginTop: 2 },
-  resultRate: { fontSize: 8.5, color: C.sec, marginTop: 2 },
-  resultSide: { flexDirection: "row", gap: 16, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: C.tealSoft },
-  resultDt: { fontFamily: "Inter", fontWeight: 700, fontSize: 6.5, letterSpacing: 0.6, color: C.muted, textTransform: "uppercase" },
-  resultDd: { fontSize: 12, fontWeight: 600, color: C.ink, marginTop: 2 },
+  funnelRow: { flexDirection: "row", gap: 14, alignItems: "center" },
+  resultPanel: { flex: 1, borderWidth: 1, borderColor: C.tealSoft, borderRadius: 10, padding: 11, backgroundColor: C.tealSoft },
+  resultLabel: { fontFamily: "Inter", fontWeight: 700, fontSize: 6.5, letterSpacing: 0.7, color: C.tealText, textTransform: "uppercase" },
+  resultValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 24, color: C.ink, marginTop: 1 },
+  resultRate: { fontSize: 8, color: C.sec, marginTop: 1 },
+  resultSide: { flexDirection: "row", gap: 14, marginTop: 9, paddingTop: 8, borderTopWidth: 1, borderTopColor: C.tealSoft },
+  resultDt: { fontFamily: "Inter", fontWeight: 700, fontSize: 6, letterSpacing: 0.5, color: C.muted, textTransform: "uppercase" },
+  resultDd: { fontSize: 10.5, fontWeight: 600, color: C.ink, marginTop: 1 },
 
-  legendRow: { flexDirection: "row", gap: 14, marginTop: 6 },
-  legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
-  legendDot: { width: 7, height: 7, borderRadius: 4 },
-  legendLabel: { fontSize: 8, color: C.sec },
+  legendRow: { flexDirection: "row", gap: 12, marginTop: 4 },
+  legendItem: { flexDirection: "row", alignItems: "center", gap: 3 },
+  legendDot: { width: 6, height: 6, borderRadius: 3 },
+  legendLabel: { fontSize: 7.5, color: C.sec },
 
-  gaugeCard: { width: "31.8%", borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 10, backgroundColor: C.surface2, alignItems: "center" },
-  gaugeLabel: { fontFamily: "Inter", fontWeight: 600, fontSize: 6.8, letterSpacing: 0.6, color: C.sec, textTransform: "uppercase", marginTop: 6 },
-  gaugeValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 14, color: C.ink, marginTop: 2 },
+  gaugeCard: { width: "32%", borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: C.surface2, alignItems: "center" },
+  gaugeLabel: { fontFamily: "Inter", fontWeight: 600, fontSize: 6, letterSpacing: 0.5, color: C.sec, textTransform: "uppercase", marginTop: 3 },
+  gaugeValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 12, color: C.ink, marginTop: 1 },
 
-  table: { borderWidth: 1, borderColor: C.border, borderRadius: 6 },
+  table: { borderWidth: 1, borderColor: C.border, borderRadius: 5 },
   tableRow: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: C.border },
   tableRowLast: { flexDirection: "row" },
-  tableHeaderCell: { flex: 1, padding: 6, fontFamily: "Inter", fontWeight: 600, fontSize: 7.5, backgroundColor: C.surface2, color: C.sec },
-  tableCell: { flex: 1, padding: 6, fontSize: 7.5, color: C.ink },
-  tableCellFirst: { flex: 2.2 },
+  tableHeaderCell: { flex: 1, paddingVertical: 4, paddingHorizontal: 5, fontFamily: "Inter", fontWeight: 600, fontSize: 6.5, backgroundColor: C.surface2, color: C.sec },
+  tableCell: { flex: 1, paddingVertical: 4, paddingHorizontal: 5, fontSize: 6.5, color: C.ink },
+  tableCellFirst: { flex: 2.4 },
+  tableMore: { fontSize: 6.8, color: C.muted, marginTop: 3 },
 
-  empty: { fontSize: 8.5, color: C.muted, paddingVertical: 8 },
-  footer: { position: "absolute", bottom: 18, left: 30, right: 30, fontSize: 7, color: C.muted, textAlign: "center" },
+  empty: { fontSize: 8, color: C.muted, paddingVertical: 5 },
+  footer: { position: "absolute", bottom: 12, left: 24, right: 24, fontSize: 6.5, color: C.muted, textAlign: "center" },
 });
 
 export type AdsReportInput = {
@@ -193,7 +200,7 @@ function FunnelSvg({ labels, values }: { labels: string[]; values: NullableMetri
   // `stageRates` de FunnelChart (que faz `values.slice(1)`).
   const rates = values.slice(1).map((v, i) => acquisitionRateLabel(v, values[i]));
   const height = funnelChartHeight(labels.length);
-  const width = 288;
+  const width = 210;
   return (
     <Svg viewBox={`0 0 ${CHART_W} ${height}`} style={{ width, height: (width * height) / CHART_W }}>
       <Defs>
@@ -215,14 +222,14 @@ function FunnelSvg({ labels, values }: { labels: string[]; values: NullableMetri
             />
             <Path d={band.leader} stroke={C.borderStrong} strokeWidth={0.75} fill="none" />
             <Circle cx={band.dot.cx} cy={band.dot.cy} r={2} fill={C.borderStrong} />
-            <SvgText x={band.labelAt.x} y={band.labelAt.y} fill={C.sec} fontFamily="Inter" fontWeight={600} fontSize={7}>
+            <SvgText x={band.labelAt.x} y={band.labelAt.y} fill={C.sec} fontFamily="Inter" fontWeight={600} fontSize={6.5}>
               {label.toUpperCase()}
             </SvgText>
-            <SvgText x={band.valueAt.x} y={band.valueAt.y} fill={C.ink} fontFamily="Fraunces" fontWeight={600} fontSize={14}>
+            <SvgText x={band.valueAt.x} y={band.valueAt.y} fill={C.ink} fontFamily="Fraunces" fontWeight={600} fontSize={13}>
               {formatAcquisitionValue(values[i])}
             </SvgText>
             {band.rateAt ? (
-              <SvgText x={band.rateAt.x} y={band.rateAt.y} textAnchor="middle" fill={C.muted} fontFamily="Inter" fontWeight={600} fontSize={7}>
+              <SvgText x={band.rateAt.x} y={band.rateAt.y} textAnchor="middle" fill={C.muted} fontFamily="Inter" fontWeight={600} fontSize={6.5}>
                 {rates[i]}
               </SvgText>
             ) : null}
@@ -265,11 +272,11 @@ function ResultPanel({
 
 function TrendSvg({ series }: { series: { label: string; points: { date: string; value: number }[] }[] }) {
   const W = 520;
-  const H = 150;
+  const H = 96;
   const padL = 10;
   const padR = 10;
-  const padT = 14;
-  const padB = 20;
+  const padT = 12;
+  const padB = 14;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
   const n = series[0]?.points.length ?? 0;
@@ -281,14 +288,14 @@ function TrendSvg({ series }: { series: { label: string; points: { date: string;
   // como o TrendChart da tela (que usa dois eixos Y). Investimento (R$) e
   // Conversas (unidades) num eixo só deixaria a menor achatada no chão.
   return (
-    <Svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: (531 * H) / W }}>
+    <Svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: (547 * H) / W }}>
       <Line x1={padL} y1={baseline} x2={W - padR} y2={baseline} stroke={C.border} strokeWidth={1} />
       {series.map((s, si) => {
         const color = REPORT_SERIES[si % REPORT_SERIES.length];
         const seriesMax = Math.max(1, ...s.points.map((p) => p.value));
         const y = (v: number) => padT + (1 - v / seriesMax) * innerH;
         const maxLabel = (
-          <SvgText key={`m${si}`} x={si === 0 ? padL : W - padR} y={padT - 4} textAnchor={si === 0 ? "start" : "end"} fill={color} fontFamily="Inter" fontWeight={600} fontSize={7}>
+          <SvgText key={`m${si}`} x={si === 0 ? padL : W - padR} y={padT - 4} textAnchor={si === 0 ? "start" : "end"} fill={color} fontFamily="Inter" fontWeight={600} fontSize={6.5}>
             {formatAcquisitionValue(seriesMax)}
           </SvgText>
         );
@@ -296,10 +303,10 @@ function TrendSvg({ series }: { series: { label: string; points: { date: string;
           return <G key={si}>{maxLabel}<Circle cx={x(0)} cy={y(s.points[0].value)} r={2.5} fill={color} /></G>;
         }
         const pts = s.points.map((p, i) => `${x(i)},${y(p.value)}`).join(" ");
-        return <G key={si}>{maxLabel}<Polyline points={pts} stroke={color} strokeWidth={2} fill="none" strokeLinejoin="round" /></G>;
+        return <G key={si}>{maxLabel}<Polyline points={pts} stroke={color} strokeWidth={1.6} fill="none" strokeLinejoin="round" /></G>;
       })}
-      {first ? <SvgText x={padL} y={H - 6} fill={C.muted} fontFamily="Inter" fontSize={7}>{shortDate(first)}</SvgText> : null}
-      {last ? <SvgText x={W - padR} y={H - 6} textAnchor="end" fill={C.muted} fontFamily="Inter" fontSize={7}>{shortDate(last)}</SvgText> : null}
+      {first ? <SvgText x={padL} y={H - 5} fill={C.muted} fontFamily="Inter" fontSize={6.5}>{shortDate(first)}</SvgText> : null}
+      {last ? <SvgText x={W - padR} y={H - 5} textAnchor="end" fill={C.muted} fontFamily="Inter" fontSize={6.5}>{shortDate(last)}</SvgText> : null}
     </Svg>
   );
 }
@@ -320,7 +327,7 @@ function GaugeCard({
   const py = cy - R * Math.sin(theta);
   return (
     <View style={S.gaugeCard} wrap={false}>
-      <Svg viewBox="0 0 96 56" style={{ width: 96, height: 56 }}>
+      <Svg viewBox="0 0 96 52" style={{ width: 78, height: 42 }}>
         <Path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`} fill="none" stroke={C.inset} strokeWidth={8} />
         {progress > 0 ? (
           <Path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${px} ${py}`} fill="none" stroke={C.tealStrong} strokeWidth={8} strokeLinecap="round" />
@@ -360,100 +367,103 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
     points: acquisitionMetricSeries(posts, r, period.from, period.to, cm).map((p) => ({ date: p.date, value: p.value ?? 0 })),
   }));
 
+  // Seções escondidas no template (Configurações › Performance › Aquisição).
+  // O que a pessoa apara na tela e salva é o que o PDF deixa de mostrar.
+  const hidden = new Set(acq.hiddenSections);
+
   const columns: (MetricRef | MetaPostMetricKey)[] = config.prefs.visibleColumns.length
     ? config.prefs.visibleColumns
     : ["alcance", "impressoes", "cliquesLink", "contatos", "custo"];
-  const campaigns = campaignSummaries(posts)
-    .sort((a, b) => (b.metrics.custo ?? b.metrics.alcance ?? 0) - (a.metrics.custo ?? a.metrics.alcance ?? 0))
-    .slice(0, 14);
+  // Quanto mais seções o template mostra, menos linhas de campanha cabem na
+  // folha. Aparou 2+ seções → sobra espaço pra tabela inteira.
+  const CAMPAIGN_CAP = hidden.size >= 2 ? 16 : 9;
+  const allCampaigns = campaignSummaries(posts)
+    .sort((a, b) => (b.metrics.custo ?? b.metrics.alcance ?? 0) - (a.metrics.custo ?? a.metrics.alcance ?? 0));
+  const campaigns = allCampaigns.slice(0, CAMPAIGN_CAP);
+  const campaignsOverflow = allCampaigns.length - campaigns.length;
 
   const subtitle = `${cadenceLabel} · ${period.from} a ${period.to} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`;
-  const Header = () => (
-    <View style={S.header}>
-      <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 22, height: 22 }}>
-        {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
-      </Svg>
-      <View>
-        <Text style={S.title}>Funil de mensagens — {clientName}</Text>
-        <Text style={S.subtitle}>{subtitle}</Text>
-      </View>
-    </View>
-  );
 
   return (
     <Document>
-      {/* Página 1 — KPIs + funil */}
-      <Page size="A4" style={S.page}>
-        <Header />
+      <Page size="A4" style={S.page} wrap>
+        <View style={S.header}>
+          <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 20, height: 20 }}>
+            {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
+          </Svg>
+          <View>
+            <Text style={S.title}>Funil de mensagens — {clientName}</Text>
+            <Text style={S.subtitle}>{subtitle}</Text>
+          </View>
+        </View>
 
-        <View style={S.section} wrap={false}>
-          <Text style={S.kicker}>KPIs</Text>
-          {acq.kpiSlots.length ? (
+        {!hidden.has("kpis") && acq.kpiSlots.length ? (
+          <View style={S.section} wrap={false}>
+            <Text style={S.kicker}>KPIs</Text>
             <View style={S.grid}>
               {acq.kpiSlots.map((ref) => <KpiCard key={ref} {...kpi(ref)} />)}
             </View>
-          ) : <Text style={S.empty}>Nenhum KPI configurado neste modelo.</Text>}
-        </View>
-
-        <View style={S.section} wrap={false}>
-          <Text style={S.kicker}>Conversão e intenção</Text>
-          <Text style={S.sectionTitle}>Funil de aquisição</Text>
-          <View style={S.funnelRow}>
-            <FunnelSvg labels={funnelLabels} values={funnelValues} />
-            <ResultPanel
-              label={funnelLabels.at(-1) ?? "Resultado"}
-              value={funnelValues.at(-1) ?? null}
-              previousStage={funnelValues.at(-2) ?? null}
-              previousLabel={funnelLabels.at(-2) ?? ""}
-              spend={spend}
-            />
           </View>
-        </View>
+        ) : null}
 
-        <Text style={S.footer} fixed>North — relatório gerado automaticamente</Text>
-      </Page>
-
-      {/* Página 2 — evolução + volume + eficiência de mídia */}
-      <Page size="A4" style={S.page}>
-        <Header />
-
-        <View style={S.section} wrap={false}>
-          <Text style={S.kicker}>Evolução</Text>
-          <Text style={S.sectionTitle}>{trend.map((t) => t.label).join(" x ") || "Tendência"}</Text>
-          {trend.length && trend[0].points.length ? (
-            <>
-              <TrendSvg series={trend} />
-              <View style={S.legendRow}>
-                {trend.map((t, i) => (
-                  <View style={S.legendItem} key={i}>
-                    <View style={[S.legendDot, { backgroundColor: REPORT_SERIES[i % REPORT_SERIES.length] }]} />
-                    <Text style={S.legendLabel}>{t.label}</Text>
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : <Text style={S.empty}>Sem série no período.</Text>}
-        </View>
-
-        <View style={S.section} wrap={false}>
-          <Text style={S.kicker}>Volume</Text>
-          <View style={S.grid}>
-            {acq.volumeSlots.map((ref) => <KpiCard key={ref} {...kpi(ref)} />)}
-            <KpiCard
-              label="Taxa de conversão"
-              value={summary.conversionRate}
-              previous={prevSummary.conversionRate}
-              kind="percent"
-              inverse={false}
-              hint="Leads ÷ cliques"
-            />
+        {!hidden.has("funnel") ? (
+          <View style={S.section} wrap={false}>
+            <Text style={S.kicker}>Conversão e intenção</Text>
+            <Text style={S.sectionTitle}>Funil de aquisição</Text>
+            <View style={S.funnelRow}>
+              <FunnelSvg labels={funnelLabels} values={funnelValues} />
+              <ResultPanel
+                label={funnelLabels.at(-1) ?? "Resultado"}
+                value={funnelValues.at(-1) ?? null}
+                previousStage={funnelValues.at(-2) ?? null}
+                previousLabel={funnelLabels.at(-2) ?? ""}
+                spend={spend}
+              />
+            </View>
           </View>
-        </View>
+        ) : null}
 
-        <View style={S.section} wrap={false}>
-          <Text style={S.kicker}>Eficiência de mídia</Text>
-          <Text style={S.sectionTitle}>Custos e taxas</Text>
-          {acq.gaugeSlots.length ? (
+        {!hidden.has("trend") ? (
+          <View style={S.section} wrap={false}>
+            <Text style={S.kicker}>Evolução</Text>
+            <Text style={S.sectionTitle}>{trend.map((t) => t.label).join(" × ") || "Tendência"}</Text>
+            {trend.length && trend[0].points.length ? (
+              <>
+                <TrendSvg series={trend} />
+                <View style={S.legendRow}>
+                  {trend.map((t, i) => (
+                    <View style={S.legendItem} key={i}>
+                      <View style={[S.legendDot, { backgroundColor: REPORT_SERIES[i % REPORT_SERIES.length] }]} />
+                      <Text style={S.legendLabel}>{t.label}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : <Text style={S.empty}>Sem série no período.</Text>}
+          </View>
+        ) : null}
+
+        {!hidden.has("volume") ? (
+          <View style={S.section} wrap={false}>
+            <Text style={S.kicker}>Volume</Text>
+            <View style={S.grid}>
+              {acq.volumeSlots.map((ref) => <KpiCard key={ref} {...kpi(ref)} />)}
+              <KpiCard
+                label="Taxa de conversão"
+                value={summary.conversionRate}
+                previous={prevSummary.conversionRate}
+                kind="percent"
+                inverse={false}
+                hint="Leads ÷ cliques"
+              />
+            </View>
+          </View>
+        ) : null}
+
+        {!hidden.has("gauges") && acq.gaugeSlots.length ? (
+          <View style={S.section} wrap={false}>
+            <Text style={S.kicker}>Eficiência de mídia</Text>
+            <Text style={S.sectionTitle}>Custos e taxas</Text>
             <View style={S.grid}>
               {acq.gaugeSlots.map((ref) => (
                 <GaugeCard
@@ -466,40 +476,44 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
                 />
               ))}
             </View>
-          ) : <Text style={S.empty}>Nenhum indicador de eficiência configurado.</Text>}
-        </View>
-
-        <Text style={S.footer} fixed>North — relatório gerado automaticamente</Text>
-      </Page>
-
-      {/* Página 3 — tabela de campanhas */}
-      <Page size="A4" style={S.page} wrap>
-        <Header />
-        <Text style={S.sectionTitle}>Campanhas</Text>
-        {campaigns.length ? (
-          <View style={S.table}>
-            <View style={S.tableRow}>
-              <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Campanha</Text>
-              {columns.map((col) => (
-                <Text style={S.tableHeaderCell} key={col}>{columnLabel(String(col), cm)}</Text>
-              ))}
-            </View>
-            {campaigns.map((row, i) => (
-              <View style={i === campaigns.length - 1 ? S.tableRowLast : S.tableRow} key={row.key} wrap={false}>
-                <Text style={[S.tableCell, S.tableCellFirst]}>{row.caption || "Sem nome"}</Text>
-                {columns.map((col) => {
-                  const isBuiltin = !String(col).startsWith("custom:");
-                  const raw = isBuiltin ? row.metrics[col as MetaPostMetricKey] : campaignMetricValue(row, col as MetricRef, cm);
-                  return (
-                    <Text style={S.tableCell} key={col}>
-                      {raw === undefined ? "—" : metricValue(raw, metricRefKind(col as MetricRef, cm), row.currency)}
-                    </Text>
-                  );
-                })}
-              </View>
-            ))}
           </View>
-        ) : <Text style={S.empty}>Nenhuma campanha com dados no período.</Text>}
+        ) : null}
+
+        {/* Sem wrap={false}: se todas as seções estão visíveis e a tabela não
+            couber no que sobra da folha, a cauda dela continua na 2ª — melhor
+            que empurrar a tabela inteira e deixar a folha 1 pela metade. */}
+        <View style={S.section}>
+          <Text style={S.kicker}>Campanhas</Text>
+          {campaigns.length ? (
+            <>
+              <View style={S.table}>
+                <View style={S.tableRow}>
+                  <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Campanha</Text>
+                  {columns.map((col) => (
+                    <Text style={S.tableHeaderCell} key={col}>{columnLabel(String(col), cm)}</Text>
+                  ))}
+                </View>
+                {campaigns.map((row, i) => (
+                  <View style={i === campaigns.length - 1 ? S.tableRowLast : S.tableRow} key={row.key} wrap={false}>
+                    <Text style={[S.tableCell, S.tableCellFirst]}>{row.caption || "Sem nome"}</Text>
+                    {columns.map((col) => {
+                      const isBuiltin = !String(col).startsWith("custom:");
+                      const raw = isBuiltin ? row.metrics[col as MetaPostMetricKey] : campaignMetricValue(row, col as MetricRef, cm);
+                      return (
+                        <Text style={S.tableCell} key={col}>
+                          {raw === undefined ? "—" : metricValue(raw, metricRefKind(col as MetricRef, cm), row.currency)}
+                        </Text>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+              {campaignsOverflow > 0 ? (
+                <Text style={S.tableMore}>+{campaignsOverflow} campanha{campaignsOverflow > 1 ? "s" : ""} com menos investimento no período.</Text>
+              ) : null}
+            </>
+          ) : <Text style={S.empty}>Nenhuma campanha com dados no período.</Text>}
+        </View>
 
         <Text style={S.footer} fixed>North — relatório gerado automaticamente</Text>
       </Page>

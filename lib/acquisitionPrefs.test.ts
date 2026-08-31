@@ -42,4 +42,11 @@ describe("sanitizeAcquisitionViewPrefs", () => {
   it("keeps showMessageBranch=false when explicitly set", () => {
     expect(sanitizeAcquisitionViewPrefs({ showMessageBranch: false }).showMessageBranch).toBe(false);
   });
+
+  it("hiddenSections default vazio; guarda só chaves de seção válidas, sem duplicata", () => {
+    expect(sanitizeAcquisitionViewPrefs({}).hiddenSections).toEqual([]);
+    expect(sanitizeAcquisitionViewPrefs({ hiddenSections: ["gauges", "volume", "gauges", "xpto"] }).hiddenSections)
+      .toEqual(["gauges", "volume"]);
+    expect(sanitizeAcquisitionViewPrefs({ hiddenSections: "gauges" }).hiddenSections).toEqual([]);
+  });
 });

@@ -12,7 +12,7 @@ import { isNotIntegrated, metricLabel } from "./insights";
 import { metricRefInverse, metricRefKind, metricRefOptions } from "./performanceLabels";
 import { CHART_W, funnelBandLayout, funnelChartHeight } from "@/lib/reports/funnelGeometry";
 import type { PerformanceWorkspace } from "./usePerformanceWorkspace";
-import { ACQUISITION_VIEW_PREFS_DEFAULT } from "@/lib/acquisitionPrefs";
+import { ACQUISITION_SECTION_KEYS, ACQUISITION_VIEW_PREFS_DEFAULT, type AcquisitionSectionKey } from "@/lib/acquisitionPrefs";
 import type { CustomMetric, MetricRef } from "@/lib/performancePrefs";
 import type { MetaPost } from "@/lib/windsor";
 
@@ -204,7 +204,9 @@ export default function AcquisitionDashboard({ workspace }: { workspace: Perform
     hiddenSections: allHiddenSections, toggleSectionVisibility,
   } = workspace;
   const hiddenSections = allHiddenSections.acquisition;
-  const hideSection = (key: string) => toggleSectionVisibility("acquisition", key);
+  // Esconder/mostrar seção é config do template (o PDF da automação respeita) —
+  // por isso marca o template como sujo, igual às trocas de métrica.
+  const hideSection = (key: string) => { toggleSectionVisibility("acquisition", key); markTemplateDirty(); };
 
   const [kpiSlots, setKpiSlots] = useState<MetricRef[]>(ACQUISITION_VIEW_PREFS_DEFAULT.kpiSlots);
   const [volumeSlots, setVolumeSlots] = useState<MetricRef[]>(ACQUISITION_VIEW_PREFS_DEFAULT.volumeSlots);
@@ -231,8 +233,11 @@ export default function AcquisitionDashboard({ workspace }: { workspace: Perform
   }, [activeTemplateConfig, activeTemplateId]);
 
   useEffect(() => {
-    setLatestAcquisition({ kpiSlots, volumeSlots, gaugeSlots, funnelStages, showMessageBranch, trendMetrics });
-  }, [kpiSlots, volumeSlots, gaugeSlots, funnelStages, showMessageBranch, trendMetrics, setLatestAcquisition]);
+    setLatestAcquisition({
+      kpiSlots, volumeSlots, gaugeSlots, funnelStages, showMessageBranch, trendMetrics,
+      hiddenSections: ([...hiddenSections] as AcquisitionSectionKey[]).filter((k) => ACQUISITION_SECTION_KEYS.includes(k)),
+    });
+  }, [kpiSlots, volumeSlots, gaugeSlots, funnelStages, showMessageBranch, trendMetrics, hiddenSections, setLatestAcquisition]);
 
   const current = currentPaidRows;
   const prev = prevPaidRows;

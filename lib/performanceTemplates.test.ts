@@ -77,6 +77,9 @@ describe("performance templates", () => {
     for (const template of BUILTIN_PERFORMANCE_TEMPLATES) {
       expect(template.config.acquisition.kpiSlots.length).toBeGreaterThan(0);
       expect(template.config.acquisition.funnelStages.length).toBeGreaterThanOrEqual(2);
+      // hiddenSections é config do template (o PDF da automação respeita) —
+      // os builtins mostram tudo.
+      expect(template.config.acquisition.hiddenSections).toEqual([]);
       // Nível "ad" deixaria KPIs/tendência/ranking vazios até alguém marcar uma
       // campanha — as linhas de criativo só são buscadas para campanhas marcadas.
       expect(template.config.level).toBe("campaign");

@@ -160,6 +160,7 @@ const messageFunnelAcquisition: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliquesLink", "contatos"],
   showMessageBranch: false,
   trendMetrics: ["custo", "contatos"],
+  hiddenSections: [],
 };
 const purchaseFunnelAcquisition: AcquisitionViewPrefs = {
   kpiSlots: ["custo", "alcance", "compras", `custom:${COST_PER_PURCHASE_ID}`],
@@ -168,6 +169,7 @@ const purchaseFunnelAcquisition: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliquesLink", "compras"],
   showMessageBranch: false,
   trendMetrics: ["custo", "compras"],
+  hiddenSections: [],
 };
 const resultFunnelAcquisition: AcquisitionViewPrefs = {
   kpiSlots: ["custo", "alcance", "resultado", `custom:${COST_PER_RESULT_ID}`],
@@ -176,6 +178,7 @@ const resultFunnelAcquisition: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliques", "resultado"],
   showMessageBranch: false,
   trendMetrics: ["custo", "resultado"],
+  hiddenSections: [],
 };
 
 // Nível fica em "campaign" nos três. As linhas de conjunto/criativo só são

@@ -407,6 +407,10 @@ export function usePerformanceWorkspace({ clients, canEdit }: { clients: ClientL
     setSortDir(config.prefs.sortDir);
     setVisibleColumns(config.prefs.visibleColumns);
     setAmbosSource(config.cardSources);
+    // Visibilidade de seção da Aquisição é config do template (o PDF da
+    // automação lê daqui). Analytics não é tocado — templates não guardam a
+    // visibilidade das seções de Analytics.
+    setHiddenSections((prev) => ({ ...prev, acquisition: new Set<string>(config.acquisition.hiddenSections) }));
     setActiveTemplateId(template.id);
     setActiveTemplateConfig(config);
     setTemplateDirty(false);

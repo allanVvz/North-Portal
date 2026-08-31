@@ -55,4 +55,17 @@ describe("renderAdsReportPdf", () => {
       expect(isPdf(buf), template.id).toBe(true);
     }
   });
+
+  it("template com seções escondidas renderiza (e cabe numa folha)", async () => {
+    const cfg: typeof DEFAULT_BUILTIN_TEMPLATE.config = {
+      ...DEFAULT_BUILTIN_TEMPLATE.config,
+      acquisition: { ...DEFAULT_BUILTIN_TEMPLATE.config.acquisition, hiddenSections: ["gauges", "volume", "trend"] },
+    };
+    const buf = await renderAdsReportPdf({ ...base, config: cfg });
+    expect(isPdf(buf)).toBe(true);
+    // %PDF ... /Type /Page repetido = nº de páginas; com 3 seções aparadas + KPIs
+    // + funil + tabela curta, é uma folha só.
+    const pages = (buf.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+    expect(pages).toBe(1);
+  });
 });
