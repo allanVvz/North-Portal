@@ -9,8 +9,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // YouTube cai em north_trilhas (sem client_id); a reordenação persiste
 // `position`; e o portal de um cliente vê a mesma lista, na mesma ordem.
 //
-// PRÉ-REQUISITO: a migração 20260831030000_north_trilhas.sql precisa estar
-// aplicada no backend real — enquanto não estiver, este spec falha na criação.
+// PRÉ-REQUISITO: a migração north_trilhas precisa estar aplicada no backend real.
 
 const RUN = Date.now();
 const EMAIL = `e2e-informacoes-${RUN}@e2e-test.com`;
@@ -35,11 +34,11 @@ async function login(page: Page): Promise<void> {
 
 async function addVideo(page: Page, title: string, url: string) {
   await page.getByRole("button", { name: "+ Vídeo do YouTube" }).click();
-  const form = page.locator(".set-legal-editor");
-  await form.getByLabel("Link do vídeo do YouTube").fill(url);
-  await form.getByLabel("Título").fill(title);
-  await form.getByRole("button", { name: "Salvar" }).click();
-  await expect(page.locator(".trilha-row", { hasText: title })).toBeVisible({ timeout: 20_000 });
+  const modal = page.locator(".kb-modal");
+  await modal.getByLabel("Link do vídeo do YouTube").fill(url);
+  await modal.getByLabel("Título").fill(title);
+  await modal.getByRole("button", { name: "Salvar" }).click();
+  await expect(page.locator(".trilha-card", { hasText: title })).toBeVisible({ timeout: 20_000 });
 }
 
 test.describe("Informações — Trilhas North lista global (e2e contra o backend real)", () => {
@@ -84,10 +83,20 @@ test.describe("Informações — Trilhas North lista global (e2e contra o backen
 
     await tabs.getByRole("button", { name: /Trilhas North/ }).click();
     await expect(page.getByRole("heading", { name: "Trilhas North" })).toBeVisible();
-    // O Manual do Cliente é a linha fixa, sempre presente e sem "Excluir".
-    const manualRow = page.locator(".trilha-row", { hasText: "Manual do Cliente" });
-    await expect(manualRow).toBeVisible({ timeout: 20_000 });
-    await expect(manualRow.getByRole("button", { name: "Excluir" })).toHaveCount(0);
+    // O Manual do Cliente é o card fixo, sempre presente e sem "Excluir".
+    const manualCard = page.locator(".trilha-card", { hasText: "Manual do Cliente" });
+    await expect(manualCard).toBeVisible({ timeout: 20_000 });
+    await expect(manualCard.getByRole("button", { name: "Excluir" })).toHaveCount(0);
+
+    // Visualizar embute o deck no modal e dá pra navegar entre os slides,
+    // sem gravar `manual_seen` de ninguém (é só admin).
+    await manualCard.getByRole("button", { name: "Visualizar" }).click();
+    const preview = page.locator(".tm.tm-lg");
+    await expect(preview.locator(".manual-viewer")).toBeVisible({ timeout: 15_000 });
+    await expect(preview.locator(".manual-count")).toHaveText("01 / 11");
+    await preview.getByRole("button", { name: /Próximo/ }).click();
+    await expect(preview.locator(".manual-count")).toHaveText("02 / 11");
+    await preview.getByRole("button", { name: "Fechar" }).first().click();
   });
 
   test("adiciona vídeo do YouTube → cai em north_trilhas sem client_id; reordena persiste", async ({ page }) => {
@@ -113,10 +122,15 @@ test.describe("Informações — Trilhas North lista global (e2e contra o backen
       expect(r).not.toHaveProperty("client_id");
     }
 
-    // Reordena: arrasta a segunda trilha para cima da primeira.
-    const rowV1 = page.locator(".trilha-row", { hasText: V1 });
-    const rowV2 = page.locator(".trilha-row", { hasText: V2 });
-    await rowV2.dragTo(rowV1);
+    // Visualizar um vídeo mostra o embed do YouTube.
+    const cardV1 = page.locator(".trilha-card", { hasText: V1 });
+    await cardV1.getByRole("button", { name: "Visualizar" }).click();
+    await expect(page.locator(".tm.tm-lg .trilha-preview-embed iframe")).toHaveAttribute("src", /youtube\.com\/embed\/dQw4w9WgXcQ/);
+    await page.locator(".tm.tm-lg .kb-modal-close").click();
+
+    // Reordena: arrasta o segundo card para cima do primeiro.
+    const cardV2 = page.locator(".trilha-card", { hasText: V2 });
+    await cardV2.dragTo(page.locator(".trilha-card", { hasText: V1 }));
 
     await expect
       .poll(async () => {

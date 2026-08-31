@@ -2911,10 +2911,37 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .trilha-add { display: flex; align-items: stretch; gap: 12px; margin-top: 14px; }
 .trilha-add .doc-dropzone { flex: 1; margin: 0; }
 .trilha-add > button { flex: none; align-self: stretch; }
-.trilha-list { margin-top: 16px; }
-.trilha-row { cursor: grab; }
-.trilha-row.dragging { opacity: .4; }
-.trilha-row:active { cursor: grabbing; }
+.trilha-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.trilha-card {
+  display: flex; align-items: flex-start; gap: 14px;
+  border: 1px solid var(--a-border); border-radius: 12px; padding: 14px 16px;
+  background: var(--a-surface); cursor: grab;
+}
+.trilha-card.dragging { opacity: .4; }
+.trilha-card:active { cursor: grabbing; }
+.trilha-card-ico {
+  width: 34px; height: 34px; border-radius: 9px; background: var(--a-inset); color: var(--a-sec);
+  display: inline-grid; place-items: center; font-size: 16px; flex-shrink: 0;
+}
+.trilha-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.trilha-card-titlerow { display: flex; align-items: center; gap: 8px; }
+.trilha-card-titlerow strong { font-size: 14px; font-weight: 600; color: var(--a-ink); }
+.trilha-card-desc { margin: 4px 0 0; font-size: 12.5px; color: var(--a-muted); line-height: 1.5; overflow-wrap: anywhere; }
+.trilha-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+@media (max-width: 720px) {
+  .trilha-card { flex-wrap: wrap; }
+  .trilha-card-actions { width: 100%; justify-content: flex-end; }
+}
+
+/* Conteúdo embutido no TrilhaPreviewModal (vídeo do YouTube / deck do Manual) —
+   preenche a .tm-main igual ao .file-preview do preview de documento. */
+.trilha-preview-embed {
+  position: relative; min-width: 0; min-height: 510px; height: 100%; flex: 1;
+  overflow: hidden; border-radius: 14px; background: #0a1210;
+}
+.trilha-preview-embed > iframe { width: 100%; height: 100%; border: 0; display: block; }
+.trilha-preview-manual { border: 1px solid var(--a-border); }
+.trilha-preview-manual .manual-viewer { height: 100%; }
 /* appearance */
 .set-appearance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .set-h3 { margin: 0 0 2px; font-size: 14.5px; font-weight: 600; color: var(--a-ink); }

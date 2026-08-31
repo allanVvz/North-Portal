@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import CompassMark from "../brand/CompassMark";
+import "./ManualDoCliente.css";
 
 type Theme = "dark" | "light";
 
@@ -258,11 +259,13 @@ function SlideBody({
   onBriefing,
   onFinish,
   clientName,
+  previewMode = false,
 }: {
   slide: ManualSlide;
   onBriefing: () => void;
   onFinish: () => void;
   clientName: string;
+  previewMode?: boolean;
 }) {
   if (slide.kind === "cover") {
     return (
@@ -280,7 +283,12 @@ function SlideBody({
         </Reveal>
         {slide.cta ? (
           <Reveal i={3} className="manual-reveal">
-            <button className="manual-btn primary" onClick={slide.cta.kind === "finish" ? onFinish : onBriefing}>
+            <button
+              className="manual-btn primary"
+              disabled={previewMode}
+              title={previewMode ? "Ação disponível só para o cliente" : undefined}
+              onClick={slide.cta.kind === "finish" ? onFinish : onBriefing}
+            >
               {slide.cta.label}
             </button>
           </Reveal>
@@ -375,7 +383,14 @@ function SlideBody({
         {slide.quote ? <Reveal i={4 + slide.items.length} className="manual-reveal manual-quote"><p>&ldquo;{slide.quote}&rdquo;</p></Reveal> : null}
         {slide.cta ? (
           <Reveal i={5 + slide.items.length} className="manual-reveal">
-            <button className="manual-btn primary sm manual-lc-cta" onClick={onBriefing}>{slide.cta.label}</button>
+            <button
+              className="manual-btn primary sm manual-lc-cta"
+              disabled={previewMode}
+              title={previewMode ? "Ação disponível só para o cliente" : undefined}
+              onClick={onBriefing}
+            >
+              {slide.cta.label}
+            </button>
           </Reveal>
         ) : null}
       </div>
@@ -452,16 +467,21 @@ function SlideBody({
 
 export default function ManualDoCliente({
   onClose,
-  onOpenBriefing,
-  onFinish,
+  onOpenBriefing = () => {},
+  onFinish = () => {},
   clientName,
+  previewMode = false,
 }: {
   onClose: () => void;
-  onOpenBriefing: () => void;
+  onOpenBriefing?: () => void;
   // Persists Manual do Cliente completion server-side (client_prefs.manual_seen)
   // so Jornada/Home/Onboarding all reflect it — see PortalPaged's onManualFinish.
-  onFinish: () => void;
+  onFinish?: () => void;
   clientName: string;
+  // Aberto pelo admin (Trilhas North › Visualizar): embute num modal em vez de
+  // overlay do portal, não grava `manual_seen` de ninguém, e os CTAs dos slides
+  // ("Responder briefing" / "Concluir") ficam inertes.
+  previewMode?: boolean;
 }) {
   const [index, setIndex] = useState(0);
   const [dir, setDir] = useState<1 | -1>(1);
@@ -478,8 +498,9 @@ export default function ManualDoCliente({
   );
 
   useEffect(() => {
+    if (previewMode) return;
     if (index === total - 1) onFinish();
-  }, [index, total, onFinish]);
+  }, [index, total, onFinish, previewMode]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -492,8 +513,10 @@ export default function ManualDoCliente({
   }, [go, index, onClose]);
 
   // Same body-scroll lock as the compass Overlay — position:fixed with the
-  // scroll offset frozen, restored on close.
+  // scroll offset frozen, restored on close. Embutido (previewMode), o modal-pai
+  // já trava o scroll, então não mexe no body.
   useEffect(() => {
+    if (previewMode) return;
     const scrollY = window.scrollY;
     const body = document.body;
     body.style.position = "fixed";
@@ -507,7 +530,7 @@ export default function ManualDoCliente({
       body.style.right = "";
       window.scrollTo(0, scrollY);
     };
-  }, []);
+  }, [previewMode]);
 
   const handleBriefing = useCallback(() => {
     onClose();
@@ -520,15 +543,23 @@ export default function ManualDoCliente({
   }, [onFinish, onClose]);
 
   return (
-    <div className="manual-viewer" data-manual-theme={slide.theme} role="dialog" aria-modal="true" aria-label="Manual do Cliente">
+    <div
+      className={`manual-viewer${previewMode ? " manual-viewer-embedded" : ""}`}
+      data-manual-theme={slide.theme}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Manual do Cliente"
+    >
       <div className="manual-top">
-        <span className="manual-eyebrow">Manual do Cliente · {String(index + 1).padStart(2, "0")}</span>
+        <span className="manual-eyebrow">
+          {previewMode ? "Pré-visualização · " : ""}Manual do Cliente · {String(index + 1).padStart(2, "0")}
+        </span>
         <button className="manual-close" onClick={onClose} aria-label="Fechar">Fechar ✕</button>
       </div>
 
       <div className="manual-stage">
         <div key={index} className={`manual-slide manual-in-${dir === 1 ? "next" : "prev"}`}>
-          <SlideBody slide={slide} onBriefing={handleBriefing} onFinish={handleFinishClick} clientName={clientName} />
+          <SlideBody slide={slide} onBriefing={handleBriefing} onFinish={handleFinishClick} clientName={clientName} previewMode={previewMode} />
         </div>
       </div>
 
@@ -536,7 +567,7 @@ export default function ManualDoCliente({
         <span className="manual-count">{String(index + 1).padStart(2, "0")} / {total}</span>
         <div className="manual-controls-right">
           <button className="manual-btn" disabled={index === 0} onClick={() => go(index - 1)}>← Anterior</button>
-          <button className="manual-btn" onClick={onClose}>Menu</button>
+          {previewMode ? null : <button className="manual-btn" onClick={onClose}>Menu</button>}
           <button className="manual-btn primary" disabled={index === total - 1} onClick={() => go(index + 1)}>Próximo →</button>
         </div>
       </div>

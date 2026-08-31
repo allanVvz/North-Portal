@@ -2,17 +2,19 @@
 
 import { useState } from "react";
 import DocumentDropZone from "./DocumentDropZone";
+import TrilhaPreviewModal from "./TrilhaPreviewModal";
 import { MAX_DOCUMENT_SIZE_BYTES, trilhaStoragePath, removeDocumentFile, uploadDocumentFile } from "@/lib/documentFiles";
 import { youtubeIdFromUrl } from "@/lib/youtube";
 import type { NorthTrilha } from "@/lib/validation";
 
-// Trilhas North — a lista GLOBAL de material educacional do portal. O admin
-// adiciona uma apresentação HTML (subida no bucket `documents`, path
-// `north-trilhas/...`) ou um vídeo do YouTube (só o id), reordena por arraste, e
-// o `TrilhasPage` de todo cliente lê exatamente esta lista, na mesma ordem.
+// Trilhas North — a lista GLOBAL de material educacional do portal, a mesma para
+// todo cliente. O admin adiciona uma apresentação HTML ou um vídeo do YouTube,
+// reordena por arraste, e o `TrilhasPage` de cada cliente lê exatamente esta
+// lista, na mesma ordem.
 //
-// A linha `kind='manual'` é o Manual do Cliente (deck hardcoded que move o % de
-// onboarding): editável e arrastável, nunca removível.
+// Toda trilha (Manual do Cliente incluído) abre no mesmo modal de
+// pré-visualização — `TrilhaPreviewModal` — com o conteúdo embutido. O Manual é
+// a linha `kind='manual'`: fixa, editável só no metadado, nunca removível.
 
 const KIND_ICON: Record<NorthTrilha["kind"], string> = {
   manual: "◆",
@@ -20,12 +22,18 @@ const KIND_ICON: Record<NorthTrilha["kind"], string> = {
   video_youtube: "▶",
 };
 const KIND_LABEL: Record<NorthTrilha["kind"], string> = {
-  manual: "Manual",
-  slides_html: "Apresentação",
-  video_youtube: "Vídeo",
+  manual: "Manual do Cliente",
+  slides_html: "Apresentação HTML",
+  video_youtube: "Vídeo do YouTube",
 };
 
 type MetaDraft = { title: string; etapa: string; description: string };
+type Creating =
+  | { kind: "slides_html"; storage_path: string; file_url: string }
+  | { kind: "video_youtube" }
+  | null;
+
+const EMPTY_META: MetaDraft = { title: "", etapa: "", description: "" };
 
 export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[] }) {
   const [items, setItems] = useState<NorthTrilha[]>(initial);
@@ -33,21 +41,22 @@ export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
 
-  // Um de: editar linha existente | criar a partir de um HTML já subido | criar vídeo.
-  const [editing, setEditing] = useState<string | null>(null);
-  const [htmlUpload, setHtmlUpload] = useState<{ storage_path: string; file_url: string } | null>(null);
-  const [videoOpen, setVideoOpen] = useState(false);
-  const [meta, setMeta] = useState<MetaDraft>({ title: "", etapa: "", description: "" });
+  const [preview, setPreview] = useState<NorthTrilha | null>(null);
+  const [editing, setEditing] = useState<NorthTrilha | null>(null);
+  const [creating, setCreating] = useState<Creating>(null);
+  const [meta, setMeta] = useState<MetaDraft>(EMPTY_META);
   const [videoUrl, setVideoUrl] = useState("");
 
-  // drag-and-drop (padrão de OperacaoWorkspace.reorderBefore)
   const [dragId, setDragId] = useState<string | null>(null);
 
-  function resetForm() {
+  const formOpen = editing !== null || creating !== null;
+
+  function closeForm() {
+    // Upload órfão de um HTML cuja criação foi cancelada.
+    if (creating?.kind === "slides_html") void removeDocumentFile(creating.storage_path).catch(() => {});
+    setCreating(null);
     setEditing(null);
-    setHtmlUpload(null);
-    setVideoOpen(false);
-    setMeta({ title: "", etapa: "", description: "" });
+    setMeta(EMPTY_META);
     setVideoUrl("");
     setError("");
     setProgress(null);
@@ -69,7 +78,7 @@ export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[
     try {
       const path = trilhaStoragePath(file.name);
       const fileUrl = await uploadDocumentFile(file, path, setProgress);
-      setHtmlUpload({ storage_path: path, file_url: fileUrl });
+      setCreating({ kind: "slides_html", storage_path: path, file_url: fileUrl });
       setMeta({ title: file.name.replace(/\.[^.]+$/, "") || file.name, etapa: "", description: "" });
     } catch {
       setError("Não foi possível enviar o arquivo.");
@@ -78,86 +87,72 @@ export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[
     setBusy(false);
   }
 
-  async function createHtml() {
-    if (!htmlUpload || !meta.title.trim()) return;
-    setBusy(true);
+  function startVideo() {
+    setEditing(null);
+    setMeta(EMPTY_META);
+    setVideoUrl("");
     setError("");
-    try {
-      const res = await fetch("/api/admin/north-trilhas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "slides_html",
-          title: meta.title.trim(),
-          etapa: meta.etapa.trim(),
-          description: meta.description.trim(),
-          storage_path: htmlUpload.storage_path,
-          file_url: htmlUpload.file_url,
-        }),
-      });
-      if (!res.ok) throw new Error();
-      const created = (await res.json()) as NorthTrilha;
-      setItems((rows) => [...rows, created].sort((a, b) => a.position - b.position));
-      resetForm();
-    } catch {
-      setError("Não foi possível salvar a trilha.");
-      setBusy(false);
-    }
-  }
-
-  async function createVideo() {
-    if (!meta.title.trim()) return;
-    const youtubeId = youtubeIdFromUrl(videoUrl);
-    if (!youtubeId) {
-      setError("Cole um link de vídeo do YouTube válido.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const res = await fetch("/api/admin/north-trilhas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "video_youtube",
-          title: meta.title.trim(),
-          etapa: meta.etapa.trim(),
-          description: meta.description.trim(),
-          youtube_id: youtubeId,
-        }),
-      });
-      if (!res.ok) throw new Error();
-      const created = (await res.json()) as NorthTrilha;
-      setItems((rows) => [...rows, created].sort((a, b) => a.position - b.position));
-      resetForm();
-    } catch {
-      setError("Não foi possível salvar a trilha.");
-      setBusy(false);
-    }
+    setCreating({ kind: "video_youtube" });
   }
 
   function startEdit(t: NorthTrilha) {
-    setHtmlUpload(null);
-    setVideoOpen(false);
-    setEditing(t.id);
-    setMeta({ title: t.title, etapa: t.etapa, description: t.description });
+    setCreating(null);
+    setPreview(null);
     setError("");
+    setMeta({ title: t.title, etapa: t.etapa, description: t.description });
+    setEditing(t);
   }
 
-  async function saveEdit() {
-    if (!editing || !meta.title.trim()) return;
+  async function submit() {
+    if (!meta.title.trim()) return;
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/north-trilhas/${editing}`, {
-        method: "PATCH",
+      if (editing) {
+        const res = await fetch(`/api/admin/north-trilhas/${editing.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: meta.title.trim(), etapa: meta.etapa.trim(), description: meta.description.trim() }),
+        });
+        if (!res.ok) throw new Error();
+        const updated = (await res.json()) as NorthTrilha;
+        setItems((rows) => rows.map((r) => (r.id === updated.id ? updated : r)));
+        closeForm();
+        return;
+      }
+      // Criação
+      const body: Record<string, unknown> = {
+        title: meta.title.trim(),
+        etapa: meta.etapa.trim(),
+        description: meta.description.trim(),
+      };
+      if (creating?.kind === "slides_html") {
+        Object.assign(body, { kind: "slides_html", storage_path: creating.storage_path, file_url: creating.file_url });
+      } else {
+        const youtubeId = youtubeIdFromUrl(videoUrl);
+        if (!youtubeId) {
+          setError("Cole um link de vídeo do YouTube válido.");
+          setBusy(false);
+          return;
+        }
+        Object.assign(body, { kind: "video_youtube", youtube_id: youtubeId });
+      }
+      const res = await fetch("/api/admin/north-trilhas", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: meta.title.trim(), etapa: meta.etapa.trim(), description: meta.description.trim() }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error();
-      const updated = (await res.json()) as NorthTrilha;
-      setItems((rows) => rows.map((r) => (r.id === updated.id ? updated : r)));
-      resetForm();
+      const created = (await res.json()) as NorthTrilha;
+      setItems((rows) => [...rows, created].sort((a, b) => a.position - b.position));
+      // não roda closeForm() aqui (removeria o arquivo recém-vinculado)
+      setCreating(null);
+      setEditing(null);
+      setMeta(EMPTY_META);
+      setVideoUrl("");
+      setError("");
+      setProgress(null);
+      setBusy(false);
     } catch {
       setError("Não foi possível salvar.");
       setBusy(false);
@@ -213,8 +208,6 @@ export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[
     }
   }
 
-  const formOpen = editing !== null || htmlUpload !== null || videoOpen;
-
   return (
     <div className="set-card">
       <div className="set-appearance-head">
@@ -222,78 +215,35 @@ export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[
           <h2 className="set-h">Trilhas North</h2>
           <p className="admin-sub">
             A central educacional do portal — a mesma lista para todos os clientes. Adicione uma apresentação
-            HTML ou um vídeo do YouTube; arraste para reordenar a fila.
+            HTML ou um vídeo do YouTube; arraste os cards para reordenar a fila.
           </p>
         </div>
       </div>
 
       {!formOpen ? (
-        <div className="trilha-add">
-          <DocumentDropZone
-            label="Arraste uma apresentação HTML ou clique para enviar"
-            hint="HTML · máximo 50 MB"
-            accept=".html,.htm,text/html"
-            onFileSelected={(file) => void onHtmlPicked(file)}
-          />
-          <button type="button" className="admin-btn primary" onClick={() => { resetForm(); setVideoOpen(true); }} disabled={busy}>
-            + Vídeo do YouTube
-          </button>
-        </div>
-      ) : null}
-
-      {progress !== null ? (
-        <div className="doc-upload-progress" aria-live="polite"><div><span style={{ width: `${progress}%` }} /></div><b>{progress}%</b></div>
-      ) : null}
-      {error && !formOpen ? <p className="admin-error">{error}</p> : null}
-
-      {/* Formulário: dá nome a um HTML recém-subido, cria um vídeo, ou edita uma linha. */}
-      {formOpen ? (
-        <div className="set-legal-editor">
-          {videoOpen ? (
-            <label className="admin-field"><span>Link do vídeo do YouTube</span>
-              <input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=…" autoFocus />
-            </label>
-          ) : null}
-          <label className="admin-field"><span>Título</span>
-            <input value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} placeholder="Ex.: Guia de Stories" autoFocus={!videoOpen} />
-          </label>
-          <label className="admin-field"><span>Etapa</span>
-            <input value={meta.etapa} onChange={(e) => setMeta({ ...meta, etapa: e.target.value })} placeholder="Ex.: Conteúdo" />
-          </label>
-          <label className="admin-field"><span>Descrição</span>
-            <textarea rows={2} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
-          </label>
-          {error ? <p className="admin-error" role="alert">{error}</p> : null}
-          <div className="set-actions">
-            <span />
-            <div className="kb-modal-actions-right">
-              <button
-                className="admin-btn ghost"
-                onClick={() => {
-                  // desfaz o upload órfão se cancelar a criação de um HTML
-                  if (htmlUpload) void removeDocumentFile(htmlUpload.storage_path).catch(() => {});
-                  resetForm();
-                }}
-                disabled={busy}
-              >
-                Cancelar
-              </button>
-              <button
-                className="admin-btn primary"
-                onClick={() => { void (editing ? saveEdit() : videoOpen ? createVideo() : createHtml()); }}
-                disabled={busy || !meta.title.trim()}
-              >
-                {busy ? "Salvando…" : "Salvar"}
-              </button>
-            </div>
+        <>
+          <div className="trilha-add">
+            <DocumentDropZone
+              label="Arraste uma apresentação HTML ou clique para enviar"
+              hint="HTML · máximo 50 MB"
+              accept=".html,.htm,text/html"
+              onFileSelected={(file) => void onHtmlPicked(file)}
+            />
+            <button type="button" className="admin-btn primary" onClick={startVideo} disabled={busy}>
+              + Vídeo do YouTube
+            </button>
           </div>
-        </div>
+          {progress !== null ? (
+            <div className="doc-upload-progress" aria-live="polite"><div><span style={{ width: `${progress}%` }} /></div><b>{progress}%</b></div>
+          ) : null}
+          {error ? <p className="admin-error">{error}</p> : null}
+        </>
       ) : null}
 
-      <div className="set-legal trilha-list">
-        {items.map((t) => (
+      <div className="trilha-list">
+        {items.map((t, i) => (
           <div
-            className={`set-legal-row trilha-row ${dragId === t.id ? "dragging" : ""}`}
+            className={`trilha-card ${dragId === t.id ? "dragging" : ""}`}
             key={t.id}
             draggable={!formOpen}
             onDragStart={(e) => { setDragId(t.id); e.dataTransfer.effectAllowed = "move"; }}
@@ -301,28 +251,89 @@ export default function NorthTrilhasManager({ initial }: { initial: NorthTrilha[
             onDragOver={(e) => { e.preventDefault(); }}
             onDrop={(e) => { e.preventDefault(); void reorder(t.id); }}
           >
-            {editing === t.id ? null : (
-              <>
-                <span className="set-legal-ico" aria-hidden>{KIND_ICON[t.kind]}</span>
-                <div className="set-legal-meta">
-                  <strong>{t.title}</strong>
-                  <span className="admin-sub">
-                    {KIND_LABEL[t.kind]}{t.etapa ? ` · ${t.etapa}` : ""}
-                  </span>
-                </div>
+            <span className="trilha-card-ico" aria-hidden>{KIND_ICON[t.kind]}</span>
+            <div className="trilha-card-body">
+              <div className="trilha-card-titlerow">
+                <strong>{t.title}</strong>
                 {t.kind === "manual" ? <span className="set-badge publicada">Fixo</span> : null}
-                <button className="admin-btn ghost" onClick={() => startEdit(t)} disabled={busy || formOpen}>Editar</button>
-                {t.kind !== "manual" ? (
-                  <button className="admin-btn ghost" onClick={() => void remove(t)} disabled={busy || formOpen}>Excluir</button>
-                ) : null}
-              </>
-            )}
+              </div>
+              <span className="admin-sub">
+                {KIND_LABEL[t.kind]}{t.etapa ? ` · ${t.etapa}` : ""} · {i + 1}ª na fila
+              </span>
+              {t.description ? <p className="trilha-card-desc">{t.description}</p> : null}
+            </div>
+            <div className="trilha-card-actions">
+              <button className="admin-btn ghost" onClick={() => setPreview(t)} disabled={formOpen}>Visualizar</button>
+              <button className="admin-btn ghost" onClick={() => startEdit(t)} disabled={busy || formOpen}>Editar</button>
+              {t.kind !== "manual" ? (
+                <button className="admin-btn ghost" onClick={() => void remove(t)} disabled={busy || formOpen}>Excluir</button>
+              ) : null}
+            </div>
           </div>
         ))}
         {items.length === 0 && !formOpen ? (
           <p className="admin-sub">Nenhuma trilha ainda. Adicione a primeira acima.</p>
         ) : null}
       </div>
+
+      {preview ? (
+        <TrilhaPreviewModal
+          trilha={preview}
+          positionInQueue={items.findIndex((r) => r.id === preview.id) + 1}
+          onClose={() => setPreview(null)}
+          onEdit={() => startEdit(preview)}
+        />
+      ) : null}
+
+      {formOpen ? (
+        <div className="kb-modal-backdrop" onClick={() => !busy && closeForm()}>
+          <div className="kb-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kb-modal-head">
+              <h2>
+                {editing
+                  ? `Editar ${editing.kind === "manual" ? "o Manual do Cliente" : "trilha"}`
+                  : creating?.kind === "video_youtube" ? "Adicionar vídeo do YouTube" : "Adicionar apresentação HTML"}
+              </h2>
+              <button className="kb-modal-close" onClick={() => !busy && closeForm()} aria-label="Fechar">✕</button>
+            </div>
+
+            {editing?.kind === "manual" ? (
+              <p className="admin-sub">
+                Os 11 slides do Manual são fixos na plataforma — aqui você ajusta só como ele aparece na lista e
+                no hero do portal.
+              </p>
+            ) : null}
+
+            {creating?.kind === "video_youtube" ? (
+              <label className="admin-field"><span>Link do vídeo do YouTube</span>
+                <input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=…" autoFocus />
+              </label>
+            ) : null}
+
+            <label className="admin-field"><span>Título</span>
+              <input value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} placeholder="Ex.: Guia de Stories" autoFocus={creating?.kind !== "video_youtube"} />
+            </label>
+            <label className="admin-field"><span>Etapa</span>
+              <input value={meta.etapa} onChange={(e) => setMeta({ ...meta, etapa: e.target.value })} placeholder="Ex.: Conteúdo" />
+            </label>
+            <label className="admin-field"><span>Descrição</span>
+              <textarea rows={3} value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
+            </label>
+
+            {error ? <p className="admin-error" role="alert">{error}</p> : null}
+
+            <div className="kb-modal-actions">
+              <span />
+              <div className="kb-modal-actions-right">
+                <button className="admin-btn ghost" onClick={() => !busy && closeForm()} disabled={busy}>Cancelar</button>
+                <button className="admin-btn primary" onClick={() => void submit()} disabled={busy || !meta.title.trim()}>
+                  {busy ? "Salvando…" : "Salvar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
