@@ -161,20 +161,63 @@ const taskCommentSchema = z.object({
   text: z.string().max(2000),
   at: z.string(),
 });
-export const taskPayloadSchema = z
-  .object({
-    barTone: taskTone.optional(),
-    statusLabel: z.string().max(80).optional(),
-    statusTone: taskTone.optional(),
-    // Criativo
-    formato: z.string().max(80).optional(),
-    plataforma: z.string().max(80).optional(),
-    // Agendamento (plataforma is shared with Criativo)
-    hora: z.string().max(20).optional(),
-    // Atividade (comentários do card, mais recente por último)
-    comments: z.array(taskCommentSchema).max(200).optional(),
-  })
-  .passthrough();
+// F dos "pontos frágeis": `payload` deixou de ser `.passthrough()`. Agora é o
+// CONTRATO — toda chave que o app grava no payload de uma tarefa está listada
+// aqui, e o modo padrão do zod (strip) descarta qualquer outra ANTES do insert.
+// Uma chave com typo (`flow_parnet`) não chega mais ao banco calada; ela some.
+// Custo zero no banco (validação é 100% no app). Um teste
+// (lib/taskPayloadSchema.test.ts) trava a completude: quem adicionar uma chave
+// nova e esquecer daqui quebra o CI.
+//
+// As chaves "de marcador" (flow/recorrência/etc.) são `z.unknown()` de
+// propósito: são escritas pelo nosso próprio código, então aqui só interessa
+// que a CHAVE seja conhecida, não o formato do valor — dado histórico com
+// forma inesperada não pode derrubar o save de um card.
+export const taskPayloadSchema = z.object({
+  // Rótulo/cor custom do status no card (escritos pelo modal)
+  barTone: taskTone.optional(),
+  statusLabel: z.string().max(80).optional(),
+  statusTone: taskTone.optional(),
+  // Criativo / Agendamento
+  formato: z.string().max(80).optional(),
+  plataforma: z.string().max(80).optional(),
+  hora: z.string().max(20).optional(),
+  // Atividade (comentários do card, mais recente por último)
+  comments: z.array(taskCommentSchema).max(200).optional(),
+  // Fluxo em cascata (Entregas)
+  flow_parent: z.unknown().optional(),
+  flow_total_weight: z.unknown().optional(),
+  flow_step_count: z.unknown().optional(),
+  flow_prev_task_id: z.unknown().optional(),
+  flow_step_key: z.unknown().optional(), // resíduo — hoje o slot do elo é a verdade
+  // Recorrência — template
+  recurrence_group: z.unknown().optional(),
+  recurrence_cycle: z.unknown().optional(),
+  recurrence_revision: z.unknown().optional(),
+  recurrence_last_cadence: z.unknown().optional(),
+  completed_cycles: z.unknown().optional(),
+  last_completed_at: z.unknown().optional(),
+  cycle_completed: z.unknown().optional(),
+  // Recorrência — execução
+  recurrence_parent_id: z.unknown().optional(),
+  occurrence_date: z.unknown().optional(),
+  deferred_until_accessed: z.unknown().optional(),
+  accessed_at: z.unknown().optional(),
+  // Grupos por datas explícitas (legado — convertidos em 20260804000002)
+  explicit_occurrence_dates: z.unknown().optional(),
+  explicit_date_group_id: z.unknown().optional(),
+  // Histórico / importação
+  publicado_em: z.unknown().optional(),
+  migrated_from_recurring_task: z.unknown().optional(),
+  imported_from: z.unknown().optional(),
+  external_id: z.unknown().optional(),
+  // Automação
+  pre_parada_status: z.unknown().optional(),
+  metaPostId: z.unknown().optional(),
+  // Legado ainda lido/gravado por caminhos antigos
+  pct: z.unknown().optional(),
+  action_plan_id: z.unknown().optional(),
+});
 export type TaskComment = z.infer<typeof taskCommentSchema>;
 
 // Plano agrega membros; Entrega agrega etapas por um molde congelado. Ser os

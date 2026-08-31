@@ -35,6 +35,15 @@ async function login(page: import("@playwright/test").Page) {
   await page.waitForURL(/\/admin/, { timeout: 15_000 });
 }
 
+// A antiga tela /admin/onboarding virou a aba "Onboarding" de Informações
+// (/admin/documentos) — o redirect leva para lá, mas a aba padrão é Documentos,
+// e a seção é estado de cliente (some no reload). Sempre reabrir a aba.
+async function openOnboarding(page: import("@playwright/test").Page) {
+  await page.goto("/admin/documentos");
+  await page.locator(".clients-section-tabs").getByRole("button", { name: /Onboarding/ }).click();
+  await expect(page.locator(".doc-table")).toBeVisible({ timeout: 15_000 });
+}
+
 test.describe("Checkpoints comerciais (e2e contra o backend real)", () => {
   let sb: SupabaseClient;
   let clientId: string;
@@ -94,7 +103,7 @@ test.describe("Checkpoints comerciais (e2e contra o backend real)", () => {
     expect(checkpoints?.every((c) => c.status === "backlog")).toBe(true);
 
     // 3. Onboarding shows 0% while every checkpoint is still backlog.
-    await page.goto("/admin/onboarding");
+    await openOnboarding(page);
     const row = page.locator("tr", { hasText: NAME });
     await expect(row).toBeVisible();
     await expect(row.locator(".ob-progress span")).toHaveText("0%");
@@ -104,14 +113,14 @@ test.describe("Checkpoints comerciais (e2e contra o backend real)", () => {
     const half = ids.slice(0, Math.ceil(ids.length / 2));
     await sb.from("tasks").update({ status: "aprovado" }).in("id", half);
 
-    await page.reload();
+    await openOnboarding(page);
     const rowAfter = page.locator("tr", { hasText: NAME });
     await expect(rowAfter.locator(".ob-progress span")).not.toHaveText("0%");
 
     // 5. Mark all Concluído -> 100%, and the real checkpoints render on the
     //    client's own Central Comercial page (not the static demo array).
     await sb.from("tasks").update({ status: "aprovado" }).in("id", ids);
-    await page.reload();
+    await openOnboarding(page);
     await expect(page.locator("tr", { hasText: NAME }).locator(".ob-progress span")).toHaveText("100%");
 
     await sb.from("clients").update({ is_active: true }).eq("id", clientId);

@@ -162,23 +162,31 @@ Desativar a recorrência mantém `payload.recurrence_group` quando há filhos (p
 
 ---
 
-## Chaves de `payload` em uso
+## Chaves de `payload` — o contrato
 
-O `payload` é `jsonb` livre (`taskPayloadSchema` é `.passthrough()` / a API valida com `z.record`). Chaves conhecidas:
+`payload` é `jsonb`, mas **não é mais livre**: `taskPayloadSchema` (`lib/validation.ts`) enumera toda chave conhecida e roda em **modo strip** (o padrão do zod) — chave fora da lista é descartada antes do insert, então um typo (`flow_parnet`) não persiste calado. Custo zero no banco. `lib/taskPayloadSchema.test.ts` trava a completude: gravou chave nova sem adicionar ao schema → CI vermelho.
 
 | chave | onde | significado |
 |---|---|---|
 | `flow_parent: true` | entrega | marca o pai de corrente |
 | `flow_total_weight`, `flow_step_count` | entrega | denominador congelado do progresso |
-| `flow_step_key` | etapa | qual etapa do molde (resíduo — hoje o `slot` do elo é a verdade) |
+| `flow_prev_task_id` | etapa | id da etapa anterior na corrente |
+| `flow_step_key` | etapa | resíduo — hoje o `slot` do elo é a verdade |
 | `recurrence_group: true` | template recorrente | marca o pai |
 | `recurrence_cycle`, `recurrence_revision` | template | contador de ciclo + revisão da agenda (concorrência otimista) |
+| `recurrence_last_cadence`, `completed_cycles`, `last_completed_at`, `cycle_completed` | template | estado do ciclo |
 | `recurrence_parent_id` | execução recorrente | id do template (redundante com `plan_id`; usado por `recurrenceParentIdOf`) |
 | `deferred_until_accessed: true` | execução futura | some do quadro até o primeiro clique |
 | `occurrence_date`, `accessed_at` | execução | data da ocorrência / quando foi aberta |
+| `explicit_occurrence_dates`, `explicit_date_group_id` | legado | grupos por datas explícitas (convertidos em `20260804000002`) |
 | `publicado_em` | peça histórica | data em que foi ao ar (antes do card de Publicação) |
+| `migrated_from_recurring_task`, `imported_from`, `external_id` | importação | origem do card |
+| `pre_parada_status` | automação | status de onde o card veio quando foi para `parada` |
+| `metaPostId` | performance | id do post do Meta vinculado |
+| `pct`, `action_plan_id` | legado | ainda lidos/limpos por caminhos antigos |
 | `statusLabel`, `statusTone`, `barTone` | qualquer card | rótulo/cor custom do status no card |
 | `formato`, `plataforma`, `hora` | criativo / agendado | atributos do card |
+| `comments` | qualquer card | comentários, mais recente por último |
 
 ---
 
@@ -209,7 +217,7 @@ O `payload` é `jsonb` livre (`taskPayloadSchema` é `.passthrough()` / a API va
 | C | `concluido` órfão no `task_status` (CHECK bloqueia) | Deixar — não dá pra remover label de enum; documentado acima. Risco nenhum. |
 | ~~D~~ | ~~dias-da-semana exigidos só pela API~~ | **Resolvido de outra forma:** dia-da-semana virou **opcional** (`recurrenceWeekdays()` cai no dia da `start_date`). Sem CHECK novo — decisão deliberada de manter a recorrência flexível. |
 | ~~E~~ | ~~`requires_review` / `requires_approval` default `true`~~ | **Feito** (`20260831120000`): default `false`, dados alinhados a `Boolean(reviewer_id)` / `Boolean(approver_id)`. Os campos Revisor/Aprovador do modal são amarrados 1:1 à tela Configurações › Etapas (flags `revisaoAdmin` / `aprovacaoAdmin` por cliente) — etapa desligada, o campo some (inclusive do "Configurar atributos"); não há mais override. |
-| F | `payload` sem schema no banco | **Aberto** (frente própria). Risco médio — chave com typo entra calada. Catálogo acima é o contrato; considerar validar as chaves conhecidas na API. |
+| ~~F~~ | ~~`payload` sem schema~~ | **Feito**: `taskPayloadSchema` deixou de ser `.passthrough()`, enumera toda chave conhecida e roda em modo strip — typo é descartado antes do insert. Zero custo no banco. `lib/taskPayloadSchema.test.ts` trava a completude. |
 | G | ~15 linhas `active = false` em `task_types` (agendamento/planejamento) | Deixar (histórico) ou limpar numa faxina de vocabulário. Risco nenhum. |
 
 ---
@@ -232,6 +240,7 @@ O `payload` é `jsonb` livre (`taskPayloadSchema` é `.passthrough()` / a API va
 - A entrega, o Plano de Ação e o pai recorrente ficam **fora do quadro Tarefas** (`belongsToTaskScreen`) — status derivado não tem coluna honesta.
 - Progresso de pai é sempre rollup dos filhos; nunca persistido.
 - `kind` / `subtype` de toda tarefa existem no vocabulário `task_types` (trigger `tasks_valida_vocabulario`).
+- `payload` só carrega chaves de `taskPayloadSchema` — o resto é descartado no parse (modo strip).
 - Revisão / Aprovação são amarradas 1:1 à tela Configurações › Etapas; etapa desligada para o cliente → campo some do modal e `requires_*` fica `false`. Sem override.
 - O toggle "Visível para o cliente" é fail-closed enquanto a flag carrega.
 - Trocar de "Rotina" para outro tipo no modal limpa a recorrência.
