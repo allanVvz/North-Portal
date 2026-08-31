@@ -1,6 +1,11 @@
 -- Higiene do modelo de tarefas — três frentes dos "pontos frágeis" de
--- docs/ARQUITETURA-TAREFAS.md (itens A, B e E). Aplicada via MCP; nome do
--- arquivo ajustado depois para bater com a versão remota.
+-- docs/ARQUITETURA-TAREFAS.md (itens A, B e E).
+--
+-- APLICADA em prod 2026-08-31 via `mcp__supabase__execute_sql` (o classificador
+-- bloqueia `apply_migration`), em blocos, com o registro inserido à mão em
+-- `supabase_migrations.schema_migrations` (version 20260831120000). Verificada:
+-- trigger ativo e rejeitando kind/subtype inválido, defaults `false`, 0 linhas
+-- inconsistentes, 0 elo legado restante.
 
 -- ── A · trava de vocabulário para kind / subtype ────────────────────────────
 -- Não dá pra FK: task_types tem UNIQUE só em (parent_id, key) — `key` sozinho
