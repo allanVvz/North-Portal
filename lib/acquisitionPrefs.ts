@@ -52,7 +52,8 @@ export const ACQUISITION_VIEW_PREFS_DEFAULT: AcquisitionViewPrefs = {
 };
 
 const MAX_SLOTS = 6;
-const MAX_FUNNEL_STAGES = 3;
+// Alcance → Cliques → (Visitas ao site) → Seguidores → Mensagens já são 5.
+const MAX_FUNNEL_STAGES = 6;
 const MIN_FUNNEL_STAGES = 2;
 const MAX_TREND_METRICS = 2;
 

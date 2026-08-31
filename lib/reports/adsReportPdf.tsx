@@ -58,11 +58,17 @@ export type AdsReportInput = {
 
 type BlockKpi = { label: string; metric?: MetricRef; ratio?: [MetricRef, MetricRef] };
 
+// "Mensagens" (metric `contatos`) entra em TODO bloco: "alguém chamou" é o
+// desfecho que a equipe conta, independente do objetivo da campanha. "Visitas ao
+// perfil" (`profileVisits`, ingerido de instagram_profile_visits) entra onde faz
+// sentido. "Novos seguidores" fica zerado — a Meta não expõe follows na API.
 const BLOCK_KPIS: Record<CampaignBlock, BlockKpi[]> = {
   trafego_site: [
     { label: "Investimento", metric: "custo" },
     { label: "Alcance", metric: "alcance" },
     { label: "Cliques no site", metric: "cliquesLink" },
+    { label: "Visitas ao perfil", metric: "profileVisits" },
+    { label: "Mensagens", metric: "contatos" },
     { label: "Custo por clique", ratio: ["custo", "cliquesLink"] },
   ],
   trafego_perfil: [
@@ -70,27 +76,37 @@ const BLOCK_KPIS: Record<CampaignBlock, BlockKpi[]> = {
     { label: "Alcance", metric: "alcance" },
     { label: "Visitas ao perfil", metric: "profileVisits" },
     { label: "Novos seguidores", metric: "followersGained" },
+    { label: "Mensagens", metric: "contatos" },
     { label: "Custo por visita", ratio: ["custo", "profileVisits"] },
   ],
   mensagens: [
     { label: "Investimento", metric: "custo" },
     { label: "Alcance", metric: "alcance" },
-    { label: "Conversas", metric: "contatos" },
-    { label: "Custo por conversa", ratio: ["custo", "contatos"] },
+    { label: "Mensagens", metric: "contatos" },
+    { label: "Custo por mensagem", ratio: ["custo", "contatos"] },
   ],
   engajamento: [
     { label: "Investimento", metric: "custo" },
     { label: "Alcance", metric: "alcance" },
     { label: "Engajamento", metric: "engajamento" },
+    { label: "Visitas ao perfil", metric: "profileVisits" },
+    { label: "Mensagens", metric: "contatos" },
     { label: "Custo por engajamento", ratio: ["custo", "engajamento"] },
   ],
   outro: [
     { label: "Investimento", metric: "custo" },
     { label: "Alcance", metric: "alcance" },
     { label: "Cliques", metric: "cliques" },
+    { label: "Mensagens", metric: "contatos" },
     { label: "CTR", metric: "ctr" },
   ],
 };
+
+// Métricas que o relatório força a "0" em vez de "—"/"Sem integração": são
+// contagens onde zero é informação real numa conta Meta paga. `contatos`
+// unificado (msg/lead/conversa) e `followersGained` (a Meta não entrega follows;
+// o usuário quer a etapa visível zerada).
+const ZERO_NOT_DASH = new Set<MetricRef>(["contatos", "followersGained"]);
 
 // ---- componentes locais ----------------------------------------------
 
@@ -146,7 +162,7 @@ const CREATIVE_COLS: { key: MetaPostMetricKey; label: string; kind: "number" | "
   { key: "alcance", label: "Alcance", kind: "number" },
   { key: "impressoes", label: "Impr.", kind: "number" },
   { key: "cliquesLink", label: "Cliques", kind: "number" },
-  { key: "contatos", label: "Conversas", kind: "number" },
+  { key: "contatos", label: "Mensagens", kind: "number" },
   { key: "custo", label: "Invest.", kind: "money" },
   { key: "ctr", label: "CTR", kind: "percent" },
 ];
@@ -178,13 +194,14 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
       };
     }
     const ref = def.metric as MetricRef;
+    const zero = ZERO_NOT_DASH.has(ref);
     return {
       label: def.label,
-      value: resolveAcquisitionMetric(cur, ref, cm),
-      previous: resolveAcquisitionMetric(prev, ref, cm),
+      value: resolveAcquisitionMetric(cur, ref, cm) ?? (zero ? 0 : null),
+      previous: resolveAcquisitionMetric(prev, ref, cm) ?? (zero ? 0 : null),
       kind: metricRefKind(ref, cm),
       inverse: metricRefInverse(ref, cm),
-      notIntegrated: isNotIntegrated(ref, cm),
+      notIntegrated: zero ? false : isNotIntegrated(ref, cm),
     };
   };
 
@@ -200,15 +217,24 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
     }
     sumMetricsInto(agg.metrics, c.metrics);
   }
-  const campaigns = [...byCampaign.values()]
+  const allCampaigns = [...byCampaign.values()]
     .map((c) => {
       recomputeRatios(c.metrics);
       return { ...c, block: blockOf(c.campaignId, c.caption, c.objective) };
     })
     .sort((a, b) => (b.metrics.custo ?? b.metrics.alcance ?? 0) - (a.metrics.custo ?? a.metrics.alcance ?? 0));
+  // Uma folha só: no máximo 6 campanhas e 3 criativos por campanha.
+  const CAMPAIGN_CAP = 6;
+  const CREATIVE_CAP = 3;
+  const campaigns = allCampaigns.slice(0, CAMPAIGN_CAP);
+  const campaignsOverflow = allCampaigns.length - campaigns.length;
 
-  // Funil agregado — etapa de cauda sem dado sai (funnelStageCount).
-  const allFunnelValues = acq.funnelStages.map((r) => resolveAcquisitionMetric(posts, r, cm));
+  // Funil agregado — etapa de cauda sem dado sai (funnelStageCount). `contatos`
+  // e `followersGained` viram 0 (não faixa tracejada): são contagens que o
+  // relatório mostra zeradas de propósito.
+  const allFunnelValues = acq.funnelStages.map(
+    (r) => resolveAcquisitionMetric(posts, r, cm) ?? (ZERO_NOT_DASH.has(r) ? 0 : null),
+  );
   const keepN = funnelStageCount(allFunnelValues);
   const funnelValues = allFunnelValues.slice(0, keepN);
   const funnelLabels = acq.funnelStages.slice(0, keepN).map((r) => acquisitionMetricLabel(r, cm, metricLabel));
@@ -254,7 +280,9 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
         <View style={S.section}>
           <Text style={S.kicker}>Criativos</Text>
           {campaigns.length ? campaigns.map((c) => {
-            const rows = c.campaignId ? creativeRowsFor(adPosts, c.campaignId) : [];
+            const all = c.campaignId ? creativeRowsFor(adPosts, c.campaignId) : [];
+            const rows = all.slice(0, CREATIVE_CAP);
+            const rowsOverflow = all.length - rows.length;
             return (
               <View key={c.id} wrap={false}>
                 <View style={S.campaignHead}>
@@ -262,30 +290,37 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
                   <Text style={S.chip}>{CAMPAIGN_BLOCK_LABEL[c.block]}</Text>
                 </View>
                 {rows.length ? (
-                  <View style={S.table}>
-                    <View style={S.tableRow}>
-                      <Text style={[S.tableHeaderCell, { flex: 0.5 }]}>#</Text>
-                      <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Criativo</Text>
-                      {CREATIVE_COLS.map((col) => <Text style={S.tableHeaderCell} key={col.key}>{col.label}</Text>)}
-                    </View>
-                    {rows.map((row, i) => (
-                      <View style={i === rows.length - 1 ? S.tableRowLast : S.tableRow} key={row.adId} wrap={false}>
-                        <Text style={[S.tableCell, { flex: 0.5 }]}>{config.adSourceTags[row.adId] ? `#${config.adSourceTags[row.adId]}` : "—"}</Text>
-                        <Text style={[S.tableCell, S.tableCellFirst]}>{row.name}</Text>
-                        {CREATIVE_COLS.map((col) => (
-                          <Text style={S.tableCell} key={col.key}>
-                            {row.metrics[col.key] === undefined ? "—" : metricValue(row.metrics[col.key], col.kind, row.currency)}
-                          </Text>
-                        ))}
+                  <>
+                    <View style={S.table}>
+                      <View style={S.tableRow}>
+                        <Text style={[S.tableHeaderCell, { flex: 0.5 }]}>#</Text>
+                        <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Criativo</Text>
+                        {CREATIVE_COLS.map((col) => <Text style={S.tableHeaderCell} key={col.key}>{col.label}</Text>)}
                       </View>
-                    ))}
-                  </View>
+                      {rows.map((row, i) => (
+                        <View style={i === rows.length - 1 ? S.tableRowLast : S.tableRow} key={row.adId} wrap={false}>
+                          <Text style={[S.tableCell, { flex: 0.5 }]}>{config.adSourceTags[row.adId] ? `#${config.adSourceTags[row.adId]}` : "—"}</Text>
+                          <Text style={[S.tableCell, S.tableCellFirst]}>{row.name}</Text>
+                          {CREATIVE_COLS.map((col) => {
+                            const raw = row.metrics[col.key] ?? (ZERO_NOT_DASH.has(col.key) ? 0 : undefined);
+                            return (
+                              <Text style={S.tableCell} key={col.key}>
+                                {raw === undefined ? "—" : metricValue(raw, col.kind, row.currency)}
+                              </Text>
+                            );
+                          })}
+                        </View>
+                      ))}
+                    </View>
+                    {rowsOverflow > 0 ? <Text style={S.tableMore}>+{rowsOverflow} criativo{rowsOverflow > 1 ? "s" : ""} com menos investimento.</Text> : null}
+                  </>
                 ) : (
                   <Text style={S.empty}>Sem detalhe por criativo nesta conta.</Text>
                 )}
               </View>
             );
           }) : <Text style={S.empty}>Nenhuma campanha com dados no período.</Text>}
+          {campaignsOverflow > 0 ? <Text style={S.tableMore}>+{campaignsOverflow} campanha{campaignsOverflow > 1 ? "s" : ""} com menos investimento no período.</Text> : null}
         </View>
 
         {/* Eficiência de mídia (opcional, controlado pelo template) */}

@@ -8,6 +8,7 @@ describe("normalizeMetaAdsRow", () => {
     date_start: "2026-08-01",
     spend: "45.9",
     reach: "6100",
+    instagram_profile_visits: "150",
     clicks: 120,
     unique_clicks: 88,
     inline_link_clicks: 72,
@@ -45,6 +46,7 @@ describe("normalizeMetaAdsRow", () => {
     expect(p.metrics).toMatchObject({
       custo: 45.9,
       alcance: 6100,
+      profileVisits: 150,
       cliques: 120,
       cliquesUnicos: 88,
       cliquesLink: 72,
@@ -70,7 +72,7 @@ describe("normalizeMetaAdsRow", () => {
     });
     expect(p.objective).toBe("OUTCOME_LEADS");
     expect(p.currency).toBe("BRL");
-    expect(p.schemaVersion).toBe(5);
+    expect(p.schemaVersion).toBe(6);
   });
 
   it("resultado escolhe o desfecho pelo objetivo, sem somar tipos diferentes", () => {

@@ -21,15 +21,22 @@ const base: AdsReportInput = {
 
 const isPdf = (buf: Buffer) => buf.subarray(0, 5).toString("latin1") === "%PDF-";
 
-// Um punhado de linhas ad-level para a tabela de criativos.
+// PNG 1x1 transparente — miniatura de criativo já hidratada para data: URI.
+const PNG_1PX =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+// Um punhado de linhas ad-level para a tabela de criativos — metade com
+// miniatura hidratada, metade sem.
 const adPosts: MetaPost[] = base.posts.slice(0, 6).map((p, i) => ({
   ...p,
   id: `${p.id}:ad${i}`,
   adId: `ad-${i % 3}`,
   adName: `Criativo ${["A", "B", "C"][i % 3]}`,
+  thumbnailUrl: i % 2 === 0 ? PNG_1PX : null,
 }));
 
-describe("renderAdsReportPdf", () => {
+// renderToBuffer + registro de fontes é lento numa importação fria.
+describe("renderAdsReportPdf", { timeout: 30_000 }, () => {
   it("gera um PDF a partir de dados de demo (com criativos)", async () => {
     const buf = await renderAdsReportPdf({ ...base, adPosts });
     expect(Buffer.isBuffer(buf)).toBe(true);
@@ -85,5 +92,29 @@ describe("renderAdsReportPdf", () => {
     };
     const buf = await renderAdsReportPdf({ ...base, config: cfg, adPosts });
     expect(isPdf(buf)).toBe(true);
+  });
+
+  it("funil com 'Visitas ao site' + Seguidores no meio (config da CRIS) não lança", async () => {
+    const cfg: typeof DEFAULT_BUILTIN_TEMPLATE.config = {
+      ...DEFAULT_BUILTIN_TEMPLATE.config,
+      acquisition: {
+        ...DEFAULT_BUILTIN_TEMPLATE.config.acquisition,
+        funnelStages: ["alcance", "cliquesLink", "landingPageViews", "followersGained", "contatos"],
+      },
+    };
+    const buf = await renderAdsReportPdf({ ...base, config: cfg, adPosts });
+    expect(isPdf(buf)).toBe(true);
+  });
+
+  it("KPI 'Mensagens' aparece mesmo sem nenhuma linha de desfecho no bloco", async () => {
+    // posts sem contatos/mensagens/leads em nenhuma linha — o card não pode sumir
+    // nem virar "—": mensagem é o desfecho que a equipe conta.
+    const semDesfecho = base.posts.map((p) => {
+      const { contatos: _c, mensagens: _m, leads: _l, ...metrics } = p.metrics;
+      return { ...p, metrics };
+    });
+    const buf = await renderAdsReportPdf({ ...base, posts: semDesfecho, prevPosts: [], adPosts: [] });
+    expect(isPdf(buf)).toBe(true);
+    expect(buf.byteLength).toBeGreaterThan(3000);
   });
 });

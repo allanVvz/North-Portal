@@ -199,16 +199,20 @@ const resultFunnelPrefs = sanitizePerformanceViewPrefs({
 // A última etapa de `funnelStages` é o desfecho: é dela que o fecho do funil
 // tira o número, o custo e a taxa de conversão (ver ResultPanel).
 const messageFunnelAcquisition: AcquisitionViewPrefs = {
-  // 6 é o teto do slot. Os 4 primeiros têm dado em todas as contas de produção;
-  // os 2 de seguidores entram sabidamente vazios, por decisão do usuário — a
-  // tela os rotula "Sem integração" em vez de mostrar um "—" ambíguo.
-  kpiSlots: ["custo", "alcance", "contatos", `custom:${COST_PER_CONTACT_ID}`, "followersGained", `custom:${COST_PER_FOLLOWER_ID}`],
+  // 6 é o teto do slot. `profileVisits` passou a ser ingerido
+  // (instagram_profile_visits, schema v6); `followersGained` segue vazio — a
+  // Meta não expõe follows na Marketing API, então a tela rotula "Sem
+  // integração" (o relatório de anúncios mostra zerado, de propósito).
+  kpiSlots: ["custo", "alcance", "contatos", "profileVisits", `custom:${COST_PER_CONTACT_ID}`, "followersGained"],
   volumeSlots: ["impressoes", "cliques"],
   gaugeSlots: ["cpm", "cpc", "ctr"],
-  funnelStages: ["alcance", "cliquesLink", "contatos"],
+  // Seguidores é etapa do funil (zerada por ora); mensagens é o desfecho.
+  funnelStages: ["alcance", "cliquesLink", "followersGained", "contatos"],
   showMessageBranch: false,
   trendMetrics: ["custo", "contatos"],
-  hiddenSections: [],
+  // Gauges ("Eficiência de mídia") fora por padrão — o operador liga por
+  // template se quiser (o relatório de anúncios respeita).
+  hiddenSections: ["gauges"],
 };
 const purchaseFunnelAcquisition: AcquisitionViewPrefs = {
   kpiSlots: ["custo", "alcance", "compras", `custom:${COST_PER_PURCHASE_ID}`],
@@ -217,7 +221,7 @@ const purchaseFunnelAcquisition: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliquesLink", "compras"],
   showMessageBranch: false,
   trendMetrics: ["custo", "compras"],
-  hiddenSections: [],
+  hiddenSections: ["gauges"],
 };
 const resultFunnelAcquisition: AcquisitionViewPrefs = {
   kpiSlots: ["custo", "alcance", "resultado", `custom:${COST_PER_RESULT_ID}`],
@@ -226,7 +230,7 @@ const resultFunnelAcquisition: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliques", "resultado"],
   showMessageBranch: false,
   trendMetrics: ["custo", "resultado"],
-  hiddenSections: [],
+  hiddenSections: ["gauges"],
 };
 
 // Nível fica em "campaign" nos três. As linhas de conjunto/criativo só são

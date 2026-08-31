@@ -35,14 +35,18 @@ export const DASH_METRICS: { key: MetaPostMetricKey; label: string; paidOnly: bo
 
 // Métricas que existem no vocabulário mas que NENHUMA ingestão preenche hoje:
 // nem o normalizador da Meta (lib/metaInsights.ts) nem o da Windsor
-// (lib/windsor.ts) escrevem estas chaves. Verificado no cache de produção — 376
-// linhas em 30 dias, 6 contas, zero ocorrências.
+// (lib/windsor.ts) escrevem estas chaves.
+//
+// `followers`/`followersGained` seguem aqui: sondada a Marketing API na conta
+// real (v21/v23/v24), a métrica "Instagram follows" não existe como campo nem
+// como action_type — só no painel do Ads Manager. `profileVisits` SAIU: passou a
+// vir de `instagram_profile_visits` (schema v6).
 //
 // A distinção importa na tela: "0 neste período" e "esta integração não existe"
 // são coisas diferentes, e um "—" mudo faz o operador procurar um problema de
 // filtro que não está lá. Um KPI destes é mostrado de propósito (o usuário quer
 // ver a lacuna de seguidores), mas rotulado como lacuna.
-const NEVER_INGESTED = new Set<MetaPostMetricKey>(["profileVisits", "followers", "followersGained"]);
+const NEVER_INGESTED = new Set<MetaPostMetricKey>(["followers", "followersGained"]);
 
 export function isNotIntegrated(ref: MetricRef, customMetrics: CustomMetric[] = []): boolean {
   if (isCustomMetricRef(ref)) {

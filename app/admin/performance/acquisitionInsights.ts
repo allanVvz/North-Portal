@@ -143,6 +143,19 @@ export function filterAcquisitionPosts(posts: MetaPost[], campaignId: string, ad
 // summarizeAcquisition above (ctr/cpm/cpc via totalWhenPresent + ratio()).
 
 function resolveBuiltinAcquisitionMetric(posts: MetaPost[], key: MetaPostMetricKey): NullableMetric {
+  // "Alguém chamou" é um desfecho só. A Meta reporta o mesmo evento ora como
+  // conversa (`contatos`/`mensagens`), ora como lead — o normalizador já faz
+  // `contatos = max(mensagens, leads)` por linha (lib/metaInsights.ts), mas uma
+  // linha que só reportou `mensagens` ou só `leads` deixa `contatos` ausente.
+  // Aqui `contatos` volta a resolver a partir dos três, sempre pelo maior.
+  if (key === "contatos") {
+    const parts = [
+      totalWhenPresent(posts, "contatos"),
+      totalWhenPresent(posts, "mensagens"),
+      totalWhenPresent(posts, "leads"),
+    ].filter((value): value is number => value !== null);
+    return parts.length ? Math.max(...parts) : null;
+  }
   if (key === "ctr") return ratio(totalWhenPresent(posts, "cliques"), totalWhenPresent(posts, "impressoes"), 100);
   if (key === "cpc") return ratio(totalWhenPresent(posts, "custo"), totalWhenPresent(posts, "cliques"));
   if (key === "cpm") return ratio(totalWhenPresent(posts, "custo"), totalWhenPresent(posts, "impressoes"), 1000);
