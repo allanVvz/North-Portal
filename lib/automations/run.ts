@@ -25,7 +25,8 @@ import { fetchWindsorPosts, type MetaPost, type WindsorDatasource, type WindsorS
 import { fetchMetaAdCreativeInsights, fetchMetaAdsInsights } from "@/lib/metaInsights";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
-import { clonePlanForReport, materializeOccurrenceForReport } from "./execute";
+import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrenceForReport, materializeOccurrenceForReport } from "./execute";
+import { isFlowDelivery } from "@/lib/taskRelations";
 import { recurrenceStopped } from "@/lib/recurrenceState";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
@@ -213,9 +214,16 @@ async function runOneReportAutomation(
   if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return "not_due";
 
   let actingTask: TaskRecord;
+  // Entrega recorrente (fluxo relatorio_conversao): a Automação 1 preenche a
+  // ETAPA `relatorio_trafego` e a auto-conclui — artefato de máquina, sem
+  // revisão humana; concluir deixa reconcileFlows() no mesmo tique criar a
+  // etapa `agendamentos`.
+  const isFlowStep = target.kind === "relatorio_conversao" && isFlowDelivery(target) && Boolean(target.recurrence_cadence);
   try {
     if (target.kind === "plano_acao") {
       actingTask = await clonePlanForReport(admin, target, today);
+    } else if (isFlowStep) {
+      actingTask = await ensureFlowOccurrenceForReport(admin, target, today);
     } else if (target.recurrence_cadence) {
       actingTask = await materializeOccurrenceForReport(admin, target, today);
     } else {
@@ -234,12 +242,15 @@ async function runOneReportAutomation(
     // appends another below it rather than overwriting. [label](url) renders
     // as a short link (the file's own name), not the raw URL — see
     // lib/comments.ts splitCommentText.
-    const payload = appendedCommentPayload(actingTask.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`);
+    const label = isFlowStep ? "Relatório de tráfego" : "Relatório de anúncios";
+    const payload = appendedCommentPayload(actingTask.payload, `${label} gerado e anexado: [${fileName}](${url})`);
     const { error: statusError } = await admin
       .from("tasks")
-      .update({ status: "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
+      .update({ status: isFlowStep ? "aprovado" : "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
       .eq("id", actingTask.id);
     if (statusError) throw statusError;
+    // Só depois do fill dar certo — para uma falha não pular um ciclo.
+    if (isFlowStep) await advanceFlowMold(admin, target, today);
     await notifyFromAutomation(
       admin,
       actingTask.id,
