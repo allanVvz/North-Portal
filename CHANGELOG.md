@@ -1,5 +1,62 @@
 # Changelog
 
+## 31 de agosto de 2026 — relatório de anúncios redesenhado + fluxo de conversão / vendas
+
+Branch `feat/relatorio-conversao-vendas`. Duas frentes: (0) reescrever o
+relatório PDF da automação para parecer o resumo que a equipe manda à mão, e
+(1) fechar o ciclo de conversão com um fluxo de 2 cards + IA lendo o comentário.
+
+### Fase 0 — Relatório de anúncios por bloco de objetivo
+
+- **KPIs agrupados por tipo de campanha** (Tráfego para o site / Tráfego para o
+  perfil / Mensagens / Engajamento / Outras), cada bloco com suas métricas
+  próprias. A classificação é uma **tag manual por campanha** no template de
+  Performance (`config.campaignBlocks`); `suggestCampaignBlock` (objective +
+  optimization_goal + nome da campanha) dá só o palpite inicial.
+- **Lista de criativos abaixo de cada campanha** (agregados por `adId` entre
+  plataformas) com coluna de **fonte #1/#2/#3** (`config.adSourceTags`, tag
+  manual por anúncio) e de **Mensagens** (`contatos`, unificado msg/lead/conversa
+  pelo maior). Conta Windsor ou sem detalhe → "sem detalhe por criativo".
+- **Funil agregado por último**; `funnelStageCount` derruba a etapa de cauda sem
+  dado (ex.: "Seguidores") em vez de faixa tracejada, na tela e no PDF.
+- **Sem o gráfico de linha diário**; **gauges fora do padrão** dos 3 builtins
+  (`hiddenSections: ["gauges"]`).
+- **`instagram_profile_visits` passa a ser ingerido** (schema Meta v6):
+  "Visitas ao perfil" agora tem dado real; `followersGained` segue vazio — a
+  Marketing API não expõe follows.
+- Componentes de PDF compartilhados extraídos para `lib/reports/reportComponents.tsx`.
+- A automação passa a buscar dados **por criativo** (fan-out
+  `fetchMetaAdCreativeInsights` por campanha). Relatório cabe numa folha A4
+  (teto de 6 campanhas × 3 criativos).
+
+### Fase 1 — Fluxo de conversão (2 automações)
+
+- **Tipo-entrega `relatorio_conversao`** (migração `20260901000000`): 2 etapas —
+  `relatorio_trafego` (a automação preenche e **auto-conclui**) → `agendamentos`
+  (manual, cliente-visível). 5º `TaskKind`.
+- **Automação 1 estendida**: alvo = molde de entrega recorrente
+  `relatorio_conversao` → preenche a etapa de tráfego, auto-conclui,
+  `reconcileFlows()` cria a etapa de agendamentos na sequência
+  (`ensureFlowOccurrenceForReport` / `advanceFlowMold`; guarda em
+  `materializeFirstStep` contra molde recorrente).
+- **`lib/ai/`** — primeiro código que fala com um LLM no repo. `fetch` direto na
+  Messages API da Anthropic, sem SDK, sem deps. `getAiProviderSettingsService`
+  (leitura service-role da credencial `provider='ai'`), `aiComplete`,
+  `extractConversionReport` (texto livre → linhas de conversão; pré-check regex
+  para "N agendamentos"; **nunca lança** — sem chave / IA fora / resposta
+  ilegível → pede de novo).
+- **Automação 2 `relatorio_vendas`** (chave nova, migrações `20260901000100`
+  CHECK + `20260901000200` unique `(target_task_id, automation_key)`):
+  `runAutomations()` despacha por chave. A cada tique lê o comentário do
+  responsável na etapa `agendamentos`, extrai as conversões com IA, grava em
+  `task_metrics` (`source='cliente'`, escalares string) + `payload.conversoes`,
+  auto-conclui a etapa; com a etapa de tráfego concluída → gera **`salesReportPdf`**
+  (resumo do período, tabela por fonte #1/#2/#3 cruzando receita × custo do
+  anúncio, funil de vendas), anexa na ocorrência, `settleDelivery` encerra.
+  Ambíguo → comentário-pergunta, etapa fica aberta, nunca `parada`.
+- Validado ponta a ponta contra CRIS CAR CARE em produção
+  (`scripts/relatorio-conversao-e2e.mjs` + `lib/automations/e2e.manual.test.ts`).
+
 ## 30 e 31 de agosto de 2026 — criação de tarefa, Trilhas North, recorrência v2
 
 Três frentes definidas pelo usuário (R0.1–R0.3 no `plan/ROADMAP.md`) e uma
