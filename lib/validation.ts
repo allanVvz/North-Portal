@@ -502,6 +502,7 @@ const automationKeySchema = z.enum([
   "relatorio_trafego_semanal",
   "provisionar_card_metricas",
   "coleta_metrica_cliente",
+  "relatorio_vendas",
 ]);
 // Only meaningful for coleta_metrica_cliente: which metricDefs keys the card
 // asks the client for.

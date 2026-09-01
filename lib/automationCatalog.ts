@@ -7,11 +7,13 @@
 export type AutomationKey =
   | "relatorio_trafego_semanal"
   | "provisionar_card_metricas"
-  | "coleta_metrica_cliente";
+  | "coleta_metrica_cliente"
+  | "relatorio_vendas";
 export const AUTOMATION_KEYS: AutomationKey[] = [
   "relatorio_trafego_semanal",
   "provisionar_card_metricas",
   "coleta_metrica_cliente",
+  "relatorio_vendas",
 ];
 
 // "ads_account": eligible if the client has a mapped Windsor or Meta ad
@@ -59,6 +61,17 @@ export const AUTOMATION_DEFINITIONS: Record<AutomationKey, AutomationDef> = {
     requiresPerformanceTemplate: false,
     requiresTemplateTask: true,
     requiresMetricKeys: true,
+  },
+  // Fecha o fluxo relatorio_conversao: quando a etapa de tráfego está
+  // concluída E o responsável lançou as conversões num comentário (lidas com
+  // IA), gera o PDF de vendas e regera o de anúncios com a atribuição por
+  // fonte. O alvo é o molde de entrega recorrente relatorio_conversao.
+  relatorio_vendas: {
+    label: "Relatório de vendas",
+    description: "Lê os agendamentos e vendas do comentário (com IA) e gera o relatório de vendas ao fim do fluxo de conversão.",
+    eligibility: "ads_account",
+    requiresPerformanceTemplate: true,
+    requiresTemplateTask: true,
   },
 };
 
