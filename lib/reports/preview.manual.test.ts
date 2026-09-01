@@ -28,7 +28,7 @@ describe.skipIf(!SLUG)("preview relatório de anúncios (dados reais)", () => {
     loadEnvLocal();
     const { createAdminClient } = await import("@/lib/supabase/admin");
     const { getWindsorSettingsService, getMetaSettingsService, adsAccountFor } = await import("@/lib/automations/serviceIntegrations");
-    const { fetchPostsForAccount } = await import("@/lib/automations/run");
+    const { fetchPostsForAccount } = await import("@/lib/automations/reportData");
     const { renderAdsReportPdf } = await import("./adsReportPdf");
     const { DEFAULT_BUILTIN_TEMPLATE } = await import("@/lib/performanceTemplates");
     const { inPeriod, previousPeriod } = await import("@/app/admin/performance/insights");
