@@ -4,7 +4,10 @@ import { Fragment } from "react";
 import type { AdSummary, CampaignSummary, PerformanceEntitySummary } from "./insights";
 import { OBJECTIVE_LABEL, PLATFORM_LABEL, metricValue, platformTone } from "./performanceLabels";
 import type { CAMPAIGN_METRIC_COLUMNS, SortDir } from "@/lib/performancePrefs";
-import type { PerformanceEntityLevel } from "@/lib/performanceTemplates";
+import {
+  AD_SOURCE_TAGS, CAMPAIGN_BLOCKS, CAMPAIGN_BLOCK_LABEL,
+  type AdSourceTag, type CampaignBlock, type PerformanceEntityLevel,
+} from "@/lib/performanceTemplates";
 import type { MetaPostMetricKey } from "@/lib/windsor";
 
 type Column = { key: MetaPostMetricKey; label: string };
@@ -48,6 +51,12 @@ export default function PerformanceCampaignTable({
   onExportCsv,
   onLoadMore,
   categoryNote,
+  canEditTemplate,
+  campaignBlocks,
+  adSourceTags,
+  onSetCampaignBlock,
+  onSetAdSourceTag,
+  suggestBlock,
 }: {
   level: PerformanceEntityLevel;
   onChangeLevel: (level: PerformanceEntityLevel) => void;
@@ -79,10 +88,20 @@ export default function PerformanceCampaignTable({
   onExportCsv: () => void;
   onLoadMore: () => void;
   categoryNote: boolean;
+  canEditTemplate: boolean;
+  campaignBlocks: Record<string, CampaignBlock>;
+  adSourceTags: Record<string, AdSourceTag>;
+  onSetCampaignBlock: (campaignId: string, block: CampaignBlock | "") => void;
+  onSetAdSourceTag: (adId: string, tag: AdSourceTag | "") => void;
+  suggestBlock: (objective?: string | null, optimizationGoal?: string | null, name?: string | null) => CampaignBlock;
 }) {
   const formatMetric = (value: number | undefined, key: MetaPostMetricKey, currency?: string) => metricValue(value, columnKind[key] ?? "number", currency);
   const selectedEntityIds = level === "adset" ? selectedAdsetIds : selectedAdIds;
   const itemCount = level === "campaign" ? campaignTotal : entityRows.length;
+  // Colunas extras de tagueamento do template: "Bloco" nas campanhas, "#"
+  // (fonte) nos criativos. Só aparecem para quem pode editar template.
+  const blockCol = canEditTemplate && level === "campaign" ? 1 : 0;
+  const tagCol = canEditTemplate && level === "ad" ? 1 : 0;
 
   return (
     <div className="perf-card">
@@ -128,6 +147,7 @@ export default function PerformanceCampaignTable({
               <thead><tr>
                 <th className="perf-select-cell"><input type="checkbox" aria-label="Selecionar todos os itens" checked={entityRows.every((row) => selectedEntityIds.includes(row.id))} onChange={onToggleAllEntities} /></th>
                 <th>Rede</th><th>Campanha</th>{level === "ad" ? <th>Conjunto</th> : null}<th>{level === "adset" ? "Conjunto de anúncios" : "Criativo"}</th><th>Objetivo</th>
+                {tagCol ? <th title="Fonte de tráfego da conversão (#1/#2/#3)">#</th> : null}
                 {columns.map((column) => <th key={column.key}>{column.label}</th>)}
               </tr></thead>
               <tbody>{entityRows.map((row) => (
@@ -138,6 +158,19 @@ export default function PerformanceCampaignTable({
                   {level === "ad" ? <td className="perf-td-caption" title={row.adsetName}>{row.adsetName || "—"}</td> : null}
                   <td className="perf-td-caption"><span className="perf-entity-name">{row.thumbnailUrl ? <img src={row.thumbnailUrl} alt="" /> : null}<span title={row.name}>{row.name}</span></span></td>
                   <td className="admin-cell-muted">{row.objective ? OBJECTIVE_LABEL[row.objective] ?? row.objective : "—"}</td>
+                  {tagCol ? (
+                    <td>
+                      <select
+                        className="perf-tag-select"
+                        aria-label={`Fonte de ${row.name}`}
+                        value={adSourceTags[row.id] ?? ""}
+                        onChange={(e) => onSetAdSourceTag(row.id, e.target.value as AdSourceTag | "")}
+                      >
+                        <option value="">—</option>
+                        {AD_SOURCE_TAGS.map((t) => <option key={t} value={t}>#{t}</option>)}
+                      </select>
+                    </td>
+                  ) : null}
                   {columns.map((column) => <td key={column.key}>{formatMetric(row.metrics[column.key], column.key, row.currency)}</td>)}
                 </tr>
               ))}</tbody>
@@ -153,6 +186,7 @@ export default function PerformanceCampaignTable({
                   <th className="perf-select-cell"><input type="checkbox" aria-label="Selecionar todas as campanhas" checked={campaigns.length > 0 && campaigns.every((campaign) => campaign.campaignId && selectedCampaignIds.includes(`${campaign.accountId}:${campaign.campaignId}`))} onChange={onToggleAllCampaigns} /></th>
                   <th aria-label="Expandir" />
                   <th>Plataforma</th><th>Conta</th><th>Campanha</th><th>Objetivo</th>
+                  {blockCol ? <th title="Bloco de objetivo no relatório de anúncios">Bloco</th> : null}
                   {columns.map((c) => (
                     <th key={c.key} className="perf-th-sort" onClick={() => onToggleSort(c.key)} aria-sort={sortKey === c.key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                       {c.label}{sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
@@ -174,13 +208,27 @@ export default function PerformanceCampaignTable({
                         <td className="admin-cell-muted">{c.accountName}</td>
                         <td className="perf-td-caption" title={c.caption}>{c.caption || "—"}</td>
                         <td className="admin-cell-muted">{c.objective ? OBJECTIVE_LABEL[c.objective] ?? c.objective : "—"}</td>
+                        {blockCol ? (
+                          <td onClick={(event) => event.stopPropagation()}>
+                            {c.campaignId ? (
+                              <select
+                                className="perf-tag-select"
+                                aria-label={`Bloco da campanha ${c.caption}`}
+                                value={campaignBlocks[c.campaignId] ?? suggestBlock(c.objective, undefined, c.caption)}
+                                onChange={(e) => onSetCampaignBlock(c.campaignId as string, e.target.value as CampaignBlock | "")}
+                              >
+                                {CAMPAIGN_BLOCKS.map((b) => <option key={b} value={b}>{CAMPAIGN_BLOCK_LABEL[b]}</option>)}
+                              </select>
+                            ) : "—"}
+                          </td>
+                        ) : null}
                         {columns.map((col) => (
                           <td key={col.key}>{formatMetric(c.metrics[col.key], col.key, c.currency)}</td>
                         ))}
                       </tr>
                       {isExpanded ? (
                         <tr className="perf-ad-subrow">
-                          <td colSpan={6 + columns.length}>
+                          <td colSpan={6 + blockCol + columns.length}>
                             {!c.campaignId ? (
                               <p className="perf-empty">Detalhamento por anúncio disponível apenas para campanhas da conexão direta com a Meta.</p>
                             ) : ads?.loading ? (
@@ -222,7 +270,7 @@ export default function PerformanceCampaignTable({
                     </Fragment>
                   );
                 })}
-                {campaigns.length === 0 ? <tr><td colSpan={6 + columns.length} className="perf-empty">Nenhum anúncio pago no período com os filtros atuais.</td></tr> : null}
+                {campaigns.length === 0 ? <tr><td colSpan={6 + blockCol + columns.length} className="perf-empty">Nenhum anúncio pago no período com os filtros atuais.</td></tr> : null}
               </tbody>
             </table>
           </div>

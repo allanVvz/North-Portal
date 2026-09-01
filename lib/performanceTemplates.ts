@@ -12,6 +12,38 @@ import type { MetaPlatform } from "./windsor";
 
 export type PerformanceEntityLevel = "campaign" | "adset" | "ad";
 export type PerformanceTemplateScope = "builtin" | "personal" | "agency";
+
+// Bloco de objetivo de uma campanha — dita o grupo de KPIs que ela ganha no
+// relatório de anúncios (ver lib/reports/adsReportPdf.tsx). "Site" e "Perfil"
+// nem sempre se separam pelo `objective` do Meta, então a classificação é uma
+// TAG MANUAL por campanha no template (config.campaignBlocks), com
+// suggestCampaignBlock() só como palpite inicial na UI.
+export type CampaignBlock = "trafego_site" | "trafego_perfil" | "mensagens" | "engajamento" | "outro";
+export const CAMPAIGN_BLOCKS: CampaignBlock[] = ["trafego_site", "trafego_perfil", "mensagens", "engajamento", "outro"];
+export const CAMPAIGN_BLOCK_LABEL: Record<CampaignBlock, string> = {
+  trafego_site: "Tráfego para o site",
+  trafego_perfil: "Tráfego para o perfil",
+  mensagens: "Mensagens",
+  engajamento: "Engajamento",
+  outro: "Outras campanhas",
+};
+
+/** Fonte de tráfego de uma conversão — rastreada a partir da primeira mensagem
+ *  ("#1", "#2", "#3" por anúncio). Tag manual por anúncio no template. */
+export type AdSourceTag = "1" | "2" | "3";
+export const AD_SOURCE_TAGS: AdSourceTag[] = ["1", "2", "3"];
+
+/** Palpite do bloco a partir do objetivo/goal do Meta E do nome da campanha
+ *  (agências nomeiam "[TRAFEGO] ...", "VENDAS | SITE", "Perfil - seguidores").
+ *  Só valor inicial na UI; a tag salva no template é quem manda. */
+export function suggestCampaignBlock(objective?: string | null, optimizationGoal?: string | null, name?: string | null): CampaignBlock {
+  const hay = `${objective ?? ""} ${optimizationGoal ?? ""} ${name ?? ""}`.toUpperCase();
+  if (/MENSAG|MESSAGE|WHATS|CONVERSA|LEAD/.test(hay)) return "mensagens";
+  if (/PERFIL|PROFILE|SEGUID|FOLLOW|PAGE_LIKE/.test(hay)) return "trafego_perfil";
+  if (/SITE|LINK_CLICK|LANDING|TR[AÁ]FEGO|TRAFFIC/.test(hay)) return "trafego_site";
+  if (/ENGAJ|ENGAGEMENT|AWARENESS|ALCANCE|REACH/.test(hay)) return "engajamento";
+  return "outro";
+}
 export type PerformanceTemplateFilters = {
   clientSlug: string;
   category: "ads" | "organico" | "ambos";
@@ -27,6 +59,11 @@ export type PerformanceTemplateConfig = {
   filters: PerformanceTemplateFilters;
   dateRange: { from: string; to: string } | null;
   cardSources: Record<string, "paid" | "organic">;
+  // Bloco de objetivo por campanha (chave = campaignId, ou campaignName quando
+  // não há id — caso Windsor). Additivo: templates antigos sanitizam para `{}`.
+  campaignBlocks: Record<string, CampaignBlock>;
+  // Fonte #1/#2/#3 por anúncio (chave = adId).
+  adSourceTags: Record<string, AdSourceTag>;
   level: PerformanceEntityLevel;
   selectedCampaignIds: string[];
   selectedAdsetIds: string[];
@@ -65,6 +102,15 @@ function sanitizeCardSources(raw: unknown): Record<string, "paid" | "organic"> {
     .slice(0, 100)) as Record<string, "paid" | "organic">;
 }
 
+/** Mapa string→valor-do-enum, mesma forma de sanitizeCardSources. */
+function sanitizeTagMap<T extends string>(raw: unknown, allowed: readonly T[]): Record<string, T> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const set = new Set<string>(allowed);
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>)
+    .filter(([key, value]) => key.length > 0 && key.length <= 200 && typeof value === "string" && set.has(value))
+    .slice(0, 200)) as Record<string, T>;
+}
+
 export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemplateConfig {
   const value = (raw ?? {}) as Partial<PerformanceTemplateConfig>;
   const filters = (value.filters ?? {}) as Partial<PerformanceTemplateFilters>;
@@ -89,6 +135,8 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
     },
     dateRange: sanitizeDateRange(value.dateRange),
     cardSources: sanitizeCardSources(value.cardSources),
+    campaignBlocks: sanitizeTagMap(value.campaignBlocks, CAMPAIGN_BLOCKS),
+    adSourceTags: sanitizeTagMap(value.adSourceTags, AD_SOURCE_TAGS),
     level: LEVELS.has(value.level as PerformanceEntityLevel) ? value.level as PerformanceEntityLevel : "campaign",
     selectedCampaignIds: stringList(value.selectedCampaignIds),
     selectedAdsetIds: stringList(value.selectedAdsetIds),
@@ -151,16 +199,20 @@ const resultFunnelPrefs = sanitizePerformanceViewPrefs({
 // A última etapa de `funnelStages` é o desfecho: é dela que o fecho do funil
 // tira o número, o custo e a taxa de conversão (ver ResultPanel).
 const messageFunnelAcquisition: AcquisitionViewPrefs = {
-  // 6 é o teto do slot. Os 4 primeiros têm dado em todas as contas de produção;
-  // os 2 de seguidores entram sabidamente vazios, por decisão do usuário — a
-  // tela os rotula "Sem integração" em vez de mostrar um "—" ambíguo.
-  kpiSlots: ["custo", "alcance", "contatos", `custom:${COST_PER_CONTACT_ID}`, "followersGained", `custom:${COST_PER_FOLLOWER_ID}`],
+  // 6 é o teto do slot. `profileVisits` passou a ser ingerido
+  // (instagram_profile_visits, schema v6); `followersGained` segue vazio — a
+  // Meta não expõe follows na Marketing API, então a tela rotula "Sem
+  // integração" (o relatório de anúncios mostra zerado, de propósito).
+  kpiSlots: ["custo", "alcance", "contatos", "profileVisits", `custom:${COST_PER_CONTACT_ID}`, "followersGained"],
   volumeSlots: ["impressoes", "cliques"],
   gaugeSlots: ["cpm", "cpc", "ctr"],
-  funnelStages: ["alcance", "cliquesLink", "contatos"],
+  // Seguidores é etapa do funil (zerada por ora); mensagens é o desfecho.
+  funnelStages: ["alcance", "cliquesLink", "followersGained", "contatos"],
   showMessageBranch: false,
   trendMetrics: ["custo", "contatos"],
-  hiddenSections: [],
+  // Gauges ("Eficiência de mídia") fora por padrão — o operador liga por
+  // template se quiser (o relatório de anúncios respeita).
+  hiddenSections: ["gauges"],
 };
 const purchaseFunnelAcquisition: AcquisitionViewPrefs = {
   kpiSlots: ["custo", "alcance", "compras", `custom:${COST_PER_PURCHASE_ID}`],
@@ -169,7 +221,7 @@ const purchaseFunnelAcquisition: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliquesLink", "compras"],
   showMessageBranch: false,
   trendMetrics: ["custo", "compras"],
-  hiddenSections: [],
+  hiddenSections: ["gauges"],
 };
 const resultFunnelAcquisition: AcquisitionViewPrefs = {
   kpiSlots: ["custo", "alcance", "resultado", `custom:${COST_PER_RESULT_ID}`],
@@ -178,7 +230,7 @@ const resultFunnelAcquisition: AcquisitionViewPrefs = {
   funnelStages: ["alcance", "cliques", "resultado"],
   showMessageBranch: false,
   trendMetrics: ["custo", "resultado"],
-  hiddenSections: [],
+  hiddenSections: ["gauges"],
 };
 
 // Nível fica em "campaign" nos três. As linhas de conjunto/criativo só são

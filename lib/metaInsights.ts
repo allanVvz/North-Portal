@@ -11,7 +11,8 @@ export const META_ADS_DATASOURCE = "meta_ads" as const;
 // datasource's schema version — both come from normalizeAdsMetrics below.
 export const META_ADS_CREATIVE_DATASOURCE = "meta_ads_creative" as const;
 export const META_ADS_ADSET_DATASOURCE = "meta_ads_adset" as const;
-export const META_ADS_SCHEMA_VERSION = 5;
+// v6: passa a ingerir `instagram_profile_visits` (metrics.profileVisits).
+export const META_ADS_SCHEMA_VERSION = 6;
 
 function num(raw: unknown): number | undefined {
   if (raw === null || raw === undefined || raw === "") return undefined;
@@ -83,6 +84,7 @@ function normalizeAdsMetrics(row: Record<string, unknown>): MetaPost["metrics"] 
   const actions = actionMap(row.actions);
   const spend = num(row.spend);
   const reach = num(row.reach);
+  const profileVisits = num(row.instagram_profile_visits);
   const clicks = num(row.clicks);
   const uniqueClicks = num(row.unique_clicks);
   const linkClicks = num(row.inline_link_clicks);
@@ -114,6 +116,7 @@ function normalizeAdsMetrics(row: Record<string, unknown>): MetaPost["metrics"] 
 
   if (spend !== undefined) metrics.custo = spend;
   if (reach !== undefined) metrics.alcance = reach;
+  if (profileVisits !== undefined) metrics.profileVisits = profileVisits;
   if (clicks !== undefined) metrics.cliques = clicks;
   if (uniqueClicks !== undefined) metrics.cliquesUnicos = uniqueClicks;
   if (linkClicks !== undefined) metrics.cliquesLink = linkClicks;
@@ -188,7 +191,9 @@ export function normalizeMetaAdsetRow(row: Record<string, unknown>, adAccountId:
     date, accountId: adAccountId, accountName, platform, source: "paid", type: "outro",
     caption: adsetName, permalink: null, metrics: normalizeAdsMetrics(row), campaignId,
     campaignName: str(row.campaign_name) || campaignId, adsetId, adsetName,
-    objective: str(row.objective) || undefined, currency: str(row.account_currency) || undefined,
+    objective: str(row.objective) || undefined,
+    optimizationGoal: str(row.optimization_goal) || undefined,
+    currency: str(row.account_currency) || undefined,
     schemaVersion: META_ADS_SCHEMA_VERSION,
   };
 }
@@ -230,6 +235,7 @@ export function normalizeMetaAdRow(
     thumbnailUrl: creative?.thumbnailUrl ?? null,
     creativeId: creative?.creativeId ?? undefined,
     objective: str(row.objective) || undefined,
+    optimizationGoal: str(row.optimization_goal) || undefined,
     currency: str(row.account_currency) || undefined,
     schemaVersion: META_ADS_SCHEMA_VERSION,
   };
@@ -239,10 +245,12 @@ const ADS_FIELDS = [
   "campaign_id", "campaign_name", "date_start", "objective", "account_currency",
   "spend", "reach", "impressions", "frequency", "clicks", "unique_clicks",
   "inline_link_clicks", "inline_post_engagement", "ctr", "cpc", "cpm", "actions",
+  "instagram_profile_visits",
 ].join(",");
 
-const ADSET_INSIGHTS_FIELDS = ["adset_id", "adset_name", ADS_FIELDS].join(",");
-const AD_INSIGHTS_FIELDS = ["ad_id", "ad_name", "adset_id", "adset_name", ADS_FIELDS].join(",");
+// optimization_goal só existe em nível adset/ad no /insights — não em campanha.
+const ADSET_INSIGHTS_FIELDS = ["adset_id", "adset_name", "optimization_goal", ADS_FIELDS].join(",");
+const AD_INSIGHTS_FIELDS = ["ad_id", "ad_name", "adset_id", "adset_name", "optimization_goal", ADS_FIELDS].join(",");
 
 const MAX_PAGES = 40;
 

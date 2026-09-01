@@ -16,7 +16,8 @@ export type TaskKind =
   | "operacional"
   | "plano_acao"
   | "criativo"
-  | "checkpoint_comercial";
+  | "checkpoint_comercial"
+  | "relatorio_conversao";
 
 export type KindDef = {
   label: string;
@@ -72,6 +73,14 @@ export const TASK_KINDS: Record<TaskKind, KindDef> = {
     blurb: "Marco do onboarding/relacionamento comercial com o cliente",
     performance: false,
   },
+  relatorio_conversao: {
+    label: "Relatório de conversão",
+    icon: "▦",
+    tone: "blue",
+    blurb: "Fluxo de 2 etapas: relatório de tráfego (automático) + agendamentos (manual) → relatório de vendas",
+    performance: true,
+    subtypes: ["relatorio_trafego", "agendamentos"],
+  },
 };
 
 export const SUBTYPE_LABEL: Record<string, string> = {
@@ -95,8 +104,9 @@ export const SUBTYPE_LABEL: Record<string, string> = {
   // while criativo/captacao is step 2 of a specific piece's flow.
   captacao: "Captação",
   edicao: "Edição",
-  // operacional
+  // operacional / relatorio_conversao
   relatorio_trafego: "Relatório de tráfego",
+  agendamentos: "Agendamentos",
 };
 
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];

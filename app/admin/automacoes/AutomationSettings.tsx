@@ -41,7 +41,11 @@ const AUTOMATION_ICON: Record<AutomationKey, string> = {
   relatorio_trafego_semanal: "▤",
   provisionar_card_metricas: "⇄",
   coleta_metrica_cliente: "✎",
+  relatorio_vendas: "▧",
 };
+
+// Automações que usam um template de Performance (o mesmo seletor).
+const USES_PERFORMANCE_TEMPLATE: AutomationKey[] = ["relatorio_trafego_semanal", "relatorio_vendas"];
 
 // A "slot" is one card on screen — either a saved automation_configs row
 // (id set) or a still-unsaved draft added by clicking "+ Nova automação"
@@ -128,7 +132,7 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
     const body = {
       automationKey: slot.automationKey,
       targetTaskId: slot.targetTask.id,
-      performanceTemplateId: slot.automationKey === "relatorio_trafego_semanal" ? (slot.performanceTemplateId || null) : null,
+      performanceTemplateId: USES_PERFORMANCE_TEMPLATE.includes(slot.automationKey as AutomationKey) ? (slot.performanceTemplateId || null) : null,
       active: slot.active,
     };
     const res = slot.id
@@ -302,7 +306,7 @@ function AutomationConfigCard({
             </div>
           )}
 
-          {slot.automationKey === "relatorio_trafego_semanal" ? (
+          {USES_PERFORMANCE_TEMPLATE.includes(slot.automationKey as AutomationKey) ? (
             <select
               className="auto-template-select"
               value={slot.performanceTemplateId}

@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { BOTTOM_W, TAPER_MAX, funnelBandLayout, funnelBandWidths, funnelChartHeight } from "./funnelGeometry";
+import { BOTTOM_W, TAPER_MAX, funnelBandLayout, funnelBandWidths, funnelChartHeight, funnelStageCount } from "./funnelGeometry";
+
+describe("funnelStageCount", () => {
+  it("derruba a etapa de cauda null ou 0, nunca abaixo de 2", () => {
+    expect(funnelStageCount([100, 50, 10])).toBe(3);
+    expect(funnelStageCount([100, 50, 10, null])).toBe(3);
+    expect(funnelStageCount([100, 50, 10, 0])).toBe(3);
+    expect(funnelStageCount([100, 50, null, null])).toBe(2);
+    expect(funnelStageCount([null, null])).toBe(2);
+    // cauda vazia no meio não é cauda — só a última conta
+    expect(funnelStageCount([100, null, 10])).toBe(3);
+  });
+});
 
 describe("funnelBandWidths", () => {
   it("base = 1 e cada etapa fica sob o teto do taper (razões reais de produção)", () => {

@@ -35,14 +35,18 @@ export const DASH_METRICS: { key: MetaPostMetricKey; label: string; paidOnly: bo
 
 // Métricas que existem no vocabulário mas que NENHUMA ingestão preenche hoje:
 // nem o normalizador da Meta (lib/metaInsights.ts) nem o da Windsor
-// (lib/windsor.ts) escrevem estas chaves. Verificado no cache de produção — 376
-// linhas em 30 dias, 6 contas, zero ocorrências.
+// (lib/windsor.ts) escrevem estas chaves.
+//
+// `followers`/`followersGained` seguem aqui: sondada a Marketing API na conta
+// real (v21/v23/v24), a métrica "Instagram follows" não existe como campo nem
+// como action_type — só no painel do Ads Manager. `profileVisits` SAIU: passou a
+// vir de `instagram_profile_visits` (schema v6).
 //
 // A distinção importa na tela: "0 neste período" e "esta integração não existe"
 // são coisas diferentes, e um "—" mudo faz o operador procurar um problema de
 // filtro que não está lá. Um KPI destes é mostrado de propósito (o usuário quer
 // ver a lacuna de seguidores), mas rotulado como lacuna.
-const NEVER_INGESTED = new Set<MetaPostMetricKey>(["profileVisits", "followers", "followersGained"]);
+const NEVER_INGESTED = new Set<MetaPostMetricKey>(["followers", "followersGained"]);
 
 export function isNotIntegrated(ref: MetricRef, customMetrics: CustomMetric[] = []): boolean {
   if (isCustomMetricRef(ref)) {
@@ -241,7 +245,7 @@ export function topPosts(posts: MetaPost[], metric: MetaPostMetricKey, n: number
 // metrics (ctr/cpc/cpm/frequencia) — those are recomputed from the summed
 // totals afterward by recomputeRatios, not accumulated directly (averaging
 // per-day ratios would weight low-volume days too heavily).
-function sumMetricsInto(target: Partial<Record<MetaPostMetricKey, number>>, metrics: MetaPost["metrics"]) {
+export function sumMetricsInto(target: Partial<Record<MetaPostMetricKey, number>>, metrics: MetaPost["metrics"]) {
   for (const [metricKey, value] of Object.entries(metrics) as [MetaPostMetricKey, number | undefined][]) {
     if (value === undefined || metricKey === "ctr" || metricKey === "cpc" || metricKey === "cpm" || metricKey === "frequencia") continue;
     target[metricKey] = (target[metricKey] ?? 0) + value;
@@ -250,7 +254,7 @@ function sumMetricsInto(target: Partial<Record<MetaPostMetricKey, number>>, metr
 
 const RATIO_METRIC_KEYS = new Set<MetaPostMetricKey>(["ctr", "cpc", "cpm", "frequencia"]);
 
-function recomputeRatios(metrics: Partial<Record<MetaPostMetricKey, number>>) {
+export function recomputeRatios(metrics: Partial<Record<MetaPostMetricKey, number>>) {
   const impressions = metrics.impressoes ?? 0;
   const clicks = metrics.cliques ?? 0;
   const spend = metrics.custo ?? 0;

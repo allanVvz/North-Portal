@@ -1,0 +1,187 @@
+// PDF do "Relatório de vendas" (Automação 2 — relatorio_vendas).
+//
+// Fecha o fluxo de conversão: cruza os números do Meta (tráfego, conversas) com
+// as conversões que o responsável lançou no comentário do card manual (via
+// lib/ai/extractConversionReport) e a tag de fonte #1/#2/#3 por anúncio
+// (config.adSourceTags). Uma folha A4.
+//
+// Reusa reportComponents.tsx / reportTheme.ts / reportFonts.ts / funnelGeometry.ts
+// — mesmos KPIs, mesmo funil e mesmo painel de resultado do relatório de anúncios.
+
+import { Document, Page, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import {
+  formatAcquisitionValue, ratio, resolveAcquisitionMetric,
+  totalWhenPresent, type NullableMetric,
+} from "@/app/admin/performance/acquisitionInsights";
+import type { Period } from "@/app/admin/performance/insights";
+import { metricValue } from "@/app/admin/performance/performanceLabels";
+import type { PerformanceTemplateConfig, AdSourceTag } from "@/lib/performanceTemplates";
+import type { ConversionRow } from "@/lib/ai/extractConversionReport";
+import type { MetaPost } from "@/lib/windsor";
+import { funnelStageCount } from "./funnelGeometry";
+import { registerReportFonts } from "./reportFonts";
+import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
+import { CompassNode, FunnelSvg, KpiCard, REPORT_STYLES as S, ResultPanel } from "./reportComponents";
+
+registerReportFonts();
+
+export type SalesReportInput = {
+  clientName: string;
+  period: Period;
+  cadenceLabel: string;
+  config: PerformanceTemplateConfig;
+  campaignPosts: MetaPost[];
+  adPosts: MetaPost[];
+  prevCampaignPosts: MetaPost[];
+  conversoes: ConversionRow[];
+  prevConversoes?: ConversionRow[];
+  generatedAt: Date;
+};
+
+type SalesTotals = { agendamentos: number; vendas: number; receita: number };
+function totalsOf(conversoes: ConversionRow[]): SalesTotals {
+  return {
+    agendamentos: conversoes.length,
+    vendas: conversoes.filter((c) => c.status === "fechado").length,
+    receita: conversoes.reduce((sum, c) => sum + (c.valor ?? 0), 0),
+  };
+}
+
+const SOURCE_ROWS: (AdSourceTag | null)[] = ["1", "2", "3", null];
+const SOURCE_LABEL = (tag: AdSourceTag | null) => (tag ? `Fonte #${tag}` : "Sem tag");
+
+function SalesReportDocument({
+  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, generatedAt,
+}: SalesReportInput) {
+  const cm = config.prefs.customMetrics;
+  const cur = totalsOf(conversoes);
+  const prev = prevConversoes ? totalsOf(prevConversoes) : null;
+  const spend = totalWhenPresent(campaignPosts, "custo") ?? 0;
+  const prevSpend = totalWhenPresent(prevCampaignPosts, "custo") ?? 0;
+
+  const kpi = (label: string, value: NullableMetric, previous: NullableMetric, kind: "money" | "number" | "percent" | "decimal", inverse = false) =>
+    ({ label, value, previous, kind, inverse, notIntegrated: false });
+
+  const summaryKpis = [
+    kpi("Investimento", spend, prevSpend || null, "money"),
+    kpi("Receita da semana", cur.receita || null, prev ? prev.receita || null : null, "money"),
+    kpi("Agendamentos", cur.agendamentos, prev ? prev.agendamentos : null, "number"),
+    kpi("Vendas fechadas", cur.vendas, prev ? prev.vendas : null, "number"),
+    kpi("Ticket médio", ratio(cur.receita, cur.vendas), prev ? ratio(prev.receita, prev.vendas) : null, "money"),
+    kpi("ROAS", ratio(cur.receita, spend), prev ? ratio(prev.receita, prevSpend) : null, "decimal"),
+  ];
+
+  // Por fonte #1/#2/#3: cruza receita (do comentário) com custo/conversas (do
+  // anúncio taggeado). Só entra a linha que tem algum dado.
+  const sourceRows = SOURCE_ROWS.map((tag) => {
+    const conv = conversoes.filter((c) => (c.fonte ?? null) === tag);
+    const ads = adPosts.filter((p) => (config.adSourceTags[p.adId ?? ""] ?? null) === tag);
+    const t = totalsOf(conv);
+    const custo = totalWhenPresent(ads, "custo") ?? 0;
+    return {
+      tag,
+      custo,
+      conversas: totalWhenPresent(ads, "contatos"),
+      agendamentos: t.agendamentos,
+      vendas: t.vendas,
+      receita: t.receita,
+      custoPorAgendamento: ratio(custo, t.agendamentos),
+      roas: ratio(t.receita, custo),
+      hasData: conv.length > 0 || ads.length > 0,
+    };
+  }).filter((r) => r.hasData);
+
+  // Funil agregado — cauda sem dado sai (funnelStageCount).
+  const funnelRaw: { label: string; value: NullableMetric }[] = [
+    { label: "Alcance", value: resolveAcquisitionMetric(campaignPosts, "alcance", cm) },
+    { label: "Cliques", value: resolveAcquisitionMetric(campaignPosts, "cliquesLink", cm) },
+    { label: "Conversas", value: resolveAcquisitionMetric(campaignPosts, "contatos", cm) ?? 0 },
+    { label: "Agendamentos", value: cur.agendamentos },
+    { label: "Vendas", value: cur.vendas },
+  ];
+  const values = funnelRaw.map((s) => s.value);
+  const keepN = funnelStageCount(values);
+  const funnelLabels = funnelRaw.slice(0, keepN).map((s) => s.label);
+  const funnelValues = values.slice(0, keepN);
+
+  const subtitle = `${cadenceLabel} · ${period.from} a ${period.to} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`;
+  const fmtMoney = (v: NullableMetric) => formatAcquisitionValue(v, "money");
+
+  return (
+    <Document>
+      <Page size="A4" style={S.page} wrap>
+        <View style={S.header}>
+          <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 20, height: 20 }}>
+            {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
+          </Svg>
+          <View>
+            <Text style={S.title}>Relatório de vendas — {clientName}</Text>
+            <Text style={S.subtitle}>{subtitle}</Text>
+          </View>
+        </View>
+
+        <View style={S.section}>
+          <Text style={S.kicker}>Resumo do período</Text>
+          <View style={S.grid}>
+            {summaryKpis.map((k) => <KpiCard key={k.label} {...k} />)}
+          </View>
+        </View>
+
+        <View style={S.section}>
+          <Text style={S.kicker}>Por fonte de tráfego</Text>
+          {sourceRows.length ? (
+            <View style={S.table}>
+              <View style={S.tableRow}>
+                <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Fonte</Text>
+                <Text style={S.tableHeaderCell}>Invest.</Text>
+                <Text style={S.tableHeaderCell}>Conversas</Text>
+                <Text style={S.tableHeaderCell}>Agend.</Text>
+                <Text style={S.tableHeaderCell}>Vendas</Text>
+                <Text style={S.tableHeaderCell}>Receita</Text>
+                <Text style={S.tableHeaderCell}>Custo/agend.</Text>
+                <Text style={S.tableHeaderCell}>ROAS</Text>
+              </View>
+              {sourceRows.map((r, i) => (
+                <View style={i === sourceRows.length - 1 ? S.tableRowLast : S.tableRow} key={r.tag ?? "none"} wrap={false}>
+                  <Text style={[S.tableCell, S.tableCellFirst]}>{SOURCE_LABEL(r.tag)}</Text>
+                  <Text style={S.tableCell}>{fmtMoney(r.custo || null)}</Text>
+                  <Text style={S.tableCell}>{formatAcquisitionValue(r.conversas)}</Text>
+                  <Text style={S.tableCell}>{r.agendamentos}</Text>
+                  <Text style={S.tableCell}>{r.vendas}</Text>
+                  <Text style={S.tableCell}>{fmtMoney(r.receita || null)}</Text>
+                  <Text style={S.tableCell}>{fmtMoney(r.custoPorAgendamento)}</Text>
+                  <Text style={S.tableCell}>{r.roas === null ? "—" : metricValue(r.roas, "decimal")}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={S.empty}>Nenhuma conversão com fonte identificada no período.</Text>
+          )}
+        </View>
+
+        {funnelValues.length >= 2 ? (
+          <View style={S.section} wrap={false}>
+            <Text style={S.kicker}>Visão geral</Text>
+            <Text style={S.sectionTitle}>Funil de vendas</Text>
+            <View style={S.funnelRow}>
+              <FunnelSvg labels={funnelLabels} values={funnelValues} />
+              <ResultPanel
+                label={funnelLabels.at(-1) ?? "Vendas"}
+                value={funnelValues.at(-1) ?? null}
+                previousStage={funnelValues.at(-2) ?? null}
+                previousLabel={funnelLabels.at(-2) ?? ""}
+                spend={spend}
+              />
+            </View>
+          </View>
+        ) : null}
+
+        <Text style={S.footer} fixed>North — relatório gerado automaticamente</Text>
+      </Page>
+    </Document>
+  );
+}
+
+export async function renderSalesReportPdf(input: SalesReportInput): Promise<Buffer> {
+  return renderToBuffer(<SalesReportDocument {...input} />);
+}

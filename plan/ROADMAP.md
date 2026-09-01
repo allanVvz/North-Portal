@@ -22,6 +22,30 @@ mobile gaveta. Ver `CHANGELOG.md`.
 
 ## Tier 0 — Frentes definidas pelo usuário
 
+### R0.4 — Relatório de anúncios redesenhado + fluxo de conversão / vendas — ✅ FEITO na branch (2026-08-31)
+
+Branch `feat/relatorio-conversao-vendas` (não mergeada). Ver `CHANGELOG.md`.
+
+- **Fase 0** — relatório PDF da automação reescrito: KPIs por bloco de objetivo
+  (tag manual `config.campaignBlocks`), criativos por campanha com fonte
+  #1/#2/#3 (`config.adSourceTags`), funil ao final, sem gráfico diário, gauges
+  fora por padrão, uma folha A4. Ingestão de `instagram_profile_visits`
+  (schema Meta v6). `lib/reports/reportComponents.tsx` extraído.
+- **Fase 1** — tipo-entrega `relatorio_conversao` (2 etapas: tráfego auto +
+  agendamentos manual), `lib/ai/` (fetch direto na Messages API, sem SDK),
+  Automação 2 `relatorio_vendas` lê o comentário do responsável com IA →
+  `task_metrics` + `salesReportPdf`. Migrações `20260901000000/100/200`.
+  Validado ponta a ponta contra CRIS CAR CARE em prod.
+- **Encosta em**: R4.1/R4.4 (loop de escrita da automação a partir de
+  comentários — este fluxo é o primeiro caso concreto), R4.6 (a credencial
+  `'ai'` genérica já é lida por serviço; falta a tela de modelos por provedor),
+  R6.11 (`coleta_metrica_cliente` segue stub; `relatorio_vendas` resolve o caso
+  de agendamentos por outro caminho — flow step, não pendência no portal).
+- **Follow-ups**: regerar o relatório de anúncios com atribuição de receita por
+  fonte (hoje só no de vendas); trigger em insert de comentário para a
+  Automação 2 reagir na hora; `e2e/relatorio-conversao.spec.ts` (Playwright);
+  ingestão Meta de `followersGained` (a API não expõe).
+
 ### R0.1 — Unificação total do botão e do modal de criação de tarefa — ✅ FEITO (2026-08-30)
 
 Entregue: `NewTaskButton` único em toda tela; `TaskModal` deriva o

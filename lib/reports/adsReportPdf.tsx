@@ -1,107 +1,45 @@
 // PDF do "Relatório de anúncios" (Automação 1 — relatorio_trafego_semanal).
 //
-// Reproduz a aba Aquisição da tela de Performance (AcquisitionDashboard.tsx)
-// para o template escolhido — por padrão `builtin-funil-mensagens`. Cabe numa
-// folha A4: KPIs / funil / evolução / volume / eficiência de mídia + tabela de
-// campanhas. As seções que o operador esconde no template
-// (`config.acquisition.hiddenSections`) não entram no PDF — apara a tela,
-// apara o relatório.
+// Formato-alvo: o resumo que a equipe manda hoje à mão — KPIs agrupados por
+// TIPO DE CAMPANHA (tráfego site / tráfego perfil / mensagens / engajamento),
+// a lista de CRIATIVOS abaixo de cada campanha, e o FUNIL por último,
+// agregando tudo. Sem gráfico de linha diário.
+//
+// O bloco de cada campanha vem de `config.campaignBlocks` (tag manual no
+// template; suggestCampaignBlock só como fallback). A fonte #1/#2/#3 de cada
+// criativo vem de `config.adSourceTags`. As etapas do funil vêm de
+// `config.acquisition.funnelStages`; uma etapa de cauda sem dado sai do funil
+// (funnelStageCount).
 //
 // Renderiza server-side com @react-pdf/renderer (sem browser, sem rede) — Node
-// runtime obrigatório (app/api/admin/automations/run/route.ts).
-//
-// Tudo vem de `config.acquisition` + `config.prefs.customMetrics`, exatamente
-// como o dashboard (que faz `setKpiSlots(acq.kpiSlots)` etc.). `config.prefs`
-// só entra para os defs de métrica custom e para `visibleColumns` (a tabela
-// legada, que não tem equivalente em `acquisition`).
-//
-// Gráficos são SVG nativo do @react-pdf (Svg/Path/Circle/Polyline/LinearGradient).
-// A geometria do funil mora em lib/reports/funnelGeometry.ts — a MESMA que
-// desenha o funil da tela. Cores em lib/reports/reportTheme.ts (o renderer não
-// vê CSS). Fontes em lib/reports/reportFonts.ts.
+// runtime obrigatório (app/api/admin/automations/run/route.ts). Cores em
+// reportTheme.ts, fontes em reportFonts.ts, componentes em reportComponents.tsx.
 
+import { Document, Page, Path, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import {
-  Circle, Defs, Document, G, LinearGradient, Line, Page, Path, Polyline,
-  StyleSheet, Stop, Svg, Text, View, renderToBuffer,
-} from "@react-pdf/renderer";
-import {
-  acquisitionDelta, acquisitionMetricLabel, acquisitionMetricSeries,
-  acquisitionRateLabel, formatAcquisitionValue, ratio, resolveAcquisitionMetric,
-  summarizeAcquisition, totalWhenPresent, type MetricKind, type NullableMetric,
+  acquisitionMetricLabel, formatAcquisitionValue, ratio, resolveAcquisitionMetric,
+  totalWhenPresent, type NullableMetric,
 } from "@/app/admin/performance/acquisitionInsights";
 import {
-  campaignMetricValue, campaignSummaries, isNotIntegrated, metricLabel,
+  campaignSummaries, isNotIntegrated, metricLabel, recomputeRatios, sumMetricsInto,
   type Period,
 } from "@/app/admin/performance/insights";
 import { metricRefInverse, metricRefKind, metricValue } from "@/app/admin/performance/performanceLabels";
-import type { PerformanceTemplateConfig } from "@/lib/performanceTemplates";
-import { CAMPAIGN_METRIC_COLUMNS, type MetricRef } from "@/lib/performancePrefs";
+import {
+  CAMPAIGN_BLOCKS, CAMPAIGN_BLOCK_LABEL, suggestCampaignBlock,
+  type CampaignBlock, type PerformanceTemplateConfig,
+} from "@/lib/performanceTemplates";
+import type { MetricRef } from "@/lib/performancePrefs";
 import type { MetaPost, MetaPostMetricKey } from "@/lib/windsor";
-import { CHART_W, funnelBandLayout, funnelChartHeight } from "./funnelGeometry";
+import { funnelStageCount } from "./funnelGeometry";
 import { registerReportFonts } from "./reportFonts";
-import { COMPASS_VIEWBOX, REPORT_COLORS as C, REPORT_SERIES, compassShapes } from "./reportTheme";
-import type { CompassShape } from "@/app/brand/compass";
-import type { ComponentProps, ReactNode } from "react";
+import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
+import {
+  CompassNode, DeltaText, FunnelSvg, KpiCard, REPORT_STYLES as S,
+  ResultPanel, gaugeKind,
+} from "./reportComponents";
 
 registerReportFonts();
-
-// Layout COMPACTO — o relatório cabe numa folha A4. As seções que o operador
-// esconde no template (`config.acquisition.hiddenSections`) não são renderizadas,
-// então a folha respira conforme ele apara. Com as 5 seções + tabela ainda
-// cabe, apertado.
-const S = StyleSheet.create({
-  page: { paddingVertical: 22, paddingHorizontal: 24, fontFamily: "Inter", fontSize: 8, color: C.ink, backgroundColor: C.surface },
-  header: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: C.border },
-  title: { fontFamily: "Inter", fontWeight: 700, fontSize: 12.5, color: C.ink },
-  subtitle: { fontSize: 7.5, color: C.muted, marginTop: 1 },
-
-  section: { marginBottom: 10 },
-  kicker: { fontFamily: "Inter", fontWeight: 600, fontSize: 6.8, letterSpacing: 0.9, color: C.tealText, textTransform: "uppercase", marginBottom: 3 },
-  sectionTitle: { fontFamily: "Inter", fontWeight: 700, fontSize: 10, color: C.ink, marginBottom: 6 },
-
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  kpiCard: { width: "32%", position: "relative", borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: C.surface },
-  kpiCardGap: { borderStyle: "dashed", borderColor: C.borderStrong, backgroundColor: C.surface2 },
-  kpiAccent: { position: "absolute", top: 0, right: 0, width: 28, height: 2.5, borderTopRightRadius: 6, backgroundColor: C.teal },
-  kpiLabel: { fontFamily: "Inter", fontWeight: 600, fontSize: 6, letterSpacing: 0.5, color: C.sec, textTransform: "uppercase", marginBottom: 3 },
-  kpiValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 13, color: C.ink },
-  kpiValueGap: { color: C.muted },
-  kpiHint: { fontSize: 6, color: C.muted, marginTop: 1 },
-  delta: { fontSize: 6.6, fontWeight: 600, marginTop: 2 },
-  deltaGood: { color: C.tealText },
-  deltaBad: { color: C.danger },
-  deltaNeutral: { color: C.muted },
-  deltaGap: { color: C.goldText },
-
-  funnelRow: { flexDirection: "row", gap: 14, alignItems: "center" },
-  resultPanel: { flex: 1, borderWidth: 1, borderColor: C.tealSoft, borderRadius: 10, padding: 11, backgroundColor: C.tealSoft },
-  resultLabel: { fontFamily: "Inter", fontWeight: 700, fontSize: 6.5, letterSpacing: 0.7, color: C.tealText, textTransform: "uppercase" },
-  resultValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 24, color: C.ink, marginTop: 1 },
-  resultRate: { fontSize: 8, color: C.sec, marginTop: 1 },
-  resultSide: { flexDirection: "row", gap: 14, marginTop: 9, paddingTop: 8, borderTopWidth: 1, borderTopColor: C.tealSoft },
-  resultDt: { fontFamily: "Inter", fontWeight: 700, fontSize: 6, letterSpacing: 0.5, color: C.muted, textTransform: "uppercase" },
-  resultDd: { fontSize: 10.5, fontWeight: 600, color: C.ink, marginTop: 1 },
-
-  legendRow: { flexDirection: "row", gap: 12, marginTop: 4 },
-  legendItem: { flexDirection: "row", alignItems: "center", gap: 3 },
-  legendDot: { width: 6, height: 6, borderRadius: 3 },
-  legendLabel: { fontSize: 7.5, color: C.sec },
-
-  gaugeCard: { width: "32%", borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: C.surface2, alignItems: "center" },
-  gaugeLabel: { fontFamily: "Inter", fontWeight: 600, fontSize: 6, letterSpacing: 0.5, color: C.sec, textTransform: "uppercase", marginTop: 3 },
-  gaugeValue: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 12, color: C.ink, marginTop: 1 },
-
-  table: { borderWidth: 1, borderColor: C.border, borderRadius: 5 },
-  tableRow: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: C.border },
-  tableRowLast: { flexDirection: "row" },
-  tableHeaderCell: { flex: 1, paddingVertical: 4, paddingHorizontal: 5, fontFamily: "Inter", fontWeight: 600, fontSize: 6.5, backgroundColor: C.surface2, color: C.sec },
-  tableCell: { flex: 1, paddingVertical: 4, paddingHorizontal: 5, fontSize: 6.5, color: C.ink },
-  tableCellFirst: { flex: 2.4 },
-  tableMore: { fontSize: 6.8, color: C.muted, marginTop: 3 },
-
-  empty: { fontSize: 8, color: C.muted, paddingVertical: 5 },
-  footer: { position: "absolute", bottom: 12, left: 24, right: 24, fontSize: 6.5, color: C.muted, textAlign: "center" },
-});
 
 export type AdsReportInput = {
   clientName: string;
@@ -110,206 +48,67 @@ export type AdsReportInput = {
   config: PerformanceTemplateConfig;
   posts: MetaPost[];
   prevPosts: MetaPost[];
+  // Linhas em nível de anúncio (só na conexão direta com a Meta) — a tabela de
+  // criativos por campanha sai daqui. Vazio = conta sem detalhe por criativo.
+  adPosts: MetaPost[];
   generatedAt: Date;
 };
 
-// ---- pequenos utilitários -------------------------------------------------
+// ---- KPIs por bloco ----------------------------------------------------
 
-function shortDate(iso: string): string {
-  const [, m, d] = iso.split("-");
-  return d && m ? `${d}/${m}` : iso;
-}
+type BlockKpi = { label: string; metric?: MetricRef; ratio?: [MetricRef, MetricRef] };
 
-/** kind do gauge — react-pdf não tem "number"; ratio vira decimal. */
-function gaugeKind(kind: MetricKind): "money" | "percent" | "decimal" {
-  return kind === "number" ? "decimal" : kind;
-}
-
-const COLUMN_LABEL = new Map(CAMPAIGN_METRIC_COLUMNS.map((c) => [c.key as string, c.label]));
-function columnLabel(col: string, cm: Parameters<typeof metricRefKind>[1]): string {
-  return COLUMN_LABEL.get(col) ?? acquisitionMetricLabel(col as MetricRef, cm, metricLabel);
-}
-
-// ---- componentes --------------------------------------------------------
-
-// react-pdf lê fontFamily/fontWeight/fontSize direto das props de um <Text> SVG
-// (@react-pdf/layout `resolveSvgText`) — os tipos publicados só omitem esses
-// campos. Wrapper para não espalhar `as any` pelo arquivo.
-type SvgTextProps = {
-  x: number;
-  y: number;
-  fill: string;
-  fontFamily: "Inter" | "Fraunces";
-  fontWeight?: 400 | 600 | 700;
-  fontSize: number;
-  textAnchor?: "start" | "middle" | "end";
-  children: ReactNode;
+// "Mensagens" (metric `contatos`) entra em TODO bloco: "alguém chamou" é o
+// desfecho que a equipe conta, independente do objetivo da campanha. "Visitas ao
+// perfil" (`profileVisits`, ingerido de instagram_profile_visits) entra onde faz
+// sentido. "Novos seguidores" fica zerado — a Meta não expõe follows na API.
+const BLOCK_KPIS: Record<CampaignBlock, BlockKpi[]> = {
+  trafego_site: [
+    { label: "Investimento", metric: "custo" },
+    { label: "Alcance", metric: "alcance" },
+    { label: "Cliques no site", metric: "cliquesLink" },
+    { label: "Visitas ao perfil", metric: "profileVisits" },
+    { label: "Mensagens", metric: "contatos" },
+    { label: "Custo por clique", ratio: ["custo", "cliquesLink"] },
+  ],
+  trafego_perfil: [
+    { label: "Investimento", metric: "custo" },
+    { label: "Alcance", metric: "alcance" },
+    { label: "Visitas ao perfil", metric: "profileVisits" },
+    { label: "Novos seguidores", metric: "followersGained" },
+    { label: "Mensagens", metric: "contatos" },
+    { label: "Custo por visita", ratio: ["custo", "profileVisits"] },
+  ],
+  mensagens: [
+    { label: "Investimento", metric: "custo" },
+    { label: "Alcance", metric: "alcance" },
+    { label: "Mensagens", metric: "contatos" },
+    { label: "Custo por mensagem", ratio: ["custo", "contatos"] },
+  ],
+  engajamento: [
+    { label: "Investimento", metric: "custo" },
+    { label: "Alcance", metric: "alcance" },
+    { label: "Engajamento", metric: "engajamento" },
+    { label: "Visitas ao perfil", metric: "profileVisits" },
+    { label: "Mensagens", metric: "contatos" },
+    { label: "Custo por engajamento", ratio: ["custo", "engajamento"] },
+  ],
+  outro: [
+    { label: "Investimento", metric: "custo" },
+    { label: "Alcance", metric: "alcance" },
+    { label: "Cliques", metric: "cliques" },
+    { label: "Mensagens", metric: "contatos" },
+    { label: "CTR", metric: "ctr" },
+  ],
 };
-function SvgText(props: SvgTextProps) {
-  return <Text {...(props as unknown as ComponentProps<typeof Text>)} />;
-}
 
-function CompassNode({ shape, ink }: { shape: CompassShape; ink: string }) {
-  switch (shape.kind) {
-    case "ring":
-      return <Circle cx={shape.cx} cy={shape.cy} r={shape.r} fill="none" stroke={ink} strokeWidth={shape.width} opacity={shape.opacity} />;
-    case "dot":
-      return <Circle cx={shape.cx} cy={shape.cy} r={shape.r} fill={ink} opacity={shape.opacity ?? 1} />;
-    case "spoke":
-      return <Line x1={shape.x1} y1={shape.y1} x2={shape.x2} y2={shape.y2} stroke={ink} strokeWidth={shape.width} opacity={shape.opacity} />;
-    case "blade":
-      return <Path d={shape.d} fill={ink} opacity={shape.opacity ?? 1} />;
-  }
-}
+// Métricas que o relatório força a "0" em vez de "—"/"Sem integração": são
+// contagens onde zero é informação real numa conta Meta paga. `contatos`
+// unificado (msg/lead/conversa) e `followersGained` (a Meta não entrega follows;
+// o usuário quer a etapa visível zerada).
+const ZERO_NOT_DASH = new Set<MetricRef>(["contatos", "followersGained"]);
 
-function DeltaText({ current, previous, inverse }: { current: NullableMetric; previous: NullableMetric; inverse: boolean }) {
-  const value = acquisitionDelta(current, previous);
-  if (value === null) return <Text style={[S.delta, S.deltaNeutral]}>Sem comparativo</Text>;
-  const good = inverse ? value <= 0 : value >= 0;
-  return (
-    <Text style={[S.delta, good ? S.deltaGood : S.deltaBad]}>
-      {value >= 0 ? "↑" : "↓"} {formatAcquisitionValue(Math.abs(value), "decimal")}% vs. anterior
-    </Text>
-  );
-}
-
-function KpiCard({
-  label, value, previous, kind, inverse, notIntegrated = false, hint,
-}: {
-  label: string; value: NullableMetric; previous: NullableMetric;
-  kind: MetricKind; inverse: boolean; notIntegrated?: boolean; hint?: string;
-}) {
-  return (
-    <View style={notIntegrated ? [S.kpiCard, S.kpiCardGap] : S.kpiCard} wrap={false}>
-      <View style={S.kpiAccent} />
-      <Text style={S.kpiLabel}>{label.toUpperCase()}</Text>
-      <Text style={notIntegrated ? [S.kpiValue, S.kpiValueGap] : S.kpiValue}>
-        {notIntegrated ? "—" : formatAcquisitionValue(value, kind)}
-      </Text>
-      {notIntegrated
-        ? <Text style={[S.delta, S.deltaGap]}>Sem integração</Text>
-        : <DeltaText current={value} previous={previous} inverse={inverse} />}
-      {hint ? <Text style={S.kpiHint}>{hint}</Text> : null}
-    </View>
-  );
-}
-
-function FunnelSvg({ labels, values }: { labels: string[]; values: NullableMetric[] }) {
-  const bands = funnelBandLayout(values);
-  // rates[i] = taxa da transição da etapa i para a i+1 — mesmo indexado do
-  // `stageRates` de FunnelChart (que faz `values.slice(1)`).
-  const rates = values.slice(1).map((v, i) => acquisitionRateLabel(v, values[i]));
-  const height = funnelChartHeight(labels.length);
-  const width = 210;
-  return (
-    <Svg viewBox={`0 0 ${CHART_W} ${height}`} style={{ width, height: (width * height) / CHART_W }}>
-      <Defs>
-        <LinearGradient id="funnelBand" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0%" stopColor={C.teal} />
-          <Stop offset="100%" stopColor={C.tealText} />
-        </LinearGradient>
-      </Defs>
-      {labels.map((label, i) => {
-        const band = bands[i];
-        return (
-          <G key={label}>
-            <Path
-              d={band.trapezoid}
-              fill={band.missing ? C.surface2 : "url(#funnelBand)"}
-              stroke={band.missing ? C.borderStrong : undefined}
-              strokeDasharray={band.missing ? "3 3" : undefined}
-              opacity={band.opacity}
-            />
-            <Path d={band.leader} stroke={C.borderStrong} strokeWidth={0.75} fill="none" />
-            <Circle cx={band.dot.cx} cy={band.dot.cy} r={2} fill={C.borderStrong} />
-            <SvgText x={band.labelAt.x} y={band.labelAt.y} fill={C.sec} fontFamily="Inter" fontWeight={600} fontSize={6.5}>
-              {label.toUpperCase()}
-            </SvgText>
-            <SvgText x={band.valueAt.x} y={band.valueAt.y} fill={C.ink} fontFamily="Fraunces" fontWeight={600} fontSize={13}>
-              {formatAcquisitionValue(values[i])}
-            </SvgText>
-            {band.rateAt ? (
-              <SvgText x={band.rateAt.x} y={band.rateAt.y} textAnchor="middle" fill={C.muted} fontFamily="Inter" fontWeight={600} fontSize={6.5}>
-                {rates[i]}
-              </SvgText>
-            ) : null}
-          </G>
-        );
-      })}
-    </Svg>
-  );
-}
-
-function ResultPanel({
-  label, value, previousStage, previousLabel, spend,
-}: {
-  label: string; value: NullableMetric; previousStage: NullableMetric;
-  previousLabel: string; spend: NullableMetric;
-}) {
-  const rate = ratio(value, previousStage, 100);
-  return (
-    <View style={S.resultPanel} wrap={false}>
-      <Text style={S.resultLabel}>{label.toUpperCase()}</Text>
-      <Text style={S.resultValue}>{formatAcquisitionValue(value)}</Text>
-      {rate !== null && previousLabel ? (
-        <Text style={S.resultRate}>
-          {formatAcquisitionValue(rate, "percent")} de {previousLabel.toLowerCase()}
-        </Text>
-      ) : null}
-      <View style={S.resultSide}>
-        <View style={{ flex: 1 }}>
-          <Text style={S.resultDt}>Custo por resultado</Text>
-          <Text style={S.resultDd}>{formatAcquisitionValue(ratio(spend, value), "money")}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={S.resultDt}>Investimento</Text>
-          <Text style={S.resultDd}>{formatAcquisitionValue(spend, "money")}</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function TrendSvg({ series }: { series: { label: string; points: { date: string; value: number }[] }[] }) {
-  const W = 520;
-  const H = 96;
-  const padL = 10;
-  const padR = 10;
-  const padT = 12;
-  const padB = 14;
-  const innerW = W - padL - padR;
-  const innerH = H - padT - padB;
-  const n = series[0]?.points.length ?? 0;
-  const x = (i: number) => padL + (i * innerW) / Math.max(1, n - 1);
-  const first = series[0]?.points[0]?.date;
-  const last = series[0]?.points.at(-1)?.date;
-  const baseline = padT + innerH;
-  // Cada série tem sua PRÓPRIA escala — "Linhas independentes · mesmo período",
-  // como o TrendChart da tela (que usa dois eixos Y). Investimento (R$) e
-  // Conversas (unidades) num eixo só deixaria a menor achatada no chão.
-  return (
-    <Svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: (547 * H) / W }}>
-      <Line x1={padL} y1={baseline} x2={W - padR} y2={baseline} stroke={C.border} strokeWidth={1} />
-      {series.map((s, si) => {
-        const color = REPORT_SERIES[si % REPORT_SERIES.length];
-        const seriesMax = Math.max(1, ...s.points.map((p) => p.value));
-        const y = (v: number) => padT + (1 - v / seriesMax) * innerH;
-        const maxLabel = (
-          <SvgText key={`m${si}`} x={si === 0 ? padL : W - padR} y={padT - 4} textAnchor={si === 0 ? "start" : "end"} fill={color} fontFamily="Inter" fontWeight={600} fontSize={6.5}>
-            {formatAcquisitionValue(seriesMax)}
-          </SvgText>
-        );
-        if (n === 1) {
-          return <G key={si}>{maxLabel}<Circle cx={x(0)} cy={y(s.points[0].value)} r={2.5} fill={color} /></G>;
-        }
-        const pts = s.points.map((p, i) => `${x(i)},${y(p.value)}`).join(" ");
-        return <G key={si}>{maxLabel}<Polyline points={pts} stroke={color} strokeWidth={1.6} fill="none" strokeLinejoin="round" /></G>;
-      })}
-      {first ? <SvgText x={padL} y={H - 5} fill={C.muted} fontFamily="Inter" fontSize={6.5}>{shortDate(first)}</SvgText> : null}
-      {last ? <SvgText x={W - padR} y={H - 5} textAnchor="end" fill={C.muted} fontFamily="Inter" fontSize={6.5}>{shortDate(last)}</SvgText> : null}
-    </Svg>
-  );
-}
+// ---- componentes locais ----------------------------------------------
 
 function GaugeCard({
   label, current, previous, kind, inverse,
@@ -340,47 +139,106 @@ function GaugeCard({
   );
 }
 
-// ---- documento ----------------------------------------------------------
+// Linhas de criativo de UMA campanha, agregadas por adId (soma entre
+// plataformas), ratios re-derivadas do total. Puro.
+type CreativeRow = { adId: string; name: string; metrics: Partial<Record<MetaPostMetricKey, number>>; currency?: string };
+function creativeRowsFor(adPosts: MetaPost[], campaignId: string): CreativeRow[] {
+  const byId = new Map<string, CreativeRow>();
+  for (const p of adPosts) {
+    if (!p.adId || p.campaignId !== campaignId) continue;
+    let row = byId.get(p.adId);
+    if (!row) {
+      row = { adId: p.adId, name: p.adName || p.caption || p.adId, metrics: {}, currency: p.currency };
+      byId.set(p.adId, row);
+    }
+    sumMetricsInto(row.metrics, p.metrics);
+  }
+  const rows = [...byId.values()];
+  for (const row of rows) recomputeRatios(row.metrics);
+  return rows.sort((a, b) => (b.metrics.custo ?? 0) - (a.metrics.custo ?? 0));
+}
 
-function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, prevPosts, generatedAt }: AdsReportInput) {
+const CREATIVE_COLS: { key: MetaPostMetricKey; label: string; kind: "number" | "money" | "percent" }[] = [
+  { key: "alcance", label: "Alcance", kind: "number" },
+  { key: "impressoes", label: "Impr.", kind: "number" },
+  { key: "cliquesLink", label: "Cliques", kind: "number" },
+  { key: "contatos", label: "Mensagens", kind: "number" },
+  { key: "custo", label: "Invest.", kind: "money" },
+  { key: "ctr", label: "CTR", kind: "percent" },
+];
+
+// ---- documento ------------------------------------------------------
+
+function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, prevPosts, adPosts, generatedAt }: AdsReportInput) {
   const acq = config.acquisition;
   const cm = config.prefs.customMetrics;
-
-  const summary = summarizeAcquisition(posts);
-  const prevSummary = summarizeAcquisition(prevPosts);
-
-  const kpi = (ref: MetricRef) => ({
-    label: acquisitionMetricLabel(ref, cm, metricLabel),
-    value: resolveAcquisitionMetric(posts, ref, cm),
-    previous: resolveAcquisitionMetric(prevPosts, ref, cm),
-    kind: metricRefKind(ref, cm),
-    inverse: metricRefInverse(ref, cm),
-    notIntegrated: isNotIntegrated(ref, cm),
-  });
-
-  const funnelValues = acq.funnelStages.map((r) => resolveAcquisitionMetric(posts, r, cm));
-  const funnelLabels = acq.funnelStages.map((r) => acquisitionMetricLabel(r, cm, metricLabel));
-  const spend = totalWhenPresent(posts, "custo");
-
-  const trend = acq.trendMetrics.slice(0, 2).map((r) => ({
-    label: acquisitionMetricLabel(r, cm, metricLabel),
-    points: acquisitionMetricSeries(posts, r, period.from, period.to, cm).map((p) => ({ date: p.date, value: p.value ?? 0 })),
-  }));
-
-  // Seções escondidas no template (Configurações › Performance › Aquisição).
-  // O que a pessoa apara na tela e salva é o que o PDF deixa de mostrar.
   const hidden = new Set(acq.hiddenSections);
 
-  const columns: (MetricRef | MetaPostMetricKey)[] = config.prefs.visibleColumns.length
-    ? config.prefs.visibleColumns
-    : ["alcance", "impressoes", "cliquesLink", "contatos", "custo"];
-  // Quanto mais seções o template mostra, menos linhas de campanha cabem na
-  // folha. Aparou 2+ seções → sobra espaço pra tabela inteira.
-  const CAMPAIGN_CAP = hidden.size >= 2 ? 16 : 9;
-  const allCampaigns = campaignSummaries(posts)
+  const blockOf = (campaignId: string | undefined, campaignName: string | undefined, objective?: string, optimizationGoal?: string): CampaignBlock =>
+    config.campaignBlocks[campaignId ?? campaignName ?? ""] ?? suggestCampaignBlock(objective, optimizationGoal, campaignName);
+  const postBlock = (p: MetaPost) => blockOf(p.campaignId, p.campaignName ?? p.caption, p.objective, p.optimizationGoal);
+
+  // Blocos presentes, na ordem canônica.
+  const blocksPresent = CAMPAIGN_BLOCKS.filter((block) => posts.some((p) => postBlock(p) === block));
+
+  const kpiForDef = (def: BlockKpi, cur: MetaPost[], prev: MetaPost[]) => {
+    if (def.ratio) {
+      const [num, den] = def.ratio;
+      return {
+        label: def.label,
+        value: ratio(resolveAcquisitionMetric(cur, num, cm), resolveAcquisitionMetric(cur, den, cm)),
+        previous: ratio(resolveAcquisitionMetric(prev, num, cm), resolveAcquisitionMetric(prev, den, cm)),
+        kind: "money" as const,
+        inverse: true,
+        notIntegrated: false,
+      };
+    }
+    const ref = def.metric as MetricRef;
+    const zero = ZERO_NOT_DASH.has(ref);
+    return {
+      label: def.label,
+      value: resolveAcquisitionMetric(cur, ref, cm) ?? (zero ? 0 : null),
+      previous: resolveAcquisitionMetric(prev, ref, cm) ?? (zero ? 0 : null),
+      kind: metricRefKind(ref, cm),
+      inverse: metricRefInverse(ref, cm),
+      notIntegrated: zero ? false : isNotIntegrated(ref, cm),
+    };
+  };
+
+  // O relatório é por CAMPANHA, não por campanha×plataforma — campaignSummaries
+  // devolve uma linha por plataforma, então agregamos por campaignId aqui.
+  const byCampaign = new Map<string, { id: string; campaignId?: string; caption: string; objective?: string; metrics: Partial<Record<MetaPostMetricKey, number>>; currency?: string }>();
+  for (const c of campaignSummaries(posts)) {
+    const id = c.campaignId || c.caption;
+    let agg = byCampaign.get(id);
+    if (!agg) {
+      agg = { id, campaignId: c.campaignId, caption: c.caption, objective: c.objective, metrics: {}, currency: c.currency };
+      byCampaign.set(id, agg);
+    }
+    sumMetricsInto(agg.metrics, c.metrics);
+  }
+  const allCampaigns = [...byCampaign.values()]
+    .map((c) => {
+      recomputeRatios(c.metrics);
+      return { ...c, block: blockOf(c.campaignId, c.caption, c.objective) };
+    })
     .sort((a, b) => (b.metrics.custo ?? b.metrics.alcance ?? 0) - (a.metrics.custo ?? a.metrics.alcance ?? 0));
+  // Uma folha só: no máximo 6 campanhas e 3 criativos por campanha.
+  const CAMPAIGN_CAP = 6;
+  const CREATIVE_CAP = 3;
   const campaigns = allCampaigns.slice(0, CAMPAIGN_CAP);
   const campaignsOverflow = allCampaigns.length - campaigns.length;
+
+  // Funil agregado — etapa de cauda sem dado sai (funnelStageCount). `contatos`
+  // e `followersGained` viram 0 (não faixa tracejada): são contagens que o
+  // relatório mostra zeradas de propósito.
+  const allFunnelValues = acq.funnelStages.map(
+    (r) => resolveAcquisitionMetric(posts, r, cm) ?? (ZERO_NOT_DASH.has(r) ? 0 : null),
+  );
+  const keepN = funnelStageCount(allFunnelValues);
+  const funnelValues = allFunnelValues.slice(0, keepN);
+  const funnelLabels = acq.funnelStages.slice(0, keepN).map((r) => acquisitionMetricLabel(r, cm, metricLabel));
+  const spend = totalWhenPresent(posts, "custo");
 
   const subtitle = `${cadenceLabel} · ${period.from} a ${period.to} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`;
 
@@ -392,78 +250,83 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
             {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
           </Svg>
           <View>
-            <Text style={S.title}>Funil de mensagens — {clientName}</Text>
+            <Text style={S.title}>Relatório de anúncios — {clientName}</Text>
             <Text style={S.subtitle}>{subtitle}</Text>
           </View>
         </View>
 
-        {!hidden.has("kpis") && acq.kpiSlots.length ? (
-          <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>KPIs</Text>
-            <View style={S.grid}>
-              {acq.kpiSlots.map((ref) => <KpiCard key={ref} {...kpi(ref)} />)}
-            </View>
-          </View>
-        ) : null}
-
-        {!hidden.has("funnel") ? (
-          <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>Conversão e intenção</Text>
-            <Text style={S.sectionTitle}>Funil de aquisição</Text>
-            <View style={S.funnelRow}>
-              <FunnelSvg labels={funnelLabels} values={funnelValues} />
-              <ResultPanel
-                label={funnelLabels.at(-1) ?? "Resultado"}
-                value={funnelValues.at(-1) ?? null}
-                previousStage={funnelValues.at(-2) ?? null}
-                previousLabel={funnelLabels.at(-2) ?? ""}
-                spend={spend}
-              />
-            </View>
-          </View>
-        ) : null}
-
-        {!hidden.has("trend") ? (
-          <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>Evolução</Text>
-            <Text style={S.sectionTitle}>{trend.map((t) => t.label).join(" × ") || "Tendência"}</Text>
-            {trend.length && trend[0].points.length ? (
-              <>
-                <TrendSvg series={trend} />
-                <View style={S.legendRow}>
-                  {trend.map((t, i) => (
-                    <View style={S.legendItem} key={i}>
-                      <View style={[S.legendDot, { backgroundColor: REPORT_SERIES[i % REPORT_SERIES.length] }]} />
-                      <Text style={S.legendLabel}>{t.label}</Text>
-                    </View>
-                  ))}
+        {/* KPIs por bloco de objetivo */}
+        {!hidden.has("kpis") && blocksPresent.length ? (
+          <View style={S.section}>
+            <Text style={S.kicker}>Resultados por campanha</Text>
+            {blocksPresent.map((block) => {
+              const cur = posts.filter((p) => postBlock(p) === block);
+              const prev = prevPosts.filter((p) => postBlock(p) === block);
+              return (
+                <View style={S.blockGroup} key={block} wrap={false}>
+                  <View style={S.blockHead}>
+                    <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
+                  </View>
+                  <View style={S.grid}>
+                    {BLOCK_KPIS[block].map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev)} />)}
+                  </View>
                 </View>
-              </>
-            ) : <Text style={S.empty}>Sem série no período.</Text>}
+              );
+            })}
           </View>
         ) : null}
 
-        {!hidden.has("volume") ? (
-          <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>Volume</Text>
-            <View style={S.grid}>
-              {acq.volumeSlots.map((ref) => <KpiCard key={ref} {...kpi(ref)} />)}
-              <KpiCard
-                label="Taxa de conversão"
-                value={summary.conversionRate}
-                previous={prevSummary.conversionRate}
-                kind="percent"
-                inverse={false}
-                hint="Leads ÷ cliques"
-              />
-            </View>
-          </View>
-        ) : null}
+        {/* Criativos por campanha */}
+        <View style={S.section}>
+          <Text style={S.kicker}>Criativos</Text>
+          {campaigns.length ? campaigns.map((c) => {
+            const all = c.campaignId ? creativeRowsFor(adPosts, c.campaignId) : [];
+            const rows = all.slice(0, CREATIVE_CAP);
+            const rowsOverflow = all.length - rows.length;
+            return (
+              <View key={c.id} wrap={false}>
+                <View style={S.campaignHead}>
+                  <Text style={S.campaignName}>{c.caption || "Sem nome"}</Text>
+                  <Text style={S.chip}>{CAMPAIGN_BLOCK_LABEL[c.block]}</Text>
+                </View>
+                {rows.length ? (
+                  <>
+                    <View style={S.table}>
+                      <View style={S.tableRow}>
+                        <Text style={[S.tableHeaderCell, { flex: 0.5 }]}>#</Text>
+                        <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Criativo</Text>
+                        {CREATIVE_COLS.map((col) => <Text style={S.tableHeaderCell} key={col.key}>{col.label}</Text>)}
+                      </View>
+                      {rows.map((row, i) => (
+                        <View style={i === rows.length - 1 ? S.tableRowLast : S.tableRow} key={row.adId} wrap={false}>
+                          <Text style={[S.tableCell, { flex: 0.5 }]}>{config.adSourceTags[row.adId] ? `#${config.adSourceTags[row.adId]}` : "—"}</Text>
+                          <Text style={[S.tableCell, S.tableCellFirst]}>{row.name}</Text>
+                          {CREATIVE_COLS.map((col) => {
+                            const raw = row.metrics[col.key] ?? (ZERO_NOT_DASH.has(col.key) ? 0 : undefined);
+                            return (
+                              <Text style={S.tableCell} key={col.key}>
+                                {raw === undefined ? "—" : metricValue(raw, col.kind, row.currency)}
+                              </Text>
+                            );
+                          })}
+                        </View>
+                      ))}
+                    </View>
+                    {rowsOverflow > 0 ? <Text style={S.tableMore}>+{rowsOverflow} criativo{rowsOverflow > 1 ? "s" : ""} com menos investimento.</Text> : null}
+                  </>
+                ) : (
+                  <Text style={S.empty}>Sem detalhe por criativo nesta conta.</Text>
+                )}
+              </View>
+            );
+          }) : <Text style={S.empty}>Nenhuma campanha com dados no período.</Text>}
+          {campaignsOverflow > 0 ? <Text style={S.tableMore}>+{campaignsOverflow} campanha{campaignsOverflow > 1 ? "s" : ""} com menos investimento no período.</Text> : null}
+        </View>
 
+        {/* Eficiência de mídia (opcional, controlado pelo template) */}
         {!hidden.has("gauges") && acq.gaugeSlots.length ? (
           <View style={S.section} wrap={false}>
             <Text style={S.kicker}>Eficiência de mídia</Text>
-            <Text style={S.sectionTitle}>Custos e taxas</Text>
             <View style={S.grid}>
               {acq.gaugeSlots.map((ref) => (
                 <GaugeCard
@@ -479,41 +342,23 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
           </View>
         ) : null}
 
-        {/* Sem wrap={false}: se todas as seções estão visíveis e a tabela não
-            couber no que sobra da folha, a cauda dela continua na 2ª — melhor
-            que empurrar a tabela inteira e deixar a folha 1 pela metade. */}
-        <View style={S.section}>
-          <Text style={S.kicker}>Campanhas</Text>
-          {campaigns.length ? (
-            <>
-              <View style={S.table}>
-                <View style={S.tableRow}>
-                  <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Campanha</Text>
-                  {columns.map((col) => (
-                    <Text style={S.tableHeaderCell} key={col}>{columnLabel(String(col), cm)}</Text>
-                  ))}
-                </View>
-                {campaigns.map((row, i) => (
-                  <View style={i === campaigns.length - 1 ? S.tableRowLast : S.tableRow} key={row.key} wrap={false}>
-                    <Text style={[S.tableCell, S.tableCellFirst]}>{row.caption || "Sem nome"}</Text>
-                    {columns.map((col) => {
-                      const isBuiltin = !String(col).startsWith("custom:");
-                      const raw = isBuiltin ? row.metrics[col as MetaPostMetricKey] : campaignMetricValue(row, col as MetricRef, cm);
-                      return (
-                        <Text style={S.tableCell} key={col}>
-                          {raw === undefined ? "—" : metricValue(raw, metricRefKind(col as MetricRef, cm), row.currency)}
-                        </Text>
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
-              {campaignsOverflow > 0 ? (
-                <Text style={S.tableMore}>+{campaignsOverflow} campanha{campaignsOverflow > 1 ? "s" : ""} com menos investimento no período.</Text>
-              ) : null}
-            </>
-          ) : <Text style={S.empty}>Nenhuma campanha com dados no período.</Text>}
-        </View>
+        {/* Funil agregado — por último */}
+        {!hidden.has("funnel") && funnelValues.length >= 2 ? (
+          <View style={S.section} wrap={false}>
+            <Text style={S.kicker}>Visão geral</Text>
+            <Text style={S.sectionTitle}>Funil de aquisição</Text>
+            <View style={S.funnelRow}>
+              <FunnelSvg labels={funnelLabels} values={funnelValues} />
+              <ResultPanel
+                label={funnelLabels.at(-1) ?? "Resultado"}
+                value={funnelValues.at(-1) ?? null}
+                previousStage={funnelValues.at(-2) ?? null}
+                previousLabel={funnelLabels.at(-2) ?? ""}
+                spend={spend}
+              />
+            </View>
+          </View>
+        ) : null}
 
         <Text style={S.footer} fixed>North — relatório gerado automaticamente</Text>
       </Page>

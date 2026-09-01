@@ -62,6 +62,18 @@ export function funnelChartHeight(stageCount: number): number {
   return stageCount * BAND_H + Math.max(0, stageCount - 1) * BAND_GAP;
 }
 
+/**
+ * Quantas etapas de fato desenhar: a etapa de CAUDA sem dado (null ou 0) é
+ * removida em vez de virar faixa tracejada — o funil não deve terminar num
+ * degrau vazio (ex.: "Seguidores" antes da ingestão Meta existir). Nunca cai
+ * abaixo de `min` (2); uma cauda vazia acima disso vira "—" normalmente.
+ */
+export function funnelStageCount(values: readonly (number | null)[], min = 2): number {
+  let n = values.length;
+  while (n > min && (values[n - 1] === null || values[n - 1] === 0)) n--;
+  return n;
+}
+
 export type FunnelBand = {
   /** `d` do trapézio (encaixa na próxima etapa em vez de empilhar retângulos). */
   trapezoid: string;

@@ -1,7 +1,8 @@
-// Daily cron entrypoint for Automação 1 (relatorio_trafego_semanal), called
-// by app/api/admin/automations/run/route.ts. Automação 2 has no cron leg —
-// it's a synchronous fan-out only (lib/automations/provision.ts), triggered
-// by the "Provisionar agora" button, never by this daily tick.
+// Daily cron entrypoint, called by app/api/admin/automations/run/route.ts.
+// Despacha por automation_key: `relatorio_trafego_semanal` (aqui) e
+// `relatorio_vendas` (lib/automations/sales.ts). `provisionar_card_metricas`
+// continua sendo um fan-out síncrono (lib/automations/provision.ts) e
+// `coleta_metrica_cliente` ainda é só stub (roadmap R6.11).
 //
 // v2: one row per registered automation instance, bound to a target card
 // whose OWN due date/cadence drives everything — see
@@ -14,18 +15,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyFromAutomation } from "./notify";
 import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
-import {
-  BUILTIN_PERFORMANCE_TEMPLATES,
-  DEFAULT_BUILTIN_TEMPLATE,
-  sanitizePerformanceTemplateConfig,
-  type PerformanceTemplateConfig,
-} from "@/lib/performanceTemplates";
-import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
-import { fetchWindsorPosts, type MetaPost, type WindsorDatasource, type WindsorSettings } from "@/lib/windsor";
-import { fetchMetaAdsInsights } from "@/lib/metaInsights";
+import { inPeriod, previousPeriod } from "@/app/admin/performance/insights";
+import type { WindsorSettings } from "@/lib/windsor";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
-import { clonePlanForReport, materializeOccurrenceForReport } from "./execute";
+import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
+import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrenceForReport, materializeOccurrenceForReport } from "./execute";
+import { runOneSalesAutomation } from "./sales";
+import { isFlowDelivery } from "@/lib/taskRelations";
 import { recurrenceStopped } from "@/lib/recurrenceState";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
@@ -56,56 +53,6 @@ function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function periodForCadence(cadence: RecurringCadence, endIso: string): Period {
-  const days = cadence === "semanal" ? 7 : cadence === "quinzenal" ? 14 : 30;
-  const to = new Date(`${endIso}T12:00:00Z`);
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - (days - 1));
-  return { from: isoDay(from), to: isoDay(to) };
-}
-
-// performance_template_id e TEXT (aceita "builtin-*"), mas
-// performance_templates.id e UUID. Consultar um id de builtin ali faz o
-// Postgres devolver "invalid input syntax for type uuid" e derruba a execucao
-// inteira da automacao — foi o que aconteceria com as configs que apontavam
-// para builtins removidos. Por isso o id so vai ao banco quando e um UUID de
-// verdade; qualquer outro id desconhecido cai no template padrao.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-async function resolveTemplateConfig(admin: AdminClient, templateId: string | null): Promise<PerformanceTemplateConfig> {
-  const fallback = DEFAULT_BUILTIN_TEMPLATE.config;
-  if (!templateId) return fallback;
-  const builtin = BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === templateId);
-  if (builtin) return builtin.config;
-  if (!UUID_RE.test(templateId)) return fallback;
-  const { data, error } = await admin.from("performance_templates").select("config").eq("id", templateId).limit(1);
-  if (error) throw error;
-  const row = data?.[0] as { config: unknown } | undefined;
-  return row ? sanitizePerformanceTemplateConfig(row.config) : fallback;
-}
-
-async function fetchPostsForAccount(
-  account: { windsorAccountId: string | null; metaAccountId: string | null; metaAccountName: string | null },
-  windsor: WindsorSettings,
-  meta: ServiceMetaSettings,
-  windowFrom: string,
-  windowTo: string,
-): Promise<MetaPost[]> {
-  const posts: MetaPost[] = [];
-  if (account.windsorAccountId && windsor.apiKey) {
-    const enabled = (Object.keys(windsor.datasources) as WindsorDatasource[]).filter((ds) => windsor.datasources[ds]);
-    for (const ds of enabled) {
-      const fetched = await fetchWindsorPosts(windsor.apiKey, ds, windowFrom, windowTo);
-      posts.push(...fetched.filter((p) => p.accountId === account.windsorAccountId));
-    }
-  }
-  if (account.metaAccountId && meta.accessToken) {
-    const fetched = await fetchMetaAdsInsights(meta.accessToken, account.metaAccountId, account.metaAccountName ?? "", windowFrom, windowTo);
-    posts.push(...fetched);
-  }
-  return posts;
-}
-
 async function fillReportCard(
   admin: AdminClient,
   actingTask: TaskRecord,
@@ -128,9 +75,10 @@ async function fillReportCard(
   const cadence: RecurringCadence = target.recurrence_cadence ?? "semanal";
   const period = periodForCadence(cadence, today);
   const prevPeriod = previousPeriod(period);
-  const posts = await fetchPostsForAccount(account, windsor, meta, prevPeriod.from, period.to);
-  const currentPosts = posts.filter((p) => inPeriod(p, period));
-  const prevPosts = posts.filter((p) => inPeriod(p, prevPeriod));
+  const { campaignPosts, adPosts } = await fetchPostsForAccount(account, windsor, meta, prevPeriod.from, period.to);
+  const currentPosts = campaignPosts.filter((p) => inPeriod(p, period));
+  const prevPosts = campaignPosts.filter((p) => inPeriod(p, prevPeriod));
+  const currentAdPosts = adPosts.filter((p) => inPeriod(p, period));
 
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const pdfBuffer = await renderAdsReportPdf({
@@ -140,6 +88,7 @@ async function fillReportCard(
     config: templateConfig,
     posts: currentPosts,
     prevPosts,
+    adPosts: currentAdPosts,
     generatedAt: new Date(),
   });
 
@@ -170,7 +119,7 @@ async function fillReportCard(
   return { fileName, url: urlData.publicUrl };
 }
 
-type RunOutcome = "not_due" | "ran" | { error: string };
+export type RunOutcome = "not_due" | "ran" | { error: string };
 
 async function runOneReportAutomation(
   admin: AdminClient,
@@ -187,9 +136,16 @@ async function runOneReportAutomation(
   if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return "not_due";
 
   let actingTask: TaskRecord;
+  // Entrega recorrente (fluxo relatorio_conversao): a Automação 1 preenche a
+  // ETAPA `relatorio_trafego` e a auto-conclui — artefato de máquina, sem
+  // revisão humana; concluir deixa reconcileFlows() no mesmo tique criar a
+  // etapa `agendamentos`.
+  const isFlowStep = target.kind === "relatorio_conversao" && isFlowDelivery(target) && Boolean(target.recurrence_cadence);
   try {
     if (target.kind === "plano_acao") {
       actingTask = await clonePlanForReport(admin, target, today);
+    } else if (isFlowStep) {
+      actingTask = await ensureFlowOccurrenceForReport(admin, target, today);
     } else if (target.recurrence_cadence) {
       actingTask = await materializeOccurrenceForReport(admin, target, today);
     } else {
@@ -208,12 +164,15 @@ async function runOneReportAutomation(
     // appends another below it rather than overwriting. [label](url) renders
     // as a short link (the file's own name), not the raw URL — see
     // lib/comments.ts splitCommentText.
-    const payload = appendedCommentPayload(actingTask.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`);
+    const label = isFlowStep ? "Relatório de tráfego" : "Relatório de anúncios";
+    const payload = appendedCommentPayload(actingTask.payload, `${label} gerado e anexado: [${fileName}](${url})`);
     const { error: statusError } = await admin
       .from("tasks")
-      .update({ status: "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
+      .update({ status: isFlowStep ? "aprovado" : "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
       .eq("id", actingTask.id);
     if (statusError) throw statusError;
+    // Só depois do fill dar certo — para uma falha não pular um ciclo.
+    if (isFlowStep) await advanceFlowMold(admin, target, today);
     await notifyFromAutomation(
       admin,
       actingTask.id,
@@ -228,6 +187,9 @@ async function runOneReportAutomation(
   return "ran";
 }
 
+// coleta_metrica_cliente fica de fora (roadmap R6.11 — ainda é só stub).
+const RUN_KEYS = ["relatorio_trafego_semanal", "relatorio_vendas"] as const;
+
 export async function runAutomations(): Promise<AutomationRunSummary> {
   const admin = createAdminClient();
   const summary: AutomationRunSummary = { processed: 0, succeeded: 0, errors: [] };
@@ -236,7 +198,7 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
   const { data: configRows, error: configError } = await admin
     .from("automation_configs")
     .select("*")
-    .eq("automation_key", "relatorio_trafego_semanal")
+    .in("automation_key", RUN_KEYS as unknown as string[])
     .eq("active", true);
   if (configError) throw configError;
   const configs = (configRows ?? []) as AutomationConfigRow[];
@@ -245,10 +207,16 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
 
   for (const config of configs) {
-    if (config.last_run_date === today) continue; // already processed today (idempotency)
+    // last_run_date guarda a Automação 1 (uma vez por dia). A Automação 2 reage
+    // ao comentário do responsável em qualquer dia — a idempotência dela vem de
+    // marcadores em payload — mas ainda gravamos a data para observabilidade.
+    if (config.automation_key === "relatorio_trafego_semanal" && config.last_run_date === today) continue;
+
     let outcome: RunOutcome;
     try {
-      outcome = await runOneReportAutomation(admin, config, windsor, meta, today);
+      outcome = config.automation_key === "relatorio_vendas"
+        ? await runOneSalesAutomation(admin, config, windsor, meta, today)
+        : await runOneReportAutomation(admin, config, windsor, meta, today);
     } catch (error) {
       outcome = { error: errorMessage(error) };
     }

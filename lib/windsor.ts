@@ -39,6 +39,10 @@ export type MetaPost = {
   adsetId?: string;
   adsetName?: string;
   objective?: string;
+  // Meta `optimization_goal` da campanha (LINK_CLICKS / PROFILE_VISIT /
+  // CONVERSATIONS / ...). Só no path Meta direto — melhora a auto-sugestão de
+  // bloco (suggestCampaignBlock).
+  optimizationGoal?: string;
   currency?: string;
   schemaVersion?: number;
   // Ad-level drill-down only (datasource "meta_ads_creative") — absent on

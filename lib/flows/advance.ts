@@ -21,6 +21,7 @@ import { asTaskRecord, errorMessage, getAdminTask, type AdminClient } from "@/li
 import { notifyFromAutomation } from "@/lib/automations/notify";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { flowStepKeyOf, isFlowDelivery } from "@/lib/taskRelations";
+import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
 import { deliveryIsFinished, deliveryStatusOnFinish } from "./parentStatus";
 import {
   deliveryTypeProblem,
@@ -131,6 +132,13 @@ async function advanceOneDelivery(
  * primária em vez de duplicar. */
 export async function materializeFirstStep(admin: AdminClient, delivery: TaskRecord): Promise<TaskRecord | null> {
   if (!isFlowDelivery(delivery)) return null;
+  // Um MOLDE de entrega recorrente carrega `flow_parent` (cada ocorrência herda
+  // dele), mas ele não é uma entrega — os filhos dele são as OCORRÊNCIAS, não as
+  // etapas. Materializar uma etapa aqui a ligaria direto no molde, sem slot.
+  // Ocorrências não herdam `recurrence_group` (recurringExecutionFields o
+  // remove), então esta guarda separa molde de ocorrência. Mesmo princípio de
+  // flowTotalWeight em lib/taskCatalog.ts.
+  if (delivery.payload?.[RECURRENCE_GROUP_KEY] === true) return null;
   const existing = await stepsOf(admin, delivery.id);
   if (existing.some((s) => s.slot !== null)) return null;
 

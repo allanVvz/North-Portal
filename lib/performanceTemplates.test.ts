@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILTIN_PERFORMANCE_TEMPLATES, DEFAULT_BUILTIN_TEMPLATE, DEFAULT_BUILTIN_TEMPLATE_ID, sanitizePerformanceTemplateConfig } from "./performanceTemplates";
+import { BUILTIN_PERFORMANCE_TEMPLATES, DEFAULT_BUILTIN_TEMPLATE, DEFAULT_BUILTIN_TEMPLATE_ID, sanitizePerformanceTemplateConfig, suggestCampaignBlock } from "./performanceTemplates";
 
 describe("performance templates", () => {
   it("ships one builtin per tipo de desfecho, funil de mensagens first", () => {
@@ -78,8 +78,8 @@ describe("performance templates", () => {
       expect(template.config.acquisition.kpiSlots.length).toBeGreaterThan(0);
       expect(template.config.acquisition.funnelStages.length).toBeGreaterThanOrEqual(2);
       // hiddenSections é config do template (o PDF da automação respeita) —
-      // os builtins mostram tudo.
-      expect(template.config.acquisition.hiddenSections).toEqual([]);
+      // gauges ("Eficiência de mídia") fica fora por padrão.
+      expect(template.config.acquisition.hiddenSections).toEqual(["gauges"]);
       // Nível "ad" deixaria KPIs/tendência/ranking vazios até alguém marcar uma
       // campanha — as linhas de criativo só são buscadas para campanhas marcadas.
       expect(template.config.level).toBe("campaign");
@@ -104,6 +104,25 @@ describe("performance templates", () => {
     expect(config.filters.clientSlug).toBe("");
     expect(config.dateRange).toEqual({ from: "2026-07-01", to: "2026-07-31" });
     expect(config.cardSources).toEqual({ trend: "organic", "kpi:custo": "paid" });
+  });
+
+  it("campaignBlocks/adSourceTags: default vazio, guarda só chaves/valores válidos", () => {
+    expect(sanitizePerformanceTemplateConfig({}).campaignBlocks).toEqual({});
+    expect(sanitizePerformanceTemplateConfig({}).adSourceTags).toEqual({});
+    const c = sanitizePerformanceTemplateConfig({
+      campaignBlocks: { "123": "mensagens", "456": "xpto", "789": "trafego_perfil" },
+      adSourceTags: { ad1: "2", ad2: "9", ad3: "1" },
+    });
+    expect(c.campaignBlocks).toEqual({ "123": "mensagens", "789": "trafego_perfil" });
+    expect(c.adSourceTags).toEqual({ ad1: "2", ad3: "1" });
+  });
+
+  it("suggestCampaignBlock: palpite pelo objective/optimization_goal do Meta", () => {
+    expect(suggestCampaignBlock("OUTCOME_LEADS")).toBe("mensagens");
+    expect(suggestCampaignBlock("OUTCOME_ENGAGEMENT", "PROFILE_VISIT")).toBe("trafego_perfil");
+    expect(suggestCampaignBlock("OUTCOME_ENGAGEMENT")).toBe("engajamento");
+    expect(suggestCampaignBlock("OUTCOME_TRAFFIC")).toBe("trafego_site");
+    expect(suggestCampaignBlock(null, null)).toBe("outro");
   });
 
   it("falls back safely for unknown values", () => {

@@ -61,6 +61,18 @@ describe("acquisition insights", () => {
       expect(resolveAcquisitionMetric(posts, "leads", [])).toBe(5);
     });
 
+    it("unifica contatos: mensagem iniciada, lead e conversa são um desfecho só (o maior, nunca a soma)", () => {
+      // Linha que só reportou `mensagens`, linha que só reportou `leads`.
+      const posts = [
+        post("a", "2026-08-01", { mensagens: 12 }),
+        post("b", "2026-08-02", { leads: 4 }),
+      ];
+      expect(resolveAcquisitionMetric(posts, "contatos", [])).toBe(12);
+      expect(acquisitionMetricAvailable(posts, "contatos", [])).toBe(true);
+      // Sem nenhum dos três → null (não 0).
+      expect(resolveAcquisitionMetric([post("c", "2026-08-03", { custo: 10 })], "contatos", [])).toBeNull();
+    });
+
     it("resolves ratio built-ins (ctr/cpc/cpm) from summed volume, not per-row averaging", () => {
       const posts = [
         post("a", "2026-08-01", { impressoes: 1000, cliques: 20 }),
