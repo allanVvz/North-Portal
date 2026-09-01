@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const apiKey = body.apiKey ?? settings.apiKey;
     if (!apiKey) throw new HttpError(400, "Informe a chave da API da Windsor.ai.");
     const enabled = (Object.keys(settings.datasources) as WindsorDatasource[]).filter((ds) => settings.datasources[ds]);
-    const result = await testWindsorConnection(apiKey, enabled.length ? enabled : ["instagram_organic"]);
+    const result = await testWindsorConnection(apiKey, enabled.length ? enabled : ["instagram"]);
     return NextResponse.json(result);
   } catch (error) {
     return apiError(error);

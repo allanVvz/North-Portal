@@ -167,7 +167,7 @@ export default function WindsorIntegration({ clients }: { clients: ClientLite[] 
                 ) : null}
                 {accounts.map((a) => (
                   <option key={`${a.datasource}:${a.accountId}`} value={`${a.datasource}:${a.accountId}`}>
-                    {a.accountName} · {a.datasource === "instagram_organic" ? "Instagram" : a.datasource === "facebook_organic" ? "Facebook" : "Facebook Ads"}
+                    {a.accountName} · {a.datasource === "instagram" ? "Instagram" : a.datasource === "facebook_organic" ? "Facebook" : "Facebook Ads"}
                   </option>
                 ))}
               </select>

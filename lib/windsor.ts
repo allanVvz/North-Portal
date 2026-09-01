@@ -4,10 +4,13 @@ import { HttpError } from "./validation";
 // (the API key is a query param — it must never reach the browser); the
 // normalizer and types are pure and shared with the dashboard/tests.
 
-export type WindsorDatasource = "instagram_organic" | "facebook_organic" | "facebook";
+// Slugs dos conectores da Windsor.ai (connectors.windsor.ai/<slug>). "instagram"
+// é o conector de Instagram (não existe "instagram_organic" — a Windsor devolve
+// 400 "We don't have this connector yet!").
+export type WindsorDatasource = "instagram" | "facebook_organic" | "facebook";
 
 export const WINDSOR_DATASOURCES: { key: WindsorDatasource; label: string }[] = [
-  { key: "instagram_organic", label: "Instagram orgânico" },
+  { key: "instagram", label: "Instagram" },
   { key: "facebook_organic", label: "Facebook orgânico" },
   { key: "facebook", label: "Facebook Ads (pago)" },
 ];
@@ -64,7 +67,7 @@ export type WindsorSettings = {
 
 export const WINDSOR_SETTINGS_DEFAULT: WindsorSettings = {
   apiKey: "",
-  datasources: { instagram_organic: true, facebook_organic: true, facebook: false },
+  datasources: { instagram: true, facebook_organic: true, facebook: false },
   accountMap: {},
 };
 
@@ -148,7 +151,7 @@ export function normalizeWindsorRow(row: Record<string, unknown>, ds: WindsorDat
 
   const postId = str(row.post_id);
   if (!postId) return null;
-  const platform = ds === "instagram_organic" ? "instagram" : "facebook";
+  const platform = ds === "instagram" ? "instagram" : "facebook";
   const metrics: MetaPost["metrics"] = {};
   const reach = num(row.reach);
   const impressions = num(row.impressions);
@@ -187,7 +190,11 @@ export function normalizeWindsorRow(row: Record<string, unknown>, ds: WindsorDat
 // ---- Fetchers (server only) ----------------------------------------------------
 
 const FIELDS: Record<WindsorDatasource, string> = {
-  instagram_organic:
+  // NOTA: os nomes de campo aqui vêm do schema antigo — quando houver uma conta
+  // Instagram conectada na Windsor, confira contra o schema real do conector
+  // `instagram` (alguns campos podem ter outro nome; `follower_count` fica aqui
+  // quando entrar a ingestão de seguidores).
+  instagram:
     "date,account_id,account_name,post_id,media_type,media_product_type,caption,permalink,impressions,reach,likes,comments,shares,saved,video_views,engagement",
   facebook_organic:
     "date,account_id,account_name,post_id,type,message,permalink,impressions,reach,likes,comments,shares,engagement",
@@ -211,10 +218,16 @@ async function windsorGet(apiKey: string, ds: WindsorDatasource, params: Record<
   if (res.status === 429) {
     throw new HttpError(503, "Limite de requisições da Windsor atingido. Tente novamente mais tarde.");
   }
+  const body = (await res.json().catch(() => null)) as { data?: unknown; error?: string } | null;
   if (!res.ok) {
-    throw new HttpError(502, `A Windsor.ai respondeu com erro (${res.status}).`);
+    const raw = typeof body?.error === "string" ? body.error : "";
+    // A Windsor responde 400 tanto para conector inexistente quanto para
+    // "conta ainda não conectada" — nos dois casos a mensagem dela é útil.
+    if (/no .* account for user .* was found/i.test(raw)) {
+      throw new HttpError(502, `Nenhuma conta "${ds}" conectada na Windsor.ai. Conecte em https://onboard.windsor.ai e tente de novo.`);
+    }
+    throw new HttpError(502, raw ? `A Windsor.ai respondeu: ${raw}` : `A Windsor.ai respondeu com erro (${res.status}).`);
   }
-  const body = (await res.json().catch(() => null)) as { data?: unknown } | null;
   return Array.isArray(body?.data) ? (body.data as Record<string, unknown>[]) : [];
 }
 

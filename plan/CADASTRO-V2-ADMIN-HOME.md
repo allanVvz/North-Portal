@@ -16,7 +16,7 @@ O gap original continua valendo: o cadastro em cÃ³digo (`app/admin/novo/page.t
 6. **Escopo contratado = catÃ¡logo customizÃ¡vel** (tabela `scope_tags`, admin cria tag nova inline), nÃ£o enum em cÃ³digo.
 7. **Checkpoints comerciais vivem dentro do cadastro/ediÃ§Ã£o**, reaproveitando `commercial_checkpoint_templates` (jÃ¡ existe e jÃ¡ Ã© seedada).
 8. **VÃ­nculo de conta = ambos**: e-mail colaborador nas pastas do Drive + conta de anÃºncios Meta/Windsor (reaproveita o `accountMap` existente).
-9. **Instagram = grid real via Windsor/Meta** â€” a integraÃ§Ã£o jÃ¡ puxa `instagram_organic` com mÃ­dia e permalink. Sem oEmbed.
+9. **Instagram = grid real via Windsor/Meta** â€” a integraÃ§Ã£o jÃ¡ puxa `instagram` com mÃ­dia e permalink. Sem oEmbed.
 10. **"Ver cliente" = dashboard do cliente para o admin** (read-only, com "Editar" levando Ã  tela de ediÃ§Ã£o).
 11. **ConversÃµes = card de coleta**: card recorrente pede o nÃºmero ao cliente; a resposta alimenta a mÃ©trica automaticamente.
 12. **Entrega da coleta = portal + notificaÃ§Ã£o** (infra que jÃ¡ existe, zero provider). E-mail/WhatsApp aparecem desabilitados com "configure em IntegraÃ§Ãµes".
@@ -89,7 +89,7 @@ Arquivo prod `I1nVg0mJH169Mv7IdVC67M`, page Admin `295:2`.
 ### 0.4 "Ver cliente" â€” NOVO frame
 Dashboard do cliente para o admin, aplicando o skill `frontend-design` (jÃ¡ lido: hero como tese, tipografia com personalidade, estrutura que codifica informaÃ§Ã£o real, um elemento-assinatura). SeÃ§Ãµes:
 - **Header**: nome, segmento, plano, status do contrato, botÃ£o "Editar cliente".
-- **Assinatura da tela: preview do Instagram** â€” perfil (@handle, avatar, bio do cadastro) + **grid dos Ãºltimos posts reais** vindos de `instagram_organic` (Windsor/Meta), cada um com alcance/engajamento.
+- **Assinatura da tela: preview do Instagram** â€” perfil (@handle, avatar, bio do cadastro) + **grid dos Ãºltimos posts reais** vindos de `instagram` (Windsor/Meta), cada um com alcance/engajamento.
 - **KPIs do cliente** (alcance, engajamento, investimento, conversÃµes) do perÃ­odo.
 - **Pastas do Drive com preview de arquivos**.
 - **Plano de aÃ§Ã£o / tarefas em andamento** + checkpoints comerciais como timeline.
@@ -160,7 +160,7 @@ Novo `app/admin/portalContent/` â€” um editor por seÃ§Ã£o, campo-a-camp
 
 Nova rota read-only (`app/admin/[slug]/visao/page.tsx` + `ClientOverview.tsx`), aplicando `frontend-design`.
 
-- **Instagram**: novo `app/admin/[slug]/visao/InstagramPanel.tsx` â€” perfil montado de `client_company_info.instagram_ou_site` + grid dos posts reais filtrados por `datasource='instagram_organic'` e pela conta mapeada do cliente, via a rota jÃ¡ existente `/api/admin/performance/insights?client={slug}`. Sem endpoint novo, sem oEmbed.
+- **Instagram**: novo `app/admin/[slug]/visao/InstagramPanel.tsx` â€” perfil montado de `client_company_info.instagram_ou_site` + grid dos posts reais filtrados por `datasource='instagram'` e pela conta mapeada do cliente, via a rota jÃ¡ existente `/api/admin/performance/insights?client={slug}`. Sem endpoint novo, sem oEmbed.
 - **KPIs do perÃ­odo**: mesma rota de insights, agregada com os helpers puros jÃ¡ existentes (`sumMetric`/`aggregateMetric` em `app/admin/performance/insights.ts`).
 - **Pastas com preview** (reusa Â§2.3), **plano/tarefas** (`listActionPlans`), **checkpoints** como timeline (`kind='checkpoint_comercial'`), **coleta de conversÃµes** (Â§5).
 - BotÃµes "Editar cliente" â†’ `/admin/{slug}`, "Portal â†—" â†’ `/{slug}` (padrÃ£o jÃ¡ usado em `app/admin/[slug]/page.tsx:21-23`).

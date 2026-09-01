@@ -296,7 +296,7 @@ export const taskMetricsPatchSchema = z.object({
 });
 
 // ---- Windsor.ai integration (Performance × Meta) --------------------------------
-export const windsorDatasourceSchema = z.enum(["instagram_organic", "facebook_organic", "facebook"]);
+export const windsorDatasourceSchema = z.enum(["instagram", "facebook_organic", "facebook"]);
 const windsorAccountRefSchema = z.object({
   accountId: z.string().min(1).max(120),
   accountName: z.string().max(200),

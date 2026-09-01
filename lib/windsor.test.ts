@@ -24,7 +24,7 @@ describe("normalizeMediaType", () => {
   });
 });
 
-describe("normalizeWindsorRow · instagram_organic", () => {
+describe("normalizeWindsorRow · instagram", () => {
   const base = {
     date: "2026-07-01",
     account_id: "acc1",
@@ -44,7 +44,7 @@ describe("normalizeWindsorRow · instagram_organic", () => {
   };
 
   it("normalizes a full row, coercing numeric strings", () => {
-    const p = normalizeWindsorRow(base, "instagram_organic")!;
+    const p = normalizeWindsorRow(base, "instagram")!;
     expect(p).not.toBeNull();
     expect(p.platform).toBe("instagram");
     expect(p.source).toBe("organic");
@@ -59,20 +59,20 @@ describe("normalizeWindsorRow · instagram_organic", () => {
   it("derives engagement from interactions when Windsor omits it", () => {
     const { engagement: _e, ...rest } = base;
     void _e;
-    const p = normalizeWindsorRow(rest, "instagram_organic")!;
+    const p = normalizeWindsorRow(rest, "instagram")!;
     expect(p.metrics.engajamento).toBe(50 + 5 + 2 + 8);
   });
 
   it("normalizes a Story reported as media_type=VIDEO + media_product_type=STORY", () => {
-    const p = normalizeWindsorRow({ ...base, media_type: "VIDEO", media_product_type: "STORY" }, "instagram_organic")!;
+    const p = normalizeWindsorRow({ ...base, media_type: "VIDEO", media_product_type: "STORY" }, "instagram")!;
     expect(p.type).toBe("story");
   });
 
   it("returns null for rows missing date, account or post id", () => {
-    expect(normalizeWindsorRow({ ...base, date: undefined }, "instagram_organic")).toBeNull();
-    expect(normalizeWindsorRow({ ...base, account_id: "" }, "instagram_organic")).toBeNull();
-    expect(normalizeWindsorRow({ ...base, post_id: "" }, "instagram_organic")).toBeNull();
-    expect(normalizeWindsorRow({ ...base, date: "not-a-date" }, "instagram_organic")).toBeNull();
+    expect(normalizeWindsorRow({ ...base, date: undefined }, "instagram")).toBeNull();
+    expect(normalizeWindsorRow({ ...base, account_id: "" }, "instagram")).toBeNull();
+    expect(normalizeWindsorRow({ ...base, post_id: "" }, "instagram")).toBeNull();
+    expect(normalizeWindsorRow({ ...base, date: "not-a-date" }, "instagram")).toBeNull();
   });
 });
 
