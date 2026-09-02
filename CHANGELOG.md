@@ -23,8 +23,13 @@ ganhos agora só aparecem no relatório de vendas, vindos do comentário.
 Depois de rodar 3 e2e (karpinski / utzig / baita, casos vendas+fonte / só
 seguidores / sem número), o relatório de vendas ganhou corpo:
 
-- **Resultados por campanha** — a mesma `CampaignBlocksSection` do relatório de
-  anúncios (KPIs Meta por objetivo), agora também no de vendas.
+- **Resultados por objetivo** — a `CampaignBlocksSection` do relatório de
+  anúncios (KPIs Meta por objetivo), agora também no de vendas, e com
+  **Agendamentos / Vendas / Receita / ROAS por bloco** quando os criativos têm
+  tag de fonte `#1/#2/#3` no template. Sem tag (caso de todos os clientes hoje),
+  mostra só a mídia + uma nota de como ligar. Props novos em
+  `CampaignBlocksSection`: `extraKpis` e `footer` (o relatório de anúncios não
+  passa nenhum, segue igual).
 - **Fonte de tráfego e objetivo** — a tabela por fonte `#1/#2/#3` com o objetivo
   da(s) campanha(s) taggeada(s) como coluna (`Vários` quando cruza), Receita e
   ROAS por fonte.
@@ -32,8 +37,14 @@ seguidores / sem número), o relatório de vendas ganhou corpo:
   gestor descreveu (serviço · fonte · situação · valor), com nota "N de M
   descritos no comentário" quando o total relatado passa do detalhado.
 - **Totais do resumo e do funil vêm do relatado, não da contagem de linhas** —
-  "5 vendas / 9 orçamentos" no comentário viram 5 e 9 nos KPIs e no funil, mesmo
-  que só 2 estejam detalhadas.
+  novos campos `vendasTotal` / `agendamentosTotal` em `SalesReportInput`. "6
+  vendas / 11 orçamentos" no comentário viram os KPIs e o funil, mesmo que só 3
+  estejam detalhados.
+- **`agendamentos` nunca fica abaixo de `vendas`** — uma venda fechada passou
+  por um agendamento, e o funil não pode alargar. `parseMetricJson` força
+  (vale para `task_metrics`), `salesReportPdf` reforça na exibição, e o prompt
+  de extração aprendeu que "orçamento / proposta / cotação" conta como
+  agendamento.
 
 ### Funil de vendas mostra "Seguidores"
 
