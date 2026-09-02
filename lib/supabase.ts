@@ -1277,11 +1277,13 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
   let query = supabase
     .from("tasks")
     .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug)`)
-    .in("kind", types.map((t) => t.key))
     .order("updated_at", { ascending: false });
-  // Uma entrega é marcada no payload, não inferida do tipo: existem cards
-  // `criativo` antigos que são trabalho comum e não podem virar pais.
+  // Uma entrega é marcada no payload (`flow_parent`), NÃO inferida do tipo:
+  // existem cards `criativo` antigos que são trabalho comum, e o fluxo de
+  // feedback dinâmico usa uma ocorrência `operacional` como pai. Então o filtro
+  // de entrega é só o marcador; para plano, o kind.
   if (behavior === "entrega") query = query.eq(`payload->>${FLOW_PARENT_KEY}`, "true");
+  else query = query.in("kind", types.map((t) => t.key));
   const { data, error } = await query;
   if (error) fail(error);
 
@@ -1336,7 +1338,7 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
       ...task,
       clientName: c?.name ?? "Outros",
       clientSlug: c?.slug ?? "",
-      typeLabel: labelByKind.get(task.kind) ?? task.kind,
+      typeLabel: labelByKind.get(task.kind) ?? kindLabel(task.kind),
       progress: taskProgress(task, counted, childrenOfParent),
       activities: members.map((member) => ({
         ...member,

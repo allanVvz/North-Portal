@@ -111,6 +111,39 @@ export default function FlowStepsBox({
   onUnlinkStep: (task: TaskRecord) => void;
   onLinkStep: (task: TaskRecord, slot: string) => void;
 }) {
+  // Fluxo DINÂMICO (tipo existe mas não tem subtipos — ex.: ocorrência
+  // `operacional` promovida a pai de fluxo): não há sequência pré-definida, só
+  // as etapas que existem. Lista simples, clicável, sem ChainPicker.
+  const dynamic = type !== null && type.subtypes.length === 0;
+  if (dynamic) {
+    if (!steps.length) return null;
+    return (
+      <div className="tm-box tm-planmembers">
+        <p className="tm-box-label">Etapas ({steps.length})</p>
+        <div className="tm-member-list">
+          {steps.map((card) => {
+            const isCurrent = card.id === currentTaskId;
+            return (
+              <div className={`tm-member ${isCurrent ? "tm-member-current" : ""}`} key={card.id}>
+                <button
+                  type="button"
+                  className="tm-member-open"
+                  onClick={() => onOpenStep(card)}
+                  disabled={!canOpen || busy || isCurrent}
+                >
+                  <TaskKindIcon kind={card.kind} size="sm" />
+                  <span className="tm-member-title">{card.title}</span>
+                  <span className="tm-member-status">{isCurrent ? "você está aqui" : STATUS_LABEL[card.status]}</span>
+                  {isCurrent ? null : <span className="tm-member-arrow" aria-hidden>↗</span>}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tm-box tm-planmembers">
       <p className="tm-box-label">
