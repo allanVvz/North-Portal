@@ -2,8 +2,11 @@
 //
 // Fecha o fluxo de conversão: cruza os números do Meta (tráfego, conversas) com
 // as conversões que o responsável lançou no comentário do card manual (via
-// lib/ai/extractConversionReport) e a tag de fonte #1/#2/#3 por anúncio
-// (config.adSourceTags). Uma folha A4.
+// lib/ai/extractMetrics). Uma folha A4.
+//
+// A leitura por OBJETIVO de campanha e por FONTE de tráfego (#1/#2/#3) não são
+// duas seções: entram numa tabela só, com o objetivo como coluna da linha de
+// cada fonte — sem repetir investimento/conversas em dois eixos.
 //
 // Reusa reportComponents.tsx / reportTheme.ts / reportFonts.ts / funnelGeometry.ts
 // — mesmos KPIs, mesmo funil e mesmo painel de resultado do relatório de anúncios.
@@ -15,13 +18,14 @@ import {
 } from "@/app/admin/performance/acquisitionInsights";
 import type { Period } from "@/app/admin/performance/insights";
 import { metricValue } from "@/app/admin/performance/performanceLabels";
-import type { PerformanceTemplateConfig, AdSourceTag } from "@/lib/performanceTemplates";
+import { CAMPAIGN_BLOCK_LABEL, type PerformanceTemplateConfig, type AdSourceTag } from "@/lib/performanceTemplates";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { MetaPost } from "@/lib/windsor";
 import { funnelStageCount } from "./funnelGeometry";
 import { registerReportFonts } from "./reportFonts";
 import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
 import { CompassNode, FunnelSvg, KpiCard, REPORT_STYLES as S, ResultPanel } from "./reportComponents";
+import { blockResolver } from "./campaignBlockKpis";
 
 registerReportFonts();
 
@@ -77,33 +81,41 @@ function SalesReportDocument({
     kpi("Vendas fechadas", cur.vendas, prev ? prev.vendas : null, "number"),
     kpi("Ticket médio", ratio(cur.receita, cur.vendas), prev ? ratio(prev.receita, prev.vendas) : null, "money"),
     kpi("ROI (ROAS)", ratio(cur.receita, spend), prev ? ratio(prev.receita, prevSpend) : null, "decimal"),
-    ...(seguidores != null ? [kpi("Seguidores ganhos", seguidores, null, "number")] : []),
+    ...(seguidores != null && seguidores > 0 ? [kpi("Seguidores ganhos", seguidores, null, "number")] : []),
   ];
 
-  // Por fonte #1/#2/#3: cruza receita (do comentário) com custo/conversas (do
-  // anúncio taggeado). Só entra a linha que tem algum dado.
+  // Uma tabela só: cada FONTE #1/#2/#3 é uma linha, com o OBJETIVO da(s)
+  // campanha(s) taggeada(s) como coluna — cruza receita (do comentário) com
+  // custo/conversas (do anúncio taggeado) sem repetir os números por objetivo
+  // numa seção à parte. Só entra a linha que tem algum dado.
+  const { postBlock } = blockResolver(config);
   const sourceRows = SOURCE_ROWS.map((tag) => {
     const conv = conversoes.filter((c) => (c.fonte ?? null) === tag);
     const ads = adPosts.filter((p) => (config.adSourceTags[p.adId ?? ""] ?? null) === tag);
     const t = totalsOf(conv);
     const custo = totalWhenPresent(ads, "custo") ?? 0;
+    const blocks = [...new Set(ads.map(postBlock))];
+    const objetivo = blocks.length === 0 ? "—" : blocks.length === 1 ? CAMPAIGN_BLOCK_LABEL[blocks[0]] : "Vários";
     return {
       tag,
+      objetivo,
       custo,
       conversas: totalWhenPresent(ads, "contatos"),
       agendamentos: t.agendamentos,
       vendas: t.vendas,
       receita: t.receita,
-      custoPorAgendamento: ratio(custo, t.agendamentos),
       roas: ratio(t.receita, custo),
       hasData: conv.length > 0 || ads.length > 0,
     };
   }).filter((r) => r.hasData);
 
-  // Funil agregado — cauda sem dado sai (funnelStageCount).
+  // Funil agregado — cauda sem dado sai (funnelStageCount). "Seguidores ganhos"
+  // (relatado no comentário, não vem da Meta) entra como etapa só quando houve
+  // ganho no período; zero não vira degrau vazio.
   const funnelRaw: { label: string; value: NullableMetric }[] = [
     { label: "Alcance", value: resolveAcquisitionMetric(campaignPosts, "alcance", cm) },
     { label: "Cliques", value: resolveAcquisitionMetric(campaignPosts, "cliquesLink", cm) },
+    ...(seguidores != null && seguidores > 0 ? [{ label: "Seguidores", value: seguidores as NullableMetric }] : []),
     { label: "Conversas", value: resolveAcquisitionMetric(campaignPosts, "contatos", cm) ?? 0 },
     { label: "Agendamentos", value: cur.agendamentos },
     { label: "Vendas", value: cur.vendas },
@@ -137,28 +149,28 @@ function SalesReportDocument({
         </View>
 
         <View style={S.section}>
-          <Text style={S.kicker}>Por fonte de tráfego</Text>
+          <Text style={S.kicker}>Fonte de tráfego e objetivo</Text>
           {sourceRows.length ? (
             <View style={S.table}>
               <View style={S.tableRow}>
-                <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Fonte</Text>
+                <Text style={[S.tableHeaderCell, { flex: 1.3 }]}>Fonte</Text>
+                <Text style={[S.tableHeaderCell, { flex: 1.8 }]}>Objetivo</Text>
                 <Text style={S.tableHeaderCell}>Invest.</Text>
                 <Text style={S.tableHeaderCell}>Conversas</Text>
                 <Text style={S.tableHeaderCell}>Agend.</Text>
                 <Text style={S.tableHeaderCell}>Vendas</Text>
                 <Text style={S.tableHeaderCell}>Receita</Text>
-                <Text style={S.tableHeaderCell}>Custo/agend.</Text>
                 <Text style={S.tableHeaderCell}>ROAS</Text>
               </View>
               {sourceRows.map((r, i) => (
                 <View style={i === sourceRows.length - 1 ? S.tableRowLast : S.tableRow} key={r.tag ?? "none"} wrap={false}>
-                  <Text style={[S.tableCell, S.tableCellFirst]}>{SOURCE_LABEL(r.tag)}</Text>
+                  <Text style={[S.tableCell, { flex: 1.3 }]}>{SOURCE_LABEL(r.tag)}</Text>
+                  <Text style={[S.tableCell, { flex: 1.8 }]}>{r.objetivo}</Text>
                   <Text style={S.tableCell}>{fmtMoney(r.custo || null)}</Text>
                   <Text style={S.tableCell}>{formatAcquisitionValue(r.conversas)}</Text>
                   <Text style={S.tableCell}>{r.agendamentos}</Text>
                   <Text style={S.tableCell}>{r.vendas}</Text>
                   <Text style={S.tableCell}>{fmtMoney(r.receita || null)}</Text>
-                  <Text style={S.tableCell}>{fmtMoney(r.custoPorAgendamento)}</Text>
                   <Text style={S.tableCell}>{r.roas === null ? "—" : metricValue(r.roas, "decimal")}</Text>
                 </View>
               ))}

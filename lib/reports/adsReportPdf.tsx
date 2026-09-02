@@ -17,27 +17,24 @@
 
 import { Document, Page, Path, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import {
-  acquisitionMetricLabel, formatAcquisitionValue, ratio, resolveAcquisitionMetric,
+  acquisitionMetricLabel, formatAcquisitionValue, resolveAcquisitionMetric,
   totalWhenPresent, type NullableMetric,
 } from "@/app/admin/performance/acquisitionInsights";
 import {
-  campaignSummaries, isNotIntegrated, metricLabel, recomputeRatios, sumMetricsInto,
+  campaignSummaries, metricLabel, recomputeRatios, sumMetricsInto,
   type Period,
 } from "@/app/admin/performance/insights";
 import { metricRefInverse, metricRefKind, metricValue } from "@/app/admin/performance/performanceLabels";
-import {
-  CAMPAIGN_BLOCKS, CAMPAIGN_BLOCK_LABEL, suggestCampaignBlock,
-  type CampaignBlock, type PerformanceTemplateConfig,
-} from "@/lib/performanceTemplates";
-import type { MetricRef } from "@/lib/performancePrefs";
+import { CAMPAIGN_BLOCK_LABEL, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { MetaPost, MetaPostMetricKey } from "@/lib/windsor";
 import { funnelStageCount } from "./funnelGeometry";
 import { registerReportFonts } from "./reportFonts";
 import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
 import {
-  CompassNode, DeltaText, FunnelSvg, KpiCard, REPORT_STYLES as S,
+  CompassNode, DeltaText, FunnelSvg, REPORT_STYLES as S,
   ResultPanel, gaugeKind,
 } from "./reportComponents";
+import { CampaignBlocksSection, ZERO_NOT_DASH, blockResolver } from "./campaignBlockKpis";
 
 registerReportFonts();
 
@@ -54,59 +51,9 @@ export type AdsReportInput = {
   generatedAt: Date;
 };
 
-// ---- KPIs por bloco ----------------------------------------------------
-
-type BlockKpi = { label: string; metric?: MetricRef; ratio?: [MetricRef, MetricRef] };
-
-// "Mensagens" (metric `contatos`) entra em TODO bloco: "alguém chamou" é o
-// desfecho que a equipe conta, independente do objetivo da campanha. "Visitas ao
-// perfil" (`profileVisits`, ingerido de instagram_profile_visits) entra onde faz
-// sentido. "Novos seguidores" fica zerado — a Meta não expõe follows na API.
-const BLOCK_KPIS: Record<CampaignBlock, BlockKpi[]> = {
-  trafego_site: [
-    { label: "Investimento", metric: "custo" },
-    { label: "Alcance", metric: "alcance" },
-    { label: "Cliques no site", metric: "cliquesLink" },
-    { label: "Visitas ao perfil", metric: "profileVisits" },
-    { label: "Mensagens", metric: "contatos" },
-    { label: "Custo por clique", ratio: ["custo", "cliquesLink"] },
-  ],
-  trafego_perfil: [
-    { label: "Investimento", metric: "custo" },
-    { label: "Alcance", metric: "alcance" },
-    { label: "Visitas ao perfil", metric: "profileVisits" },
-    { label: "Novos seguidores", metric: "followersGained" },
-    { label: "Mensagens", metric: "contatos" },
-    { label: "Custo por visita", ratio: ["custo", "profileVisits"] },
-  ],
-  mensagens: [
-    { label: "Investimento", metric: "custo" },
-    { label: "Alcance", metric: "alcance" },
-    { label: "Mensagens", metric: "contatos" },
-    { label: "Custo por mensagem", ratio: ["custo", "contatos"] },
-  ],
-  engajamento: [
-    { label: "Investimento", metric: "custo" },
-    { label: "Alcance", metric: "alcance" },
-    { label: "Engajamento", metric: "engajamento" },
-    { label: "Visitas ao perfil", metric: "profileVisits" },
-    { label: "Mensagens", metric: "contatos" },
-    { label: "Custo por engajamento", ratio: ["custo", "engajamento"] },
-  ],
-  outro: [
-    { label: "Investimento", metric: "custo" },
-    { label: "Alcance", metric: "alcance" },
-    { label: "Cliques", metric: "cliques" },
-    { label: "Mensagens", metric: "contatos" },
-    { label: "CTR", metric: "ctr" },
-  ],
-};
-
-// Métricas que o relatório força a "0" em vez de "—"/"Sem integração": são
-// contagens onde zero é informação real numa conta Meta paga. `contatos`
-// unificado (msg/lead/conversa) e `followersGained` (a Meta não entrega follows;
-// o usuário quer a etapa visível zerada).
-const ZERO_NOT_DASH = new Set<MetricRef>(["contatos", "followersGained"]);
+// A seção "Resultados por campanha" (KPIs por bloco de objetivo) e o conjunto
+// ZERO_NOT_DASH vivem em ./campaignBlockKpis — compartilhados com o relatório de
+// vendas.
 
 // ---- componentes locais ----------------------------------------------
 
@@ -174,36 +121,7 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
   const cm = config.prefs.customMetrics;
   const hidden = new Set(acq.hiddenSections);
 
-  const blockOf = (campaignId: string | undefined, campaignName: string | undefined, objective?: string, optimizationGoal?: string): CampaignBlock =>
-    config.campaignBlocks[campaignId ?? campaignName ?? ""] ?? suggestCampaignBlock(objective, optimizationGoal, campaignName);
-  const postBlock = (p: MetaPost) => blockOf(p.campaignId, p.campaignName ?? p.caption, p.objective, p.optimizationGoal);
-
-  // Blocos presentes, na ordem canônica.
-  const blocksPresent = CAMPAIGN_BLOCKS.filter((block) => posts.some((p) => postBlock(p) === block));
-
-  const kpiForDef = (def: BlockKpi, cur: MetaPost[], prev: MetaPost[]) => {
-    if (def.ratio) {
-      const [num, den] = def.ratio;
-      return {
-        label: def.label,
-        value: ratio(resolveAcquisitionMetric(cur, num, cm), resolveAcquisitionMetric(cur, den, cm)),
-        previous: ratio(resolveAcquisitionMetric(prev, num, cm), resolveAcquisitionMetric(prev, den, cm)),
-        kind: "money" as const,
-        inverse: true,
-        notIntegrated: false,
-      };
-    }
-    const ref = def.metric as MetricRef;
-    const zero = ZERO_NOT_DASH.has(ref);
-    return {
-      label: def.label,
-      value: resolveAcquisitionMetric(cur, ref, cm) ?? (zero ? 0 : null),
-      previous: resolveAcquisitionMetric(prev, ref, cm) ?? (zero ? 0 : null),
-      kind: metricRefKind(ref, cm),
-      inverse: metricRefInverse(ref, cm),
-      notIntegrated: zero ? false : isNotIntegrated(ref, cm),
-    };
-  };
+  const { blockOf } = blockResolver(config);
 
   // O relatório é por CAMPANHA, não por campanha×plataforma — campaignSummaries
   // devolve uma linha por plataforma, então agregamos por campaignId aqui.
@@ -229,9 +147,9 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
   const campaigns = allCampaigns.slice(0, CAMPAIGN_CAP);
   const campaignsOverflow = allCampaigns.length - campaigns.length;
 
-  // Funil agregado — etapa de cauda sem dado sai (funnelStageCount). `contatos`
-  // e `followersGained` viram 0 (não faixa tracejada): são contagens que o
-  // relatório mostra zeradas de propósito.
+  // Funil agregado — etapa de cauda sem dado sai (funnelStageCount). Só
+  // `contatos` vira 0 (não faixa tracejada): é uma contagem que o relatório
+  // mostra zerada de propósito. "Seguidores", sem dado da Meta, some do funil.
   const allFunnelValues = acq.funnelStages.map(
     (r) => resolveAcquisitionMetric(posts, r, cm) ?? (ZERO_NOT_DASH.has(r) ? 0 : null),
   );
@@ -256,24 +174,8 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
         </View>
 
         {/* KPIs por bloco de objetivo */}
-        {!hidden.has("kpis") && blocksPresent.length ? (
-          <View style={S.section}>
-            <Text style={S.kicker}>Resultados por campanha</Text>
-            {blocksPresent.map((block) => {
-              const cur = posts.filter((p) => postBlock(p) === block);
-              const prev = prevPosts.filter((p) => postBlock(p) === block);
-              return (
-                <View style={S.blockGroup} key={block} wrap={false}>
-                  <View style={S.blockHead}>
-                    <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
-                  </View>
-                  <View style={S.grid}>
-                    {BLOCK_KPIS[block].map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev)} />)}
-                  </View>
-                </View>
-              );
-            })}
-          </View>
+        {!hidden.has("kpis") ? (
+          <CampaignBlocksSection config={config} posts={posts} prevPosts={prevPosts} />
         ) : null}
 
         {/* Criativos por campanha */}

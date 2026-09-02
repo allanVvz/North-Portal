@@ -1,5 +1,39 @@
 # Changelog
 
+## 2 de setembro de 2026 — relatório de vendas: leitura por objetivo + funil com seguidores
+
+Seguimento do fluxo de conversão (`e184037`). Três ajustes nos PDFs dos dois
+relatórios do fluxo, pedidos depois de validar a primeira ocorrência.
+
+### Seção por bloco de objetivo compartilhada
+
+`BLOCK_KPIS` / `ZERO_NOT_DASH` / o resolvedor de bloco saíram de
+`adsReportPdf.tsx` para `lib/reports/campaignBlockKpis.tsx` (`CampaignBlocksSection`),
+sem mudança de comportamento no relatório de anúncios.
+
+### Relatório de anúncios (1ª etapa) — sem "Novos seguidores"
+
+O KPI `followersGained` saiu do bloco **tráfego perfil** e do conjunto
+`ZERO_NOT_DASH`: a Meta não entrega follows na API, então a etapa vinha sempre
+zerada — ruído. Some do bloco e, quando é etapa de cauda do funil, some do funil
+(`funnelStageCount` já apara cauda `null`/`0`). Seguidores ganhos agora só
+aparecem no relatório de vendas, vindos do comentário.
+
+### Relatório de vendas (2ª etapa) — fonte × objetivo numa tabela só
+
+Em vez de uma seção de KPIs por objetivo **mais** a tabela "Por fonte de
+tráfego" (que repetiam investimento e conversas em dois eixos), agora é **uma
+tabela**: cada fonte `#1/#2/#3` é uma linha, com o **objetivo** da(s)
+campanha(s) taggeada(s) como coluna (`Vários` quando a tag cruza objetivos).
+Colunas: Fonte · Objetivo · Invest. · Conversas · Agend. · Vendas · Receita ·
+ROAS (saiu "Custo/agend.").
+
+### Funil de vendas mostra "Seguidores"
+
+Nova etapa **Seguidores** entre Cliques e Conversas, **só quando houve ganho no
+período** (relatado no comentário) — zero não vira degrau vazio. Mesmo critério
+no KPI "Seguidores ganhos" do resumo (antes bastava não ser `null`).
+
 ## 1 de setembro de 2026 — busca de tarefas unificada em todas as telas admin
 
 Commit `fb65585`. A busca por texto de tarefas/cards estava espalhada em 6+
