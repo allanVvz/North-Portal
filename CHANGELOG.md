@@ -1,5 +1,24 @@
 # Changelog
 
+## 2 de setembro de 2026 — fluxo de conversão ligado (dormente) para os 6 clientes
+
+Commit `a059199` + configuração em produção.
+
+- **Automação 2 (`relatorio_vendas`) registrada nos 6 clientes** — no card
+  recorrente "Relatório de anúncios", ao lado da Automação 1, com as métricas
+  vendas / agendamentos / seguidores / receita.
+- **Fica DORMENTE sem backend de IA.** `conversionAiReady()` checa a credencial
+  `ai` (vendor anthropic) — ou `AI_CLI=1` em dev/e2e. Sem ela: `runAutomations`
+  pula as configs `relatorio_vendas`, `flowMode` da Automação 1 vira `false` (a
+  ocorrência não vira pai de fluxo, o relatório de tráfego sai normal, sem card
+  de feedback nem pedido de métricas ao cliente), e o hook de comentário
+  (`handleConversionComment`) retorna cedo. Ao cadastrar a chave da Anthropic
+  (Configurações › Integrações › Provedor de IA), o fluxo ativa sozinho no ciclo
+  seguinte — sem semana quebrada no meio.
+- **Cards "Relatório de anúncios — Topo de funil" removidos** — os 6 eram moldes
+  inertes (0 ocorrências / documentos / comentários), resto de configuração
+  antiga. O recorte de topo de funil agora é escolha de template.
+
 ## 2 de setembro de 2026 — relatório de vendas: leitura por objetivo + funil com seguidores
 
 Seguimento do fluxo de conversão (`e184037`). Três ajustes nos PDFs dos dois
