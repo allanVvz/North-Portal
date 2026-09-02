@@ -4,9 +4,12 @@
 // as conversões que o responsável lançou no comentário do card manual (via
 // lib/ai/extractMetrics). Uma folha A4.
 //
-// A leitura por OBJETIVO de campanha e por FONTE de tráfego (#1/#2/#3) não são
-// duas seções: entram numa tabela só, com o objetivo como coluna da linha de
-// cada fonte — sem repetir investimento/conversas em dois eixos.
+// Estrutura: (1) resumo do período, (2) resultados por campanha — os KPIs Meta
+// por bloco de objetivo, compartilhados com o relatório de anúncios
+// (CampaignBlocksSection), (3) fonte de tráfego × objetivo — a tabela que
+// atribui receita/vendas/ROAS às tags #1/#2/#3, (4) funil de vendas. As seções
+// 2 e 3 leem o mesmo dado por eixos diferentes: (2) diagnostica a mídia por
+// objetivo, (3) prova de onde veio o dinheiro.
 //
 // Reusa reportComponents.tsx / reportTheme.ts / reportFonts.ts / funnelGeometry.ts
 // — mesmos KPIs, mesmo funil e mesmo painel de resultado do relatório de anúncios.
@@ -25,7 +28,7 @@ import { funnelStageCount } from "./funnelGeometry";
 import { registerReportFonts } from "./reportFonts";
 import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
 import { CompassNode, FunnelSvg, KpiCard, REPORT_STYLES as S, ResultPanel } from "./reportComponents";
-import { blockResolver } from "./campaignBlockKpis";
+import { CampaignBlocksSection, blockResolver } from "./campaignBlockKpis";
 
 registerReportFonts();
 
@@ -39,9 +42,13 @@ export type SalesReportInput = {
   prevCampaignPosts: MetaPost[];
   conversoes: ConversionRow[];
   prevConversoes?: ConversionRow[];
-  /** Receita total relatada (o gestor pode dar só o total, sem detalhar venda a
-   *  venda). Quando ausente, cai na soma das linhas de `conversoes`. */
+  /** Totais relatados no comentário (o gestor diz "5 vendas, 9 orçamentos" sem
+   *  detalhar linha a linha). Quando ausentes, caem na contagem das linhas de
+   *  `conversoes`; as linhas ficam só para a tabela de detalhe e o rateio por
+   *  fonte. */
   receitaTotal?: number | null;
+  vendasTotal?: number | null;
+  agendamentosTotal?: number | null;
   /** Seguidores ganhos no período (relatado no comentário). */
   seguidores?: number | null;
   generatedAt: Date;
@@ -60,13 +67,17 @@ const SOURCE_ROWS: (AdSourceTag | null)[] = ["1", "2", "3", null];
 const SOURCE_LABEL = (tag: AdSourceTag | null) => (tag ? `Fonte #${tag}` : "Sem tag");
 
 function SalesReportDocument({
-  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, receitaTotal, seguidores, generatedAt,
+  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, receitaTotal, vendasTotal, agendamentosTotal, seguidores, generatedAt,
 }: SalesReportInput) {
   const cm = config.prefs.customMetrics;
   const linhasTotals = totalsOf(conversoes);
-  // A receita exibida é a relatada como total quando existe; senão, a soma das
-  // linhas detalhadas.
-  const cur = { ...linhasTotals, receita: receitaTotal ?? linhasTotals.receita };
+  // O total exibido é o relatado no comentário quando existe; senão, a contagem
+  // / soma das linhas detalhadas.
+  const cur = {
+    agendamentos: agendamentosTotal ?? linhasTotals.agendamentos,
+    vendas: vendasTotal ?? linhasTotals.vendas,
+    receita: receitaTotal ?? linhasTotals.receita,
+  };
   const prev = prevConversoes ? totalsOf(prevConversoes) : null;
   const spend = totalWhenPresent(campaignPosts, "custo") ?? 0;
   const prevSpend = totalWhenPresent(prevCampaignPosts, "custo") ?? 0;
@@ -109,6 +120,18 @@ function SalesReportDocument({
     };
   }).filter((r) => r.hasData);
 
+  // Detalhe linha a linha do que o gestor descreveu (serviço/valor/fonte/status).
+  // Uma folha só: no máximo 12 linhas, priorizando as de maior valor.
+  const DETALHE_CAP = 12;
+  const conversoesOrdenadas = [...conversoes].sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0));
+  const detalhe = conversoesOrdenadas.slice(0, DETALHE_CAP);
+  const conversoesOverflow = conversoesOrdenadas.length - detalhe.length;
+  // Quantas das vendas/agendamentos relatados foram descritos linha a linha — o
+  // gestor pode dizer "5 vendas" e detalhar só 2. Nota só quando difere.
+  const descritas = conversoesOrdenadas.length;
+  const relatadas = Math.max(cur.vendas, cur.agendamentos);
+  const parcialmenteDetalhado = detalhe.length > 0 && descritas < relatadas;
+
   // Funil agregado — cauda sem dado sai (funnelStageCount). "Seguidores ganhos"
   // (relatado no comentário, não vem da Meta) entra como etapa só quando houve
   // ganho no período; zero não vira degrau vazio.
@@ -120,9 +143,12 @@ function SalesReportDocument({
     { label: "Agendamentos", value: cur.agendamentos },
     { label: "Vendas", value: cur.vendas },
   ];
-  const values = funnelRaw.map((s) => s.value);
+  // Etapa sem dado nenhum (`null`) sai do funil em qualquer posição — não vira
+  // faixa tracejada vazia. Cauda `0` ainda é aparada pelo funnelStageCount.
+  const funnelStages = funnelRaw.filter((s) => s.value !== null);
+  const values = funnelStages.map((s) => s.value);
   const keepN = funnelStageCount(values);
-  const funnelLabels = funnelRaw.slice(0, keepN).map((s) => s.label);
+  const funnelLabels = funnelStages.slice(0, keepN).map((s) => s.label);
   const funnelValues = values.slice(0, keepN);
 
   const subtitle = `${cadenceLabel} · ${period.from} a ${period.to} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`;
@@ -147,6 +173,8 @@ function SalesReportDocument({
             {summaryKpis.map((k) => <KpiCard key={k.label} {...k} />)}
           </View>
         </View>
+
+        <CampaignBlocksSection config={config} posts={campaignPosts} prevPosts={prevCampaignPosts} />
 
         <View style={S.section}>
           <Text style={S.kicker}>Fonte de tráfego e objetivo</Text>
@@ -179,6 +207,34 @@ function SalesReportDocument({
             <Text style={S.empty}>Nenhuma conversão com fonte identificada no período.</Text>
           )}
         </View>
+
+        {detalhe.length ? (
+          <View style={S.section}>
+            <Text style={S.kicker}>Vendas e agendamentos detalhados</Text>
+            {parcialmenteDetalhado ? (
+              <Text style={S.empty}>{descritas} de {relatadas} descrito{descritas > 1 ? "s" : ""} no comentário; o resumo acima usa os totais relatados.</Text>
+            ) : null}
+            <View style={S.table}>
+              <View style={S.tableRow}>
+                <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Serviço</Text>
+                <Text style={S.tableHeaderCell}>Fonte</Text>
+                <Text style={S.tableHeaderCell}>Situação</Text>
+                <Text style={S.tableHeaderCell}>Valor</Text>
+              </View>
+              {detalhe.map((row, i) => (
+                <View style={i === detalhe.length - 1 ? S.tableRowLast : S.tableRow} key={i} wrap={false}>
+                  <Text style={[S.tableCell, S.tableCellFirst]}>{row.servico ?? "—"}</Text>
+                  <Text style={S.tableCell}>{row.fonte ? `#${row.fonte}` : "—"}</Text>
+                  <Text style={S.tableCell}>{row.status === "fechado" ? "Fechada" : row.status === "agendado" ? "Agendada" : "—"}</Text>
+                  <Text style={S.tableCell}>{fmtMoney(row.valor)}</Text>
+                </View>
+              ))}
+            </View>
+            {conversoesOverflow > 0 ? (
+              <Text style={S.tableMore}>+{conversoesOverflow} conversã{conversoesOverflow > 1 ? "es" : "o"} não detalhada{conversoesOverflow > 1 ? "s" : ""} no comentário.</Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {funnelValues.length >= 2 ? (
           <View style={S.section} wrap={false}>

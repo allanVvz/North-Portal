@@ -65,4 +65,16 @@ describe("renderSalesReportPdf", () => {
     expect(isPdf(buf)).toBe(true);
     expect(buf.byteLength).toBeGreaterThan(3000);
   });
+
+  it("totais relatados (5 vendas / 9 agend.) com só 2 linhas detalhadas não lança", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      conversoes: conversoes.slice(0, 2),
+      vendasTotal: 5,
+      agendamentosTotal: 9,
+      receitaTotal: 4200,
+      seguidores: 35,
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
 });

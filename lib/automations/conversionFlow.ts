@@ -123,6 +123,8 @@ async function generateSalesReport(
     adPosts: adPosts.filter((p) => inPeriod(p, period)),
     conversoes,
     receitaTotal: typeof ext.valores.receita === "number" ? ext.valores.receita : null,
+    vendasTotal: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,
+    agendamentosTotal: typeof ext.valores.agendamentos === "number" ? ext.valores.agendamentos : null,
     seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
     generatedAt: new Date(),
   });

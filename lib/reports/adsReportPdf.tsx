@@ -147,15 +147,17 @@ function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, pr
   const campaigns = allCampaigns.slice(0, CAMPAIGN_CAP);
   const campaignsOverflow = allCampaigns.length - campaigns.length;
 
-  // Funil agregado — etapa de cauda sem dado sai (funnelStageCount). Só
-  // `contatos` vira 0 (não faixa tracejada): é uma contagem que o relatório
-  // mostra zerada de propósito. "Seguidores", sem dado da Meta, some do funil.
-  const allFunnelValues = acq.funnelStages.map(
-    (r) => resolveAcquisitionMetric(posts, r, cm) ?? (ZERO_NOT_DASH.has(r) ? 0 : null),
-  );
-  const keepN = funnelStageCount(allFunnelValues);
-  const funnelValues = allFunnelValues.slice(0, keepN);
-  const funnelLabels = acq.funnelStages.slice(0, keepN).map((r) => acquisitionMetricLabel(r, cm, metricLabel));
+  // Funil agregado. Só `contatos` vira 0 (não faixa tracejada): é uma contagem
+  // que o relatório mostra zerada de propósito. Etapa sem dado nenhum (`null`)
+  // sai do funil em QUALQUER posição, não só na cauda — uma faixa tracejada
+  // vazia no meio ("Novos seguidores", que a Meta não entrega) confunde. A
+  // cauda `0` continua sendo aparada pelo funnelStageCount.
+  const resolvedStages = acq.funnelStages
+    .map((r) => ({ ref: r, value: resolveAcquisitionMetric(posts, r, cm) ?? (ZERO_NOT_DASH.has(r) ? 0 : null) }))
+    .filter((s) => s.value !== null);
+  const keepN = funnelStageCount(resolvedStages.map((s) => s.value));
+  const funnelValues = resolvedStages.slice(0, keepN).map((s) => s.value);
+  const funnelLabels = resolvedStages.slice(0, keepN).map((s) => acquisitionMetricLabel(s.ref, cm, metricLabel));
   const spend = totalWhenPresent(posts, "custo");
 
   const subtitle = `${cadenceLabel} · ${period.from} a ${period.to} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`;

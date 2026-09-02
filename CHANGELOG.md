@@ -15,24 +15,43 @@ sem mudança de comportamento no relatório de anúncios.
 
 O KPI `followersGained` saiu do bloco **tráfego perfil** e do conjunto
 `ZERO_NOT_DASH`: a Meta não entrega follows na API, então a etapa vinha sempre
-zerada — ruído. Some do bloco e, quando é etapa de cauda do funil, some do funil
-(`funnelStageCount` já apara cauda `null`/`0`). Seguidores ganhos agora só
-aparecem no relatório de vendas, vindos do comentário.
+zerada — ruído. Some do bloco (e do funil, ver "Correções" abaixo). Seguidores
+ganhos agora só aparecem no relatório de vendas, vindos do comentário.
 
-### Relatório de vendas (2ª etapa) — fonte × objetivo numa tabela só
+### Relatório de vendas (2ª etapa) — mais completo
 
-Em vez de uma seção de KPIs por objetivo **mais** a tabela "Por fonte de
-tráfego" (que repetiam investimento e conversas em dois eixos), agora é **uma
-tabela**: cada fonte `#1/#2/#3` é uma linha, com o **objetivo** da(s)
-campanha(s) taggeada(s) como coluna (`Vários` quando a tag cruza objetivos).
-Colunas: Fonte · Objetivo · Invest. · Conversas · Agend. · Vendas · Receita ·
-ROAS (saiu "Custo/agend.").
+Depois de rodar 3 e2e (karpinski / utzig / baita, casos vendas+fonte / só
+seguidores / sem número), o relatório de vendas ganhou corpo:
+
+- **Resultados por campanha** — a mesma `CampaignBlocksSection` do relatório de
+  anúncios (KPIs Meta por objetivo), agora também no de vendas.
+- **Fonte de tráfego e objetivo** — a tabela por fonte `#1/#2/#3` com o objetivo
+  da(s) campanha(s) taggeada(s) como coluna (`Vários` quando cruza), Receita e
+  ROAS por fonte.
+- **Vendas e agendamentos detalhados** — tabela nova, uma linha por venda que o
+  gestor descreveu (serviço · fonte · situação · valor), com nota "N de M
+  descritos no comentário" quando o total relatado passa do detalhado.
+- **Totais do resumo e do funil vêm do relatado, não da contagem de linhas** —
+  "5 vendas / 9 orçamentos" no comentário viram 5 e 9 nos KPIs e no funil, mesmo
+  que só 2 estejam detalhadas.
 
 ### Funil de vendas mostra "Seguidores"
 
 Nova etapa **Seguidores** entre Cliques e Conversas, **só quando houve ganho no
 período** (relatado no comentário) — zero não vira degrau vazio. Mesmo critério
 no KPI "Seguidores ganhos" do resumo (antes bastava não ser `null`).
+
+### Correções achadas no e2e
+
+- **Receita detalhada venda a venda sem total explícito** ("uma de R$2.400 pela
+  #1, outra de R$1.800") agora soma no total (`parseMetricJson`): antes
+  `task_metrics.receita` e os KPIs do PDF ficavam R$0. Um total declarado no
+  texto ainda vence a soma.
+- **"Novos seguidores" sumiu do funil do relatório de anúncios em qualquer
+  posição** — não só na cauda. `followersGained` (sempre `null`, a Meta não dá)
+  virava uma faixa tracejada vazia no meio do funil. Etapa `null` agora sai de
+  qualquer posição; cauda `0` continua sendo aparada pelo `funnelStageCount`.
+  Mesmo tratamento no funil de vendas.
 
 ## 1 de setembro de 2026 — busca de tarefas unificada em todas as telas admin
 

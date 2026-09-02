@@ -37,6 +37,22 @@ describe("parseMetricJson", () => {
     const r = parseMetricJson('{"valores":{"receita":"R$ 1.400,50"}}', ["receita"]);
     expect(r.valores.receita).toBeCloseTo(1400.5);
   });
+
+  it("receita 0 mas linhas detalhadas → soma das linhas vira o total", () => {
+    const r = parseMetricJson(
+      '{"valores":{"vendas":5,"agendamentos":9,"seguidores":35,"receita":0},"linhas":[{"servico":null,"valor":2400,"fonte":"1","status":"fechado"},{"servico":null,"valor":1800,"fonte":"3","status":"fechado"}]}',
+      TAGS,
+    );
+    expect(r.valores.receita).toBe(4200);
+  });
+
+  it("total de receita declarado vence a soma das linhas", () => {
+    const r = parseMetricJson(
+      '{"valores":{"vendas":3,"agendamentos":0,"seguidores":0,"receita":10000},"linhas":[{"servico":null,"valor":1400,"fonte":"2","status":"fechado"}]}',
+      TAGS,
+    );
+    expect(r.valores.receita).toBe(10000);
+  });
 });
 
 describe("extractMetrics", () => {

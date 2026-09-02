@@ -81,6 +81,13 @@ export function parseMetricJson(text: string, tags: string[]): MetricExtract {
   const linhas = Array.isArray(obj.linhas)
     ? obj.linhas.map(coerceRow).filter((row): row is ConversionRow => row !== null).slice(0, 200)
     : [];
+  // Receita relatada venda a venda ("uma de R$2.400 pela #1, outra de R$1.800")
+  // sem um total explícito: a soma das linhas É o total. Só preenche quando a IA
+  // deixou `receita` em 0 — um total declarado no texto vence a soma.
+  if (tags.includes("receita") && !valores.receita) {
+    const somaLinhas = linhas.reduce((s, l) => s + (l.valor ?? 0), 0);
+    if (somaLinhas > 0) valores.receita = somaLinhas;
+  }
   const algo = Object.values(valores).some((v) => v > 0) || linhas.length > 0;
   return { valores, linhas, note: algo ? "llm" : "nada identificado" };
 }
