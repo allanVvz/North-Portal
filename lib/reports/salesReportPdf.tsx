@@ -72,10 +72,12 @@ function SalesReportDocument({
   const cm = config.prefs.customMetrics;
   const linhasTotals = totalsOf(conversoes);
   // O total exibido é o relatado no comentário quando existe; senão, a contagem
-  // / soma das linhas detalhadas.
+  // / soma das linhas detalhadas. Agendamentos nunca fica abaixo de vendas — uma
+  // venda fechada passou por um agendamento, e o funil não pode alargar.
+  const vendas = vendasTotal ?? linhasTotals.vendas;
   const cur = {
-    agendamentos: agendamentosTotal ?? linhasTotals.agendamentos,
-    vendas: vendasTotal ?? linhasTotals.vendas,
+    vendas,
+    agendamentos: Math.max(agendamentosTotal ?? linhasTotals.agendamentos, vendas),
     receita: receitaTotal ?? linhasTotals.receita,
   };
   const prev = prevConversoes ? totalsOf(prevConversoes) : null;

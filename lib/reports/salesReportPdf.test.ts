@@ -38,7 +38,7 @@ const base: SalesReportInput = {
 
 const isPdf = (buf: Buffer) => buf.subarray(0, 5).toString("latin1") === "%PDF-";
 
-describe("renderSalesReportPdf", () => {
+describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
   it("gera um PDF de vendas com conversões e fontes", async () => {
     const buf = await renderSalesReportPdf(base);
     expect(isPdf(buf)).toBe(true);

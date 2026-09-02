@@ -6,7 +6,8 @@ const TAGS = ["vendas", "agendamentos", "seguidores", "receita"];
 describe("parseMetricJson", () => {
   it("lê um número por tag e zera as ausentes", () => {
     const r = parseMetricJson('{"valores":{"vendas":3,"receita":1400},"linhas":[]}', TAGS);
-    expect(r.valores).toEqual({ vendas: 3, agendamentos: 0, seguidores: 0, receita: 1400 });
+    // agendamentos ausente → 0, mas sobe para 3 (nunca abaixo de vendas)
+    expect(r.valores).toEqual({ vendas: 3, agendamentos: 3, seguidores: 0, receita: 1400 });
     expect(r.note).toBe("llm");
   });
 
@@ -44,6 +45,14 @@ describe("parseMetricJson", () => {
       TAGS,
     );
     expect(r.valores.receita).toBe(4200);
+  });
+
+  it("agendamentos nunca fica abaixo de vendas", () => {
+    const r = parseMetricJson(
+      '{"valores":{"vendas":6,"agendamentos":0,"seguidores":0,"receita":6800},"linhas":[]}',
+      TAGS,
+    );
+    expect(r.valores.agendamentos).toBe(6);
   });
 
   it("total de receita declarado vence a soma das linhas", () => {
