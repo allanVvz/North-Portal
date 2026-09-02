@@ -1,5 +1,65 @@
 # Changelog
 
+## 1 de setembro de 2026 — busca de tarefas unificada em todas as telas admin
+
+Commit `fb65585`. A busca por texto de tarefas/cards estava espalhada em 6+
+implementações independentes, cada uma olhando um subconjunto diferente de
+campos. Pior: o filtro do quadro de Tarefas (`KanbanBoard`) só casava
+título + responsável + descrição e **nem batia com o dropdown da própria barra
+de busca** (que já usava tipo, prioridade, formato, plataforma, cliente).
+
+### Módulo canônico — `lib/taskSearch.ts`
+
+- **`taskSearchText(task, ctx)`** — um único haystack por card, normalizado e
+  **memoizado por referência do objeto** (`WeakMap`; os objetos de tarefa são
+  trocados por inteiro a cada recarga, então não há como ficar velho). Só a
+  parte cara (join de até 200 comentários, lookup de rótulos, formatação de
+  data) é cacheada; o contexto (`clientName`, `typeLabel`, extras da tela) fica
+  fora do cache.
+- **`taskMatchesQuery(task, query, ctx)`** — divide a query em termos por espaço
+  e exige **todos** (E): `"instagram alta parada"` cruza os três. Query vazia
+  casa com tudo.
+- **`normalizeSearchText()`** — `NFD` + remoção de diacríticos + minúsculas, a
+  mesma transformação já usada em `lib/documentFiles.ts`. Busca passa a ser
+  **acento-insensível**: `"relatorio"` acha "relatório".
+
+### O que o haystack cobre agora
+
+Título, descrição, **comentários (texto e nome do autor)**, responsável,
+cliente, autor do card, rótulos de tipo/subtipo/status/prioridade,
+`payload.formato` / `plataforma` / `hora` / `statusLabel`, e datas
+(`due` / `start` / `end`) tanto crua (`2026-09-15`) quanto formatada
+(`15 set`) — com guarda para "Sem data" não casar com todo card. Só em
+Rotinas: rótulo de cadência + estado do ciclo, via `ctx.extra`.
+
+Fora de escopo de propósito (exigiriam query extra por tela): anexos,
+`task_metrics`, nomes de revisor/aprovador.
+
+### Telas religadas (6 buscas → 1)
+
+- **Kanban** — `KanbanBoard` (quadro/tabela/calendário; a correção da
+  inconsistência) e `KanbanSearchBar` (dropdown "pular para tarefa") agora usam
+  o mesmo matcher e retornam o mesmo conjunto.
+- **Rotinas** — `RecurringSearchBar` + `OperacaoWorkspace`, via novo
+  `recurringMatchesQuery` em `recurringTaskFilters.ts` (substitui
+  `recurringSearchText`).
+- **Entregas e Plano de Ação** — `ParentCardsBoard.parentMatches` reescrito
+  mantendo a descida pai-**OU**-atividade: um termo casa se aparece no haystack
+  do pai ou no de qualquer etapa filha.
+- **Automações** — `AutomationCardPicker` deixou de ter uma cópia literal de
+  `taskMatchesFilters`; importa de `KanbanSearchBar` e usa `taskMatchesQuery`.
+- **Modal do card** — `FlowStepsBox` (`ChainPicker`, 🔗) usa `taskMatchesQuery`
+  completo; `TaskModal.PlanMemberComposer` só normaliza acento (recebe um shape
+  reduzido `{ id, title, kind }` — busca completa ali é follow-up).
+
+Os **chips estruturados** (Cliente / Tipo / Prioridade / Responsável no Kanban;
+os das Rotinas) não foram tocados — só a metade de texto livre foi unificada.
+
+`taskSearchText` / `matchesQuery` saíram de `kanbanShared.ts`. Testes:
+`lib/taskSearch.test.ts` novo (16 casos — E, acento, comentário, autor, payload,
+rótulos, datas, contrato do memo); `recurringTasks.test.ts` migrado para
+`recurringMatchesQuery`.
+
 ## 31 de agosto de 2026 — relatório de anúncios redesenhado + fluxo de conversão / vendas
 
 Branch `feat/relatorio-conversao-vendas`. Duas frentes: (0) reescrever o
