@@ -171,23 +171,22 @@ async function runOneReportAutomation(
     }
     try {
       const { fileName, url } = await fillReportCard(admin, card1, target, config, windsor, meta, today);
+      // Tudo o que o gestor vê vai na ETAPA `trafego` (visível no quadro); a
+      // ocorrência (flow_parent) é só o contêiner e não aparece em tela.
       const { error: c1Error } = await admin
         .from("tasks")
         .update({
           status: "revisao",
           assignee: AUTOMATION_ASSIGNEE,
-          payload: { ...(card1.payload ?? {}), trafego_report_at: new Date().toISOString() },
+          payload: {
+            ...appendedCommentPayload(card1.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`),
+            trafego_report_at: new Date().toISOString(),
+          },
         })
         .eq("id", card1.id);
       if (c1Error) throw c1Error;
-      // O comentário do relatório vai no PAI (o fluxo), não na etapa.
-      const { error: occError } = await admin
-        .from("tasks")
-        .update({ payload: appendedCommentPayload(occ.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`) })
-        .eq("id", occ.id);
-      if (occError) throw occError;
       await advanceFlowMold(admin, target, today);
-      await notifyFromAutomation(admin, occ.id, "task_commented", `Automação comentou em "${occ.title}".`);
+      await notifyFromAutomation(admin, card1.id, "task_commented", `Automação comentou em "${card1.title}".`);
     } catch (error) {
       const message = errorMessage(error);
       await markTaskParada(admin, card1.id, `Falha ao gerar o relatório de anúncios: ${message}`);

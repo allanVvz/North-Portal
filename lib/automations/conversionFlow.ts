@@ -91,6 +91,7 @@ async function generateSalesReport(
   config: AutomationConfigRow,
   mold: TaskRecord,
   occ: TaskRecord,
+  card2: TaskRecord,
   ext: MetricExtract,
   windsor: WindsorSettings,
   meta: ServiceMetaSettings,
@@ -128,7 +129,7 @@ async function generateSalesReport(
 
   // Nome versionado: um comentário corrigido regera o PDF sem colidir no storage.
   const fileName = `relatorio-vendas-${period.to}.pdf`;
-  const path = documentStoragePath(client.slug, `relatorio-vendas-${period.to}-${Date.now()}.pdf`, occ.id);
+  const path = documentStoragePath(client.slug, `relatorio-vendas-${period.to}-${Date.now()}.pdf`, card2.id);
   const { error: uploadError } = await admin.storage.from(DOCUMENT_BUCKET).upload(path, pdf, {
     contentType: "application/pdf",
     upsert: false,
@@ -138,7 +139,7 @@ async function generateSalesReport(
 
   const { error: docError } = await admin.from("documents").insert({
     client_id: clientId,
-    task_id: occ.id,
+    task_id: card2.id,
     name: fileName,
     doc_type: "relatorio",
     status: "publicado",
@@ -151,10 +152,11 @@ async function generateSalesReport(
   });
   if (docError) throw docError;
 
+  const fresh = (await getAdminTask(admin, card2.id))?.payload ?? card2.payload;
   const { error: updErr } = await admin
     .from("tasks")
-    .update({ payload: appendedCommentPayload(occ.payload, `Relatório de vendas gerado e anexado: [${fileName}](${urlData.publicUrl})`) })
-    .eq("id", occ.id);
+    .update({ payload: appendedCommentPayload(fresh, `Relatório de vendas gerado e anexado: [${fileName}](${urlData.publicUrl})`) })
+    .eq("id", card2.id);
   if (updErr) throw updErr;
 }
 
@@ -172,19 +174,27 @@ async function processOccurrence(
   const tags = tagsOf(config);
   let occPayload = (occ.payload ?? {}) as OccPayload;
 
-  const card1 = await getAdminTask(admin, flowStepTaskId(occ.id, "trafego"));
+  let card1 = await getAdminTask(admin, flowStepTaskId(occ.id, "trafego"));
   if (!card1 || !(card1.payload as Record<string, unknown>)?.trafego_report_at) return false; // espera a Autom. 1
 
-  // Pedido único, no pai.
+  // Pedido único — na ETAPA `trafego` (visível no quadro; a ocorrência é só o
+  // contêiner e não aparece em tela). O marcador de dedupe fica na ocorrência.
   if (!occPayload.feedback_prompt_at) {
-    occPayload = { ...appendedCommentPayload(occ.payload, pedidoDe(tags)), feedback_prompt_at: nowIso() } as OccPayload;
+    const { error: promptErr } = await admin
+      .from("tasks")
+      .update({ payload: appendedCommentPayload(card1.payload, pedidoDe(tags)) })
+      .eq("id", card1.id);
+    if (promptErr) throw promptErr;
+    occPayload = { ...occPayload, feedback_prompt_at: nowIso() };
     const { error } = await admin.from("tasks").update({ payload: occPayload }).eq("id", occ.id);
     if (error) throw error;
     occ = { ...occ, payload: occPayload };
+    card1 = (await getAdminTask(admin, card1.id)) ?? card1;
   }
 
   let card2 = await getAdminTask(admin, flowStepTaskId(occ.id, "feedback"));
-  const human = latestHumanComment([occ, card1, ...(card2 ? [card2] : [])], occPayload.feedback_source_at);
+  // O gestor comenta os números na etapa `trafego` (ou na `feedback` se já existe).
+  const human = latestHumanComment([card1, ...(card2 ? [card2] : [])], occPayload.feedback_source_at);
 
   const agendDue = addDays(occ.due_date ?? today, FEEDBACK_LEAD_DAYS);
   const overdue = today >= addDays(agendDue, TOLERANCIA_DIAS);
@@ -208,29 +218,34 @@ async function processOccurrence(
   if (metricsErr) throw metricsErr;
 
   const sourceAt = human?.at ?? nowIso();
+  const resumo = human
+    ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.`
+    : `Sem retorno do responsável até o prazo — fechando a semana sem métricas registradas.`;
   const { error: c2Err } = await admin
     .from("tasks")
     .update({
       status: "revisao",
       assignee: AUTOMATION_ASSIGNEE,
-      payload: { ...(card2.payload ?? {}), metricas: ext.valores, linhas: ext.linhas, feedback_source_at: sourceAt },
+      payload: {
+        ...appendedCommentPayload(card2.payload, resumo),
+        metricas: ext.valores,
+        linhas: ext.linhas,
+        feedback_source_at: sourceAt,
+      },
     })
     .eq("id", card2.id);
   if (c2Err) throw c2Err;
+  card2 = (await getAdminTask(admin, card2.id)) ?? card2;
 
-  // Comentário-resumo + estado do pai.
-  occPayload = {
-    ...appendedCommentPayload(occ.payload, human
-      ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.`
-      : `Sem retorno do responsável até o prazo — fechando a semana sem métricas registradas.`),
-    feedback_prompt_at: occPayload.feedback_prompt_at,
-    feedback_source_at: sourceAt,
-  } as OccPayload;
+  // Pai: só o estado + os marcadores estruturais (sem comentário — invisível).
+  occPayload = { ...occPayload, feedback_source_at: sourceAt };
   const { error: occErr } = await admin.from("tasks").update({ payload: occPayload, status: "revisao" }).eq("id", occ.id);
   if (occErr) throw occErr;
   occ = { ...occ, payload: occPayload };
 
-  await generateSalesReport(admin, config, mold, occ, ext, windsor, meta, today);
+  // O PDF de vendas é anexado à ETAPA `feedback` (aparece nos Anexos dela e na
+  // tela Documentos), com o comentário do link.
+  await generateSalesReport(admin, config, mold, occ, card2, ext, windsor, meta, today);
 
   const { error: markErr } = await admin
     .from("tasks")
@@ -238,7 +253,7 @@ async function processOccurrence(
     .eq("id", occ.id);
   if (markErr) throw markErr;
 
-  await notifyFromAutomation(admin, occ.id, "task_commented", `Automação anexou o relatório de vendas em "${occ.title}".`);
+  await notifyFromAutomation(admin, card2.id, "task_commented", `Automação anexou o relatório de vendas em "${card2.title}".`);
   return true;
 }
 
