@@ -1,6 +1,6 @@
 # North Portal — Roadmap
 
-Fonte única de trabalho pendente. Atualizado em 2026-09-01 contra `main` /
+Fonte única de trabalho pendente. Atualizado em 2026-09-02 contra `main` /
 produção (`northportal.vercel.app`). Os arquivos `plan/*.md` individuais continuam
 como spec detalhada de cada item; este arquivo é o índice priorizado.
 
@@ -53,6 +53,44 @@ Branch `feat/relatorio-conversao-vendas` mergeada na `main` em 2026-09-01
   fonte (hoje só no de vendas); trigger em insert de comentário para a
   Automação 2 reagir na hora; `e2e/relatorio-conversao.spec.ts` (Playwright);
   ingestão Meta de `followersGained` (a API não expõe).
+
+#### R0.4b — Fluxo de conversão reescrito (dinâmico) + ligado dormente — ⏳ PENDENTE: chave da Anthropic
+
+**2026-09-02** (`e184037` → `245b89d`, ver `CHANGELOG.md` e memória
+[[fluxo-conversao-nao-ligado]]). O molde fixo `relatorio_conversao` foi
+aposentado; o fluxo virou **dinâmico e sem task_type**:
+
+- **Automação 1** (`relatorio_trafego_semanal`) — quando o card recorrente tem
+  uma Automação 2 ativa E há backend de IA, a ocorrência da semana vira pai de
+  fluxo (`flow_parent`), a etapa `trafego` recebe o PDF do Meta e vai a revisão.
+- **Automação 2** (`relatorio_vendas`, `lib/automations/conversionFlow.ts`) —
+  módulo genérico. Config = card alvo + `collect_metric_keys` (chips de tag
+  livre; default vendas/agendamentos/seguidores/receita). Posta o pedido, lê o
+  comentário do gestor com IA (`lib/ai/extractMetrics.ts`), grava `task_metrics`,
+  gera o **relatório de vendas** (seção por objetivo + fonte×objetivo + vendas
+  detalhadas + funil com seguidores; `lib/reports/salesReportPdf.tsx` +
+  `campaignBlockKpis.tsx`), fecha a ocorrência.
+- **IA**: `AI_CLI=1` (CLI `claude`) só dev/e2e. Prod usa a credencial `ai`
+  (vendor anthropic).
+- **Estado em prod (2026-09-02):** os **6 clientes** têm as 2 automações no card
+  "Relatório de anúncios" (métricas vendas/agendamentos/seguidores/receita). Os
+  6 cards "Relatório de anúncios — Topo de funil" (inertes) foram apagados.
+  Validado e2e ponta a ponta (karpinski/utzig/baita, 3 casos) — depois tudo
+  apagado, `task_metrics` em prod = 0.
+- **DORMENTE** — `conversionAiReady()` (`conversionFlow.ts`): sem credencial
+  `ai`, `runAutomations` pula as configs `relatorio_vendas`, `flowMode` da
+  Automação 1 fica `false` (relatório de tráfego sai normal, sem card de
+  feedback), o hook de comentário retorna cedo.
+
+  **➡️ PENDÊNCIA ÚNICA: cadastrar a chave da Anthropic** em Configurações ›
+  Integrações › Provedor de IA. No ciclo seguinte a Automação 2 ativa sozinha
+  nos 6 — sem semana quebrada no meio. (Alternativa: rodar o cron num runner
+  self-hosted com a CLI `claude`.)
+
+- **Follow-ups R0.4b:** `adSourceTags` — nenhum cliente marca criativos com
+  fonte #1/#2/#3, então "vendas/ROAS por objetivo" no PDF de vendas mostra só a
+  nota de como ligar; hardening do prompt de extração (few-shot para "orçamento
+  em aberto", aproximações de seguidores); `e2e/relatorio-conversao.spec.ts`.
 
 ### R0.1 — Unificação total do botão e do modal de criação de tarefa — ✅ FEITO (2026-08-30)
 
@@ -310,8 +348,10 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 
 ## Sequenciamento sugerido
 
-1. **Tier 0 (R0.1–R0.4) — CONCLUÍDO.** R0.4 (relatório de anúncios + fluxo de
-   conversão/vendas) mergeado na `main` em 2026-09-01 (`cfd1a34`).
+1. **Tier 0 (R0.1–R0.4) — CONCLUÍDO em código.** R0.4 mergeado em 2026-09-01
+   (`cfd1a34`); o fluxo de conversão foi reescrito para dinâmico e ligado
+   (dormente) nos 6 clientes em 2026-09-02 (R0.4b). **Única pendência aberta do
+   Tier 0: cadastrar a chave da Anthropic** — sem ela a Automação 2 não roda.
 2. **Tier 1** — R1.1, R1.2, R1.5 fechados (ver topo); R1.7 investigado e
    dissolvido (specs de aprovação/checkpoints já verdes; a lacuna de
    `metric-collection` é a R6.11, que é construção). Resta o operacional:
@@ -331,7 +371,10 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 - Ao concluir um item, mover para a lista "Já entregue" no topo (uma linha) e
   apagar a entrada do tier.
 - `plan/*.md` individuais continuam sendo a spec; este arquivo é só o índice.
-- Datar cada revisão. Última: 2026-09-01 (R0.4 mergeado; R1.1 cron real ligado em
-  prod; R1.2 perda de dado no save resolvida — resta só shape do `contentSchema`,
-  movido pra R6.10; R1.5 comentários mortos limpos; R1.7 investigado e dissolvido;
-  R6.11 investigado — é stub, vira construção).
+- Datar cada revisão. Última: 2026-09-02 (R0.4b — fluxo de conversão reescrito
+  dinâmico, Automação 2 registrada nos 6 clientes mas DORMENTE até a chave da
+  Anthropic; cards "Topo de funil" apagados; relatório de vendas ganhou seção
+  por objetivo + tabelas). Antes, 2026-09-01: R0.4 mergeado; R1.1 cron real
+  ligado em prod; R1.2 perda de dado no save resolvida — resta só shape do
+  `contentSchema`, movido pra R6.10; R1.5 comentários mortos limpos; R1.7
+  investigado e dissolvido; R6.11 investigado — é stub, vira construção).
