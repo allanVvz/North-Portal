@@ -22,6 +22,22 @@ export function commentsOf(payload: Record<string, unknown> | null | undefined):
   return Array.isArray(comments) ? (comments as TaskComment[]) : [];
 }
 
+/** Um comentário anotado com o card de onde veio — usado quando o thread de um
+ *  card mostra a conversa da família inteira (plano + atividades, ou entrega +
+ *  etapas). `taskId` ainda não é renderizado; o rótulo de origem por comentário
+ *  é item de roadmap (R2.5). */
+export type FamilyComment = TaskComment & { taskId: string };
+
+/** Mescla os comentários de vários cards num só thread, ordenado por `at`
+ *  crescente — a mesma ordem cronológica que `commentsOf` de um card só. */
+export function mergeFamilyComments(
+  cards: ReadonlyArray<{ id: string; payload: Record<string, unknown> | null | undefined }>,
+): FamilyComment[] {
+  return cards
+    .flatMap((card) => commentsOf(card.payload).map((comment) => ({ ...comment, taskId: card.id })))
+    .sort((a, b) => a.at.localeCompare(b.at));
+}
+
 const URL_RE = /https?:\/\/[^\s)]+/gi;
 // `[label](url)` — the short-link form both the automation (lib/automations/run.ts)
 // and the manual "attach a document" comment button (TaskModal.tsx

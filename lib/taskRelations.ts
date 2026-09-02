@@ -149,6 +149,16 @@ export function deliveryParentIdsOf(task: TaskRelation): string[] {
   return (task.parents ?? []).filter((p) => p.slot !== null).map((p) => p.id);
 }
 
+/** O card-pai "família" deste card, para a visão pai↔filho do modal e para o
+ *  thread de comentários compartilhado: a entrega da qual ele é etapa (elo com
+ *  slot) tem precedência sobre o plano do qual é atividade (elo sem slot) —
+ *  fluxo é a unidade mais estreita. Recorrência fica de fora de propósito: cada
+ *  ciclo é uma entrega própria e junta os comentários de meses seria ruído.
+ *  `null` quando o card não é filho de nenhum dos dois. */
+export function familyRootIdOf(task: TaskRelation): string | null {
+  return deliveryParentIdsOf(task)[0] ?? planParentIdOf(task) ?? null;
+}
+
 export function recurrenceExecutionsOf<T extends Pick<TaskRecord, "payload">>(parentId: string, tasks: readonly T[]): T[] {
   return tasks.filter((task) => recurrenceParentIdOf(task) === parentId);
 }

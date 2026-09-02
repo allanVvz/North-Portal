@@ -6,6 +6,7 @@ import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
 import FlowStepsBox from "./FlowStepsBox";
+import CardParentBox from "./CardParentBox";
 import VisibleToggleField from "./VisibleToggleField";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { ATTR_DEFS, useAttrVisibility } from "./kanbanAttrs";
@@ -19,7 +20,7 @@ import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
 import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
-import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
+import { formatAbsoluteTime, formatCommentTime, mergeFamilyComments, splitCommentText } from "@/lib/comments";
 import { normalizeSearchText } from "@/lib/taskSearch";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
@@ -392,6 +393,9 @@ export default function TaskModal({
   // cujo subtipo diz que etapa é.
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
   const [flowDelivery, setFlowDelivery] = useState<TaskRecord | null>(null);
+  // O Plano de Ação a que este card pertence — não aparece no quadro, então
+  // quase sempre precisa ser buscado por id (igual a `flowDelivery`).
+  const [planParent, setPlanParent] = useState<TaskRecord | null>(null);
   // A etapa recém-criada pela conclusão desta, devolvida pelo PATCH.
   const [flowNext, setFlowNext] = useState<TaskRecord | null>(null);
   const currentType = taskTypes.find((t) => t.key === draft.kind) ?? null;
@@ -543,7 +547,31 @@ export default function TaskModal({
   }, [closeAfterSave]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
-  const comments = liveTask ? commentsOf(liveTask) : [];
+
+  // Os cards da "família" deste card, cujos comentários formam um thread só:
+  // um plano + suas atividades, ou uma entrega + suas etapas. De qualquer card
+  // da família dá pra ler a conversa inteira. Recorrência fica de fora — cada
+  // ciclo é uma entrega própria (a entrega-ocorrência ainda junta as etapas
+  // dela, porque aí `isDelivery` é true). Enquanto o pai não carregou (fetch
+  // assíncrono), cai nos irmãos que já estão em `clientTasks` e completa sozinho.
+  const familyCards = useMemo(() => {
+    if (!liveTask) return [] as TaskRecord[];
+    const flowRoot = deliveryParentIdsOf(liveTask)[0] ?? null;
+    const planRoot = planParentIdOf(liveTask);
+    const raw: (TaskRecord | null)[] =
+      kindDef(liveTask.kind).isPlan ? [liveTask, ...actionPlanMembersOf(liveTask.id, clientTasks)]
+      : isDelivery ? [liveTask, ...flowStepsOf(liveTask.id, clientTasks)]
+      : flowRoot ? [flowDelivery, ...flowStepsOf(flowRoot, clientTasks), liveTask]
+      : planRoot ? [planParent, ...actionPlanMembersOf(planRoot, clientTasks), liveTask]
+      : [liveTask];
+    const seen = new Set<string>();
+    const out: TaskRecord[] = [];
+    for (const card of raw) if (card && !seen.has(card.id)) { seen.add(card.id); out.push(card); }
+    return out;
+  }, [liveTask, clientTasks, isDelivery, flowDelivery, planParent]);
+
+  const ownComments = liveTask ? commentsOf(liveTask) : [];
+  const comments = liveTask ? mergeFamilyComments(familyCards) : [];
   // Same client first (most relevant), other clients' documents below —
   // never hidden entirely, since a comment can reasonably reference either.
   const commentDocs = draft.clientSlug
@@ -555,8 +583,10 @@ export default function TaskModal({
   // comment becomes an icon here too, not just direct task_id attachments.
   const taskDocs = useMemo(() => {
     if (!liveTask) return [];
+    // Anexos ficam por card, não por família — o thread de comentários é
+    // compartilhado, os arquivos não. Por isso varre `ownComments`, não o merge.
     const byId = new Map(attachableDocs.filter((d) => d.task_id === liveTask.id).map((d) => [d.id, d]));
-    for (const c of comments) {
+    for (const c of ownComments) {
       for (const part of splitCommentText(c.text)) {
         if (!("url" in part)) continue;
         const doc = attachableDocs.find((d) => d.file_url === part.url);
@@ -564,7 +594,7 @@ export default function TaskModal({
       }
     }
     return Array.from(byId.values());
-  }, [liveTask, attachableDocs, comments]);
+  }, [liveTask, attachableDocs, ownComments]);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
   // A comment link that matches a known document's file_url opens the same
   // preview modal in place instead of navigating to the raw file in a new tab.
@@ -638,6 +668,24 @@ export default function TaskModal({
     return () => { cancelled = true; };
   }, [flowDeliveryId, clientTasks]);
 
+  // O mesmo, para o Plano de Ação a que o card pertence (elo sem slot). Igual à
+  // entrega, o plano não aparece no quadro, então o normal é buscar por id.
+  const planParentId = liveTask && !isDelivery && !isRecurringParent && !kindDef(liveTask.kind).isPlan
+    ? planParentIdOf(liveTask)
+    : null;
+  useEffect(() => {
+    if (!planParentId) { setPlanParent(null); return; }
+    const asPlan = (parent: TaskRecord | null) => (parent && kindDef(parent.kind).isPlan ? parent : null);
+    const loaded = clientTasks.find((t) => t.id === planParentId) ?? null;
+    if (loaded) { setPlanParent(asPlan(loaded)); return; }
+    let cancelled = false;
+    fetch(`/api/admin/tasks/${encodeURIComponent(planParentId)}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((parent: TaskRecord | null) => { if (!cancelled) setPlanParent(asPlan(parent)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [planParentId, clientTasks]);
+
   function pickKind(kind: string) {
     if (kind === ROTINA_KEY) {
       setRotinaMode(true);
@@ -699,13 +747,44 @@ export default function TaskModal({
     ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdOf(t) && t.client_id === liveTask.client_id)
     : [];
   /** A entrega a que a caixa de etapas se refere: o próprio card quando ele é a
-   * entrega, ou o pai quando estamos olhando uma etapa. É isso que faz a mesma
-   * caixa (e o mesmo botão de corrente) funcionar nos dois lugares. */
+   * entrega, ou o pai quando estamos olhando uma etapa (usado só para calcular o
+   * progresso do pai na caixa "Faz parte de" — o stepper editável agora só
+   * aparece do lado da entrega). */
   const chainDelivery = isDelivery ? liveTask : flowDelivery;
 
   // As etapas da corrente a que este card pertence — as do próprio card quando
   // ele é a entrega, as do pai quando ele é uma etapa.
   const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
+
+  // As caixas "Faz parte de" do modal de um FILHO: uma linha enxuta por card
+  // pai (entrega, plano, molde de recorrência), só para navegar. Um card pode
+  // ser etapa de uma entrega E atividade de um plano ao mesmo tempo, daí a lista.
+  const parentBoxes: { parent: TaskRecord; subtitle: string; progress: number }[] = [];
+  if (liveTask && !isDelivery && !kd.isPlan) {
+    if (flowDelivery) {
+      const total = deliveryType?.subtypes.length ?? 0;
+      const stepLabel = subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo";
+      parentBoxes.push({
+        parent: flowDelivery,
+        subtitle: flowStepIndex >= 0 && total ? `Etapa ${flowStepIndex + 1} de ${total} · ${stepLabel}` : stepLabel,
+        progress: taskProgress(flowDelivery, chainSteps),
+      });
+    }
+    if (planParent) {
+      parentBoxes.push({
+        parent: planParent,
+        subtitle: "Atividade do plano",
+        progress: taskProgress(planParent, actionPlanMembersOf(planParent.id, clientTasks)),
+      });
+    }
+    if (recurrenceParent) {
+      parentBoxes.push({
+        parent: recurrenceParent,
+        subtitle: "Execução da recorrência",
+        progress: taskProgress(recurrenceParent, recurrenceExecutionsOf(recurrenceParent.id, clientTasks)),
+      });
+    }
+  }
 
   /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo tipo, mesmo
    * subtipo, e ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
@@ -1406,29 +1485,22 @@ export default function TaskModal({
 
             </div>
 
-            {liveTask && recurrenceParentId ? (
-              <div className="tm-box tm-planmembers">
-                <p className="tm-box-label">Card pai (1)</p>
-                <div className="tm-member-list">
-                  {recurrenceParent ? (
-                    <div className="tm-member">
-                      <button
-                        type="button"
-                        className="tm-member-unlink"
-                        title="Remover ligação com o card pai"
-                        aria-label="Remover ligação com o card pai"
-                        onClick={() => void unlinkMember(liveTask.id, recurrenceParent.id)}
-                        disabled={busy}
-                      >✕</button>
-                      <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(recurrenceParent)} disabled={!onOpenRelatedTask || busy}>
-                        <TaskKindIcon kind={recurrenceParent.kind} size="sm" />
-                        <span className="tm-member-title">{recurrenceParent.title}</span>
-                        <span className="tm-member-status">{STATUS_LABEL[recurrenceParent.status]}</span>
-                        <span className="tm-member-arrow" aria-hidden>↗</span>
-                      </button>
-                    </div>
-                  ) : <p className="admin-sub" style={{ margin: 0 }}>Carregando card pai…</p>}
-                </div>
+            {/* Modal de um FILHO: a(s) caixa(s) "Faz parte de", enxutas e só de
+                navegação. O stepper editável e o 🔗 ficam do lado da entrega. */}
+            {parentBoxes.map((box) => (
+              <CardParentBox
+                key={box.parent.id}
+                parent={box.parent}
+                subtitle={box.subtitle}
+                progress={box.progress}
+                canOpen={Boolean(onOpenRelatedTask) && !busy}
+                onOpen={() => void openRelatedTask(box.parent)}
+              />
+            ))}
+            {liveTask && !isDelivery && !kd.isPlan && (flowDeliveryId || planParentId || recurrenceParentId) && parentBoxes.length === 0 ? (
+              <div className="tm-box tm-parentbox">
+                <p className="tm-box-label">Faz parte de</p>
+                <p className="admin-sub" style={{ margin: 0 }}>Carregando card pai…</p>
               </div>
             ) : null}
 
@@ -1448,36 +1520,10 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {liveTask && flowDeliveryId ? (
-              <div className="tm-box tm-planmembers">
-                <p className="tm-box-label">Entrega</p>
-                <div className="tm-member-list">
-                  {flowDelivery ? (
-                    <div className="tm-member">
-                      {/* Sem ✕: uma etapa não é um vínculo que se revoga, é um
-                          estágio da entrega. Desligar é feito pelo botão de
-                          corrente, do lado da entrega. */}
-                      <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(flowDelivery)} disabled={!onOpenRelatedTask || busy}>
-                        <TaskKindIcon kind={flowDelivery.kind} size="sm" />
-                        <span className="tm-member-title">{flowDelivery.title}</span>
-                        <span className="tm-member-status">
-                          {flowStepIndex >= 0 && deliveryType
-                            ? `Etapa ${flowStepIndex + 1}/${deliveryType.subtypes.length}`
-                            : subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo"}
-                        </span>
-                        <span className="tm-member-arrow" aria-hidden>↗</span>
-                      </button>
-                    </div>
-                  ) : <p className="admin-sub" style={{ margin: 0 }}>Carregando entrega…</p>}
-                </div>
-              </div>
-            ) : null}
-
-            {/* A corrente aparece tanto no card da ENTREGA quanto no de uma
-                ETAPA: quem abre uma etapa pelo quadro precisa conseguir ligar
-                um card ali mesmo, sem descobrir antes que existe uma tela de
-                Entregas. */}
-            {liveTask && chainDelivery ? (
+            {/* O stepper editável (com 🔗 nos slots vazios, ✕ nos preenchidos)
+                aparece só no card da ENTREGA. Numa etapa, quem quer mexer na
+                corrente abre a entrega pela caixa "Faz parte de" acima. */}
+            {liveTask && isDelivery ? (
               <FlowStepsBox
                 type={deliveryType}
                 steps={chainSteps}
@@ -1486,7 +1532,7 @@ export default function TaskModal({
                 busy={busy}
                 canOpen={Boolean(onOpenRelatedTask)}
                 onOpenStep={(card) => void openRelatedTask(card)}
-                onUnlinkStep={(card) => void unlinkMember(card.id, chainDelivery.id)}
+                onUnlinkStep={(card) => void unlinkMember(card.id, liveTask.id)}
                 onLinkStep={(card, slot) => void linkStepCard(card, slot)}
               />
             ) : null}
@@ -1654,26 +1700,32 @@ export default function TaskModal({
                 <p className="tm-box-label">Comentários e atividade</p>
                 <div className="tm-comments">
                   {comments.slice().reverse().map((c, i) => {
-                    // A thread é exibida do mais novo para o mais velho, mas o
-                    // índice que o servidor conhece é o do array gravado.
-                    const storedIndex = comments.length - 1 - i;
-                    const editing = editingComment?.index === storedIndex;
+                    // A thread pode misturar comentários de vários cards da
+                    // família (plano + atividades, entrega + etapas). Só os do
+                    // card aberto são editáveis, e o índice que o servidor
+                    // conhece é o do `payload.comments` DESSE card — casado por
+                    // `at` (único por card).
+                    const own = c.taskId === liveTask?.id;
+                    const storedIndex = own ? ownComments.findIndex((o) => o.at === c.at && o.text === c.text) : -1;
+                    const editing = own && editingComment?.index === storedIndex;
                     return (
-                      <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.at}-${storedIndex}`}>
+                      <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.taskId}-${c.at}-${i}`}>
                         <CommentAvatar comment={c} className="tm-comment-av" />
                         <div className="tm-comment-body">
                           <p className="tm-comment-meta">
                             <b>{c.author}</b>
                             <small>{formatCommentTime(c.at)}</small>
                             {c.edited_at ? <small className="tm-comment-edited">editado</small> : null}
-                            <HeadDropdown className="tm-comment-menu" trigger={<span className="sr-only">Ações do comentário</span>}>
-                              <button type="button" className="tm-headpick-option" onClick={() => setEditingComment({ index: storedIndex, at: c.at, text: c.text })}>
-                                <span aria-hidden>✎</span> Editar
-                              </button>
-                              <button type="button" className="tm-headpick-option danger" onClick={() => void removeComment(storedIndex, c.at)}>
-                                <span aria-hidden>🗑</span> Excluir
-                              </button>
-                            </HeadDropdown>
+                            {own && storedIndex >= 0 ? (
+                              <HeadDropdown className="tm-comment-menu" trigger={<span className="sr-only">Ações do comentário</span>}>
+                                <button type="button" className="tm-headpick-option" onClick={() => setEditingComment({ index: storedIndex, at: c.at, text: c.text })}>
+                                  <span aria-hidden>✎</span> Editar
+                                </button>
+                                <button type="button" className="tm-headpick-option danger" onClick={() => void removeComment(storedIndex, c.at)}>
+                                  <span aria-hidden>🗑</span> Excluir
+                                </button>
+                              </HeadDropdown>
+                            ) : null}
                           </p>
                           {editing ? (
                             <div className="tm-comment-edit">

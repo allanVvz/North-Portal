@@ -10,6 +10,7 @@ import {
   isDeferredTask,
   actionPlanMembersOf,
   deliveryParentIdsOf,
+  familyRootIdOf,
   flowStepsOf,
   isFlowDelivery,
   parentIdsOf,
@@ -112,6 +113,13 @@ describe("etapa de entrega × membro de plano", () => {
   it("as entregas de que um card é etapa saem separadas do plano", () => {
     expect(deliveryParentIdsOf(etapaNoPlano)).toEqual([entregaId]);
     expect(deliveryParentIdsOf(soMembro)).toEqual([]);
+  });
+
+  it("familyRootIdOf: entrega tem precedência sobre plano; card avulso é null", () => {
+    expect(familyRootIdOf(etapaNoPlano)).toBe(entregaId); // é etapa E membro → a entrega
+    expect(familyRootIdOf(soEtapa)).toBe(entregaId);
+    expect(familyRootIdOf(soMembro)).toBe(planoId);
+    expect(familyRootIdOf({ parents: [] })).toBeNull();
   });
 });
 

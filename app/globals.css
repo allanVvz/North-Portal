@@ -3613,6 +3613,13 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-member-unlink:disabled { cursor: wait; opacity: .45; transform: none; }
 .tm-member-open.tm-member-pending { cursor: default; opacity: .82; }
 
+/* "Faz parte de" — o card pai no modal de um filho. Reusa .tm-member/.tm-member-open;
+   só acrescenta o subtítulo de relação e o % do pai. */
+.tm-parentbox-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tm-parentbox-main .tm-member-title { flex: 0 0 auto; }
+.tm-parentbox-sub { font-size: 11.5px; color: var(--a-muted); }
+.tm-parentbox-pct { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--a-sec); }
+
 /* Search-or-create composer for plan activities */
 .tm-member-search { position: relative; margin-top: 4px; }
 .tm-member-search-input {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractLatestLink, formatCommentTime, formatRelativeAge, splitCommentText } from "./comments";
+import { extractLatestLink, formatCommentTime, formatRelativeAge, mergeFamilyComments, splitCommentText } from "./comments";
 
 describe("splitCommentText", () => {
   it("mantém texto sem link como um único segmento", () => {
@@ -57,6 +57,38 @@ describe("extractLatestLink", () => {
 
   it("retorna null quando nenhum comentário tem link", () => {
     expect(extractLatestLink([{ author: "A", text: "oi", at: "2026-08-01T00:00:00Z" }])).toBeNull();
+  });
+});
+
+describe("mergeFamilyComments", () => {
+  const pai = {
+    id: "pai",
+    payload: { comments: [{ author: "A", text: "abertura", at: "2026-08-01T09:00:00Z" }] },
+  };
+  const etapa1 = {
+    id: "e1",
+    payload: {
+      comments: [
+        { author: "B", text: "roteiro pronto", at: "2026-08-02T10:00:00Z" },
+        { author: "C", text: "ajuste", at: "2026-08-04T10:00:00Z" },
+      ],
+    },
+  };
+  const etapa2 = { id: "e2", payload: { comments: [{ author: "D", text: "captação", at: "2026-08-03T10:00:00Z" }] } };
+
+  it("intercala os comentários de todos os cards por data", () => {
+    const merged = mergeFamilyComments([pai, etapa1, etapa2]);
+    expect(merged.map((c) => c.text)).toEqual(["abertura", "roteiro pronto", "captação", "ajuste"]);
+  });
+
+  it("marca cada comentário com o card de origem", () => {
+    const merged = mergeFamilyComments([pai, etapa1, etapa2]);
+    expect(merged.map((c) => c.taskId)).toEqual(["pai", "e1", "e2", "e1"]);
+  });
+
+  it("ignora card sem payload.comments e lista vazia", () => {
+    expect(mergeFamilyComments([{ id: "x", payload: null }, { id: "y", payload: {} }])).toEqual([]);
+    expect(mergeFamilyComments([])).toEqual([]);
   });
 });
 
