@@ -1249,9 +1249,10 @@ export async function listAllTasks(): Promise<BoardTask[]> {
 }
 
 // ---- Entregas de fluxo (admin) -----------------------------------------------
-// Uma entrega é o card com flow_template_id: ela agrega as etapas da cascata
-// por plan_id. Não aparece no quadro Tarefas (belongsToTaskScreen a exclui —
-// seu status é derivado dos filhos), então esta é a lista onde ela existe.
+// Uma entrega é o card com `payload.flow_parent = true`: ela agrega as etapas
+// da cascata pelos elos de `task_links`. Não aparece no quadro Tarefas
+// (belongsToTaskScreen a exclui — seu status é derivado dos filhos), então
+// esta é a lista onde ela existe.
 
 // Estruturalmente um ActionPlan (mesmos campos, incluindo `activities`) mais o
 // nome do molde. É de propósito: a tela de Entregas reusa PlanSearchBar,
@@ -1517,8 +1518,8 @@ export async function createExplicitDateTaskGroup(clientId: string | null, input
 }
 
 // ---- Fluxos em cascata ---------------------------------------------------
-// Cria a ENTREGA (o card-pai, marcado por flow_template_id) junto com a
-// PRIMEIRA etapa, e devolve a etapa. Devolver a etapa e não a entrega é
+// Cria a ENTREGA (o card-pai, marcado por `payload.flow_parent = true`) junto
+// com a PRIMEIRA etapa, e devolve a etapa. Devolver a etapa e não a entrega é
 // deliberado e segue createRecurringTaskGroup, que devolve a primeira
 // execução: a entrega não ocupa coluna no quadro (status derivado dos
 // filhos), então abrir a entrega logo após criar deixaria o usuário olhando
@@ -3338,6 +3339,8 @@ export type AutomationConfig = {
   performanceTemplateId: string | null;
   active: boolean;
   lastRunDate: string | null;
+  /** Métricas (tags) que a automação pede/lê — `coleta_metrica_cliente` e `relatorio_vendas`. */
+  collectMetricKeys: string[] | null;
   // Resolved directly here (not left to the frontend to cross-reference
   // against GET /api/admin/tasks) because a recurring target card that has
   // already advanced past its first cycle gets payload.recurrence_group=true
@@ -3360,6 +3363,7 @@ function mapAutomationConfigRow(row: AutomationConfigJoinRow): AutomationConfig 
     performanceTemplateId: (row.performance_template_id as string | null) ?? null,
     active: Boolean(row.active),
     lastRunDate: (row.last_run_date as string | null) ?? null,
+    collectMetricKeys: (row.collect_metric_keys as string[] | null) ?? null,
     targetTask: task ? {
       id: row.target_task_id as string,
       title: task.title,
@@ -3382,7 +3386,7 @@ export async function listAutomationConfigs(): Promise<AutomationConfig[]> {
 }
 
 export async function createAutomationConfig(
-  input: { automationKey: string; targetTaskId: string; performanceTemplateId?: string | null; active?: boolean },
+  input: { automationKey: string; targetTaskId: string; performanceTemplateId?: string | null; active?: boolean; collectMetricKeys?: string[] | null },
   createdBy: string,
 ): Promise<AutomationConfig> {
   const supabase = await createClient();
@@ -3393,6 +3397,7 @@ export async function createAutomationConfig(
       target_task_id: input.targetTaskId,
       performance_template_id: input.performanceTemplateId ?? null,
       active: input.active ?? true,
+      collect_metric_keys: input.collectMetricKeys ?? null,
       created_by: createdBy,
     })
     .select("*")
@@ -3403,13 +3408,14 @@ export async function createAutomationConfig(
 
 export async function updateAutomationConfig(
   id: string,
-  patch: { targetTaskId?: string; performanceTemplateId?: string | null; active?: boolean },
+  patch: { targetTaskId?: string; performanceTemplateId?: string | null; active?: boolean; collectMetricKeys?: string[] | null },
 ): Promise<AutomationConfig> {
   const supabase = await createClient();
   const fields: Record<string, unknown> = {};
   if (patch.targetTaskId !== undefined) fields.target_task_id = patch.targetTaskId;
   if (patch.performanceTemplateId !== undefined) fields.performance_template_id = patch.performanceTemplateId;
   if (patch.active !== undefined) fields.active = patch.active;
+  if (patch.collectMetricKeys !== undefined) fields.collect_metric_keys = patch.collectMetricKeys;
   const { data, error } = await supabase.from("automation_configs").update(fields).eq("id", id).select("*").limit(1);
   if (error) fail(error);
   const row = data?.[0] as Record<string, unknown> | undefined;

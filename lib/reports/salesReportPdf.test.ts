@@ -4,7 +4,7 @@ import { DEFAULT_BUILTIN_TEMPLATE } from "@/lib/performanceTemplates";
 import { generateDemoPosts } from "@/app/admin/performance/demoData";
 import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
 import type { MetaPost } from "@/lib/windsor";
-import type { ConversionRow } from "@/lib/ai/extractConversionReport";
+import type { ConversionRow } from "@/lib/ai/extractMetrics";
 
 const period: Period = { from: "2026-08-01", to: "2026-08-30" };
 const all = generateDemoPosts(new Date("2026-08-30T12:00:00Z"));
@@ -58,5 +58,11 @@ describe("renderSalesReportPdf", () => {
   it("com comparativo do ciclo anterior não lança", async () => {
     const buf = await renderSalesReportPdf({ ...base, prevConversoes: [{ servico: "PPF", valor: 2000, fonte: "1", status: "fechado" }] });
     expect(isPdf(buf)).toBe(true);
+  });
+
+  it("com receita total e seguidores (sem linhas detalhadas) não lança", async () => {
+    const buf = await renderSalesReportPdf({ ...base, conversoes: [], receitaTotal: 4200, seguidores: 45 });
+    expect(isPdf(buf)).toBe(true);
+    expect(buf.byteLength).toBeGreaterThan(3000);
   });
 });

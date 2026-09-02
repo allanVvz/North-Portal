@@ -29,7 +29,14 @@ export async function getAdminTask(admin: AdminClient, id: string): Promise<Task
 }
 
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  // Erros do Supabase/PostgREST são objetos planos { message, code, details, hint }.
+  if (error && typeof error === "object") {
+    const e = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts = [e.message, e.details, e.hint].filter((p) => typeof p === "string" && p);
+    if (parts.length) return parts.join(" · ") + (e.code ? ` (${e.code})` : "");
+  }
+  return String(error);
 }
 
 // Every automation run — success or failure — leaves exactly one new comment

@@ -1,24 +1,23 @@
-// Harness CLI do fluxo de conversão / vendas (relatorio_conversao +
-// relatorio_trafego_semanal + relatorio_vendas). Testa ponta a ponta sem UI.
+// Harness CLI do fluxo de feedback / vendas (Automação 1 relatorio_trafego_semanal
+// + Automação 2 relatorio_vendas). Testa ponta a ponta sem UI.
 //
 // Uso (lê .env.local para NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY):
 //   node scripts/relatorio-conversao-e2e.mjs seed [--client cris-car-care]
 //   node scripts/relatorio-conversao-e2e.mjs inspect [--client cris-car-care]
 //   node scripts/relatorio-conversao-e2e.mjs reset-lastrun [--client cris-car-care]
-//   node scripts/relatorio-conversao-e2e.mjs comment "<texto>" <stepId>
+//   node scripts/relatorio-conversao-e2e.mjs comment "<texto>" <taskId>   (occ OU card1)
+//   node scripts/relatorio-conversao-e2e.mjs overdue [--client cris-car-care] [dias]
 //   node scripts/relatorio-conversao-e2e.mjs teardown [--client cris-car-care]
 //
-// Entre seed e inspect, dispare um tique da cron — pelo endpoint real:
-//   Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/admin/automations/run -Headers @{ "x-cron-secret" = "<CRON_SECRET>" }
-// ...ou direto (não precisa de next dev):
-//   RUN_AUTOMATIONS=1 npx vitest run lib/automations/e2e.manual.test.ts
+// Entre seed e inspect, dispare um tique da cron:
+//   RUN_AUTOMATIONS=1 AI_CLI=1 AI_CLI_BIN=<claude> AI_MODEL=sonnet npx vitest run lib/automations/e2e.manual.test.ts
 //
-// Sequência completa:
+// Sequência de um caso:
 //   node scripts/relatorio-conversao-e2e.mjs seed
-//   <tique 1>            → etapa relatorio_trafego 'aprovado' + PDF; etapa agendamentos criada
-//   node scripts/relatorio-conversao-e2e.mjs comment "fechamos 5 agendamentos" <agendamentosStepId>
+//   <tique 1>   → Autom.1 cria a ocorrência + card1 (PDF Meta) → card1 revisão; Autom.2 comenta o pedido no pai
+//   node scripts/relatorio-conversao-e2e.mjs comment "Semana boa! 3 vendas, uma R$1400 pela #2, +45 seguidores." <occId>
 //   node scripts/relatorio-conversao-e2e.mjs reset-lastrun
-//   <tique 2>            → task_metrics gravado; etapa 'aprovado'; PDF de vendas; ocorrência encerrada
+//   <tique 2>   → Autom.2 cria card2, grava task_metrics, gera o PDF de vendas, card2+pai → revisão
 //   node scripts/relatorio-conversao-e2e.mjs inspect
 //   node scripts/relatorio-conversao-e2e.mjs teardown
 
@@ -62,7 +61,7 @@ const clientFlag = (() => {
   return i >= 0 ? argv[i + 1] : "cris-car-care";
 })();
 const iso = (d) => d.toISOString().slice(0, 10);
-const MOLD_TITLE = "Relatório de conversão — e2e";
+const MOLD_TITLE = "Relatório de anúncios — e2e";
 
 async function resolveClient() {
   const { data, error } = await db.from("clients").select("id,slug,name").eq("slug", clientFlag).limit(1);
@@ -76,8 +75,8 @@ async function adminProfileId() {
 }
 async function findMold(clientId) {
   const { data } = await db.from("tasks").select("*")
-    .eq("client_id", clientId).eq("kind", "relatorio_conversao").eq("title", MOLD_TITLE)
-    .contains("payload", { recurrence_group: true }).limit(1);
+    .eq("client_id", clientId).eq("title", MOLD_TITLE)
+    .not("recurrence_cadence", "is", null).limit(1);
   return data?.[0] ?? null;
 }
 
@@ -89,75 +88,44 @@ async function seed() {
 
   let mold = await findMold(client.id);
   if (!mold) {
+    // M1: tarefa recorrente COMUM (sem flow_parent). A ocorrência é que vira o
+    // pai do fluxo, criada pela Automação 1 no tique.
     const { data, error } = await db.from("tasks").insert({
       client_id: client.id,
-      kind: "relatorio_conversao",
+      kind: "operacional",
       subtype: null,
       title: MOLD_TITLE,
-      status: "em_producao",
+      status: "backlog",
       priority: "media",
       recurrence_cadence: "semanal",
       recurrence_weekdays: [weekday],
       due_date: today, start_date: today, end_date: today,
-      reviewer_id: null, approver_id: null,
-      payload: { recurrence_group: true, recurrence_cycle: 0, recurrence_revision: 1, flow_parent: true, flow_total_weight: 2, flow_step_count: 2 },
+      payload: { recurrence_group: true, recurrence_cycle: 0, recurrence_revision: 1 },
     }).select("*").limit(1);
     if (error) throw error;
     mold = data[0];
   }
 
-  const occId = recurringExecutionId(mold.id, 0);
-  const { data: occExisting } = await db.from("tasks").select("id").eq("id", occId).limit(1);
-  if (!occExisting?.[0]) {
-    const { error } = await db.from("tasks").insert({
-      id: occId,
-      client_id: client.id,
-      kind: "relatorio_conversao",
-      subtype: null,
-      title: MOLD_TITLE,
-      status: "backlog",
-      priority: "media",
-      plan_id: mold.id,
-      due_date: today, start_date: today,
-      payload: { flow_parent: true, flow_total_weight: 2, flow_step_count: 2, recurrence_parent_id: mold.id, occurrence_date: today, recurrence_cycle: 0 },
-    });
-    if (error) throw error;
-  }
-
-  const stepId = flowStepTaskId(occId, "relatorio_trafego");
-  const { data: stepExisting } = await db.from("tasks").select("id").eq("id", stepId).limit(1);
-  if (!stepExisting?.[0]) {
-    const { error } = await db.from("tasks").insert({
-      id: stepId,
-      client_id: client.id,
-      kind: "relatorio_conversao",
-      subtype: "relatorio_trafego",
-      title: `${MOLD_TITLE} — Relatório de tráfego`,
-      status: "backlog",
-      priority: "media",
-      assignee: "North ai",
-      due_date: today, start_date: today,
-      progress_weight: 1,
-      position: 10,
-      payload: {},
-    });
-    if (error) throw error;
-    const { error: linkErr } = await db.from("task_links").insert({ parent_id: occId, child_id: stepId, slot: "relatorio_trafego", position: 10 });
-    if (linkErr && linkErr.code !== "23505") throw linkErr;
-  }
-
-  for (const automationKey of ["relatorio_trafego_semanal", "relatorio_vendas"]) {
+  for (const [automationKey, extra] of [
+    ["relatorio_trafego_semanal", {}],
+    ["relatorio_vendas", { collect_metric_keys: ["vendas", "agendamentos", "seguidores", "receita"] }],
+  ]) {
     const { data: cfg } = await db.from("automation_configs").select("id")
       .eq("target_task_id", mold.id).eq("automation_key", automationKey).limit(1);
     if (!cfg?.[0]) {
       const { error } = await db.from("automation_configs").insert({
-        automation_key: automationKey, target_task_id: mold.id, performance_template_id: null, active: true, created_by: createdBy,
+        automation_key: automationKey, target_task_id: mold.id, performance_template_id: null, active: true, created_by: createdBy, ...extra,
       });
       if (error) throw error;
     }
   }
 
-  console.log(JSON.stringify({ client: client.slug, moldId: mold.id, occId, trafegoStepId: stepId, agendamentosStepId: flowStepTaskId(occId, "agendamentos") }, null, 2));
+  const occId = recurringExecutionId(mold.id, 0);
+  console.log(JSON.stringify({
+    client: client.slug, moldId: mold.id, occId,
+    card1_trafego: flowStepTaskId(occId, "trafego"),
+    card2_feedback: flowStepTaskId(occId, "feedback"),
+  }, null, 2));
 }
 
 async function inspect() {
@@ -165,23 +133,31 @@ async function inspect() {
   const mold = await findMold(client.id);
   if (!mold) return console.log("sem molde — rode `seed` primeiro");
   const occId = recurringExecutionId(mold.id, 0);
+  const card1 = flowStepTaskId(occId, "trafego");
+  const card2 = flowStepTaskId(occId, "feedback");
 
-  const { data: tasks } = await db.from("tasks").select("id,kind,subtype,status,completed_at,due_date,payload,plan_id")
-    .or(`id.eq.${mold.id},id.eq.${occId},plan_id.eq.${mold.id},plan_id.eq.${occId}`);
+  const { data: tasks } = await db.from("tasks").select("id,kind,subtype,status,completed_at,due_date,payload")
+    .in("id", [mold.id, occId, card1, card2]);
   const { data: links } = await db.from("task_links").select("parent_id,child_id,slot,position").eq("parent_id", occId);
   const { data: metrics } = await db.from("task_metrics").select("task_id,metrics,source,updated_at").eq("client_id", client.id);
   const { data: docs } = await db.from("documents").select("name,doc_type,doc_date,task_id,file_url").eq("client_id", client.id).order("created_at", { ascending: false }).limit(8);
 
+  const label = (id) => id === mold.id ? "MOLDE" : id === occId ? "OCORRÊNCIA (pai)" : id === card1 ? "card1 trafego" : id === card2 ? "card2 feedback" : id;
   console.log("=== MOLDE ===");
   console.log({ id: mold.id, status: mold.status, due_date: mold.due_date, cycle: mold.payload?.recurrence_cycle });
-  console.log("=== TASKS (molde/ocorrência/etapas) ===");
-  for (const t of tasks ?? []) console.log({ id: t.id, kind: t.kind, subtype: t.subtype, status: t.status, completed_at: t.completed_at, comments: (t.payload?.comments ?? []).map((c) => `${c.author}: ${c.text}`), conversoes: t.payload?.conversoes?.length, markers: { src: t.payload?.conversao_source_at, sales: t.payload?.sales_report_generated_at } });
+  console.log("=== TASKS ===");
+  for (const t of tasks ?? []) console.log({
+    what: label(t.id), status: t.status, completed_at: t.completed_at,
+    comments: (t.payload?.comments ?? []).map((c) => `${c.author}: ${c.text}`),
+    metricas: t.payload?.metricas, linhas: t.payload?.linhas?.length,
+    markers: { trafego: t.payload?.trafego_report_at, prompt: t.payload?.feedback_prompt_at, src: t.payload?.feedback_source_at, sales: t.payload?.sales_report_generated_at },
+  });
   console.log("=== task_links da ocorrência ===");
   console.log(links);
   console.log("=== task_metrics ===");
   console.log(metrics);
   console.log("=== documents (recentes) ===");
-  console.log((docs ?? []).map((d) => ({ name: d.name, doc_type: d.doc_type, doc_date: d.doc_date, task_id: d.task_id, url: d.file_url })));
+  console.log((docs ?? []).map((d) => ({ name: d.name, doc_type: d.doc_type, doc_date: d.doc_date, task_id: d.task_id })));
 }
 
 async function resetLastrun() {
@@ -195,16 +171,29 @@ async function resetLastrun() {
 
 async function comment() {
   const text = argv[1];
-  const stepId = argv[2];
-  if (!text || !stepId) return console.error('uso: comment "<texto>" <stepId>');
-  const { data } = await db.from("tasks").select("payload").eq("id", stepId).limit(1);
-  if (!data?.[0]) return console.error("etapa não encontrada");
+  const taskId = argv[2];
+  if (!text || !taskId) return console.error('uso: comment "<texto>" <taskId>');
+  const { data } = await db.from("tasks").select("payload").eq("id", taskId).limit(1);
+  if (!data?.[0]) return console.error("card não encontrado");
   const payload = data[0].payload ?? {};
   const comments = Array.isArray(payload.comments) ? payload.comments : [];
-  comments.push({ author: "Luiza (CRIS CAR CARE)", text, at: new Date().toISOString() });
-  const { error } = await db.from("tasks").update({ payload: { ...payload, comments: comments.slice(-200) } }).eq("id", stepId);
+  comments.push({ author: "Gestor North", text, at: new Date().toISOString() });
+  const { error } = await db.from("tasks").update({ payload: { ...payload, comments: comments.slice(-200) } }).eq("id", taskId);
   if (error) throw error;
   console.log("comentário adicionado");
+}
+
+async function overdue() {
+  const client = await resolveClient();
+  const mold = await findMold(client.id);
+  if (!mold) return console.log("sem molde");
+  const dias = Number(argv.find((a) => /^\d+$/.test(a))) || 6;
+  const past = iso(new Date(Date.now() - dias * 86400000));
+  const occId = recurringExecutionId(mold.id, 0);
+  const card2 = flowStepTaskId(occId, "feedback");
+  await db.from("tasks").update({ due_date: past }).eq("id", occId);
+  await db.from("tasks").update({ due_date: past }).eq("id", card2);
+  console.log(`ocorrência (e card2 se existir) recuada para ${past}`);
 }
 
 async function teardown() {
@@ -212,12 +201,10 @@ async function teardown() {
   const mold = await findMold(client.id);
   if (!mold) return console.log("nada para remover");
   await db.from("automation_configs").delete().eq("target_task_id", mold.id);
-  // As etapas são ligadas por task_links (plan_id null), então não caem por
-  // plan_id nem por cascade da ocorrência — apago por id determinístico.
   const stepIds = [];
   for (let cycle = 0; cycle < 6; cycle++) {
     const occId = recurringExecutionId(mold.id, cycle);
-    stepIds.push(flowStepTaskId(occId, "relatorio_trafego"), flowStepTaskId(occId, "agendamentos"));
+    stepIds.push(flowStepTaskId(occId, "trafego"), flowStepTaskId(occId, "feedback"));
     await db.from("documents").delete().eq("task_id", occId);
     await db.from("tasks").delete().eq("id", occId);
   }
@@ -228,9 +215,9 @@ async function teardown() {
   console.log("removidos molde, ocorrências, etapas, documents e configs (storage: rode o remove manual)");
 }
 
-const map = { seed, inspect, "reset-lastrun": resetLastrun, comment, teardown };
+const map = { seed, inspect, "reset-lastrun": resetLastrun, comment, overdue, teardown };
 if (!map[cmd]) {
-  console.error("comandos: seed | inspect | reset-lastrun | comment | teardown");
+  console.error("comandos: seed | inspect | reset-lastrun | comment | overdue | teardown");
   process.exit(1);
 }
 map[cmd]().catch((e) => { console.error(e); process.exit(1); });

@@ -32,6 +32,13 @@ export async function aiComplete({ system, user, maxTokens = 1024 }: {
   user: string;
   maxTokens?: number;
 }): Promise<string> {
+  // Backend alternativo para dev/e2e — a CLI `claude` no lugar da chave da API.
+  // Gate por env, não por vendor: prod (sem AI_CLI e sem o binário) nunca entra.
+  if (process.env.AI_CLI === "1") {
+    const { aiCompleteViaCli } = await import("./cli");
+    return aiCompleteViaCli({ system, user });
+  }
+
   const settings = await getAiProviderSettingsService();
   if (!settings?.apiKey) throw new AiNotConfiguredError();
   if (settings.vendor && settings.vendor !== "anthropic") throw new AiVendorUnsupportedError(settings.vendor);

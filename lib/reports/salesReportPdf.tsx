@@ -16,7 +16,7 @@ import {
 import type { Period } from "@/app/admin/performance/insights";
 import { metricValue } from "@/app/admin/performance/performanceLabels";
 import type { PerformanceTemplateConfig, AdSourceTag } from "@/lib/performanceTemplates";
-import type { ConversionRow } from "@/lib/ai/extractConversionReport";
+import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { MetaPost } from "@/lib/windsor";
 import { funnelStageCount } from "./funnelGeometry";
 import { registerReportFonts } from "./reportFonts";
@@ -35,6 +35,11 @@ export type SalesReportInput = {
   prevCampaignPosts: MetaPost[];
   conversoes: ConversionRow[];
   prevConversoes?: ConversionRow[];
+  /** Receita total relatada (o gestor pode dar só o total, sem detalhar venda a
+   *  venda). Quando ausente, cai na soma das linhas de `conversoes`. */
+  receitaTotal?: number | null;
+  /** Seguidores ganhos no período (relatado no comentário). */
+  seguidores?: number | null;
   generatedAt: Date;
 };
 
@@ -51,10 +56,13 @@ const SOURCE_ROWS: (AdSourceTag | null)[] = ["1", "2", "3", null];
 const SOURCE_LABEL = (tag: AdSourceTag | null) => (tag ? `Fonte #${tag}` : "Sem tag");
 
 function SalesReportDocument({
-  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, generatedAt,
+  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, receitaTotal, seguidores, generatedAt,
 }: SalesReportInput) {
   const cm = config.prefs.customMetrics;
-  const cur = totalsOf(conversoes);
+  const linhasTotals = totalsOf(conversoes);
+  // A receita exibida é a relatada como total quando existe; senão, a soma das
+  // linhas detalhadas.
+  const cur = { ...linhasTotals, receita: receitaTotal ?? linhasTotals.receita };
   const prev = prevConversoes ? totalsOf(prevConversoes) : null;
   const spend = totalWhenPresent(campaignPosts, "custo") ?? 0;
   const prevSpend = totalWhenPresent(prevCampaignPosts, "custo") ?? 0;
@@ -68,7 +76,8 @@ function SalesReportDocument({
     kpi("Agendamentos", cur.agendamentos, prev ? prev.agendamentos : null, "number"),
     kpi("Vendas fechadas", cur.vendas, prev ? prev.vendas : null, "number"),
     kpi("Ticket médio", ratio(cur.receita, cur.vendas), prev ? ratio(prev.receita, prev.vendas) : null, "money"),
-    kpi("ROAS", ratio(cur.receita, spend), prev ? ratio(prev.receita, prevSpend) : null, "decimal"),
+    kpi("ROI (ROAS)", ratio(cur.receita, spend), prev ? ratio(prev.receita, prevSpend) : null, "decimal"),
+    ...(seguidores != null ? [kpi("Seguidores ganhos", seguidores, null, "number")] : []),
   ];
 
   // Por fonte #1/#2/#3: cruza receita (do comentário) com custo/conversas (do

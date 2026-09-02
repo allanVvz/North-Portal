@@ -18,8 +18,6 @@ import type { TaskRecord } from "@/lib/validation";
 import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "@/lib/recurrence";
 import { recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import { DEFERRED_TASK_FLAG } from "@/lib/taskRelations";
-import { materializeFirstStep } from "@/lib/flows/advance";
-import { flowStepTaskId } from "@/lib/flows/ids";
 import { clonePlan } from "./provision";
 import { asTaskRecord, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 
@@ -76,37 +74,36 @@ export async function materializeOccurrenceForReport(admin: AdminClient, parent:
   return execution;
 }
 
-// Entrega recorrente (fluxo relatorio_conversao): a Automação 1 preenche a
-// ETAPA `relatorio_trafego` da ocorrência do ciclo atual, não o molde. Modelo
-// LAZY — a ocorrência de cada ciclo nasce exatamente uma vez (id determinístico
-// por ciclo); o avanço do molde fica em advanceFlowMold, chamado só depois do
-// fill dar certo. Devolve a etapa a preencher.
-export async function ensureFlowOccurrenceForReport(admin: AdminClient, mold: TaskRecord, today: string): Promise<TaskRecord> {
+// Fluxo de feedback DINÂMICO: a Automação 1 materializa a OCORRÊNCIA do ciclo
+// atual e a promove a pai de fluxo (`flow_parent`). As etapas (tráfego,
+// feedback) são criadas pelas automações via `ensureFlowStep`, não por um
+// task_type. Modelo LAZY — id determinístico por ciclo; o avanço do molde fica
+// em `advanceFlowMold`, chamado só depois do fill dar certo.
+export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord, today: string): Promise<TaskRecord> {
   const cycle = recurrenceCycleOf(mold);
   const occId = recurringExecutionId(mold.id, cycle);
 
-  let occurrence = await getAdminTask(admin, occId);
-  if (!occurrence) {
-    // A ocorrência 0 já nasce em createRecurringFlowDelivery; ciclos > 0 nascem
-    // aqui. Herda as marcas de fluxo do molde (recurringExecutionFields tira
-    // recurrence_group/revision), mas não é diferida — é o trabalho de hoje.
-    const fields = recurringExecutionFields(mold, occId, today, cycle);
-    const payload = { ...((fields.payload ?? {}) as Record<string, unknown>) };
-    delete payload[DEFERRED_TASK_FLAG];
-    const { data, error } = await admin
-      .from("tasks")
-      .insert({ ...fields, payload, assignee: AUTOMATION_ASSIGNEE })
-      .select(TASK_COLUMNS)
-      .limit(1);
-    if (error && (error as { code?: string }).code !== "23505") throw error;
-    occurrence = data?.[0] ? asTaskRecord(data[0]) : await getAdminTask(admin, occId);
-  }
-  if (!occurrence) throw new Error("Não foi possível materializar a ocorrência do relatório de conversão.");
+  const found = await getAdminTask(admin, occId);
+  if (found) return found;
 
-  const step = (await materializeFirstStep(admin, occurrence))
-    ?? (await getAdminTask(admin, flowStepTaskId(occurrence.id, "relatorio_trafego")));
-  if (!step) throw new Error("Não foi possível materializar a etapa de relatório de tráfego.");
-  return step;
+  const fields = recurringExecutionFields(mold, occId, today, cycle);
+  const payload = { ...((fields.payload ?? {}) as Record<string, unknown>) };
+  delete payload[DEFERRED_TASK_FLAG];
+  // M1 é tarefa recorrente comum — não carrega marcas de fluxo. A ocorrência é
+  // que vira o pai do fluxo desta semana.
+  payload.flow_parent = true;
+  payload.flow_total_weight = 2;
+  payload.flow_step_count = 2;
+
+  const { data, error } = await admin
+    .from("tasks")
+    .insert({ ...fields, payload, status: "em_producao", assignee: AUTOMATION_ASSIGNEE })
+    .select(TASK_COLUMNS)
+    .limit(1);
+  if (error && (error as { code?: string }).code !== "23505") throw error;
+  const occurrence = data?.[0] ? asTaskRecord(data[0]) : await getAdminTask(admin, occId);
+  if (!occurrence) throw new Error("Não foi possível materializar a ocorrência do fluxo de relatório.");
+  return occurrence;
 }
 
 // Avança o MOLDE recorrente do fluxo (due_date → próximo ciclo, cycle+1) —

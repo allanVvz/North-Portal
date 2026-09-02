@@ -20,9 +20,10 @@ import type { WindsorSettings } from "@/lib/windsor";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
-import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrenceForReport, materializeOccurrenceForReport } from "./execute";
-import { runOneSalesAutomation } from "./sales";
-import { isFlowDelivery } from "@/lib/taskRelations";
+import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
+import { runConversionFlow } from "./conversionFlow";
+import { ensureFlowStep } from "@/lib/flows/advance";
+import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
@@ -41,7 +42,22 @@ export type AutomationConfigRow = {
   performance_template_id: string | null;
   active: boolean;
   last_run_date: string | null;
+  /** Métricas (tags) que `relatorio_vendas` lê do comentário. */
+  collect_metric_keys: string[] | null;
 };
+
+/** Uma tarefa recorrente vira PAI de um fluxo de feedback quando tem uma
+ *  automação `relatorio_vendas` ativa apontando pra ela. */
+async function hasConversionFlow(admin: AdminClient, targetTaskId: string): Promise<boolean> {
+  const { data } = await admin
+    .from("automation_configs")
+    .select("id")
+    .eq("target_task_id", targetTaskId)
+    .eq("automation_key", "relatorio_vendas")
+    .eq("active", true)
+    .limit(1);
+  return Boolean(data?.length);
+}
 
 export type AutomationRunSummary = {
   processed: number;
@@ -135,17 +151,56 @@ async function runOneReportAutomation(
   // recorrente e para o plano de ação recorrente.
   if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return "not_due";
 
+  // Modo-fluxo: M1 tem uma automação `relatorio_vendas` ativa → a ocorrência
+  // desta semana vira PAI de um fluxo de feedback. A Automação 1 cria a
+  // ocorrência + a etapa `trafego`, preenche essa etapa com o PDF do Meta e a
+  // deixa em REVISÃO (um humano confere). O pedido de feedback e a etapa 2 são
+  // da Automação 2. Sem molde de task_type — o fluxo é dinâmico.
+  const flowMode = Boolean(target.recurrence_cadence) && (await hasConversionFlow(admin, target.id));
+
+  if (flowMode) {
+    let card1: TaskRecord;
+    let occ: TaskRecord;
+    try {
+      occ = await ensureFlowOccurrence(admin, target, today);
+      card1 = await ensureFlowStep(admin, occ, "trafego", { title: "Relatório de anúncios", leadDays: 0, position: 10 }, today);
+    } catch (error) {
+      const message = errorMessage(error);
+      await markTaskParada(admin, target.id, `Falha ao preparar o fluxo do relatório de anúncios: ${message}`);
+      return { error: message };
+    }
+    try {
+      const { fileName, url } = await fillReportCard(admin, card1, target, config, windsor, meta, today);
+      const { error: c1Error } = await admin
+        .from("tasks")
+        .update({
+          status: "revisao",
+          assignee: AUTOMATION_ASSIGNEE,
+          payload: { ...(card1.payload ?? {}), trafego_report_at: new Date().toISOString() },
+        })
+        .eq("id", card1.id);
+      if (c1Error) throw c1Error;
+      // O comentário do relatório vai no PAI (o fluxo), não na etapa.
+      const { error: occError } = await admin
+        .from("tasks")
+        .update({ payload: appendedCommentPayload(occ.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`) })
+        .eq("id", occ.id);
+      if (occError) throw occError;
+      await advanceFlowMold(admin, target, today);
+      await notifyFromAutomation(admin, occ.id, "task_commented", `Automação comentou em "${occ.title}".`);
+    } catch (error) {
+      const message = errorMessage(error);
+      await markTaskParada(admin, card1.id, `Falha ao gerar o relatório de anúncios: ${message}`);
+      return { error: message };
+    }
+    return "ran";
+  }
+
+  // Modo normal (sem fluxo de feedback): preenche a ocorrência / o card em si.
   let actingTask: TaskRecord;
-  // Entrega recorrente (fluxo relatorio_conversao): a Automação 1 preenche a
-  // ETAPA `relatorio_trafego` e a auto-conclui — artefato de máquina, sem
-  // revisão humana; concluir deixa reconcileFlows() no mesmo tique criar a
-  // etapa `agendamentos`.
-  const isFlowStep = target.kind === "relatorio_conversao" && isFlowDelivery(target) && Boolean(target.recurrence_cadence);
   try {
     if (target.kind === "plano_acao") {
       actingTask = await clonePlanForReport(admin, target, today);
-    } else if (isFlowStep) {
-      actingTask = await ensureFlowOccurrenceForReport(admin, target, today);
     } else if (target.recurrence_cadence) {
       actingTask = await materializeOccurrenceForReport(admin, target, today);
     } else {
@@ -159,26 +214,13 @@ async function runOneReportAutomation(
 
   try {
     const { fileName, url } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today);
-    // One new comment per run, success or failure (see memory
-    // automations-comment-rule) — a standard line for now; each future cycle
-    // appends another below it rather than overwriting. [label](url) renders
-    // as a short link (the file's own name), not the raw URL — see
-    // lib/comments.ts splitCommentText.
-    const label = isFlowStep ? "Relatório de tráfego" : "Relatório de anúncios";
-    const payload = appendedCommentPayload(actingTask.payload, `${label} gerado e anexado: [${fileName}](${url})`);
+    const payload = appendedCommentPayload(actingTask.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`);
     const { error: statusError } = await admin
       .from("tasks")
-      .update({ status: isFlowStep ? "aprovado" : "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
+      .update({ status: "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
       .eq("id", actingTask.id);
     if (statusError) throw statusError;
-    // Só depois do fill dar certo — para uma falha não pular um ciclo.
-    if (isFlowStep) await advanceFlowMold(admin, target, today);
-    await notifyFromAutomation(
-      admin,
-      actingTask.id,
-      "task_commented",
-      `Automação comentou em "${actingTask.title}".`,
-    );
+    await notifyFromAutomation(admin, actingTask.id, "task_commented", `Automação comentou em "${actingTask.title}".`);
   } catch (error) {
     const message = errorMessage(error);
     await markTaskParada(admin, actingTask.id, `Falha ao gerar o relatório de anúncios: ${message}`);
@@ -201,7 +243,11 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
     .in("automation_key", RUN_KEYS as unknown as string[])
     .eq("active", true);
   if (configError) throw configError;
-  const configs = (configRows ?? []) as AutomationConfigRow[];
+  // `relatorio_trafego_semanal` antes de `relatorio_vendas`: quando as duas
+  // apontam pro mesmo card, a etapa `trafego` tem que existir antes.
+  const configs = ((configRows ?? []) as AutomationConfigRow[]).sort((a, b) =>
+    a.automation_key === b.automation_key ? 0 : a.automation_key === "relatorio_trafego_semanal" ? -1 : 1,
+  );
   if (!configs.length) return summary;
 
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
@@ -215,7 +261,7 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
     let outcome: RunOutcome;
     try {
       outcome = config.automation_key === "relatorio_vendas"
-        ? await runOneSalesAutomation(admin, config, windsor, meta, today)
+        ? await runConversionFlow(admin, config, windsor, meta, today)
         : await runOneReportAutomation(admin, config, windsor, meta, today);
     } catch (error) {
       outcome = { error: errorMessage(error) };

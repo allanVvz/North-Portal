@@ -159,6 +159,79 @@ export async function materializeFirstStep(admin: AdminClient, delivery: TaskRec
   return created;
 }
 
+/**
+ * Materializa UMA etapa específica de um pai de fluxo — sem depender de um
+ * `task_type` / lista de subtipos. É o que um fluxo DINÂMICO usa: a automação
+ * `relatorio_vendas` promove a ocorrência recorrente a pai de fluxo
+ * (`flow_parent`) e chama isto para criar a etapa de tráfego e a de feedback,
+ * com slot livre. Idempotente: id determinístico + elo tolerante a `23505`.
+ */
+export async function ensureFlowStep(
+  admin: AdminClient,
+  parent: TaskRecord,
+  slot: string,
+  fields: { title: string; leadDays?: number; clientVisible?: boolean; assignee?: string | null; position?: number },
+  today = todayIso(),
+): Promise<TaskRecord> {
+  const id = flowStepTaskId(parent.id, slot);
+  const existing = await getAdminTask(admin, id);
+  if (existing) {
+    // Garante o elo mesmo que o card já tivesse sido criado por outro caminho.
+    await linkStep(admin, parent.id, id, slot, fields.position ?? 0);
+    return existing;
+  }
+  const step = flowStepFields(
+    parent,
+    {
+      key: slot,
+      label: fields.title,
+      order_index: fields.position ?? 0,
+      lead_days: fields.leadDays ?? 0,
+      progress_weight: 1,
+      default_assignee: fields.assignee ?? null,
+      client_visible: fields.clientVisible ?? false,
+    },
+    null,
+    today,
+  );
+  step.title = fields.title; // flowStepFields monta "<pai> — <label>"; aqui o título é literal
+  // Etapa de fluxo dinâmico é sempre uma tarefa comum (`operacional`), não "do
+  // mesmo tipo do pai" — o pai pode ser qualquer recorrente. `operacional/<slot>`
+  // existe no vocabulário só para a trava (migração 20260902000000).
+  step.kind = "operacional";
+  const { data, error } = await admin.from("tasks").insert(step).select(TASK_COLUMNS).limit(1);
+  if (error && !isDuplicate(error)) throw error;
+  await linkStep(admin, parent.id, id, slot, fields.position ?? 0);
+  const created = error ? await getAdminTask(admin, id) : asTaskRecord(data![0]);
+  if (!created) throw new Error("Não foi possível materializar a etapa do fluxo.");
+  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`);
+  return created;
+}
+
+/**
+ * Fecha um pai de fluxo DINÂMICO (sem `task_type`): quando todas as etapas
+ * ligadas a ele têm `completed_at`, move o pai para o estado de fim
+ * (`deliveryStatusOnFinish` — o trigger carimba o `completed_at` do pai). O
+ * `settleDelivery` normal não serve porque precisa de `type.subtypes.length`.
+ */
+export async function settleTypelessFlow(admin: AdminClient, parentId: string): Promise<boolean> {
+  const parent = await getAdminTask(admin, parentId);
+  if (!parent || parent.completed_at || !isFlowDelivery(parent)) return false;
+  const links = await stepsOf(admin, parentId);
+  if (links.length === 0) return false;
+  const { data, error } = await admin.from("tasks").select("completed_at").in("id", links.map((l) => l.id));
+  if (error) throw error;
+  const steps = (data ?? []) as { completed_at: string | null }[];
+  if (!steps.every((s) => Boolean(s.completed_at))) return false;
+
+  const nextStatus = deliveryStatusOnFinish(parent);
+  if (parent.status === nextStatus) return false;
+  const { error: updateError } = await admin.from("tasks").update({ status: nextStatus }).eq("id", parentId);
+  if (updateError) throw updateError;
+  await notifyFromAutomation(admin, parentId, "task_status_changed", `"${parent.title}" foi concluído.`);
+  return true;
+}
+
 /** Fecha a entrega se esta conclusão foi a da última etapa. */
 async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: TaskTypeDef): Promise<boolean> {
   // Uma entrega já encerrada não volta para o funil de conferência. Esta
@@ -205,7 +278,13 @@ export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord)
 
   for (const delivery of parents) {
     const type = findType(types, delivery.kind);
-    if (!type) continue;
+    if (!type || type.behavior !== "entrega") {
+      // Fluxo DINÂMICO (o `kind` da ocorrência não é um tipo-entrega): as etapas
+      // são criadas pelas automações, não pelo motor. Aqui só resta fechar o pai
+      // quando a última etapa concluir.
+      if (await settleTypelessFlow(admin, delivery.id)) outcome.finished.push(delivery.id);
+      continue;
+    }
     const problem = deliveryTypeProblem(type);
     if (problem) throw new Error(problem);
 

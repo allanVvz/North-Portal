@@ -5,7 +5,9 @@ import type { TaskRecord } from "@/lib/validation";
 import { AUTOMATION_DEFINITIONS, AUTOMATION_KEYS, type AutomationKey } from "@/lib/automationCatalog";
 import { kindIcon } from "@/lib/taskCatalog";
 import { DEFAULT_BUILTIN_TEMPLATE } from "@/lib/performanceTemplates";
+import { CONVERSION_METRICS_DEFAULT, KNOWN_METRIC_TAGS } from "@/lib/metricTags";
 import AutomationCardPicker from "./AutomationCardPicker";
+import TagChipsInput from "../TagChipsInput";
 import TaskModal from "../TaskModal";
 
 type ClientLite = { slug: string; name: string };
@@ -28,6 +30,7 @@ type AutomationConfig = {
   performanceTemplateId: string | null;
   active: boolean;
   lastRunDate: string | null;
+  collectMetricKeys: string[] | null;
   // Resolved server-side (lib/supabase.ts listAutomationConfigs) — never
   // cross-referenced against GET /api/admin/tasks here, because a recurring
   // target card that already advanced past its first cycle gets
@@ -57,6 +60,7 @@ type Slot = {
   targetTask: TargetTaskDisplay | null;
   performanceTemplateId: string;
   active: boolean;
+  collectMetricKeys: string[];
 };
 
 function slotFromConfig(config: AutomationConfig): Slot {
@@ -74,11 +78,12 @@ function slotFromConfig(config: AutomationConfig): Slot {
     } : null,
     performanceTemplateId: config.performanceTemplateId ?? "",
     active: config.active,
+    collectMetricKeys: config.collectMetricKeys ?? [],
   };
 }
 
 function blankSlot(): Slot {
-  return { key: crypto.randomUUID(), id: null, automationKey: "", targetTask: null, performanceTemplateId: "", active: true };
+  return { key: crypto.randomUUID(), id: null, automationKey: "", targetTask: null, performanceTemplateId: "", active: true, collectMetricKeys: [] };
 }
 
 // Automações (promovida de uma aba de Configurações para tela própria no menu
@@ -134,6 +139,11 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
       targetTaskId: slot.targetTask.id,
       performanceTemplateId: USES_PERFORMANCE_TEMPLATE.includes(slot.automationKey as AutomationKey) ? (slot.performanceTemplateId || null) : null,
       active: slot.active,
+      collectMetricKeys: slot.automationKey === "relatorio_vendas"
+        ? (slot.collectMetricKeys.length ? slot.collectMetricKeys : CONVERSION_METRICS_DEFAULT)
+        : slot.automationKey === "coleta_metrica_cliente"
+          ? slot.collectMetricKeys
+          : null,
     };
     const res = slot.id
       ? await fetch(`/api/admin/automations/${slot.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -315,6 +325,18 @@ function AutomationConfigCard({
               <option value="">{DEFAULT_BUILTIN_TEMPLATE.name} (padrão)</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
+          ) : null}
+
+          {slot.automationKey === "relatorio_vendas" ? (
+            <label className="auto-field">
+              <span>Métricas que a automação lê do comentário</span>
+              <TagChipsInput
+                value={slot.collectMetricKeys.length ? slot.collectMetricKeys : CONVERSION_METRICS_DEFAULT}
+                onChange={(next) => onChange({ collectMetricKeys: next })}
+                suggestions={KNOWN_METRIC_TAGS}
+                placeholder="vendas, agendamentos, seguidores, receita…"
+              />
+            </label>
           ) : null}
 
           <div className="auto-actions">
