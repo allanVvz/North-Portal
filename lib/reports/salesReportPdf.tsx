@@ -4,12 +4,12 @@
 // as conversões que o responsável lançou no comentário do card manual (via
 // lib/ai/extractMetrics). Uma folha A4.
 //
-// Estrutura: (1) resumo do período, (2) resultados por campanha — os KPIs Meta
-// por bloco de objetivo, compartilhados com o relatório de anúncios
-// (CampaignBlocksSection), (3) fonte de tráfego × objetivo — a tabela que
-// atribui receita/vendas/ROAS às tags #1/#2/#3, (4) funil de vendas. As seções
-// 2 e 3 leem o mesmo dado por eixos diferentes: (2) diagnostica a mídia por
-// objetivo, (3) prova de onde veio o dinheiro.
+// Estrutura: (1) resumo do período, (2) resultados por objetivo — os KPIs Meta
+// por bloco (CampaignBlocksSection), mais Vendas/Receita/ROAS atribuídos ao
+// bloco via a fonte #1/#2/#3 do criativo taggeado, (3) fonte de tráfego ×
+// objetivo — a mesma atribuição vista por fonte, (4) vendas e agendamentos
+// detalhados, (5) funil de vendas. Sem tag de fonte no template, a conversão
+// por objetivo não é rastreável e a seção (2) mostra só a mídia + uma nota.
 //
 // Reusa reportComponents.tsx / reportTheme.ts / reportFonts.ts / funnelGeometry.ts
 // — mesmos KPIs, mesmo funil e mesmo painel de resultado do relatório de anúncios.
@@ -21,7 +21,7 @@ import {
 } from "@/app/admin/performance/acquisitionInsights";
 import type { Period } from "@/app/admin/performance/insights";
 import { metricValue } from "@/app/admin/performance/performanceLabels";
-import { CAMPAIGN_BLOCK_LABEL, type PerformanceTemplateConfig, type AdSourceTag } from "@/lib/performanceTemplates";
+import { CAMPAIGN_BLOCK_LABEL, type CampaignBlock, type PerformanceTemplateConfig, type AdSourceTag } from "@/lib/performanceTemplates";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { MetaPost } from "@/lib/windsor";
 import { funnelStageCount } from "./funnelGeometry";
@@ -120,6 +120,36 @@ function SalesReportDocument({
     };
   }).filter((r) => r.hasData);
 
+  // Conversão atribuída a cada OBJETIVO: cada venda/agendamento com fonte
+  // #1/#2/#3 cai no bloco do anúncio taggeado com essa fonte. Criativo sem tag →
+  // fica de fora (a nota abaixo da seção avisa como ligar). O relatório de
+  // anúncios não recebe isto.
+  const blockOfFonte = (fonte: ConversionRow["fonte"]): CampaignBlock | null => {
+    if (!fonte) return null;
+    const ad = adPosts.find((p) => (config.adSourceTags[p.adId ?? ""] ?? null) === fonte);
+    return ad ? postBlock(ad) : null;
+  };
+  const convByBlock = new Map<CampaignBlock, ConversionRow[]>();
+  for (const c of conversoes) {
+    const b = blockOfFonte(c.fonte);
+    if (b) convByBlock.set(b, [...(convByBlock.get(b) ?? []), c]);
+  }
+  const receitaAtribuida = [...convByBlock.values()].flat().reduce((s, c) => s + (c.valor ?? 0), 0);
+  const receitaSemObjetivo = cur.receita > 0 && receitaAtribuida <= 0;
+
+  const objetivoExtraKpis = (block: CampaignBlock, blockPosts: MetaPost[]) => {
+    const conv = convByBlock.get(block) ?? [];
+    if (!conv.length) return [];
+    const t = totalsOf(conv);
+    const custoBloco = totalWhenPresent(blockPosts, "custo") ?? 0;
+    return [
+      kpi("Agendamentos", t.agendamentos, null, "number"),
+      kpi("Vendas", t.vendas, null, "number"),
+      kpi("Receita", t.receita || null, null, "money"),
+      kpi("ROAS", ratio(t.receita, custoBloco), null, "decimal"),
+    ];
+  };
+
   // Detalhe linha a linha do que o gestor descreveu (serviço/valor/fonte/status).
   // Uma folha só: no máximo 12 linhas, priorizando as de maior valor.
   const DETALHE_CAP = 12;
@@ -174,7 +204,16 @@ function SalesReportDocument({
           </View>
         </View>
 
-        <CampaignBlocksSection config={config} posts={campaignPosts} prevPosts={prevCampaignPosts} />
+        <CampaignBlocksSection
+          config={config}
+          posts={campaignPosts}
+          prevPosts={prevCampaignPosts}
+          kicker="Resultados por objetivo"
+          extraKpis={objetivoExtraKpis}
+          footer={receitaSemObjetivo
+            ? "Receita não rastreada por objetivo — marque os criativos com fonte #1/#2/#3 no template do relatório para ver vendas e ROAS por bloco."
+            : undefined}
+        />
 
         <View style={S.section}>
           <Text style={S.kicker}>Fonte de tráfego e objetivo</Text>

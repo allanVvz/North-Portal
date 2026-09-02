@@ -120,18 +120,28 @@ function kpiForDef(
   };
 }
 
+type KpiProps = Parameters<typeof KpiCard>[0];
+
 /** A seção inteira. `posts`/`prevPosts` são posts em nível de CAMPANHA. Não
- *  renderiza nada quando nenhuma campanha tem dado no período. */
+ *  renderiza nada quando nenhuma campanha tem dado no período.
+ *
+ *  `extraKpis` — cards acrescentados ao final do bloco (o relatório de vendas
+ *  usa para pendurar a conversão/ROAS por objetivo); `footer` — nota abaixo da
+ *  seção. Nenhum dos dois muda o relatório de anúncios, que não os passa. */
 export function CampaignBlocksSection({
   config,
   posts,
   prevPosts,
   kicker = "Resultados por campanha",
+  extraKpis,
+  footer,
 }: {
   config: PerformanceTemplateConfig;
   posts: MetaPost[];
   prevPosts: MetaPost[];
   kicker?: string;
+  extraKpis?: (block: CampaignBlock, cur: MetaPost[], prev: MetaPost[]) => KpiProps[];
+  footer?: string;
 }) {
   const cm = config.prefs.customMetrics;
   const { postBlock } = blockResolver(config);
@@ -144,6 +154,7 @@ export function CampaignBlocksSection({
       {blocksPresent.map((block) => {
         const cur = posts.filter((p) => postBlock(p) === block);
         const prev = prevPosts.filter((p) => postBlock(p) === block);
+        const extra = extraKpis?.(block, cur, prev) ?? [];
         return (
           <View style={S.blockGroup} key={block} wrap={false}>
             <View style={S.blockHead}>
@@ -151,10 +162,12 @@ export function CampaignBlocksSection({
             </View>
             <View style={S.grid}>
               {BLOCK_KPIS[block].map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm)} />)}
+              {extra.map((k) => <KpiCard key={k.label} {...k} />)}
             </View>
           </View>
         );
       })}
+      {footer ? <Text style={S.empty}>{footer}</Text> : null}
     </View>
   );
 }

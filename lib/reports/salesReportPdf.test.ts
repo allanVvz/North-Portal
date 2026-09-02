@@ -66,6 +66,17 @@ describe("renderSalesReportPdf", () => {
     expect(buf.byteLength).toBeGreaterThan(3000);
   });
 
+  it("sem tag de fonte no template (receita não atribuível a objetivo) não lança", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      config: { ...DEFAULT_BUILTIN_TEMPLATE.config, adSourceTags: {} },
+      conversoes: [],
+      receitaTotal: 4200,
+      vendasTotal: 3,
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
   it("totais relatados (5 vendas / 9 agend.) com só 2 linhas detalhadas não lança", async () => {
     const buf = await renderSalesReportPdf({
       ...base,
