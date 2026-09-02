@@ -21,7 +21,7 @@ import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
-import { runConversionFlow } from "./conversionFlow";
+import { conversionAiReady, runConversionFlow } from "./conversionFlow";
 import { ensureFlowStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
@@ -143,6 +143,7 @@ async function runOneReportAutomation(
   windsor: WindsorSettings,
   meta: ServiceMetaSettings,
   today: string,
+  aiReady: boolean,
 ): Promise<RunOutcome> {
   const target = await getAdminTask(admin, config.target_task_id);
   if (!target || target.due_date !== today) return "not_due";
@@ -156,7 +157,7 @@ async function runOneReportAutomation(
   // ocorrência + a etapa `trafego`, preenche essa etapa com o PDF do Meta e a
   // deixa em REVISÃO (um humano confere). O pedido de feedback e a etapa 2 são
   // da Automação 2. Sem molde de task_type — o fluxo é dinâmico.
-  const flowMode = Boolean(target.recurrence_cadence) && (await hasConversionFlow(admin, target.id));
+  const flowMode = aiReady && Boolean(target.recurrence_cadence) && (await hasConversionFlow(admin, target.id));
 
   if (flowMode) {
     let card1: TaskRecord;
@@ -249,19 +250,25 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
   );
   if (!configs.length) return summary;
 
-  const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
+  const [windsor, meta, aiReady] = await Promise.all([
+    getWindsorSettingsService(),
+    getMetaSettingsService(),
+    conversionAiReady(),
+  ]);
 
   for (const config of configs) {
     // last_run_date guarda a Automação 1 (uma vez por dia). A Automação 2 reage
     // ao comentário do responsável em qualquer dia — a idempotência dela vem de
     // marcadores em payload — mas ainda gravamos a data para observabilidade.
     if (config.automation_key === "relatorio_trafego_semanal" && config.last_run_date === today) continue;
+    // Automação 2 dormente sem backend de IA (ver conversionAiReady).
+    if (config.automation_key === "relatorio_vendas" && !aiReady) continue;
 
     let outcome: RunOutcome;
     try {
       outcome = config.automation_key === "relatorio_vendas"
         ? await runConversionFlow(admin, config, windsor, meta, today)
-        : await runOneReportAutomation(admin, config, windsor, meta, today);
+        : await runOneReportAutomation(admin, config, windsor, meta, today, aiReady);
     } catch (error) {
       outcome = { error: errorMessage(error) };
     }

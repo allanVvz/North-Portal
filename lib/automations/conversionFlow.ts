@@ -34,6 +34,25 @@ import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from ".
 import type { AutomationConfigRow, RunOutcome } from "./run";
 
 const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
+
+/** O fluxo de conversão (Automação 2) só funciona com um backend de IA para ler
+ *  o comentário do gestor em linguagem natural. Sem ele, `extractMetrics`
+ *  devolveria tudo zero e o relatório de vendas fecharia a semana com dados
+ *  errados — então a Automação 2 fica DORMENTE (a config existe, não roda) e a
+ *  Automação 1 se comporta como o relatório de tráfego normal até a chave da
+ *  Anthropic ser cadastrada (Configurações › Integrações › Provedor de IA).
+ *  `AI_CLI=1` (dev/e2e) conta como backend. */
+export async function conversionAiReady(): Promise<boolean> {
+  if (process.env.AI_CLI === "1") return true;
+  try {
+    const { getAiProviderSettingsService } = await import("@/lib/ai/provider");
+    const settings = await getAiProviderSettingsService();
+    if (!settings?.apiKey) return false;
+    return !settings.vendor || settings.vendor === "anthropic";
+  } catch {
+    return false;
+  }
+}
 const FEEDBACK_LEAD_DAYS = 2;   // prazo do card de feedback = vencimento da ocorrência + 2
 const TOLERANCIA_DIAS = 3;      // dias após o prazo antes de fechar com zeros
 
@@ -294,6 +313,7 @@ export async function runConversionFlow(
  */
 export async function handleConversionComment(admin: AdminClient, commentedTaskId: string): Promise<void> {
   try {
+    if (!(await conversionAiReady())) return; // Automação 2 dormente sem IA
     const candidates = new Set<string>([commentedTaskId]);
     const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", commentedTaskId);
     for (const l of links ?? []) candidates.add((l as { parent_id: string }).parent_id);
