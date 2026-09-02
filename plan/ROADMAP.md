@@ -1,6 +1,6 @@
 # North Portal — Roadmap
 
-Fonte única de trabalho pendente. Atualizado em 2026-08-31 contra `main` /
+Fonte única de trabalho pendente. Atualizado em 2026-09-01 contra `main` /
 produção (`northportal.vercel.app`). Os arquivos `plan/*.md` individuais continuam
 como spec detalhada de cada item; este arquivo é o índice priorizado.
 
@@ -16,15 +16,23 @@ Automações v2 (registro por card, status `parada`, PDF); notificações reais 
 servidor; cadastro de cliente v2 + Home + "Ver cliente" + Leads; capa automática
 de cards + navegador de pastas do Drive (caminho público); bússola única +
 favicon; foto de perfil coerente; site público restaurado; calendário + menu
-mobile gaveta. Ver `CHANGELOG.md`.
+mobile gaveta; **cron real de automações ligado em prod** (R1.1 — segredo
+`automations_cron_secret` no Vault, job `automations-run-daily` lê o
+`x-cron-secret` de lá, endpoint responde 200; migração `20260901010000`);
+**save do conteúdo do portal deixou de apagar seções irmãs** (R1.2 — o editor
+monta o patch a partir do objeto salvo; `content.trilhas`/`content.documentos`
+aposentados); limpeza de comentários mortos citando `flow_template_id`
+(R1.5 — entrega hoje é marcada por `payload.flow_parent`, elos por `task_links`).
+Ver `CHANGELOG.md`.
 
 ---
 
 ## Tier 0 — Frentes definidas pelo usuário
 
-### R0.4 — Relatório de anúncios redesenhado + fluxo de conversão / vendas — ✅ FEITO na branch (2026-08-31)
+### R0.4 — Relatório de anúncios redesenhado + fluxo de conversão / vendas — ✅ FEITO (mergeado 2026-09-01, `cfd1a34`)
 
-Branch `feat/relatorio-conversao-vendas` (não mergeada). Ver `CHANGELOG.md`.
+Branch `feat/relatorio-conversao-vendas` mergeada na `main` em 2026-09-01
+(`cfd1a34`). Ver `CHANGELOG.md`.
 
 - **Fase 0** — relatório PDF da automação reescrito: KPIs por bloco de objetivo
   (tag manual `config.campaignBlocks`), criativos por campanha com fonte
@@ -198,13 +206,9 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 
 | ID | Item | Fonte | Notas |
 |---|---|---|---|
-| R1.1 | **Ligar o cron real de automações em produção.** `CRON_SECRET` só existe no `.env.local` local; GUCs `app.automations_endpoint` / `app.cron_secret` não estão setados no Postgres de prod → `automations-run-daily` é no-op e os relatórios semanais dos 6 clientes reais dependem de disparo manual. | `automacoes-plano-pendente` (memória), `supabase/migrations/20260821025707_automation_cron_daily.sql` | Config de env/GUC, não código. **Verificar primeiro se já foi resolvido.** Alto impacto operacional. |
-| R1.2 | **Bugs de perda de dado no conteúdo do portal.** Confirmados presentes em 2026-08-30: `mergeContent` (`lib/supabase.ts:246`) é `{...default, ...data}` shallow → salvar uma seção apaga as irmãs; `content.trilhas` é renderizado mas não editável e o save é replace total → override destruído silenciosamente; `contentSchema = z.record(z.unknown())` (`lib/validation.ts:86`) sem validação de shape; `content.documentos` é campo morto. | `plan/CADASTRO-V2-ADMIN-HOME.md` §"Bugs de modelo" | Médio. Corrigir o merge e a validação antes de qualquer editor visual de portal. |
 | R1.3 | **`LOCKED_IN_PROD = ["acessos","dashboard","time-north"]`** (`app/[slug]/PortalPaged.tsx:107`) — o admin edita 3 seções que não consegue ver em produção. Decidir: destravar ou remover do editor. | `plan/CADASTRO-V2-ADMIN-HOME.md`, `docs/TELAS-PROD-VERCEL.md` | Trivial (1 array) + decisão de produto. |
 | R1.4 | **Service account do Google Drive.** Capa de card e navegador de pastas rodam pelo caminho público; 9 de 13 cards não têm miniatura por falta de compartilhamento. Configurar `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` + compartilhar as pastas dos clientes com o e-mail da conta de serviço. | `plan/CARD-COVER-PREVIEW.md`, `plan/CADASTRO-V2-ADMIN-HOME.md` §K1 | Pequeno em código, operacional. |
-| R1.5 | **Limpeza:** comentários desatualizados citando `flow_template_id` em `lib/supabase.ts` (~L1219, ~L1457) — a coluna não existe mais. | `fluxos-cascata` (memória) | Trivial. |
-| R1.6 | **Apagar branches mortos:** `feat/documentos-storage` (obsoleto, superado em `main`), `feat/fluxos-cascata` (0 commits à frente). | `roadmap-2026-08-19` (memória) | Trivial. |
-| R1.7 | **Verificar testes despausados:** `e2e/client-approval-flow.spec.ts` **rodado 2026-08-31 e verde contra o backend real** — pode sair da lista; falta só a ausência de `e2e/metric-collection.spec.ts` apesar da migration `20260825140611_metric_collection.sql` existir. Também nesta data: `e2e/commercial-checkpoints.spec.ts` consertado (estava vermelho desde a fusão do `/admin/onboarding` na aba Onboarding de Informações — não abria a aba). | `HANDOFF-PERFORMANCE-2026-08-20.md`, `performance-informacoes-session-handoff` (memória) | Investigação. |
+| R1.6 | **Apagar branches mortos:** `origin/feat/fluxos-cascata` (0 commits à frente, ainda no remote); `feat/documentos-storage` e `feat/relatorio-conversao-vendas` (mergeada em `cfd1a34`) já não existem local — conferir se sobraram no remote. | `roadmap-2026-08-19` (memória) | Trivial. |
 
 ---
 
@@ -216,6 +220,8 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 | R2.2 | **Fase 4 — Um funil idêntico para todos os tipos.** Remover a lógica condicional de colunas por tipo (`publicadoStepHidden`/`progressColumns` em `app/admin/TaskModal.tsx`); "Publicado" já saiu de `TASK_STATUSES`. | `fluxos-cascata` §backlog | Médio. **Risco:** `concluido` órfão no enum Postgres com CHECK `tasks_status_sem_concluido`; `status` aparece em policies de `tasks` E `task_assignees`; `ALTER TYPE` recusa coluna usada em policy. |
 | R2.3 | **Fase 5 — Agendamento reverso a partir da data de publicação.** Dada a data de publicação, derivar para trás os prazos de Roteiro/Captação/Edição. | `fluxos-cascata` §backlog | Médio. Casa com R6.5 (calendário composto). |
 | R2.4 | **Performance das consultas SQL de fluxos.** `listParentCards` faz só 2 níveis de fetch; Plano aninhado em fluxo exigirá CTE recursivo. | `fluxos-cascata` | Médio. Só urgente se planos-em-fluxo virarem caso real. |
+| R2.5 | **Rótulo de card de origem no thread de comentários da família.** O modal de qualquer card de um plano/entrega já mostra os comentários de todos os cards da família mesclados por data (`mergeFamilyComments`, `FamilyComment.taskId` já vem pronto), mas sem dizer de qual card cada comentário veio. Adicionar um marcador discreto clicável por comentário (`· Captação`) e/ou um filtro por card. | esta rodada (`app/admin/TaskModal.tsx`, `lib/comments.ts`) | Pequeno-médio. Puramente de view. |
+| R2.6 | **`StrategicView` cega para etapas não-materializadas.** A view Estratégica (Entregas + Plano) mostra uma entrega como plano de N itens — só `activities.length`, sem o "3/4" nem os estágios que ainda não nasceram. Mover o `stepTotal` de `ParentCardsBoard` para um helper compartilhado e ensinar a StrategicView a contar pelo molde. | `fluxos-cascata`; sessão do modal pai/filho | Pequeno-médio. |
 
 ---
 
@@ -262,7 +268,7 @@ Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
 |---|---|---|---|
 | R5.1 | **Sino / central de notificações no portal do cliente.** `notifyClients` está `false` por default porque não há rota nem componente no lado cliente. | `fluxos-cascata` (memória) | Médio. Greenfield cliente. |
 | R5.2 | **Notificações push desktop/mobile** direcionadas por login individual. In-app já existe; push não. | `memory.md` RoadMap §6 | Médio-grande. |
-| R5.3 | **Due-soon proativo:** hoje é lazy/on-demand; disparo por prazo próximo exige cron. | `roadmap-2026-08-19` (memória) | Pequeno. Casa com R1.1. |
+| R5.3 | **Due-soon proativo:** hoje é lazy/on-demand; disparo por prazo próximo exige cron. Infra de cron (pg_cron + Vault) já existe da R1.1 — reusar o padrão do `automations-run-daily`. | `roadmap-2026-08-19` (memória) | Pequeno. |
 | R5.4 | **Papel "gestor de tráfego"** como **atributo aditivo** (não 3º valor do enum `level`; todo admin geral também é gestor). Migration + revisão de RLS. | `memory.md` RoadMap §2, `plan/AUTOMACOES-IA-HARNESS.md` | Médio. Risco: RLS. Bloqueia R5.5 e parte de R4. |
 | R5.5 | **Alertas ao gestor de tráfego** sobre métricas de anúncios (pontos de atenção acionáveis). | `memory.md` RoadMap §5 | Depende de R5.1/R5.4. |
 
@@ -281,9 +287,9 @@ Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
 | R6.7 | **Trilha fase 2 — card criado automaticamente** por trilha, com o cliente como responsável (recorrente ou `plano_acao`); **Onboarding = um plano de ação por cliente** vindo dos checkpoints. Só depois de R0.2. | `plan/INFORMACOES-TRILHAS.md` | Médio. Depende de R0.2 e R6.1. |
 | R6.8 | **Link público de progresso por cliente** nas trilhas (visão externa, sem login). Progresso per-client já vem de R0.2; aqui é só a superfície pública. | `plan/INFORMACOES-TRILHAS.md`, `manual-do-cliente-risk-audit` | Médio. Depende de R0.2. |
 | R6.9 | **Tela de tarefas prioritárias / da semana** (3 colunas ou 3 linhas). A Home entregue é mais simples que o previsto. **Gate: passar pelo Figma antes de produção.** | `memory.md` RoadMap §3 | Médio. |
-| R6.10 | **Editor visual de "Conteúdo do portal" por seção** com miniatura (hoje só lista os nomes das 9 seções e diz "JSON"). Depende de R1.2 (merge/validação). | `plan/CADASTRO-V2-ADMIN-HOME.md` Entrega 2.2 | Médio. |
-| R6.11 | **Card de coleta de conversões** (cliente informa o número pelo portal): verificar se o fluxo ponta a ponta está completo (automação `coleta_metrica_cliente`, pendência no portal, `PATCH /api/client/[slug]/metrics/[taskId]`, `source='cliente'`). Migration existe; e2e não. | `plan/CADASTRO-V2-ADMIN-HOME.md` Entrega 5 | Investigação + possível fechamento. |
-| R6.12 | **Revisar ponta a ponta Aprovação/Revisão bloqueante por cliente** (ver R1.7). | `HANDOFF-PERFORMANCE-2026-08-20.md` | Médio. |
+| R6.10 | **Editor visual de "Conteúdo do portal" por seção** com miniatura (hoje só lista os nomes das 8 seções e diz "JSON"). O merge/replace já não perde dado (R1.2); resta o pedaço de menor severidade da R1.2: `contentSchema` ainda é `z.record(z.unknown())` (`lib/validation.ts:86`), só com teto de 200 KB — dar shape por seção antes/junto do editor visual. | `plan/CADASTRO-V2-ADMIN-HOME.md` Entrega 2.2 | Médio. |
+| R6.11 | **Card de coleta de conversões** (cliente informa o número pelo portal). **Investigado 2026-09-01: NÃO está completo.** Só a base de dados existe — migração `20260825140611` (coluna `automation_configs.collect_metric_keys` + policies `task_metrics` client-insert/update), a `AutomationKey` `coleta_metrica_cliente` no catálogo/validação, e o flag `requiresMetricKeys`. Falta tudo o que roda: `lib/automations/run.ts` exclui a chave de `RUN_KEYS` (comentário "ainda é só stub"), **não existe** `app/api/client/[slug]/metrics/[taskId]`, e o portal não tem a pendência de digitar o número. É construção, não fechamento. | `plan/CADASTRO-V2-ADMIN-HOME.md` Entrega 5 | Médio (era "investigação"). |
+| R6.12 | **Revisar ponta a ponta Aprovação/Revisão bloqueante por cliente.** `e2e/client-approval-flow.spec.ts` rodou verde contra o backend real em 2026-08-31 (parte do que era a R1.7); falta o pente-fino de RLS/estados além do happy path — casa com R7.2. | `HANDOFF-PERFORMANCE-2026-08-20.md` | Médio. |
 
 ---
 
@@ -304,11 +310,12 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 
 ## Sequenciamento sugerido
 
-1. **R0.1 e R0.2** (frentes do usuário) — unificação do botão/modal de criação e
-   Trilhas North real. R0.2 se beneficia de R1.2 vir junto (parar de depender de
-   `content.trilhas`).
-2. **Tier 1 inteiro** entremeado — são rápidos, destravam confiança operacional
-   (R1.1) e evitam perda de dado (R1.2).
+1. **Tier 0 (R0.1–R0.4) — CONCLUÍDO.** R0.4 (relatório de anúncios + fluxo de
+   conversão/vendas) mergeado na `main` em 2026-09-01 (`cfd1a34`).
+2. **Tier 1** — R1.1, R1.2, R1.5 fechados (ver topo); R1.7 investigado e
+   dissolvido (specs de aprovação/checkpoints já verdes; a lacuna de
+   `metric-collection` é a R6.11, que é construção). Resta o operacional:
+   R1.3 (decisão de produto), R1.4 (service account do Drive), R1.6 (branches).
 3. **R2.1** (editor de fluxos) — menor risco do Tier 2, backend pronto.
 4. **R6.5** (extrair calendário composto) — destrava R6.3 e R2.3.
 5. **R5.4** (papel gestor de tráfego) antes de mergulhar no Tier 4.
@@ -324,4 +331,7 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 - Ao concluir um item, mover para a lista "Já entregue" no topo (uma linha) e
   apagar a entrada do tier.
 - `plan/*.md` individuais continuam sendo a spec; este arquivo é só o índice.
-- Datar cada revisão. Última: 2026-08-31 (R0.3 — recorrência v2 + higiene do modelo de tarefas).
+- Datar cada revisão. Última: 2026-09-01 (R0.4 mergeado; R1.1 cron real ligado em
+  prod; R1.2 perda de dado no save resolvida — resta só shape do `contentSchema`,
+  movido pra R6.10; R1.5 comentários mortos limpos; R1.7 investigado e dissolvido;
+  R6.11 investigado — é stub, vira construção).
