@@ -4,7 +4,7 @@ import {
   recurringAssignees,
   recurringAssigneeOptions,
   recurringMatchesFilters,
-  recurringSearchText,
+  recurringMatchesQuery,
 } from "./recurringTaskFilters";
 import { cycleLengthDays, recurringState, todayInTimezone } from "./recurringState";
 import { recurringOccurrences } from "./recurringOccurrences";
@@ -73,11 +73,13 @@ describe("tarefas recorrentes de clientes", () => {
     expect(recurringMatchesFilters(task, [{ attr: "frequencia", value: "mensal", label: "Mensal" }])).toBe(false);
   });
 
-  it("inclui cliente, conteúdo e metadados na busca textual", () => {
-    const text = recurringSearchText(task);
-    expect(text).toContain("cliente exemplo");
-    expect(text).toContain("publicação semanal");
-    expect(text).toContain("ana");
+  it("encontra rotina por cliente, conteúdo e metadados, ignorando acento", () => {
+    expect(recurringMatchesQuery(task, "cliente exemplo")).toBe(true);
+    expect(recurringMatchesQuery(task, "publicação semanal")).toBe(true);
+    expect(recurringMatchesQuery(task, "publicacao semanal")).toBe(true); // sem acento
+    expect(recurringMatchesQuery(task, "ana")).toBe(true);
+    expect(recurringMatchesQuery(task, "semanal alta")).toBe(true); // E: rótulo de cadência + rótulo de prioridade
+    expect(recurringMatchesQuery(task, "cliente inexistente")).toBe(false);
   });
 
   it("permite que plano de ação seja criado como recorrência", () => {

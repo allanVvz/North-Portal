@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { matchesQuery, PRIORITY_LABEL } from "./kanbanShared";
+import { PRIORITY_LABEL } from "./kanbanShared";
+import { taskMatchesQuery } from "@/lib/taskSearch";
 import { TASK_KIND_KEYS, kindLabel } from "@/lib/taskCatalog";
 import type { TaskRecord } from "@/lib/validation";
 import TaskKindIcon from "./TaskKindIcon";
@@ -104,7 +105,7 @@ export default function KanbanSearchBar({
   const results = useMemo(() => {
     const needle = q.trim();
     if (!needle) return [];
-    return tasks.filter((t) => matchesQuery(t, needle, t.clientName ?? "")).slice(0, 8);
+    return tasks.filter((t) => taskMatchesQuery(t, needle, { clientName: t.clientName ?? "" })).slice(0, 8);
   }, [tasks, q]);
 
   const availableAttrs = ATTR_DEFS.filter((a) => !filters.some((f) => f.attr === a.key));

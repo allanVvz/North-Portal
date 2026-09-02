@@ -20,6 +20,7 @@ import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { formatAbsoluteTime, formatCommentTime, splitCommentText } from "@/lib/comments";
+import { normalizeSearchText } from "@/lib/taskSearch";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
@@ -248,9 +249,13 @@ function PlanMemberComposer({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const needle = query.trim().toLowerCase();
-  const matches = needle ? candidates.filter((c) => c.title.toLowerCase().includes(needle)).slice(0, 6) : [];
-  const exact = needle ? candidates.some((c) => c.title.toLowerCase() === needle) : false;
+  // Só título aqui de propósito: `candidates` chega como um shape reduzido
+  // ({ id, title, kind }) para este picker. Ainda assim normaliza acento nos
+  // dois lados, como o resto da busca. Alargar a prop para TaskRecord[] e usar
+  // taskMatchesQuery é um follow-up.
+  const needle = normalizeSearchText(query.trim());
+  const matches = needle ? candidates.filter((c) => normalizeSearchText(c.title).includes(needle)).slice(0, 6) : [];
+  const exact = needle ? candidates.some((c) => normalizeSearchText(c.title) === needle) : false;
 
   function startCreate() {
     setFormAssignee(defaultAssignee);

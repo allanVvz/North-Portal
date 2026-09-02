@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AttributesConfigModal from "./AttributesConfigModal";
 import HScrollRail from "./HScrollRail";
 import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
+import { taskMatchesQuery } from "@/lib/taskSearch";
 import TaskDetailPanel from "./TaskDetailPanel";
 import TaskModal from "./TaskModal";
 import NewTaskButton from "./NewTaskButton";
@@ -202,10 +203,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
 
   const taskScreenTasks = useMemo(() => tasks.filter(belongsToTaskScreen), [tasks]);
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
     const matching = taskScreenTasks.filter((t) => {
       if (!taskMatchesFilters(t, activeFilters)) return false;
-      if (needle && !(`${t.title} ${t.assignee ?? ""} ${t.description ?? ""}`.toLowerCase().includes(needle))) return false;
+      if (!taskMatchesQuery(t, q, { clientName: t.clientName ?? "" })) return false;
       return true;
     });
     // Ordenar aqui alcança Quadro (ambos os modos) e Tabela de uma vez; o

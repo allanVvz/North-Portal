@@ -5,7 +5,7 @@ import type { RecurringTask } from "@/lib/supabase";
 import { kindLabel } from "@/lib/taskCatalog";
 import { PRIORITY_LABEL } from "./kanbanShared";
 import { RECURRING_STATES, RECURRING_STATE_LABEL } from "./recurringState";
-import { recurringAssigneeOptions, recurringSearchText, type RecurringActiveFilter, type RecurringFilterAttr } from "./recurringTaskFilters";
+import { recurringAssigneeOptions, recurringMatchesQuery, type RecurringActiveFilter, type RecurringFilterAttr } from "./recurringTaskFilters";
 
 export type { RecurringActiveFilter } from "./recurringTaskFilters";
 
@@ -82,9 +82,8 @@ export default function RecurringSearchBar({
   }, [pendingAttr, tasks]);
 
   const results = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase("pt-BR");
-    if (!needle) return [];
-    return tasks.filter((task) => recurringSearchText(task).includes(needle)).slice(0, 8);
+    if (!query.trim()) return [];
+    return tasks.filter((task) => recurringMatchesQuery(task, query)).slice(0, 8);
   }, [query, tasks]);
 
   function addFilter(attr: RecurringFilterAttr, value: string, label: string) {

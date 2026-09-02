@@ -1,6 +1,6 @@
 import { commentsOf as commentsOfPayload, type TaskComment } from "@/lib/comments";
 import type { TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
-import { kindLabel, kindTone } from "@/lib/taskCatalog";
+import { kindTone } from "@/lib/taskCatalog";
 
 export type { TaskComment };
 
@@ -113,27 +113,7 @@ export function reviewerStageFor(status: TaskStatus): "admin" | "client" {
   return status === "aprovacao" || status === "aprovado" ? "client" : "admin";
 }
 
-// Flattened, lowercased haystack for the Kanban search bar — title, tipo,
-// prioridade, formato/plataforma, responsável, descrição, prazo and (in
-// "Todos os clientes" mode) o nome do cliente.
-export function taskSearchText(t: TaskRecord, clientName = ""): string {
-  const p = (t.payload ?? {}) as Record<string, unknown>;
-  const parts = [
-    t.title,
-    kindLabel(t.kind),
-    PRIORITY_LABEL[t.priority],
-    typeof p.formato === "string" ? p.formato : "",
-    typeof p.plataforma === "string" ? p.plataforma : "",
-    t.assignee ?? "",
-    t.description ?? "",
-    t.due_date ?? "",
-    clientName,
-  ];
-  return parts.join(" ").toLowerCase();
-}
-
-export function matchesQuery(t: TaskRecord, needle: string, clientName = ""): boolean {
-  const q = needle.trim().toLowerCase();
-  if (!q) return true;
-  return taskSearchText(t, clientName).includes(q);
-}
+// A busca textual de tarefa é canônica e mora em lib/taskSearch.ts
+// (taskSearchText / taskMatchesQuery) — cobre também comentários, autor,
+// subtipo, status e datas formatadas, com múltiplos termos em E e sem acento.
+// STATUS_LABEL e PRIORITY_LABEL acima são a fonte dos rótulos que ela usa.

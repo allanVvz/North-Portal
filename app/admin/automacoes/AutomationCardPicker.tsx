@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { matchesQuery, PRIORITY_LABEL } from "../kanbanShared";
+import { PRIORITY_LABEL } from "../kanbanShared";
+import { taskMatchesFilters, type ActiveFilter, type FilterAttr } from "../KanbanSearchBar";
+import { taskMatchesQuery } from "@/lib/taskSearch";
 import { TASK_KIND_KEYS, kindLabel } from "@/lib/taskCatalog";
 import type { TaskRecord } from "@/lib/validation";
 import TaskKindIcon from "../TaskKindIcon";
 
 type Row = TaskRecord & { clientName?: string };
-type FilterAttr = "cliente" | "tipo" | "prioridade" | "responsavel";
-type ActiveFilter = { attr: FilterAttr; value: string; label: string };
 
 const ATTR_DEFS: { key: FilterAttr; label: string; icon: string }[] = [
   { key: "cliente", label: "Cliente", icon: "◔" },
@@ -17,15 +17,6 @@ const ATTR_DEFS: { key: FilterAttr; label: string; icon: string }[] = [
   { key: "responsavel", label: "Responsável", icon: "◑" },
 ];
 const ATTR_LABEL: Record<FilterAttr, string> = Object.fromEntries(ATTR_DEFS.map((a) => [a.key, a.label])) as Record<FilterAttr, string>;
-
-function matchesFilters(t: Row, filters: ActiveFilter[]): boolean {
-  return filters.every((f) => {
-    if (f.attr === "cliente") return (t.clientName ?? "Outros") === f.value;
-    if (f.attr === "tipo") return t.kind === f.value;
-    if (f.attr === "prioridade") return t.priority === f.value;
-    return (t.assignee?.trim() || "Sem responsável") === f.value;
-  });
-}
 
 // Busca composta para escolher o card-modelo de uma automação — base
 // compartilhada com KanbanSearchBar.tsx (mesmos chips/atributos), mas aqui
@@ -84,9 +75,9 @@ export default function AutomationCardPicker({ tasks, onPick }: { tasks: Row[]; 
   }
 
   const results = useMemo(() => {
-    const filtered = filters.length ? tasks.filter((t) => matchesFilters(t, filters)) : tasks;
+    const filtered = filters.length ? tasks.filter((t) => taskMatchesFilters(t, filters)) : tasks;
     const needle = q.trim();
-    const byText = needle ? filtered.filter((t) => matchesQuery(t, needle, t.clientName ?? "")) : filtered;
+    const byText = needle ? filtered.filter((t) => taskMatchesQuery(t, needle, { clientName: t.clientName ?? "" })) : filtered;
     return byText.slice(0, 5);
   }, [tasks, q, filters]);
 

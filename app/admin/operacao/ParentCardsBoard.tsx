@@ -8,9 +8,10 @@ import TaskKindIcon from "../TaskKindIcon";
 import SortMenu from "../SortMenu";
 import { STATUS_LABEL } from "../kanbanShared";
 import PlanSearchBar from "../plano/PlanSearchBar";
-import StrategicView, { fmtDate } from "../plano/StrategicView";
+import StrategicView from "../plano/StrategicView";
 import { sortItems } from "../taskSort";
 import { useSortPref, type SortScope } from "../taskSortPrefs";
+import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
 import { FLOW_STEP_COUNT_KEY, subtypeLabel } from "@/lib/taskCatalog";
 import type { ParentCard } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
@@ -38,20 +39,18 @@ export type ParentBoardTexts = {
   descriptionHint: string;
 };
 
-function parentMatches(d: ParentCard, needle: string): boolean {
-  const n = needle.toLowerCase();
-  if (d.title.toLowerCase().includes(n)) return true;
-  if (d.clientName.toLowerCase().includes(n)) return true;
-  if (d.typeLabel.toLowerCase().includes(n)) return true;
-  if ((d.assignee ?? "").toLowerCase().includes(n)) return true;
-  if (fmtDate(d.start_date).toLowerCase().includes(n) || fmtDate(d.end_date).toLowerCase().includes(n)) return true;
-  return d.activities.some(
-    (a) =>
-      (a.assignee ?? "").toLowerCase().includes(n) ||
-      a.title.toLowerCase().includes(n) ||
-      subtypeLabel(a.subtype).toLowerCase().includes(n) ||
-      fmtDate(a.due_date).toLowerCase().includes(n),
-  );
+// A busca do card-pai é a busca de tarefa canônica (lib/taskSearch.ts) aplicada
+// ao pai OU a qualquer atividade filha: um termo casa se aparece no haystack do
+// pai ou no de uma etapa. Termos múltiplos são E, mas cada um pode casar num
+// lado diferente ("cliente x" no pai + "roteiro" numa atividade).
+function parentMatches(d: ParentCard, query: string): boolean {
+  const terms = normalizeSearchText(query).split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const haystack = [
+    taskSearchText(d, { clientName: d.clientName, typeLabel: d.typeLabel }),
+    ...d.activities.map((a) => taskSearchText(a, { clientName: d.clientName })),
+  ].join(" ");
+  return terms.every((term) => haystack.includes(term));
 }
 
 /** Quantas etapas o tipo previa quando a entrega nasceu. Vem do snapshot em

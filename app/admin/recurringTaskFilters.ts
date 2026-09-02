@@ -1,6 +1,5 @@
 import type { RecurringTask } from "@/lib/supabase";
-import { kindLabel } from "@/lib/taskCatalog";
-import { PRIORITY_LABEL } from "./kanbanShared";
+import { taskMatchesQuery } from "@/lib/taskSearch";
 import { RECURRING_STATE_LABEL, recurringState, type RecurringState } from "./recurringState";
 
 export type RecurringFilterAttr = "cliente" | "tipo" | "frequencia" | "prioridade" | "responsavel" | "estado";
@@ -44,18 +43,15 @@ export function recurringMatchesFilters(task: RecurringTask, filters: RecurringA
   });
 }
 
-export function recurringSearchText(task: RecurringTask): string {
-  return [
-    task.title,
-    task.description,
-    task.clientName,
-    kindLabel(task.kind),
-    task.cadence,
-    task.assignee,
-    PRIORITY_LABEL[task.priority],
-    RECURRING_STATE_LABEL[recurringState(task)],
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLocaleLowerCase("pt-BR");
+const CADENCE_LABEL: Record<string, string> = { semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal" };
+
+// A busca textual de rotina é a busca de tarefa canônica (título, descrição,
+// comentários, responsável, autor, rótulos, payload, datas — ver
+// lib/taskSearch.ts) mais dois rótulos que só a rotina tem: a cadência e o
+// estado atual do ciclo.
+export function recurringMatchesQuery(task: RecurringTask, query: string): boolean {
+  return taskMatchesQuery(task, query, {
+    clientName: task.clientName,
+    extra: [CADENCE_LABEL[task.cadence] ?? task.cadence, RECURRING_STATE_LABEL[recurringState(task)]],
+  });
 }

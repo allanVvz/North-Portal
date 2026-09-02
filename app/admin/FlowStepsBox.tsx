@@ -5,6 +5,7 @@ import TaskKindIcon from "./TaskKindIcon";
 import { STATUS_LABEL } from "./kanbanShared";
 import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "./FloatingPopover";
 import { flowStepKeyOf } from "@/lib/taskRelations";
+import { taskMatchesQuery } from "@/lib/taskSearch";
 import type { TaskSubtypeDef, TaskTypeDef } from "@/lib/taskTypes";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -36,8 +37,7 @@ function ChainPicker({
   const { anchorRef, popoverRef, style } = useFloatingPopover(open, "start");
   useDismissOnOutside(open, () => setOpen(false), [anchorRef, popoverRef]);
 
-  const needle = q.trim().toLowerCase();
-  const shown = needle ? candidates.filter((c) => c.title.toLowerCase().includes(needle)) : candidates;
+  const shown = q.trim() ? candidates.filter((c) => taskMatchesQuery(c, q)) : candidates;
 
   return (
     <div className="tm-chain" ref={anchorRef}>

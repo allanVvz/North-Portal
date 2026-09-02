@@ -11,7 +11,7 @@ import ParentCardsBoard from "./ParentCardsBoard";
 import type { FlowDelivery, ActionPlan } from "@/lib/supabase";
 import HScrollRail from "../HScrollRail";
 import RecurringSearchBar from "../RecurringSearchBar";
-import { recurringMatchesFilters, recurringSearchText, type RecurringActiveFilter } from "../recurringTaskFilters";
+import { recurringMatchesFilters, recurringMatchesQuery, type RecurringActiveFilter } from "../recurringTaskFilters";
 import CardModalLauncher from "../CardModalLauncher";
 import NewTaskButton from "../NewTaskButton";
 import { PRIORITY_LABEL } from "../kanbanShared";
@@ -270,10 +270,9 @@ export default function OperacaoWorkspace({
   }, [dragId, rows, reorderEnabled, router]);
 
   const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase("pt-BR");
     const matching = rows.filter((task) => {
       if (!recurringMatchesFilters(task, filters, today)) return false;
-      return !needle || recurringSearchText(task).includes(needle);
+      return recurringMatchesQuery(task, query);
     });
     return sortRecurring(matching);
   }, [filters, query, rows, today, sortRecurring]);
