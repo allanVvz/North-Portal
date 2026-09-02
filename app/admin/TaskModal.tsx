@@ -20,7 +20,7 @@ import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
 import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
-import { formatAbsoluteTime, formatCommentTime, mergeFamilyComments, splitCommentText } from "@/lib/comments";
+import { formatAbsoluteTime, formatCommentTime, mergeFamilyComments, splitCommentText, type FamilyComment } from "@/lib/comments";
 import { normalizeSearchText } from "@/lib/taskSearch";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
@@ -548,30 +548,29 @@ export default function TaskModal({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
-  // Os cards da "família" deste card, cujos comentários formam um thread só:
-  // um plano + suas atividades, ou uma entrega + suas etapas. De qualquer card
-  // da família dá pra ler a conversa inteira. Recorrência fica de fora — cada
-  // ciclo é uma entrega própria (a entrega-ocorrência ainda junta as etapas
-  // dela, porque aí `isDelivery` é true). Enquanto o pai não carregou (fetch
-  // assíncrono), cai nos irmãos que já estão em `clientTasks` e completa sozinho.
+  // O thread de comentários é da FAMÍLIA só quando o card aberto É o pai — um
+  // Plano de Ação (mostra ele + as atividades) ou uma Entrega (ele + as etapas).
+  // O card FILHO mostra só os próprios comentários. Recorrência fica de fora:
+  // cada ciclo é uma entrega própria; uma entrega-ocorrência ainda junta as
+  // etapas dela porque aí `isDelivery` é true.
+  const isFamilyParent = liveTask ? (kd.isPlan || isDelivery) : false;
   const familyCards = useMemo(() => {
-    if (!liveTask) return [] as TaskRecord[];
-    const flowRoot = deliveryParentIdsOf(liveTask)[0] ?? null;
-    const planRoot = planParentIdOf(liveTask);
-    const raw: (TaskRecord | null)[] =
-      kindDef(liveTask.kind).isPlan ? [liveTask, ...actionPlanMembersOf(liveTask.id, clientTasks)]
-      : isDelivery ? [liveTask, ...flowStepsOf(liveTask.id, clientTasks)]
-      : flowRoot ? [flowDelivery, ...flowStepsOf(flowRoot, clientTasks), liveTask]
-      : planRoot ? [planParent, ...actionPlanMembersOf(planRoot, clientTasks), liveTask]
-      : [liveTask];
-    const seen = new Set<string>();
-    const out: TaskRecord[] = [];
-    for (const card of raw) if (card && !seen.has(card.id)) { seen.add(card.id); out.push(card); }
+    if (!liveTask || !isFamilyParent) return liveTask ? [liveTask] : [];
+    const members = kd.isPlan
+      ? actionPlanMembersOf(liveTask.id, clientTasks)
+      : flowStepsOf(liveTask.id, clientTasks);
+    const seen = new Set([liveTask.id]);
+    const out: TaskRecord[] = [liveTask];
+    for (const member of members) if (!seen.has(member.id)) { seen.add(member.id); out.push(member); }
     return out;
-  }, [liveTask, clientTasks, isDelivery, flowDelivery, planParent]);
+  }, [liveTask, clientTasks, isDelivery, isFamilyParent, kd.isPlan]);
 
   const ownComments = liveTask ? commentsOf(liveTask) : [];
-  const comments = liveTask ? mergeFamilyComments(familyCards) : [];
+  const comments: FamilyComment[] = !liveTask
+    ? []
+    : isFamilyParent
+      ? mergeFamilyComments(familyCards)
+      : ownComments.map((comment) => ({ ...comment, taskId: liveTask.id }));
   // Same client first (most relevant), other clients' documents below —
   // never hidden entirely, since a comment can reasonably reference either.
   const commentDocs = draft.clientSlug
