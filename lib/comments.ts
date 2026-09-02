@@ -28,14 +28,30 @@ export function commentsOf(payload: Record<string, unknown> | null | undefined):
  *  é item de roadmap (R2.5). */
 export type FamilyComment = TaskComment & { taskId: string };
 
-/** Mescla os comentários de vários cards num só thread, ordenado por `at`
- *  crescente — a mesma ordem cronológica que `commentsOf` de um card só. */
+/** Mescla os comentários de vários cards num só thread, em ordem cronológica.
+ *
+ *  `at` NÃO tem formato único: os comentários gravados pela RPC
+ *  `append_task_comment` saem como `timestamptz::text` ("2026-08-24 11:43:00+00"
+ *  — espaço, sem `T`, sem `Z`), enquanto os escritos por JS (automação, imports,
+ *  comentários antigos) saem em ISO-8601 ("2026-08-24T11:43:00.000Z"). Comparar
+ *  as duas formas como string (`localeCompare`) ordena por formato antes de por
+ *  data — todo comentário de um formato vem antes de todo comentário do outro,
+ *  e um comentário antigo do plano fica preso no topo. Por isso a comparação é
+ *  sempre por timestamp parseado (o mesmo `new Date(at)` que o resto do módulo
+ *  já usa). Empate ou data ilegível → mantém a ordem de inserção (sort estável).
+ *
+ *  Dentro de um card só a ordem de inserção já é cronológica; a diferença é
+ *  entre cards. */
 export function mergeFamilyComments(
   cards: ReadonlyArray<{ id: string; payload: Record<string, unknown> | null | undefined }>,
 ): FamilyComment[] {
+  const time = (at: string) => {
+    const ms = new Date(at).getTime();
+    return Number.isNaN(ms) ? 0 : ms;
+  };
   return cards
     .flatMap((card) => commentsOf(card.payload).map((comment) => ({ ...comment, taskId: card.id })))
-    .sort((a, b) => a.at.localeCompare(b.at));
+    .sort((a, b) => time(a.at) - time(b.at));
 }
 
 const URL_RE = /https?:\/\/[^\s)]+/gi;

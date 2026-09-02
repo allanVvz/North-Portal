@@ -86,6 +86,30 @@ describe("mergeFamilyComments", () => {
     expect(merged.map((c) => c.taskId)).toEqual(["pai", "e1", "e2", "e1"]);
   });
 
+  // A RPC grava `at` como "2026-08-24 11:43:00+00" (timestamptz::text) e o JS
+  // grava "2026-08-24T11:43:00.000Z" (ISO). Comparar como string ordenava por
+  // formato — o comentário antigo do plano ficava preso no topo.
+  it("ordena por data mesmo com formatos de `at` misturados", () => {
+    const planoAntigo = {
+      id: "plano",
+      payload: { comments: [{ author: "A", text: "kickoff do plano", at: "2026-08-01T09:00:00.000Z" }] },
+    };
+    const atividadeNova = {
+      id: "ativ",
+      payload: { comments: [{ author: "B", text: "entreguei hoje", at: "2026-08-20 14:30:00+00" }] },
+    };
+    const merged = mergeFamilyComments([planoAntigo, atividadeNova]);
+    expect(merged.map((c) => c.text)).toEqual(["kickoff do plano", "entreguei hoje"]);
+  });
+
+  it("data ilegível não quebra a ordenação", () => {
+    const merged = mergeFamilyComments([
+      { id: "a", payload: { comments: [{ author: "A", text: "ok", at: "não é data" }] } },
+      { id: "b", payload: { comments: [{ author: "B", text: "depois", at: "2026-08-10T10:00:00Z" }] } },
+    ]);
+    expect(merged.map((c) => c.text)).toEqual(["ok", "depois"]);
+  });
+
   it("ignora card sem payload.comments e lista vazia", () => {
     expect(mergeFamilyComments([{ id: "x", payload: null }, { id: "y", payload: {} }])).toEqual([]);
     expect(mergeFamilyComments([])).toEqual([]);
