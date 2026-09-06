@@ -10,11 +10,14 @@ export type { NotificationRecord, NotificationType } from "./notificationTypes";
 // Notifications: lightweight per-account inbox (supabase/migrations/20260819000001_notifications.sql).
 // Two producers land in the same table:
 //   - task_review_assigned: a DB trigger on `tasks` (see migration).
-//   - task_due_soon: no cron/scheduled-job mechanism exists in this repo, so
-//     it's computed lazily — upsertDueSoonNotifications() is called by
-//     GET /api/admin/notifications before reading. Smallest real slice; a
-//     real scheduler can replace the lazy computation later without
-//     changing this module's shape or the table.
+//   - task_due_soon: computado de forma preguiçosa —
+//     upsertDueSoonNotifications() é chamado por GET /api/admin/notifications
+//     antes da leitura. Consequência assumida: quem não abre a tela não recebe
+//     o aviso, e é por isso que ele continua sendo um item aberto (R5.3).
+//     Isto NÃO é mais por falta de agendador: desde 2026-09-01 existe cron real
+//     em produção (pg_cron + segredo no Vault, job `automations-run-daily`,
+//     migração 20260901010000) e o caminho para tornar o aviso proativo é
+//     reusar esse padrão — não construir um do zero.
 // The pure date-window logic below (isDueSoon) is kept separate from the
 // Supabase calls so it's directly unit-testable (see lib/notifications.test.ts).
 

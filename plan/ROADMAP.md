@@ -1,8 +1,17 @@
 # North Portal — Roadmap
 
-Fonte única de trabalho pendente. Atualizado em 2026-09-02 contra `main` /
+Fonte única de trabalho pendente. Atualizado em 2026-09-06 contra `main` /
 produção (`northportal.vercel.app`). Os arquivos `plan/*.md` individuais continuam
 como spec detalhada de cada item; este arquivo é o índice priorizado.
+
+> **Revisão de 2026-09-06:** além de R2.1 e R6.5 (entregues nesta rodada), cinco
+> entradas foram conferidas contra o código e estavam **erradas**, não só
+> desatualizadas — descrevendo trabalho que já tinha sido feito, ou apontando
+> para identificadores que não existem. Ver R2.2 (dissolvida), R3.1 (entregue),
+> R3.9 (`stickyIdentityColumns` nunca existiu), R4.6 (a migration pedida foi
+> deliberadamente descartada) e R7.2 (a policy citada foi renomeada; o furo
+> continua). A lição prática: um item deste arquivo **não é evidência** — antes
+> de começar qualquer um, conferir a afirmação no código.
 
 **Já entregue e EM PRODUÇÃO (não repetir):** fluxos em cascata / Entregas (motor,
 UI, 5 tipos, funil único, "Publicado" vira card, entrega recorrente); recorrência
@@ -22,7 +31,13 @@ mobile gaveta; **cron real de automações ligado em prod** (R1.1 — segredo
 **save do conteúdo do portal deixou de apagar seções irmãs** (R1.2 — o editor
 monta o patch a partir do objeto salvo; `content.trilhas`/`content.documentos`
 aposentados); limpeza de comentários mortos citando `flow_template_id`
-(R1.5 — entrega hoje é marcada por `payload.flow_parent`, elos por `task_links`).
+(R1.5 — entrega hoje é marcada por `payload.flow_parent`, elos por `task_links`);
+**editor de fluxos em Configurações › Tipos e fluxos** (R2.1 — CRUD de etapas com
+prazo/peso/responsável/`client_visible`, drag-reorder da cascata, travas de
+desativação e exclusão; `35af152`); **calendário composto deixou de ser cópia**
+(R6.5 — `app/admin/calendarGrid.ts` + `useFloatingPopover` compartilhados entre
+`CalendarPicker` e `DateRangeField`, e o popover de 2 meses parou de abrir 25px
+por cima do próprio campo por não dividir a coordenada pelo `zoom`; `1401fab`).
 Ver `CHANGELOG.md`.
 
 ---
@@ -244,7 +259,7 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 
 | ID | Item | Fonte | Notas |
 |---|---|---|---|
-| R1.3 | **`LOCKED_IN_PROD = ["acessos","dashboard","time-north"]`** (`app/[slug]/PortalPaged.tsx:107`) — o admin edita 3 seções que não consegue ver em produção. Decidir: destravar ou remover do editor. | `plan/CADASTRO-V2-ADMIN-HOME.md`, `docs/TELAS-PROD-VERCEL.md` | Trivial (1 array) + decisão de produto. |
+| R1.3 | **`LOCKED_IN_PROD = ["acessos","dashboard","time-north"]`** (`app/[slug]/PortalPaged.tsx:108`) — o admin edita 3 seções que não consegue ver em produção. Decidir: destravar ou remover do editor. | `plan/CADASTRO-V2-ADMIN-HOME.md`, `docs/TELAS-PROD-VERCEL.md` | Trivial (1 array) + decisão de produto. |
 | R1.4 | **Service account do Google Drive.** Capa de card e navegador de pastas rodam pelo caminho público; 9 de 13 cards não têm miniatura por falta de compartilhamento. Configurar `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` + compartilhar as pastas dos clientes com o e-mail da conta de serviço. | `plan/CARD-COVER-PREVIEW.md`, `plan/CADASTRO-V2-ADMIN-HOME.md` §K1 | Pequeno em código, operacional. |
 | R1.6 | **Apagar branches mortos:** `origin/feat/fluxos-cascata` (0 commits à frente, ainda no remote); `feat/documentos-storage` e `feat/relatorio-conversao-vendas` (mergeada em `cfd1a34`) já não existem local — conferir se sobraram no remote. | `roadmap-2026-08-19` (memória) | Trivial. |
 
@@ -255,7 +270,7 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 | ID | Item | Fonte | Tamanho / risco |
 |---|---|---|---|
 | R2.1 | **Fase 3 — Editor de fluxos em Configurações.** ✅ **FEITO em código (2026-09-06)** — Configurações › **Tipos e fluxos** (`app/admin/configuracoes/FluxosPanel.tsx`): CRUD de etapas (rótulo, prazo, peso, responsável padrão, `client_visible`), drag-reorder da cascata, renomear/ativar tipo. Camada de escrita em `lib/taskTypes.ts` + `POST/PATCH/DELETE /api/admin/task-types`. Travas: etapa com card **em aberto** não desativa (a cascata leria uma lista de onde ela sumiu e pararia calada), etapa com histórico não exclui, Entrega nunca fica sem etapa ativa, `key` imutável. **Não faz:** criar tipo de topo — ele tem contraparte em `lib/taskCatalog.ts` (tom, ícone, união `TaskKind`), então tipo novo segue sendo mudança de código. `e2e/tipos-e-fluxos.spec.ts` **verde contra o backend real** (3 casos: criar/editar/reordenar etapa, as duas travas) — dados de teste apagados, 0 sobras em prod. *(A entrada anterior citava `GET /api/admin/flow-templates` como pronto — a rota nunca existiu: `task_flow_templates` foi dropada em `20260828210000`, o molde mora em `task_types`.)* | `fluxos-cascata` (memória), `docs/ARQUITETURA-TAREFAS.md` | Médio. Feito. |
-| R2.2 | **Fase 4 — Um funil idêntico para todos os tipos.** Remover a lógica condicional de colunas por tipo (`publicadoStepHidden`/`progressColumns` em `app/admin/TaskModal.tsx`); "Publicado" já saiu de `TASK_STATUSES`. | `fluxos-cascata` §backlog | Médio. **Risco:** `concluido` órfão no enum Postgres com CHECK `tasks_status_sem_concluido`; `status` aparece em policies de `tasks` E `task_assignees`; `ALTER TYPE` recusa coluna usada em policy. |
+| ~~R2.2~~ | **Fase 4 — Um funil idêntico para todos os tipos. ✅ DISSOLVIDA (verificado 2026-09-06).** As duas metades já tinham sido resolvidas por caminhos diferentes: (a) `publicadoStepHidden` **não existe mais** — o único recorte por TIPO era o "Publicado", que saiu junto com o estágio; o `progressColumns` que restou em `app/admin/TaskModal.tsx:490` filtra Revisão/Aprovação **por cliente**, que é contrato de cliente e não modelo de card (é a tela Configurações › Etapas, deliberada); (b) o `concluido` órfão no enum já tinha sido decidido como "deixar" no item C de `docs/ARQUITETURA-TAREFAS.md` — não dá pra remover label de enum e o CHECK `tasks_status_sem_concluido` já barra o valor. Não sobrou trabalho. | `fluxos-cascata` §backlog | — |
 | R2.3 | **Fase 5 — Agendamento reverso a partir da data de publicação.** Dada a data de publicação, derivar para trás os prazos de Roteiro/Captação/Edição. | `fluxos-cascata` §backlog | Médio. Casa com R6.5 (calendário composto). |
 | R2.4 | **Performance das consultas SQL de fluxos.** `listParentCards` faz só 2 níveis de fetch; Plano aninhado em fluxo exigirá CTE recursivo. | `fluxos-cascata` | Médio. Só urgente se planos-em-fluxo virarem caso real. |
 | R2.5 | **Rótulo de card de origem no thread de comentários da família.** O modal de qualquer card de um plano/entrega já mostra os comentários de todos os cards da família mesclados por data (`mergeFamilyComments`, `FamilyComment.taskId` já vem pronto), mas sem dizer de qual card cada comentário veio. Adicionar um marcador discreto clicável por comentário (`· Captação`) e/ou um filtro por card. | esta rodada (`app/admin/TaskModal.tsx`, `lib/comments.ts`) | Pequeno-médio. Puramente de view. |
@@ -267,7 +282,7 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 
 | ID | Item | Fonte | Tamanho / risco |
 |---|---|---|---|
-| R3.1 | **Templates Fase B — hierarquia e seleção.** Nível `adset` real no contrato Meta (`adset_id/adset_name`), coleta/cache por nível, checkbox por linha na tabela + motor central de seleção hierárquica alimentando KPIs/gráficos/CSV. | `plan/PERFORMANCE-TEMPLATES-HIERARQUIA.md` §13, `HANDOFF-PERFORMANCE-2026-08-20.md` | Grande. Risco médio (contrato Meta). |
+| R3.1 | **Templates Fase B — hierarquia e seleção. ✅ ENTREGUE em código (verificado 2026-09-06)** contra os 5 itens da Fase B de `plan/PERFORMANCE-TEMPLATES-HIERARQUIA.md §13`: contrato Meta com `adset_id/adset_name` (`lib/metaInsights.ts`), seletor de nível + tabela única (`PerformanceCampaignTable`, `level` campaign/adset/ad), checkbox por linha (`onToggleCampaign`/`onToggleEntity`/`onToggleAll*`), motor central de seleção em `usePerformanceWorkspace` (`selectedCampaignIds`/`selectedAdsetIds`/`selectedAdIds`), e o universo selecionado alimentando KPIs, gráficos e CSV (`comparisonIds` no Dashboard/Toolbar, `Exportar CSV`). O item 2 ("coleta/cache por nível") foi resolvido por **derivação**: a coleta é uma só, em `level="ad"`, e os níveis acima são agregados a partir dela — não há uma chamada por nível. **O que falta é verificação, não código:** ver R3.4/R3.7 (e2e real por nível contra conta Meta). | `plan/PERFORMANCE-TEMPLATES-HIERARQUIA.md` §13, `HANDOFF-PERFORMANCE-2026-08-20.md` | Feito. |
 | R3.2 | **Templates Fase C — configuração de todos os gráficos.** Menu de 3 pontos por card (Configurar/Duplicar/Ocultar/Mover/Restaurar), modal comum, múltiplas séries e dois eixos Y na tendência. | idem | Grande. |
 | R3.3 | **Templates Fase D — métricas de perfil.** `profileVisits`, `followers`, `followersGained`, `costPerFollower`, `costPerMessage`, com proveniência explícita; auditoria de disponibilidade real por conta antes de liberar. | idem | Médio. Risco: atribuição de seguidores a campanhas pode não existir na API — mostrar como contexto de conta, nunca atribuído. |
 | R3.4 | **Templates Fase E — validação e release.** Unitários do sanitizador/seleção, e2e de CRUD/RLS, e2e real Meta por nível, smoke em prod. | idem | Médio. |
@@ -275,7 +290,7 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 | R3.6 | **Alcance único agregado** para relatórios executivos: consulta Meta do período sem `time_increment=1` (hoje o alcance diário é somado e rotulado "acumulado"). | `HANDOFF-PERFORMANCE-2026-08-20.md` §débitos | Pequeno-médio. |
 | R3.7 | **Débito técnico de verificação** (adiado por instrução do usuário): rodar `npm run build`, `e2e/performance-templates.spec.ts` e `e2e/performance-acquisition.spec.ts` ao vivo (precisa `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD` + conta Meta real), smoke pós-deploy. | `performance-informacoes-session-handoff` (memória) | Médio. `420fda2` foi deployado sem e2e ao vivo. |
 | R3.8 | Se a config da aba Aquisição precisar virar parte dos templates de Analytics: elevar o estado para `PerformanceScreen`/provider (hoje os filtros da Aquisição são de sessão). | `HANDOFF-PERFORMANCE-2026-08-20.md` | Médio. Condicional. |
-| R3.9 | UX de Performance: sliders de paginação no topo (não rodapé); dropdown de cliente com o componente das telas de Operação (verificar se `420fda2` já resolveu); espaçamento de colunas ajustável mas global; colunas de identidade sticky/compactas (parcial via `stickyIdentityColumns`). | `plan/PERFORMANCE-CUSTOMIZACAO.md` | Pequeno cada. |
+| R3.9 | UX de Performance: sliders de paginação no topo (não rodapé); dropdown de cliente com o componente das telas de Operação (verificar se `420fda2` já resolveu); espaçamento de colunas ajustável mas global; colunas de identidade sticky/compactas. *(Correção 2026-09-06: a entrada dizia "parcial via `stickyIdentityColumns`" — esse identificador não existe em lugar nenhum do repo, e não há nenhum `sticky` em `app/admin/performance/`. A parte sticky está por fazer inteira.)* | `plan/PERFORMANCE-CUSTOMIZACAO.md` | Pequeno cada. |
 
 ---
 
@@ -292,7 +307,7 @@ Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
 | R4.3 | **Plano de ação versionado por release da automação** (mudança de prompt = nova versão registrada). | |
 | R4.4 | **Loop de escrita da automação:** escreve nos campos de texto do card, reprocessa a partir de cada novo comentário, conclui quando aprovado; card mostra "em produção" no indicador de %. | |
 | R4.5 | **Agentes planejados:** **Bia — Copywriter** (dispara ao concluir card `criativo`, propõe legenda); **Social media plan** (dispara ao aprovar legenda, sugere data/hora e melhores horários). | Não implementados. |
-| R4.6 | **Migration do CHECK de `provider`** para provedores nomeados (Anthropic/ChatGPT/DeepSeek) com lista de modelos por provedor; hoje só existe `'ai'` genérico (`20260819000002_ai_provider_credential.sql`, round-trip via vault já funciona). Tela mock de "modelos disponíveis" vira real. | Pequeno-médio. |
+| R4.6 | **Modelo por provedor na tela de IA.** *(Reescrita 2026-09-06 — a entrada anterior pedia uma "migration do CHECK de `provider` para provedores nomeados" e chamava a tela de mock; as duas coisas estavam erradas.)* A migration foi **deliberadamente não feita**: `20260819000002` documenta que o vendor mora em `integration_credentials.meta.vendor` com um `provider='ai'` genérico, porque só um provedor de IA fica ativo por vez — não há CHECK a migrar. E a lista de modelos é real, não mock: `lib/aiProviders.ts` é fonte única compartilhada entre a tela e a validação do servidor (Anthropic/ChatGPT/DeepSeek com seus modelos). **O que de fato falta:** o modelo não é selecionável nem persistido — `AiProviderSettings` guarda só `{ apiKey, vendor }`, e `lib/ai/complete.ts` fixa `claude-sonnet-5` com override apenas por env `AI_MODEL`. Escolher o modelo na tela e gravá-lo junto do vendor é o item. | `20260819000002_ai_provider_credential.sql`, `lib/aiProviders.ts` | Pequeno. |
 | R4.7 | **Providers alternativos / Open API:** toggle de provedores oficiais, GET em sistemas externos (Google Maps, scraping autorizado), gateway multi-modelo. | Grande. |
 | R4.8 | **Google Drive como integração real** (hoje mock no contexto de automação): preview de imagens/vídeos de pasta direto no card. Casa com R1.4. | |
 | R4.9 | **Fluxo de trabalho pedido pelo usuário:** desenho com Opus → execução com Sonnet → validação e2e com Opus alimentando fixes de volta para múltiplos agentes Sonnet, em loop. Ainda não montado. | `roadmap-2026-08-19` (memória). |
@@ -339,7 +354,7 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 | ID | Item | Severidade |
 |---|---|---|
 | R7.1 | `SUPABASE_SERVICE_ROLE_KEY` de produção pode ainda ser a chave anon/legacy de 2026-06-24; a policy RLS que compensava não existe mais. Escritas de admin funcionam hoje → provavelmente ok, mas **confirmar**. | Alta se verdadeiro |
-| R7.2 | RLS `"tasks client approve own"` — `with check` valida só `client_id`, não `status`: cliente com token pode PATCH além da UI via PostgREST direto. | Média |
+| R7.2 | RLS de UPDATE em `tasks` — o `with check` valida só `is_admin() or client_id = current_client_id()`, **sem restringir `status`**: o `using` decide QUAIS linhas (só `status = 'aprovacao'` e sendo aprovador/gestor), mas o `with check` decide o ESTADO NOVO e não olha status nenhum, então um cliente com token pode PATCH direto no PostgREST levando o card para qualquer status — ou mexendo em título/datas. **Atenção ao nome:** a policy `"tasks client approve own"` citada na auditoria original **não existe mais**; foi dropada e reescrita como `"tasks update"` em `20260829120000_publicado_removido_e_rls_hot_path.sql` (linhas 66-78). O achado sobreviveu à reescrita — quem procurar pelo nome antigo conclui errado que foi corrigido. *(Renomeado/reverificado 2026-09-06.)* | Média |
 | R7.3 | `middleware.ts` decide `/admin` por JWT `app_metadata.role`, enquanto os helpers RLS leem de `profiles` — duas fontes de verdade, `app_metadata` já se provou não confiável. | Média |
 | R7.4 | `legal_docs` RLS `"legal read all"` sem filtro de status — conteúdo legal em rascunho é publicamente consultável via REST; o banner "Rascunho" é só UI. | Baixa-média |
 | R7.5 | Kanban drag sem optimistic lock (last-write-wins); `updateClientBundle` faz 4 escritas sequenciais não transacionais; `mergeAnswers()` em `lib/validation.ts` é dead code. | Baixa |
@@ -352,17 +367,27 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
    (`cfd1a34`); o fluxo de conversão foi reescrito para dinâmico e ligado
    (dormente) nos 6 clientes em 2026-09-02 (R0.4b). **Única pendência aberta do
    Tier 0: cadastrar a chave da Anthropic** — sem ela a Automação 2 não roda.
+   Não é código: é um campo em Configurações › Integrações.
 2. **Tier 1** — R1.1, R1.2, R1.5 fechados (ver topo); R1.7 investigado e
    dissolvido (specs de aprovação/checkpoints já verdes; a lacuna de
    `metric-collection` é a R6.11, que é construção). Resta o operacional:
-   R1.3 (decisão de produto), R1.4 (service account do Drive), R1.6 (branches).
-3. **R2.1** (editor de fluxos) — menor risco do Tier 2, backend pronto.
-4. **R6.5** (extrair calendário composto) — destrava R6.3 e R2.3.
-5. **R5.4** (papel gestor de tráfego) antes de mergulhar no Tier 4.
+   R1.3 (decisão de produto), R1.4 (service account do Drive), R1.6 (branches —
+   `origin/feat/fluxos-cascata` confirmado ainda no remote em 2026-09-06).
+3. ~~R2.1~~ (editor de fluxos) e ~~R6.5~~ (calendário composto) — **feitos em
+   2026-09-06**, ver o topo. R2.2 e R3.1 caíram na auditoria do mesmo dia: já
+   estavam entregues por outros caminhos.
+4. **R6.3** (View Estratégica: Quem/Quando/Porquê como dropdowns) — a
+   dependência dela era o calendário composto, que agora é peça comum e neutra
+   de namespace. É a próxima frente puramente de tela, sem risco de RLS.
+5. **R5.4** (papel gestor de tráfego) antes de mergulhar no Tier 4. **Risco de
+   RLS** — é o primeiro item da fila que mexe em permissão.
 6. **Tier 4** (harness de IA) como épico próprio, com o fluxo Opus→Sonnet→Opus
-   (R4.9) montado primeiro.
-7. Performance Tier 3 e produto Tier 6 conforme prioridade de negócio.
-8. Tier 7 (segurança) — auditar R7.1 logo; o resto num pente-fino dedicado.
+   (R4.9) montado primeiro. R4.6 encolheu para "escolher o modelo na tela".
+7. Performance Tier 3 — o que resta é **verificação** (R3.4/R3.7: e2e real
+   contra conta Meta), não construção; e produto Tier 6 conforme prioridade.
+8. Tier 7 (segurança) — auditar R7.1 logo. R7.2 foi reverificado em 2026-09-06
+   e **continua aberto** sob o nome novo da policy (`"tasks update"`); é o mais
+   barato de fechar do tier, um `status` no `with check`.
 
 ---
 
@@ -370,11 +395,24 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 
 - Ao concluir um item, mover para a lista "Já entregue" no topo (uma linha) e
   apagar a entrada do tier.
+- **Conferir a afirmação antes de agir sobre ela.** A revisão de 2026-09-06
+  achou cinco entradas que não estavam só velhas, estavam erradas: prometiam
+  uma rota que nunca existiu (R2.1), pediam a extração de algo já extraído
+  (R6.5), mandavam remover código que já tinha saído (R2.2), citavam um
+  identificador inexistente (R3.9) e apontavam para uma policy renomeada
+  (R7.2). Custa um `grep` e evita começar pelo lugar errado.
+- Quando um item cair por já estar feito, **não apagar em silêncio**: registrar
+  por que a entrada existia e o que a substituiu. É isso que impede a mesma
+  frente de ser reaberta daqui a dois meses.
 - `plan/*.md` individuais continuam sendo a spec; este arquivo é só o índice.
-- Datar cada revisão. Última: 2026-09-02 (R0.4b — fluxo de conversão reescrito
-  dinâmico, Automação 2 registrada nos 6 clientes mas DORMENTE até a chave da
-  Anthropic; cards "Topo de funil" apagados; relatório de vendas ganhou seção
-  por objetivo + tabelas). Antes, 2026-09-01: R0.4 mergeado; R1.1 cron real
-  ligado em prod; R1.2 perda de dado no save resolvida — resta só shape do
-  `contentSchema`, movido pra R6.10; R1.5 comentários mortos limpos; R1.7
-  investigado e dissolvido; R6.11 investigado — é stub, vira construção).
+- Datar cada revisão. Última: **2026-09-06** — R2.1 (editor de fluxos) e R6.5
+  (calendário composto compartilhado + bug de posicionamento sob `zoom`)
+  entregues e em produção; auditoria do arquivo inteiro contra o código, com
+  R2.2 dissolvida, R3.1 dada como entregue (Fase B completa), e R3.9/R4.6/R7.2
+  reescritas. Antes, 2026-09-02: R0.4b — fluxo de conversão reescrito dinâmico,
+  Automação 2 registrada nos 6 clientes mas DORMENTE até a chave da Anthropic;
+  cards "Topo de funil" apagados; relatório de vendas ganhou seção por objetivo
+  + tabelas. Antes, 2026-09-01: R0.4 mergeado; R1.1 cron real ligado em prod;
+  R1.2 perda de dado no save resolvida — resta só shape do `contentSchema`,
+  movido pra R6.10; R1.5 comentários mortos limpos; R1.7 investigado e
+  dissolvido; R6.11 investigado — é stub, vira construção.
