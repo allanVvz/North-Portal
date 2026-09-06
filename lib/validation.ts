@@ -608,6 +608,32 @@ export const checkpointTemplateCreateSchema = z.object({
 });
 export const checkpointTemplatePatchSchema = checkpointTemplateCreateSchema.partial();
 
+// ---- Vocabulário de tarefas (Configurações › Tipos e fluxos) ------------------
+// Edita `task_types`: o rótulo/ordem de um tipo e o CRUD das etapas dele. A
+// `key` só entra na criação — depois ela é a identidade que `tasks.kind` e
+// `tasks.subtype` guardam em texto, e por isso está fora do patch.
+export const taskSubtypeCreateSchema = z.object({
+  parent_id: z.string().uuid(),
+  label: z.string().min(1).max(80),
+  key: z.string().max(40).optional(),
+  lead_days: z.number().int().min(0).max(365).optional(),
+  // Peso zero tiraria a etapa do denominador do progresso sem tirá-la da
+  // cascata — uma entrega poderia marcar 100% com trabalho pendente.
+  progress_weight: z.number().min(0.1).max(100).optional(),
+  default_assignee: z.string().max(120).nullable().optional(),
+  client_visible: z.boolean().optional(),
+});
+export const taskTypePatchSchema = z.object({
+  label: z.string().min(1).max(80).optional(),
+  order_index: z.number().int().min(0).max(100000).optional(),
+  lead_days: z.number().int().min(0).max(365).optional(),
+  progress_weight: z.number().min(0.1).max(100).optional(),
+  default_assignee: z.string().max(120).nullable().optional(),
+  client_visible: z.boolean().optional(),
+  active: z.boolean().optional(),
+  creatable: z.boolean().optional(),
+});
+
 // ---- Trilhas North (global educational material list) -------------------------
 // One list, same for every client. `manual` is the seeded, single Manual do
 // Cliente row — the client never creates it, and the PATCH can't turn another

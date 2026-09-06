@@ -93,6 +93,14 @@ Inativos (`active = false`, guardados, nunca oferecidos): `agendamento`, `planej
 
 `lib/taskCatalog.ts` continua sendo a fonte do **visual** (tom, ícone) e do **progresso** (workflow, percentuais), lidos de forma síncrona em dezenas de componentes; `task_types` é a fonte do **vocabulário** (o que se pode criar e as etapas de cada fluxo).
 
+**Quem edita isso:** Configurações › **Tipos e fluxos** (`app/admin/configuracoes/FluxosPanel.tsx` → `POST/PATCH/DELETE /api/admin/task-types`, escrita em `lib/taskTypes.ts`). Renomeia/ativa um tipo e faz CRUD das etapas dele (rótulo, prazo, peso, responsável padrão, `client_visible`, ordem por drag). Três travas, todas em `lib/taskTypes.ts` e testadas em `lib/taskTypes.test.ts`:
+
+- **`key` é imutável.** `tasks.kind`/`tasks.subtype` guardam a key em texto; renomeá-la órfanaria os cards e faria o trigger rejeitar todo UPDATE deles. Rótulo se renomeia à vontade.
+- **Não desativa linha com card em aberto.** `listTaskTypes` filtra `active = true`, e é dela que a cascata lê a etapa seguinte — desativar no meio do caminho faria `nextSubtypeAfter` não achar a etapa e a corrente pararia *em silêncio*, sem erro.
+- **Não exclui linha já usada, e Entrega nunca fica sem etapa ativa** (mesma regra de `deliveryTypeProblem`, aplicada antes do estrago).
+
+Editar um molde vale para entregas **novas**: as em andamento congelaram `payload.flow_total_weight` quando nasceram (ver `FLOW_TOTAL_WEIGHT_KEY`), então não mudam de tamanho no meio do caminho. Criar um **tipo de topo** continua sendo mudança de código — o tipo tem contraparte em `lib/taskCatalog.ts` (tom, ícone, união `TaskKind`), e uma linha só no banco renderizaria com o visual de fallback.
+
 ### `public.task_links`
 
 `(parent_id, child_id, slot?, position)` — pertencimento **N:N**. Um card pode ter vários pais (o mesmo roteiro serve várias peças). `slot` preenchido = **etapa de fluxo** (qual etapa o filho ocupa no pai); `slot` null = **membro de plano**. `on delete cascade` nos dois lados: apagar um pai remove os elos, os cards ficam.

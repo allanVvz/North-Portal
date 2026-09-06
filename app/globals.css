@@ -2915,6 +2915,41 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .set-badge.rascunho { background: var(--a-inset); color: var(--a-muted); }
 .set-legal-editor { flex: 1; }
 
+/* Tipos e fluxos — editor do vocabulário (app/admin/configuracoes/FluxosPanel.tsx).
+   A ordem das etapas na lista É a ordem da cascata, por isso a linha de etapa
+   é arrastável e carrega a posição impressa à esquerda. */
+.voc-list { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.voc-type { border: 1px solid var(--a-border); border-radius: 12px; padding: 14px 16px; background: var(--a-surface); }
+.voc-type.off { opacity: .6; }
+.voc-type-head { display: flex; align-items: flex-start; gap: 12px; }
+.voc-type-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.voc-type-titlerow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.voc-type-titlerow strong { font-size: 14px; font-weight: 600; color: var(--a-ink); }
+.voc-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--a-muted); }
+.voc-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.voc-inline { flex: 1; display: flex; align-items: flex-end; gap: 10px; }
+.voc-inline .admin-field { flex: 1; margin: 0; }
+.voc-steps { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-left: 4px; }
+.voc-step {
+  display: flex; align-items: flex-start; gap: 12px;
+  border: 1px solid var(--a-border); border-radius: 10px; padding: 10px 12px;
+  background: var(--a-inset); cursor: grab;
+}
+.voc-step.dragging { opacity: .4; }
+.voc-step:active { cursor: grabbing; }
+.voc-step.off { opacity: .55; }
+.voc-step-pos {
+  width: 22px; height: 22px; border-radius: 7px; background: var(--a-surface); color: var(--a-sec);
+  display: inline-grid; place-items: center; font-size: 11.5px; font-weight: 700; flex-shrink: 0;
+}
+.voc-step-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.voc-step-editor { border: 1px solid var(--a-teal-strong); border-radius: 10px; padding: 12px 14px; background: var(--a-surface); }
+.voc-add { align-self: flex-start; }
+@media (max-width: 720px) {
+  .voc-type-head, .voc-step { flex-wrap: wrap; }
+  .voc-actions { width: 100%; justify-content: flex-end; }
+}
+
 /* Trilhas North — gerenciador da lista global (app/admin/documentos/NorthTrilhasManager.tsx) */
 .trilha-add { display: flex; align-items: stretch; gap: 12px; margin-top: 14px; }
 .trilha-add .doc-dropzone { flex: 1; margin: 0; }

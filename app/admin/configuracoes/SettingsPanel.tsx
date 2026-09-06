@@ -8,6 +8,7 @@ import type { ResponsibilityKey } from "@/lib/validation";
 import { createClient } from "@/lib/supabase/client";
 import CheckpointTemplates from "./CheckpointTemplates";
 import EtapasPanel from "./EtapasPanel";
+import FluxosPanel from "./FluxosPanel";
 import AiProviderIntegration from "./AiProviderIntegration";
 import DriveIntegration from "./DriveIntegration";
 import MetaIntegration from "./MetaIntegration";
@@ -18,13 +19,14 @@ import { useSidebarEnabledPref } from "../kanbanPrefs";
 
 // Automações foi promovida de aba daqui pra tela própria no menu principal
 // (/admin/automacoes) em 2026-08-21 — ver plan/AUTOMACOES-RELATORIO-TRAFEGO.md.
-type Tab = "perfil" | "equipe" | "politicas" | "notificacoes" | "etapas" | "checkpoints" | "faturamento" | "landing-pages" | "integracoes";
+type Tab = "perfil" | "equipe" | "politicas" | "notificacoes" | "etapas" | "fluxos" | "checkpoints" | "faturamento" | "landing-pages" | "integracoes";
 const TABS: { key: Tab; label: string }[] = [
   { key: "perfil", label: "Perfil da agência" },
   { key: "equipe", label: "Equipe & papéis" },
   { key: "politicas", label: "Políticas" },
   { key: "notificacoes", label: "Notificações" },
   { key: "etapas", label: "Etapas" },
+  { key: "fluxos", label: "Tipos e fluxos" },
   { key: "checkpoints", label: "Checkpoints comerciais" },
   { key: "faturamento", label: "Faturamento" },
   { key: "landing-pages", label: "Landing Pages" },
@@ -90,6 +92,7 @@ export default function SettingsPanel({
         ) : null}
         {tab === "notificacoes" ? <NotificationsSettings /> : null}
         {tab === "etapas" ? <EtapasPanel clients={clients} /> : null}
+        {tab === "fluxos" ? <FluxosPanel /> : null}
         {tab === "checkpoints" ? <CheckpointTemplates initial={checkpointTemplates} /> : null}
         {tab === "faturamento" ? (
           <div className="set-card set-empty">
