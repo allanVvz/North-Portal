@@ -3346,6 +3346,9 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .cal-schedule input { min-width: 0; border: 1px solid var(--a-border); border-radius: 7px; background: var(--a-surface2); color: var(--a-ink); padding: 5px 7px; font-size: 11px; }
 .cal-pop { padding-bottom: 12px; }
 .cal-pop.cal-pop-range {
+  /* A largura vinha inline do JS junto com a posição; posição é medida em
+     tempo de execução, largura não — ela é decisão de layout e mora aqui. */
+  width: 390px;
   padding: 16px;
   background: var(--a-surface, #fbfcfa);
   border-color: var(--a-border-strong, rgba(12, 44, 44, .28));
@@ -4178,14 +4181,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .perf-composite-save > small { color: var(--a-muted); font-size: 11px; }
 .doc-filterbar-placeholder { color: var(--a-muted); font-size: 13px; }
 
-.perf-daterange-field { position: relative; flex-shrink: 0; }
-.perf-daterange-trigger {
+.daterange-field { position: relative; flex-shrink: 0; }
+.daterange-trigger {
   display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--a-border); border-radius: 10px;
   background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 12.5px; padding: 7px 12px;
   cursor: pointer; white-space: nowrap;
 }
-.perf-daterange-trigger:hover { border-color: var(--a-teal); }
-.perf-daterange-trigger span { color: var(--a-muted); font-size: 11px; }
+.daterange-trigger:hover { border-color: var(--a-teal); }
+.daterange-trigger span { color: var(--a-muted); font-size: 11px; }
 
 .perf-kpis-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .perf-kpis-title { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
@@ -4406,7 +4409,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 @media(max-width:1180px){.acq-toolbar{align-items:stretch;flex-direction:column}}
 @media(max-width:820px){.acq-funnel-layout{grid-template-columns:1fr}.acq-funnel-chart{padding:0 0 8px}}
 @media(max-width:520px){.acq-outcomes{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:600px){.acq-toolbar.perf-analysis-toolbar{align-items:stretch}.acq-toolbar>.perf-daterange-field{align-self:flex-start}.acq-toolbar>.perf-toolbar-icon{align-self:flex-start}.acq-funnel-chart svg{max-width:240px}}
+@media(max-width:600px){.acq-toolbar.perf-analysis-toolbar{align-items:stretch}.acq-toolbar>.daterange-field{align-self:flex-start}.acq-toolbar>.perf-toolbar-icon{align-self:flex-start}.acq-funnel-chart svg{max-width:240px}}
 
 .wi-datasources { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 14px 16px; margin-top: 14px; border: 1px solid var(--a-border); border-radius: 12px; }
 .wi-mapping { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 12px; }

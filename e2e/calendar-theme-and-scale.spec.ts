@@ -92,4 +92,34 @@ test.describe("Calendário temático e escala global", () => {
     expect(modalBox!.x).toBeGreaterThanOrEqual(0);
     expect(modalBox!.width).toBeLessThanOrEqual(390 / 0.8 + 2);
   });
+  // Regressão de posicionamento, e a razão de este teste existir: o popover é
+  // `position: fixed` mas nasce DENTRO do `.admin-shell`, que roda sob
+  // `html { zoom: .8 }`. `getBoundingClientRect()` devolve coordenada visual
+  // (já multiplicada por .8), enquanto `style.top` é lido em px pré-zoom — quem
+  // grava a medida crua acaba com o painel a 80% da distância pretendida, ou
+  // seja, subindo em direção ao topo da página proporcionalmente a quão longe
+  // dele o campo está. Era o caso do calendário de intervalo da Performance
+  // antes de ele passar a usar `useFloatingPopover` (roadmap R6.5).
+  test("o calendário de 2 meses abre grudado no campo, e não 80% do caminho até o topo", async ({ page }) => {
+    await login(page);
+    await page.goto("/admin/performance");
+
+    const trigger = page.locator(".daterange-trigger");
+    await expect(trigger).toBeVisible({ timeout: 40_000 });
+    await trigger.click();
+
+    const popover = page.locator(".admin-shell > .cal-pop.cal-pop-dual");
+    await expect(popover).toBeVisible();
+
+    const triggerBox = (await trigger.boundingBox())!;
+    const popoverBox = (await popover.boundingBox())!;
+    // O campo fica bem abaixo do topo da tela: é justamente aí que o erro de
+    // escala aparecia como dezenas de pixels de deriva.
+    expect(triggerBox.y).toBeGreaterThan(60);
+    // Abaixo do gatilho, encostado nele (gap de 6px × zoom .8, com folga).
+    expect(popoverBox.y).toBeGreaterThan(triggerBox.y + triggerBox.height - 2);
+    expect(popoverBox.y).toBeLessThan(triggerBox.y + triggerBox.height + 16);
+    // E alinhado pela borda esquerda do campo, não deslocado para a esquerda.
+    expect(Math.abs(popoverBox.x - triggerBox.x)).toBeLessThan(16);
+  });
 });

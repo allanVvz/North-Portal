@@ -50,7 +50,7 @@ test("dashboard de aquisição preserva hierarquia, comparativo e estados vazios
 
   // Topo (data + filtro composto) agora é compartilhado com Analytics —
   // renderizado uma vez fora da div de teste do dashboard de Aquisição.
-  const dateField = page.locator(".perf-daterange-trigger");
+  const dateField = page.locator(".daterange-trigger");
   await expect(dateField).toHaveCount(1);
   await expect(page.locator("input[type=date]")).toHaveCount(0);
 
