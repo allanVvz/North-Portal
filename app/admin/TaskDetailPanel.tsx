@@ -7,18 +7,20 @@ import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
-import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, initials } from "./kanbanShared";
+import { PRIORITY_LABEL, STATUS_LABEL, initials } from "./kanbanShared";
 import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
-import { formatCommentTime } from "@/lib/comments";
+import { familyThreadOf, formatCommentTime } from "@/lib/comments";
 import { kindDef, kindLabel } from "@/lib/taskCatalog";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { planParentIdOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
+
+const EMPTY_CLIENT_TASKS: TaskRecord[] = [];
 
 export default function TaskDetailPanel({
   task,
@@ -27,6 +29,7 @@ export default function TaskDetailPanel({
   adminReviewers,
   clientReviewers,
   planCandidates = [],
+  clientTasks = EMPTY_CLIENT_TASKS,
   planoVisibilityOn = false,
   flowFlags = null,
   onClose,
@@ -39,6 +42,10 @@ export default function TaskDetailPanel({
   adminReviewers: ReviewerCandidate[];
   clientReviewers: ReviewerCandidate[];
   planCandidates?: { id: string; title: string }[];
+  /** O quadro inteiro do cliente — o painel precisa dele para montar o thread
+   *  da família quando o card aberto é um pai. Sem ele o painel cai no
+   *  comportamento antigo (só os comentários do próprio card). */
+  clientTasks?: TaskRecord[];
   planoVisibilityOn?: boolean;
   flowFlags?: ClientFlowFlags | null;
   onClose: () => void;
@@ -67,7 +74,12 @@ export default function TaskDetailPanel({
 
   const payload = (task.payload ?? {}) as Record<string, unknown>;
   const isPlan = kindDef(task.kind).isPlan;
-  const comments = commentsOf(task);
+  // Mesma regra do modal, do mesmo lugar: um Plano de Ação ou uma entrega
+  // mostram aqui o thread da família. Antes este painel lia só
+  // `commentsOf(task)`, então o MESMO card devolvia threads diferentes
+  // dependendo de ter sido aberto pelo modal ou pelo painel — e o link
+  // `?task=` cai aqui quando a preferência de painel lateral está ligada.
+  const comments = useMemo(() => familyThreadOf(task, clientTasks), [task, clientTasks]);
   const descriptionValues = useMemo(() => ({ description: description.trim() || null }), [description]);
   const descriptionSaved = useCallback((updated: TaskRecord) => onChanged(updated), [onChanged]);
   const autosave = useTaskAutosave({ taskId: task.id, values: descriptionValues, enabled: true, textKeys: ["description"], onSaved: descriptionSaved });
@@ -244,7 +256,9 @@ export default function TaskDetailPanel({
         <p className="tdp-head">Atividade</p>
         <div className="tdp-comments">
           {comments.slice().reverse().map((c, i) => (
-            <div className="tdp-comment" key={i}>
+            // A chave carrega o card de origem: o thread mescla vários cards da
+            // família e `at` só é único DENTRO de um card.
+            <div className="tdp-comment" key={`${c.taskId}-${c.at}-${i}`}>
               <CommentAvatar comment={c} className="tdp-comment-av" />
               <div>
                 <p className="tdp-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>

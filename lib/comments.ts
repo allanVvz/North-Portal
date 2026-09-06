@@ -2,6 +2,10 @@
 // by the admin Kanban (TaskModal/TaskDetailPanel) and the client portal
 // (Feedbacks page) alike, so both read the exact same shape.
 
+import { kindDef } from "./taskCatalog";
+import { actionPlanMembersOf, flowStepsOf, isFlowDelivery } from "./taskRelations";
+import type { TaskRecord } from "./validation";
+
 export type TaskComment = {
   /** Nome do autor, congelado no momento do comentário. Sempre presente — é
    *  ele que mantém o comentário legível depois que a conta é apagada, e é o
@@ -52,6 +56,55 @@ export function mergeFamilyComments(
   return cards
     .flatMap((card) => commentsOf(card.payload).map((comment) => ({ ...comment, taskId: card.id })))
     .sort((a, b) => time(a.at) - time(b.at));
+}
+
+/** O card mínimo que a regra de família precisa ler — quem é (`kind`,
+ *  `payload.flow_parent`) e de quem é filho (`parents`). */
+type FamilyMember = Pick<TaskRecord, "id" | "kind" | "payload" | "parents">;
+
+/** Este card mostra o thread da FAMÍLIA (ele + os filhos), ou só o próprio?
+ *
+ * Só o PAI mescla: um Plano de Ação mostra ele + as atividades, uma entrega
+ * mostra ela + as etapas. O card filho mostra apenas os próprios comentários —
+ * senão a mesma conversa apareceria duplicada dos dois lados e não daria para
+ * saber onde responder. Recorrência fica de fora de propósito: cada ciclo é
+ * uma entrega própria, e juntar meses de comentários seria ruído (uma
+ * entrega-ocorrência ainda junta as etapas dela, porque aí `isFlowDelivery` é
+ * verdadeiro).
+ *
+ * `kind` separado do card para a tela de edição poder perguntar pelo tipo que
+ * está no formulário, ainda não salvo. */
+export function isFamilyParent(task: Pick<FamilyMember, "kind" | "payload">, kind = task.kind): boolean {
+  return Boolean(kindDef(kind).isPlan || isFlowDelivery(task));
+}
+
+/** Os cards cujo thread aparece junto neste: ele mesmo, e os filhos quando ele
+ *  é pai. Sempre começa pelo próprio card, e nunca repete um id. */
+export function familyCardsOf<T extends FamilyMember>(task: T, tasks: readonly T[], kind = task.kind): T[] {
+  if (!isFamilyParent(task, kind)) return [task];
+  const members = kindDef(kind).isPlan ? actionPlanMembersOf(task.id, tasks) : flowStepsOf(task.id, tasks);
+  const seen = new Set([task.id]);
+  const family = [task];
+  for (const member of members) {
+    if (seen.has(member.id)) continue;
+    seen.add(member.id);
+    family.push(member);
+  }
+  return family;
+}
+
+/** O thread que um card mostra — a regra completa, em um lugar só.
+ *
+ * Existe porque a mescla morava dentro do TaskModal e mais nenhuma tela a
+ * tinha: o painel lateral, o portal, Revisões e Aprovações liam `commentsOf`
+ * cru. Abrir o MESMO card pelo modal ou pelo painel devolvia threads
+ * diferentes, e como o link `?task=` cai no painel quando a preferência de
+ * painel lateral está ligada, a regra parecia funcionar de forma intermitente.
+ *
+ * Todo comentário sai anotado com `taskId`, inclusive no caso do card filho —
+ * assim quem renderiza pode marcar a origem sem precisar saber se houve mescla. */
+export function familyThreadOf<T extends FamilyMember>(task: T, tasks: readonly T[], kind = task.kind): FamilyComment[] {
+  return mergeFamilyComments(familyCardsOf(task, tasks, kind));
 }
 
 const URL_RE = /https?:\/\/[^\s)]+/gi;

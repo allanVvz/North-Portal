@@ -941,6 +941,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
             adminReviewers={adminReviewers}
             clientReviewers={clientReviewers}
             planCandidates={planCandidates}
+            clientTasks={tasks}
             planoVisibilityOn={planoVisibilityOn}
             flowFlags={flowFlags}
             onClose={() => setSelectedId(null)}

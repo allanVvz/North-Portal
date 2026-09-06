@@ -20,7 +20,7 @@ import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
 import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
-import { formatAbsoluteTime, formatCommentTime, mergeFamilyComments, splitCommentText, type FamilyComment } from "@/lib/comments";
+import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import { normalizeSearchText } from "@/lib/taskSearch";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
@@ -548,29 +548,15 @@ export default function TaskModal({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
-  // O thread de comentários é da FAMÍLIA só quando o card aberto É o pai — um
-  // Plano de Ação (mostra ele + as atividades) ou uma Entrega (ele + as etapas).
-  // O card FILHO mostra só os próprios comentários. Recorrência fica de fora:
-  // cada ciclo é uma entrega própria; uma entrega-ocorrência ainda junta as
-  // etapas dela porque aí `isDelivery` é true.
-  const isFamilyParent = liveTask ? (kd.isPlan || isDelivery) : false;
-  const familyCards = useMemo(() => {
-    if (!liveTask || !isFamilyParent) return liveTask ? [liveTask] : [];
-    const members = kd.isPlan
-      ? actionPlanMembersOf(liveTask.id, clientTasks)
-      : flowStepsOf(liveTask.id, clientTasks);
-    const seen = new Set([liveTask.id]);
-    const out: TaskRecord[] = [liveTask];
-    for (const member of members) if (!seen.has(member.id)) { seen.add(member.id); out.push(member); }
-    return out;
-  }, [liveTask, clientTasks, isDelivery, isFamilyParent, kd.isPlan]);
-
+  // A regra de quem mostra o thread da família mora em lib/comments.ts, para
+  // esta tela e o painel lateral responderem a mesma coisa sobre o mesmo card.
+  // O tipo vem do RASCUNHO, não do card salvo: trocar o tipo no formulário
+  // reflete no thread antes de salvar, como o resto do editor já faz.
+  const comments: FamilyComment[] = useMemo(
+    () => (liveTask ? familyThreadOf(liveTask, clientTasks, draft.kind) : []),
+    [liveTask, clientTasks, draft.kind],
+  );
   const ownComments = liveTask ? commentsOf(liveTask) : [];
-  const comments: FamilyComment[] = !liveTask
-    ? []
-    : isFamilyParent
-      ? mergeFamilyComments(familyCards)
-      : ownComments.map((comment) => ({ ...comment, taskId: liveTask.id }));
   // Same client first (most relevant), other clients' documents below —
   // never hidden entirely, since a comment can reasonably reference either.
   const commentDocs = draft.clientSlug
