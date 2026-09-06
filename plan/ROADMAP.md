@@ -10,8 +10,15 @@ como spec detalhada de cada item; este arquivo é o índice priorizado.
 > para identificadores que não existem. Ver R2.2 (dissolvida), R3.1 (entregue),
 > R3.9 (`stickyIdentityColumns` nunca existiu), R4.6 (a migration pedida foi
 > deliberadamente descartada) e R7.2 (a policy citada foi renomeada; o furo
-> continua). A lição prática: um item deste arquivo **não é evidência** — antes
-> de começar qualquer um, conferir a afirmação no código.
+> continua — corrigido no mesmo dia). A lição prática: um item deste arquivo
+> **não é evidência** — antes de começar qualquer um, conferir a afirmação no
+> código.
+>
+> E uma lição que o código não dava: o arquivo não dizia em que estado o
+> **portal do cliente** está, e por isso eu priorizei errado dentro da própria
+> sessão — reportei um teste instável de tela do cliente como bug de produção.
+> Agora diz: ver a seção "Portal do cliente" logo abaixo. Antes de tratar um
+> item do portal como urgente, olhar o portão.
 
 **Já entregue e EM PRODUÇÃO (não repetir):** fluxos em cascata / Entregas (motor,
 UI, 5 tipos, funil único, "Publicado" vira card, entrega recorrente); recorrência
@@ -39,6 +46,38 @@ desativação e exclusão; `35af152`); **calendário composto deixou de ser cóp
 `CalendarPicker` e `DateRangeField`, e o popover de 2 meses parou de abrir 25px
 por cima do próprio campo por não dividir a coordenada pelo `zoom`; `1401fab`).
 Ver `CHANGELOG.md`.
+
+---
+
+## Portal do cliente — uma frente só, atrás de um portão
+
+**Estado em 2026-09-06, definido pelo usuário:** o portal **está no ar** em
+produção — as rotas respondem e o build entrega 10 das 13 páginas (a lista de
+exceções `LOCKED_IN_PROD` em `app/[slug]/PortalPaged.tsx:108` esconde `acessos`,
+`dashboard` e `time-north`) — mas **nenhum cliente real tem login**. As contas de
+cliente que existem no Supabase são de teste (o e2e usa `cliente@karpinski.com`).
+Na prática: **o que está em produção de uso é só o admin**; o portal é backlog.
+
+Registrar isto é o ponto desta seção. A falta do registro já custou uma leitura
+errada: o roadmap espalha o portal por oito itens em quatro tiers, cada um
+parecendo independente, e nesta sessão um teste instável de tela do cliente
+(R1.8) foi reportado como "bug de produto que pode estar afetando cliente" —
+não podia, porque não há cliente.
+
+**Itens atrás deste portão**, todos sem urgência enquanto não houver cliente
+real: R1.3, R1.8, R5.1, R6.6, R6.7, R6.8, R6.11, R6.12 — mais a severidade
+*prática* de R7.2 (já corrigida, mas por prevenção) e R7.4. Um item do portal só
+sobe na fila quando existir data de lançamento.
+
+**Decisão registrada (2026-09-06):** o mecanismo de bloqueio fica **como está**.
+Inverter para allowlist (`RELEASED_IN_PROD`, default escondido) e bloquear o
+portal inteiro foram as duas alternativas consideradas, e as duas foram
+recusadas por ora — o portal segue demonstrável em produção. É no lançamento que
+essa escolha e a R1.3 se resolvem juntas.
+
+**O que ainda falta você definir, quando for a hora:** quais das 13 páginas
+entram na primeira versão, e se Feedbacks/aprovação entra junto (é o único fluxo
+do cliente com backend, RLS e e2e já prontos — e é onde a R1.8 mora).
 
 ---
 
@@ -259,10 +298,10 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 
 | ID | Item | Fonte | Notas |
 |---|---|---|---|
-| R1.3 | **`LOCKED_IN_PROD = ["acessos","dashboard","time-north"]`** (`app/[slug]/PortalPaged.tsx:108`) — o admin edita 3 seções que não consegue ver em produção. Decidir: destravar ou remover do editor. | `plan/CADASTRO-V2-ADMIN-HOME.md`, `docs/TELAS-PROD-VERCEL.md` | Trivial (1 array) + decisão de produto. |
+| R1.3 | **`LOCKED_IN_PROD = ["acessos","dashboard","time-north"]`** (`app/[slug]/PortalPaged.tsx:108`) — o admin edita 3 seções que não consegue ver em produção. *(2026-09-06: **decidido deixar como está** por ora — ver "Portal do cliente". Com o portal em backlog e sem cliente real, destravar as 3 não entrega nada a ninguém, e removê-las do editor jogaria fora trabalho que o lançamento vai querer. A decisão volta junto com o escopo do lançamento.)* | `plan/CADASTRO-V2-ADMIN-HOME.md`, `docs/TELAS-PROD-VERCEL.md` | Adiado por decisão. |
 | R1.4 | **Service account do Google Drive.** Capa de card e navegador de pastas rodam pelo caminho público; 9 de 13 cards não têm miniatura por falta de compartilhamento. Configurar `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` + compartilhar as pastas dos clientes com o e-mail da conta de serviço. | `plan/CARD-COVER-PREVIEW.md`, `plan/CADASTRO-V2-ADMIN-HOME.md` §K1 | Pequeno em código, operacional. |
 | R1.6 | **Apagar branches mortos:** `origin/feat/fluxos-cascata` (0 commits à frente, ainda no remote); `feat/documentos-storage` e `feat/relatorio-conversao-vendas` (mergeada em `cfd1a34`) já não existem local — conferir se sobraram no remote. | `roadmap-2026-08-19` (memória) | Trivial. |
-| R1.8 | **`e2e/client-approval-flow.spec.ts` é FLAKY** (achado em 2026-09-06). Em execuções do arquivo inteiro, ora falha o teste da fila de Feedbacks (`getByText(approveTitle)` não encontra o card), ora o de aprovar; cada um passa sozinho. **Não é a RLS:** conferido com a policy antiga restaurada em produção — falhava igual. Subir o timeout de 5s para 20s **não resolveu**, então não é só corrida de rede: o card não aparece nem em 20s no primeiro carregamento do portal, mas aparece no login seguinte, e o log do servidor mostra `Unhandled API error [Error: aborted] ECONNRESET` junto. A suspeita é a primeira montagem de `/[slug]#feedbacks` disparando o fetch antes da sessão do cliente estar pronta, sem retry. Vale investigar como **bug de produto** (cliente que abre o portal e vê a fila vazia), não só como teste chato. | esta sessão | Pequeno-médio. |
+| R1.8 | **`e2e/client-approval-flow.spec.ts` é FLAKY** (achado em 2026-09-06). Em execuções do arquivo inteiro, ora falha o teste da fila de Feedbacks (`getByText(approveTitle)` não encontra o card), ora o de aprovar; cada um passa sozinho. **Não é a RLS:** conferido com a policy antiga restaurada em produção — falhava igual. Subir o timeout de 5s para 20s **não resolveu**, então não é só corrida de rede: o card não aparece nem em 20s no primeiro carregamento do portal, mas aparece no login seguinte, e o log do servidor mostra `Unhandled API error [Error: aborted] ECONNRESET` junto. A suspeita é a primeira montagem de `/[slug]#feedbacks` disparando o fetch antes da sessão do cliente estar pronta, sem retry. **Severidade corrigida (2026-09-06):** eu havia reportado isto como bug de produto afetando cliente — **não é**, porque nenhum cliente tem login (ver "Portal do cliente"). É débito **pré-lançamento**: investigar antes de liberar Feedbacks, não agora. | esta sessão | Pequeno-médio. Pré-lançamento. |
 
 ---
 
@@ -378,18 +417,22 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 3. ~~R2.1~~ (editor de fluxos) e ~~R6.5~~ (calendário composto) — **feitos em
    2026-09-06**, ver o topo. R2.2 e R3.1 caíram na auditoria do mesmo dia: já
    estavam entregues por outros caminhos.
-4. **R6.3** (View Estratégica: Quem/Quando/Porquê como dropdowns) — a
-   dependência dela era o calendário composto, que agora é peça comum e neutra
-   de namespace. É a próxima frente puramente de tela, sem risco de RLS.
-5. **R5.4** (papel gestor de tráfego) antes de mergulhar no Tier 4. **Risco de
+4. **Nada do portal do cliente sobe na fila sem data de lançamento** — ver a
+   seção "Portal do cliente". Isso tira R1.3, R1.8, R5.1, R6.6, R6.7, R6.8,
+   R6.11 e R6.12 da disputa por enquanto: o que está em produção *de uso* é o
+   admin, e é lá que o trabalho rende.
+5. **R6.3** (View Estratégica) ✅ feita em 2026-09-06 — as três perguntas viram
+   filtro, reusando o calendário composto. Falta só o ponto de entrada dos 4
+   templates de plano, que depende do conteúdo de cada um (decisão de produto).
+6. **R5.4** (papel gestor de tráfego) antes de mergulhar no Tier 4. **Risco de
    RLS** — é o primeiro item da fila que mexe em permissão.
-6. **Tier 4** (harness de IA) como épico próprio, com o fluxo Opus→Sonnet→Opus
+7. **Tier 4** (harness de IA) como épico próprio, com o fluxo Opus→Sonnet→Opus
    (R4.9) montado primeiro. R4.6 encolheu para "escolher o modelo na tela".
-7. Performance Tier 3 — o que resta é **verificação** (R3.4/R3.7: e2e real
+8. Performance Tier 3 — o que resta é **verificação** (R3.4/R3.7: e2e real
    contra conta Meta), não construção; e produto Tier 6 conforme prioridade.
-8. Tier 7 (segurança) — auditar R7.1 logo. R7.2 foi reverificado em 2026-09-06
-   e **continua aberto** sob o nome novo da policy (`"tasks update"`); é o mais
-   barato de fechar do tier, um `status` no `with check`.
+9. Tier 7 — R7.2 fechada em 2026-09-06 (furo confirmado e corrigido em prod).
+   Resta auditar **R7.1** (a chave de service role), que é do lado admin e não
+   espera o portal, e R7.6 (resíduo da R7.2).
 
 ---
 
@@ -407,10 +450,15 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
   por que a entrada existia e o que a substituiu. É isso que impede a mesma
   frente de ser reaberta daqui a dois meses.
 - `plan/*.md` individuais continuam sendo a spec; este arquivo é só o índice.
-- Datar cada revisão. Última: **2026-09-06** — R2.1 (editor de fluxos) e R6.5
-  (calendário composto compartilhado + bug de posicionamento sob `zoom`)
-  entregues e em produção; auditoria do arquivo inteiro contra o código, com
-  R2.2 dissolvida, R3.1 dada como entregue (Fase B completa), e R3.9/R4.6/R7.2
+- **Dizer em que estado cada superfície está.** O arquivo listava itens do
+  portal do cliente sem dizer que o portal não tem usuário — e isso, sozinho,
+  fez um item de tela virar "urgente" por engano. Estado de superfície é
+  contexto de priorização, não detalhe.
+- Datar cada revisão. Última: **2026-09-06** — R2.1 (editor de fluxos), R6.5
+  (calendário composto), R6.3 (view Estratégica) e R7.2 (furo de RLS confirmado
+  e corrigido em produção); auditoria do arquivo inteiro; e o registro de que o
+  portal do cliente está no ar mas sem cliente real. Na auditoria, R2.2 foi
+  dissolvida, R3.1 dada como entregue (Fase B completa) e R3.9/R4.6/R7.2
   reescritas. Antes, 2026-09-02: R0.4b — fluxo de conversão reescrito dinâmico,
   Automação 2 registrada nos 6 clientes mas DORMENTE até a chave da Anthropic;
   cards "Topo de funil" apagados; relatório de vendas ganhou seção por objetivo
