@@ -24,7 +24,7 @@ import { formatRelativeAge } from "@/lib/comments";
 import { FLOW_STEP_COUNT_KEY, kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
-import { belongsToTaskScreen, childrenByParent, flowStepKeyOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
+import { belongsToTaskScreen, childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 import { calendarMonthDates } from "./calendarUtils";
 
@@ -277,23 +277,26 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // Selo de etapa do card ("2/4 · Vídeo institucional"). A entrega está em
   // `tasks` (só o quadro a filtra, via belongsToTaskScreen), então nada disso
   // precisa de fetch. O número da etapa sai da POSIÇÃO entre as etapas já
-  // materializadas, ordenadas por `position` (= order_index do molde) — e não
-  // da contagem delas: a cascata é append-only, então reabrir o roteiro deixa
-  // a captação no lugar, e contar daria 2/4 para o roteiro.
+  // materializadas — e não da contagem delas: a cascata é append-only, então
+  // reabrir o roteiro deixa a captação no lugar, e contar daria 2/4 para o
+  // roteiro.
+  //
+  // A ordem vem do ELO (`flowStepsOf` ordena por `stepOrderOf`), não de
+  // `task.position`. Ordenar pela posição do card no quadro é o que fazia uma
+  // etapa anexada à mão — que chega com a posição que tinha no Kanban — se
+  // enfiar na frente do roteiro e virar 1/4.
   const flowBadges = useMemo(() => {
     const badges = new Map<string, { step: number; total: number; delivery: string }>();
     for (const delivery of tasks) {
       if (!isFlowDelivery(delivery)) continue;
-      const steps = (membersByPlan.get(delivery.id) ?? [])
-        .filter((t) => flowStepKeyOf(t))
-        .sort((a, b) => a.position - b.position);
+      const steps = flowStepsOf(delivery.id, tasks);
       const total = Number(delivery.payload?.[FLOW_STEP_COUNT_KEY]) || steps.length;
       steps.forEach((step, index) => {
         badges.set(step.id, { step: index + 1, total, delivery: delivery.title });
       });
     }
     return badges;
-  }, [tasks, membersByPlan]);
+  }, [tasks]);
 
   // plano_acao cards a task can be linked to (same client as the one being edited).
   const planCandidates = useMemo(() => {

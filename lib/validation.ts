@@ -389,7 +389,11 @@ export const performanceSyncSchema = z.object({
   links: z.array(z.object({ taskId: z.string().uuid(), postId: z.string().min(1).max(200) })).min(1).max(100),
 });
 
-export type TaskParentLink = { id: string; slot: string | null };
+// `position` é a ordem da etapa DENTRO da corrente (o `order_index` do subtipo
+// no molde), não a posição do card no quadro. São coisas diferentes e ficaram
+// confundidas por um tempo: ordenar as etapas por `task.position` numerava a
+// corrente pela ordem em que os cards calharam de estar no Kanban.
+export type TaskParentLink = { id: string; slot: string | null; position: number };
 
 export type TaskRecord = {
   id: string;

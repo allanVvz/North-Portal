@@ -2,13 +2,23 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { getTaskById, linkTasks, slotIsTaken } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/supabase/auth";
+import { findType, listTaskTypes } from "@/lib/taskTypes";
 import { HttpError } from "@/lib/validation";
 
 const bodySchema = z.object({
   child_id: z.string().uuid(),
   slot: z.string().max(40).nullable().optional(),
 });
+
+/** O order_index do subtipo `slot` dentro do tipo do pai -- a mesma ordem que a
+ *  cascata grava no elo quando materializa a etapa sozinha (linkStep). Tipo ou
+ *  subtipo desconhecido cai para 0: o elo ainda vale, so nao carrega ordem. */
+async function slotOrderIndex(parentKind: string, slot: string): Promise<number> {
+  const types = await listTaskTypes(await createClient());
+  return findType(types, parentKind)?.subtypes.find((s) => s.key === slot)?.order_index ?? 0;
+}
 
 // POST /api/admin/tasks/[id]/relations -> liga um card EXISTENTE a este pai.
 //
@@ -36,7 +46,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       throw new HttpError(409, "Esta etapa ja tem um card ligado.");
     }
 
-    await linkTasks(id, child_id, slot ?? null, child.position);
+    // A posicao do ELO e a ordem da etapa DENTRO da corrente -- o order_index
+    // do subtipo no molde --, nao a posicao do card no quadro. Passar
+    // `child.position` aqui (como era) fazia um card avulso anexado a mao
+    // chegar com a posicao que tinha no Kanban: a etapa de edicao do "Evento
+    // Baita 19/09" veio com -680, na frente do roteiro (-640), e o selo
+    // passou a mostra-la como 1/4. Sem slot (membro de Plano de Acao) nao ha
+    // corrente e a posicao nao significa nada -- fica 0.
+    await linkTasks(id, child_id, slot ?? null, slot ? await slotOrderIndex(parent.kind, slot) : 0);
     return NextResponse.json(await getTaskById(child_id));
   } catch (error) {
     return apiError(error);

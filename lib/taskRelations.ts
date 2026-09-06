@@ -125,9 +125,28 @@ export function childrenOf<T extends TaskRelation>(parentId: string, tasks: read
 // passariam a mentir — e o `slot` é justamente o discriminador que a tabela de
 // elos já carrega para isso.
 
-/** Etapas de uma entrega: filhos ligados COM slot. */
+/** A ordem desta etapa DENTRO da corrente deste pai — o `order_index` do
+ *  subtipo, gravado no elo pela cascata.
+ *
+ *  Existe porque a alternativa óbvia (`task.position`) é a posição do card no
+ *  QUADRO, que não tem nada a ver com a ordem do fluxo: um card avulso anexado
+ *  à mão como etapa chega com a posição que já tinha no Kanban e se enfia na
+ *  frente do roteiro. Aconteceu em produção — a etapa de edição do "Evento
+ *  Baita 19/09" aparecia como 1/4. */
+export function stepOrderOf(task: TaskRelation, parentId: string): number {
+  return (task.parents ?? []).find((p) => p.id === parentId)?.position ?? 0;
+}
+
+/** Etapas de uma entrega: filhos ligados COM slot, na ordem da corrente.
+ *
+ * Ordenar aqui dentro (e não em cada chamador) é de propósito: numeração do
+ * selo, caixa "Etapas", progresso e a corrente do modal precisam concordar, e
+ * três ordenações separadas já divergiram uma vez. Empate cai para a ordem de
+ * entrada, que é estável. */
 export function flowStepsOf<T extends TaskRelation>(parentId: string, tasks: readonly T[]): T[] {
-  return tasks.filter((task) => (task.parents ?? []).some((p) => p.id === parentId && p.slot !== null));
+  return tasks
+    .filter((task) => (task.parents ?? []).some((p) => p.id === parentId && p.slot !== null))
+    .sort((a, b) => stepOrderOf(a, parentId) - stepOrderOf(b, parentId));
 }
 
 /** Membros de um Plano de Ação: filhos ligados SEM slot. */

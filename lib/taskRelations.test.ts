@@ -17,8 +17,15 @@ import {
   planParentIdOf,
   recurrenceParentOf,
   slotOf,
+  stepOrderOf,
   visibleOnTaskBoard,
 } from "./taskRelations";
+
+// Elo de pertencimento como o banco devolve. `position` é a ordem da etapa
+// DENTRO da corrente (o order_index do subtipo), não a posição do card no
+// quadro — só os testes de ordenação se importam com ela; os outros usam o
+// default.
+const elo = (id: string, slot: string | null = null, position = 0) => ({ id, slot, position });
 
 describe("relações entre tarefas", () => {
   it("resolve a relação imutável da execução com o card pai carregado", () => {
@@ -57,7 +64,7 @@ describe("relações entre tarefas", () => {
 describe("pertencimento N:N (task_links)", () => {
   // O ponto todo da mudança: o mesmo roteiro serve várias peças, a mesma
   // diária de gravação serve vários criativos.
-  const roteiro = { parents: [{ id: "entrega-a", slot: "roteiro" }, { id: "entrega-b", slot: "roteiro" }] };
+  const roteiro = { parents: [elo("entrega-a", "roteiro"), elo("entrega-b", "roteiro")] };
   const avulsa = { parents: [] };
 
   it("um card pertence a vários pais ao mesmo tempo", () => {
@@ -74,7 +81,7 @@ describe("pertencimento N:N (task_links)", () => {
   });
 
   it("o slot é por pai — o mesmo card pode ocupar etapas diferentes", () => {
-    const compartilhado = { parents: [{ id: "p1", slot: "roteiro" }, { id: "p2", slot: null }] };
+    const compartilhado = { parents: [elo("p1", "roteiro"), elo("p2", null)] };
     expect(slotOf(compartilhado, "p1")).toBe("roteiro");
     expect(slotOf(compartilhado, "p2")).toBeNull();
     expect(slotOf(compartilhado, "inexistente")).toBeNull();
@@ -88,9 +95,9 @@ describe("etapa de entrega × membro de plano", () => {
   const entregaId = "entrega-1";
   const planoId = "plano-1";
   // O card difícil: etapa de uma entrega E membro de um plano ao mesmo tempo.
-  const etapaNoPlano = { id: "s1", parents: [{ id: entregaId, slot: "roteiro" }, { id: planoId, slot: null }] };
-  const soEtapa = { id: "s2", parents: [{ id: entregaId, slot: "captacao" }] };
-  const soMembro = { id: "m1", parents: [{ id: planoId, slot: null }] };
+  const etapaNoPlano = { id: "s1", parents: [elo(entregaId, "roteiro"), elo(planoId, null)] };
+  const soEtapa = { id: "s2", parents: [elo(entregaId, "captacao")] };
+  const soMembro = { id: "m1", parents: [elo(planoId, null)] };
   const todos = [etapaNoPlano, soEtapa, soMembro];
 
   it("etapa é filho COM slot; membro de plano é filho SEM slot", () => {
@@ -101,12 +108,33 @@ describe("etapa de entrega × membro de plano", () => {
     expect(actionPlanMembersOf(entregaId, todos)).toEqual([]);
   });
 
+  // A ordem da corrente vive no ELO, não em `task.position`. Ordenar pela
+  // posição do card no quadro é o que fazia a etapa de edição do "Evento Baita
+  // 19/09" — anexada à mão, e por isso com a posição que já tinha no Kanban —
+  // aparecer como 1/4, na frente do roteiro.
+  it("ordena as etapas pela posição do elo, não pela do card no quadro", () => {
+    const edicaoAnexada = { id: "edicao", position: -680, parents: [elo(entregaId, "edicao", 30)] };
+    const roteiro = { id: "roteiro", position: -640, parents: [elo(entregaId, "roteiro", 10)] };
+    const captacao = { id: "captacao", position: -590, parents: [elo(entregaId, "captacao", 20)] };
+    const quadro = [edicaoAnexada, roteiro, captacao];
+    expect(flowStepsOf(entregaId, quadro).map((t) => t.id)).toEqual(["roteiro", "captacao", "edicao"]);
+  });
+
+  // A mesma etapa compartilhada por duas entregas pode ocupar posições
+  // diferentes em cada uma — a ordem é por pai, como o slot.
+  it("a ordem da etapa é por pai", () => {
+    const compartilhada = { parents: [elo("e1", "roteiro", 10), elo("e2", "extra", 40)] };
+    expect(stepOrderOf(compartilhada, "e1")).toBe(10);
+    expect(stepOrderOf(compartilhada, "e2")).toBe(40);
+    expect(stepOrderOf(compartilhada, "inexistente")).toBe(0);
+  });
+
   it("o plano de um card é o elo SEM slot, em qualquer ordem do array", () => {
     // A consulta de pais não tem ORDER BY. Ler `parents[0]` fazia o autosave
     // mandar o id da ENTREGA como se fosse o plano — e apagar a associação
     // real. Por isso as duas ordens são afirmadas.
     expect(planParentIdOf(etapaNoPlano)).toBe(planoId);
-    expect(planParentIdOf({ parents: [{ id: planoId, slot: null }, { id: entregaId, slot: "roteiro" }] })).toBe(planoId);
+    expect(planParentIdOf({ parents: [elo(planoId, null), elo(entregaId, "roteiro")] })).toBe(planoId);
     expect(planParentIdOf(soEtapa)).toBeNull();
   });
 
