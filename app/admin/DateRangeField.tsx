@@ -72,6 +72,8 @@ export default function DateRangeField({
   presets,
   activePreset,
   onPreset,
+  presetLabel = (days) => `${days} dias`,
+  placeholder = "Selecionar período",
 }: {
   from: string;
   to: string;
@@ -79,6 +81,11 @@ export default function DateRangeField({
   presets: number[];
   activePreset: number | null;
   onPreset: (days: number) => void;
+  /** Em Performance um preset quer dizer "últimos N dias"; em Plano de Ação,
+   * "próximos N dias". O rótulo tem que poder dizer qual dos dois, senão o
+   * mesmo botão "30 dias" significa coisas opostas em telas diferentes. */
+  presetLabel?: (days: number) => string;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [pickingEnd, setPickingEnd] = useState(false);
@@ -115,7 +122,7 @@ export default function DateRangeField({
         onClick={() => { setOpen((current) => !current); setPickingEnd(false); }}
       >
         <span aria-hidden>◇</span>
-        {from && to ? `${formatShortDayMonth(from)} → ${formatShortDayMonth(to)}` : "Selecionar período"}
+        {from && to ? `${formatShortDayMonth(from)} → ${formatShortDayMonth(to)}` : placeholder}
       </button>
       <FloatingPanel open={open} popoverRef={popoverRef} style={style} className="cal-pop cal-pop-dual">
         <div className="cal-pop-bar">
@@ -127,18 +134,22 @@ export default function DateRangeField({
           <MonthGrid year={view.year} month={view.month} from={from} to={to} todayIso={todayIso} onPick={pick} />
           <MonthGrid year={second.year} month={second.month} from={from} to={to} todayIso={todayIso} onPick={pick} />
         </div>
-        <div className="cal-pop-presets">
-          {presets.map((days) => (
-            <button
-              type="button"
-              key={days}
-              className={activePreset === days ? "on" : ""}
-              onClick={() => { onPreset(days); setOpen(false); }}
-            >
-              {days} dias
-            </button>
-          ))}
-        </div>
+        {/* Sem presets, sem faixa: uma tela que só quer o intervalo (Plano de
+            Ação) não herda uma barra vazia por baixo dos meses. */}
+        {presets.length ? (
+          <div className="cal-pop-presets">
+            {presets.map((days) => (
+              <button
+                type="button"
+                key={days}
+                className={activePreset === days ? "on" : ""}
+                onClick={() => { onPreset(days); setOpen(false); }}
+              >
+                {presetLabel(days)}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </FloatingPanel>
     </div>
   );

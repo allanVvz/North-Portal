@@ -1,10 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { STATUS_LABEL, TONES, initials } from "../kanbanShared";
 import type { ActionPlan, PlanActivity } from "@/lib/supabase";
 import { parseAssignees } from "@/lib/assignees";
+import { normalizeSearchText } from "@/lib/taskSearch";
 import TaskKindIcon from "../TaskKindIcon";
+import DateRangeField from "../DateRangeField";
+import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "../FloatingPopover";
+import {
+  EMPTY_STRATEGIC_FILTER,
+  filterPlans,
+  isFilterActive,
+  planPeople,
+  shouldAutoExpand,
+  whyPreview,
+  type StrategicFilter,
+} from "./strategicFilters";
 
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 export function fmtDate(value: string | null): string {
@@ -25,6 +37,72 @@ function toneFor(who: string): (typeof TONES)[number] {
   let h = 0;
   for (let i = 0; i < who.length; i++) h = (h * 31 + who.charCodeAt(i)) >>> 0;
   return TONES[h % TONES.length];
+}
+
+/** Uma pergunta do cabeçalho virada filtro: rótulo em cima, valor embaixo, e um
+ * painel com as respostas que existem nos planos em tela. Free-text e lista
+ * convivem — a lista é atalho, não camisa de força (a spec pede editável e
+ * autocompletável). */
+function QuestionFilter({
+  label,
+  value,
+  summary,
+  options,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  /** O que mostrar quando não há filtro: o que a tela já contém. */
+  summary: string;
+  options: { value: string; label: string; hint?: string }[];
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { anchorRef, popoverRef, style } = useFloatingPopover(open);
+  useDismissOnOutside(open, () => setOpen(false), [anchorRef, popoverRef]);
+
+  const needle = normalizeSearchText(value).trim();
+  const visible = needle
+    ? options.filter((o) => normalizeSearchText(`${o.label} ${o.hint ?? ""}`).includes(needle))
+    : options;
+
+  return (
+    <div className="plan-qfield" ref={anchorRef}>
+      <span className="plan-qlabel">{label}</span>
+      <button type="button" className={`plan-qvalue ${value ? "on" : ""}`} onClick={() => setOpen((v) => !v)}>
+        {value || summary}
+      </button>
+      {value ? (
+        <button type="button" className="plan-qclear" aria-label={`Limpar filtro ${label}`} onClick={() => onChange("")}>✕</button>
+      ) : null}
+      <FloatingPanel open={open} popoverRef={popoverRef} style={style} className="plan-qpop">
+        <input
+          className="plan-qinput"
+          value={value}
+          placeholder={placeholder}
+          autoFocus
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") setOpen(false); }}
+        />
+        <div className="plan-qoptions">
+          {visible.map((option) => (
+            <button
+              type="button"
+              className="plan-qoption"
+              key={option.value}
+              onClick={() => { onChange(option.value); setOpen(false); }}
+            >
+              <strong>{option.label}</strong>
+              {option.hint ? <small>{option.hint}</small> : null}
+            </button>
+          ))}
+          {visible.length === 0 ? <p className="admin-sub plan-qempty">Nada com esse texto — o filtro vale mesmo assim.</p> : null}
+        </div>
+      </FloatingPanel>
+    </div>
+  );
 }
 
 // Client is the primary grouping axis — one heading per cliente, plans (and
@@ -48,23 +126,56 @@ export default function StrategicView<T extends ActionPlan>({
   onOpenActivity: (plan: T, activityId: string) => void;
   emptyMessage?: string;
 }) {
-  // Todo plano nasce recolhido — a tela abria como uma parede de swimlanes de
-  // todos os clientes ao mesmo tempo. Um Set (e não um único id) porque
-  // comparar dois planos lado a lado é o uso normal desta visão.
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<StrategicFilter>(EMPTY_STRATEGIC_FILTER);
+  const patch = (part: Partial<StrategicFilter>) => setFilter((current) => ({ ...current, ...part }));
+
+  const visible = useMemo(() => filterPlans(plans, filter), [plans, filter]);
+
+  // Recolhido é o padrão porque a tela sem filtro é uma parede de swimlanes de
+  // todos os clientes. Abaixo de 5 planos esse motivo evapora e o clique a mais
+  // vira pedágio — quem filtrou até aqui filtrou para VER.
+  //
+  // Por isso o estado é um mapa de EXCEÇÕES, não o conjunto dos abertos: o
+  // automático manda enquanto ninguém discordou, e um clique manual vale só
+  // para aquele card. Guardar "os abertos" faria a regra automática apagar a
+  // escolha da pessoa toda vez que a contagem mudasse.
+  const [overrides, setOverrides] = useState<Map<string, boolean>>(new Map());
+  const autoExpand = shouldAutoExpand(visible.length);
+  const isOpen = (id: string) => overrides.get(id) ?? autoExpand;
   const toggle = (id: string) =>
-    setExpanded((open) => {
-      const next = new Set(open);
-      if (next.has(id)) next.delete(id); else next.add(id);
+    setOverrides((current) => {
+      const next = new Map(current);
+      next.set(id, !isOpen(id));
       return next;
     });
+
+  const people = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const p of plans) {
+      for (const name of planPeople(p)) {
+        const key = name.toLocaleLowerCase("pt-BR");
+        if (!names.has(key)) names.set(key, name);
+      }
+    }
+    return Array.from(names.values()).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [plans]);
+
+  const whyOptions = useMemo(() => {
+    const seen = new Map<string, { value: string; label: string; hint?: string }>();
+    for (const p of plans) {
+      const preview = whyPreview(p.description);
+      if (!preview || seen.has(preview)) continue;
+      seen.set(preview, { value: preview.replace(/…$/, ""), label: preview, hint: p.clientName || undefined });
+    }
+    return Array.from(seen.values());
+  }, [plans]);
 
   if (plans.length === 0) {
     return <p className="admin-empty">{emptyMessage}</p>;
   }
 
   const groups = new Map<string, { clientName: string; items: T[] }>();
-  for (const p of plans) {
+  for (const p of visible) {
     const key = p.clientSlug || NO_CLIENT;
     const g = groups.get(key);
     if (g) g.items.push(p); else groups.set(key, { clientName: p.clientName || "Sem cliente", items: [p] });
@@ -77,11 +188,62 @@ export default function StrategicView<T extends ActionPlan>({
 
   return (
     <div className="plan-strat">
-      <section className="plan-guide" aria-label="Guia do plano de ação">
-        <div><span>Quem</span><strong>Defina quem assume cada entrega.</strong></div>
-        <div><span>Quando</span><strong>Use início, fim e prazos objetivos.</strong></div>
-        <div><span>Por quê</span><strong>Registre o resultado esperado na descrição.</strong></div>
+      {/* As três perguntas que o cabeçalho já fazia — quem, quando, por quê —
+          deixam de ser dica e viram o filtro. Era texto fixo dizendo "defina
+          quem assume cada entrega"; agora é onde se pergunta QUEM está com o
+          quê, e a lista responde. */}
+      <section className="plan-qbar" aria-label="Filtrar planos por quem, quando e por quê">
+        <QuestionFilter
+          label="Quem"
+          value={filter.who}
+          summary={people.length ? `${people.length} pessoa${people.length === 1 ? "" : "s"} nos planos` : "Sem responsáveis"}
+          options={people.map((name) => ({ value: name, label: name }))}
+          placeholder="Buscar responsável…"
+          onChange={(who) => patch({ who })}
+        />
+        <div className="plan-qfield">
+          <span className="plan-qlabel">Quando</span>
+          <DateRangeField
+            from={filter.from}
+            to={filter.to}
+            onChange={(from, to) => patch({ from, to })}
+            presets={[30, 90]}
+            activePreset={null}
+            presetLabel={(days) => `Próximos ${days} dias`}
+            placeholder="Qualquer período"
+            onPreset={(days) => {
+              // Plano olha para a frente: "30 dias" aqui é o que vem, não o que
+              // passou (em Performance o mesmo botão significa o contrário — por
+              // isso o rótulo é explícito).
+              const today = new Date();
+              const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+              const end = new Date(today);
+              end.setDate(end.getDate() + days);
+              patch({ from: iso(today), to: iso(end) });
+            }}
+          />
+          {filter.from || filter.to ? (
+            <button type="button" className="plan-qclear" aria-label="Limpar filtro Quando" onClick={() => patch({ from: "", to: "" })}>✕</button>
+          ) : null}
+        </div>
+        <QuestionFilter
+          label="Por quê"
+          value={filter.why}
+          summary="Qualquer justificativa"
+          options={whyOptions}
+          placeholder="Buscar na justificativa…"
+          onChange={(why) => patch({ why })}
+        />
       </section>
+
+      {isFilterActive(filter) ? (
+        <p className="plan-qresult" role="status">
+          {visible.length === 0
+            ? "Nenhum plano com esses filtros."
+            : `${visible.length} de ${plans.length} plano${plans.length === 1 ? "" : "s"}${autoExpand ? " · abertos automaticamente" : ""}`}
+          <button type="button" className="admin-btn ghost" onClick={() => setFilter(EMPTY_STRATEGIC_FILTER)}>Limpar filtros</button>
+        </p>
+      ) : null}
       {groupEntries.map(([key, group]) => (
         <div className="plan-strat-group" key={key}>
           <h2 className="plan-strat-groupname">{group.clientName}</h2>
@@ -101,7 +263,7 @@ export default function StrategicView<T extends ActionPlan>({
                 return a.localeCompare(b);
               });
 
-              const open = expanded.has(p.id);
+              const open = isOpen(p.id);
 
               return (
                 <div className={`plan-strat-card ${open ? "open" : ""}`} key={p.id}>
