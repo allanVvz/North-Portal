@@ -51,7 +51,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
       };
     }
 
-    const updated = await updateTaskGroup(id, task, patch);
+    const updated = await updateTaskGroup(id, task, patch, session.userId);
 
     // O cliente comentando no portal era o caminho MUDO mais importante — e é
     // exatamente o caso para o qual `notify_task_participants` foi feita

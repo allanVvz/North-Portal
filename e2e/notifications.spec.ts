@@ -225,4 +225,64 @@ test.describe("Notificações reais no sino do rail (e2e contra o backend real)"
       .eq("profile_id", userId).eq("task_id", taskId).eq("type", "task_commented");
     expect(proprias ?? 0).toBe(0);
   });
+  // A queixa que abriu esta frente: "as notificações são todas 'card foi
+  // editado' e aparecem sem motivo aparente". O motivo era este — arrastar um
+  // card no quadro manda um PATCH por card RENUMERADO, e a rota avisava
+  // "editado" em qualquer PATCH que não mudasse o status. Os vizinhos, que
+  // ninguém tocou, enchiam a caixa de todo mundo.
+  test("renumerar posição não notifica; mudar de coluna ainda notifica", async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page);
+
+    const contar = async (tipo?: string) => {
+      let q = sb.from("notifications").select("id").eq("profile_id", colegaId).eq("task_id", taskId);
+      if (tipo) q = q.eq("type", tipo);
+      const { data } = await q;
+      return (data ?? []).length;
+    };
+
+    // Exatamente o corpo que KanbanBoard manda para os cards vizinhos de um
+    // arrasto: mesmo status, posição nova.
+    const antes = await contar();
+    const semMudanca = await page.request.patch(`/api/admin/tasks/${taskId}`, {
+      data: { status: "revisao", position: 4242 },
+    });
+    expect(semMudanca.ok()).toBe(true);
+    // Nada de poll aqui: a ausência de notificação não "chega" com o tempo, e
+    // um poll só mascararia uma escrita lenta. A rota já respondeu.
+    expect(await contar()).toBe(antes);
+
+    // A outra metade, sem a qual "não notifica nunca" também passaria: o card
+    // que REALMENTE mudou de coluna continua avisando.
+    const mudou = await page.request.patch(`/api/admin/tasks/${taskId}`, { data: { status: "em_producao" } });
+    expect(mudou.ok()).toBe(true);
+    await expect.poll(() => contar("task_status_changed"), { timeout: 15_000 }).toBeGreaterThan(0);
+  });
+
+  // "Prazo alterado" saiu de dentro do "foi editado" genérico: é o que mais
+  // muda o compromisso de quem trabalha no card, e agora dá para ligar e
+  // desligar sozinho.
+  test("mudar o prazo gera task_due_changed, não task_updated", async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page);
+
+    const contar = async (tipo: string) => {
+      const { data } = await sb
+        .from("notifications").select("id")
+        .eq("profile_id", colegaId).eq("task_id", taskId).eq("type", tipo);
+      return (data ?? []).length;
+    };
+    const editadosAntes = await contar("task_updated");
+
+    const res = await page.request.patch(`/api/admin/tasks/${taskId}`, { data: { due_date: "2026-12-24" } });
+    expect(res.ok()).toBe(true);
+
+    await expect.poll(() => contar("task_due_changed"), { timeout: 15_000 }).toBeGreaterThan(0);
+    expect(await contar("task_updated")).toBe(editadosAntes);
+
+    const { data } = await sb
+      .from("notifications").select("message")
+      .eq("profile_id", colegaId).eq("task_id", taskId).eq("type", "task_due_changed").limit(1);
+    expect(data?.[0]?.message).toContain("24/12/2026");
+  });
 });

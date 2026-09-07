@@ -1914,7 +1914,7 @@ async function routeTaskGroupUpdate(
   return updateTask(id, patch);
 }
 
-export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch: Record<string, unknown>): Promise<TaskRecord> {
+export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch: Record<string, unknown>, actorId: string | null = null): Promise<TaskRecord> {
   const patch = await patchWithTopPosition(id, current, rawPatch);
   const historical = current.payload?.[RECURRENCE_GROUP_KEY] === true;
   // A recurrence template always owns its executions. Ignore any stale
@@ -1928,7 +1928,10 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   // PATCH do admin E a aprovação do cliente (app/api/client/[slug]/tasks/[id])
   // compartilham — plugar na rota admin deixaria a aprovação do cliente, que é
   // justamente onde uma etapa costuma se concluir, fora da cascata.
-  await advanceFlowAfterUpdate(current, updated);
+  // O ator vem de cima: a cascata roda com o service role, onde auth.uid()
+  // e nulo, e sem ele quem concluiu a etapa recebia de volta o aviso de que a
+  // etapa seguinte nasceu — aviso da propria acao.
+  await advanceFlowAfterUpdate(current, updated, actorId);
   return updated;
 }
 

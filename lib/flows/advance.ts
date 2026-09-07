@@ -89,6 +89,7 @@ async function advanceOneDelivery(
   completedStep: TaskRecord,
   type: TaskTypeDef,
   today: string,
+  actorId: string | null = null,
 ): Promise<TaskRecord | null> {
   const next = nextSubtypeAfter(type, flowStepKeyOf(completedStep));
   if (!next) return null;
@@ -115,7 +116,7 @@ async function advanceOneDelivery(
   // A etapa nasce com responsável e revisor herdados da entrega, então o leque
   // já endereça as pessoas certas na primeira linha — é a propriedade "passou a
   // estar envolvido depois" funcionando de graça.
-  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`);
+  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`, actorId);
   return created;
 }
 
@@ -130,7 +131,7 @@ async function advanceOneDelivery(
  * Idempotente por construção: se já existe qualquer elo com slot, não faz
  * nada; e o id da etapa é determinístico, então uma corrida colide na chave
  * primária em vez de duplicar. */
-export async function materializeFirstStep(admin: AdminClient, delivery: TaskRecord): Promise<TaskRecord | null> {
+export async function materializeFirstStep(admin: AdminClient, delivery: TaskRecord, actorId: string | null = null): Promise<TaskRecord | null> {
   if (!isFlowDelivery(delivery)) return null;
   // Um MOLDE de entrega recorrente carrega `flow_parent` (cada ocorrência herda
   // dele), mas ele não é uma entrega — os filhos dele são as OCORRÊNCIAS, não as
@@ -155,7 +156,7 @@ export async function materializeFirstStep(admin: AdminClient, delivery: TaskRec
   if (error) return await getAdminTask(admin, id);
 
   const created = asTaskRecord(data![0]);
-  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`);
+  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`, actorId);
   return created;
 }
 
@@ -172,6 +173,7 @@ export async function ensureFlowStep(
   slot: string,
   fields: { title: string; leadDays?: number; clientVisible?: boolean; assignee?: string | null; position?: number },
   today = todayIso(),
+  actorId: string | null = null,
 ): Promise<TaskRecord> {
   const id = flowStepTaskId(parent.id, slot);
   const existing = await getAdminTask(admin, id);
@@ -204,7 +206,7 @@ export async function ensureFlowStep(
   await linkStep(admin, parent.id, id, slot, fields.position ?? 0);
   const created = error ? await getAdminTask(admin, id) : asTaskRecord(data![0]);
   if (!created) throw new Error("Não foi possível materializar a etapa do fluxo.");
-  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`);
+  await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`, actorId);
   return created;
 }
 
@@ -214,7 +216,7 @@ export async function ensureFlowStep(
  * (`deliveryStatusOnFinish` — o trigger carimba o `completed_at` do pai). O
  * `settleDelivery` normal não serve porque precisa de `type.subtypes.length`.
  */
-export async function settleTypelessFlow(admin: AdminClient, parentId: string): Promise<boolean> {
+export async function settleTypelessFlow(admin: AdminClient, parentId: string, actorId: string | null = null): Promise<boolean> {
   const parent = await getAdminTask(admin, parentId);
   if (!parent || parent.completed_at || !isFlowDelivery(parent)) return false;
   const links = await stepsOf(admin, parentId);
@@ -228,12 +230,12 @@ export async function settleTypelessFlow(admin: AdminClient, parentId: string): 
   if (parent.status === nextStatus) return false;
   const { error: updateError } = await admin.from("tasks").update({ status: nextStatus }).eq("id", parentId);
   if (updateError) throw updateError;
-  await notifyFromAutomation(admin, parentId, "task_status_changed", `"${parent.title}" foi concluído.`);
+  await notifyFromAutomation(admin, parentId, "task_status_changed", `"${parent.title}" foi concluído.`, actorId);
   return true;
 }
 
 /** Fecha a entrega se esta conclusão foi a da última etapa. */
-async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: TaskTypeDef): Promise<boolean> {
+async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: TaskTypeDef, actorId: string | null = null): Promise<boolean> {
   // Uma entrega já encerrada não volta para o funil de conferência. Esta
   // função é chamada toda vez que o reconciliador vê uma etapa concluída —
   // inclusive meses depois, e inclusive para etapas que nasceram já
@@ -254,7 +256,7 @@ async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: Ta
   // Só quando o status REALMENTE virou — as guardas acima já garantiram isso.
   // Criar a etapa seguinte e encerrar a entrega são dois fatos distintos, não o
   // mesmo aviso duas vezes.
-  await notifyFromAutomation(admin, delivery.id, "task_status_changed", `"${delivery.title}" mudou para ${nextStatus === "aprovado" ? "Concluído" : nextStatus === "revisao" ? "Revisão" : "Aprovação"}.`);
+  await notifyFromAutomation(admin, delivery.id, "task_status_changed", `"${delivery.title}" mudou para ${nextStatus === "aprovado" ? "Concluído" : nextStatus === "revisao" ? "Revisão" : "Aprovação"}.`, actorId);
   return true;
 }
 
@@ -266,7 +268,7 @@ async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: Ta
  * e a decisão de um revisor, e perdê-la por um arrasto errado seria muito pior
  * do que uma corrente momentaneamente fora de ordem.
  */
-export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord): Promise<AdvanceOutcome> {
+export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord, actorId: string | null = null): Promise<AdvanceOutcome> {
   const outcome: AdvanceOutcome = { created: [], finished: [] };
   if (!completedStep.completed_at || !flowStepKeyOf(completedStep)) return outcome;
 
@@ -282,15 +284,15 @@ export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord)
       // Fluxo DINÂMICO (o `kind` da ocorrência não é um tipo-entrega): as etapas
       // são criadas pelas automações, não pelo motor. Aqui só resta fechar o pai
       // quando a última etapa concluir.
-      if (await settleTypelessFlow(admin, delivery.id)) outcome.finished.push(delivery.id);
+      if (await settleTypelessFlow(admin, delivery.id, actorId)) outcome.finished.push(delivery.id);
       continue;
     }
     const problem = deliveryTypeProblem(type);
     if (problem) throw new Error(problem);
 
-    const created = await advanceOneDelivery(admin, delivery, completedStep, type, today);
+    const created = await advanceOneDelivery(admin, delivery, completedStep, type, today, actorId);
     if (created) outcome.created.push(created);
-    if (await settleDelivery(admin, delivery, type)) outcome.finished.push(delivery.id);
+    if (await settleDelivery(admin, delivery, type, actorId)) outcome.finished.push(delivery.id);
   }
   return outcome;
 }
@@ -327,12 +329,12 @@ export async function nextFlowStepCardOf(admin: AdminClient, step: TaskRecord): 
  * status que a pessoa acabou de fazer, então a falha aparece no próprio card
  * (`parada` + comentário, a mesma convenção das automações) e não como um 500.
  */
-export async function advanceFlowAfterUpdate(before: TaskRecord, after: TaskRecord): Promise<void> {
+export async function advanceFlowAfterUpdate(before: TaskRecord, after: TaskRecord, actorId: string | null = null): Promise<void> {
   if (!justCompleted(before, after)) return;
   if (!flowStepKeyOf(after)) return;
   const admin = createAdminClient();
   try {
-    await advanceFlow(admin, after);
+    await advanceFlow(admin, after, actorId);
   } catch (error) {
     await markTaskParada(admin, after.id, `Não foi possível criar a próxima etapa do fluxo: ${errorMessage(error)}`);
   }

@@ -8,7 +8,8 @@ import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { flowStepKeyOf } from "@/lib/taskRelations";
-import { notifyTaskParticipants, statusChangedMessage, taskUpdatedMessage } from "@/lib/notifications";
+import { notifyTaskParticipants } from "@/lib/notifications";
+import { notifiableChange } from "@/lib/notifiableChange";
 import { HttpError, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,14 +30,17 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
   }
 }
 
-// Uma edição gera UMA notificação: mudança de status é o evento que interessa
-// quando ela acontece, e as duas juntas encheriam a caixa com o mesmo salvamento.
+// O QUE merece virar notificação mora em lib/notifiableChange.ts, puro e
+// testado. Aqui só resta despachar.
+//
+// Antes, este trecho era `if (status mudou) status; else "foi editado"`, sem
+// olhar mais nada — e como `patchWithTopPosition` mexe no `position` em quase
+// todo PATCH, e arrastar um card manda um PATCH por card RENUMERADO, a caixa de
+// entrada de todo mundo virava um fluxo de "foi editado" de cards que ninguém
+// tinha tocado. Agora um salvamento sem mudança significativa não avisa nada.
 async function notifyTaskChange(before: TaskRecord, after: TaskRecord): Promise<void> {
-  if (before.status !== after.status) {
-    await notifyTaskParticipants(after.id, "task_status_changed", statusChangedMessage(after.title, after.status));
-    return;
-  }
-  await notifyTaskParticipants(after.id, "task_updated", taskUpdatedMessage(after.title));
+  const { fanout } = notifiableChange(before, after);
+  if (fanout) await notifyTaskParticipants(after.id, fanout.type, fanout.message);
 }
 
 // Concluir uma etapa cria a próxima dentro deste mesmo request. Devolvê-la
@@ -57,7 +61,7 @@ async function withFlowNextTask(before: TaskRecord, after: TaskRecord): Promise<
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    await requireAdmin();
+    const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID invalido.");
     const { slug, assignee_profile_ids, payload_patch, ...patch } = taskPatchSchema.parse(await request.json());
@@ -120,7 +124,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // "ocorrência de recorrência". setTaskPlanLink mexe apenas no elo sem
     // slot, para não derrubar as ligações de etapa de uma corrente.
     const { plan_id: planLink, ...taskPatch } = patch as Record<string, unknown>;
-    let task = await updateTaskGroup(id, current, taskPatch);
+    let task = await updateTaskGroup(id, current, taskPatch, session.userId);
     if (planLink !== undefined) {
       await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null);
     }

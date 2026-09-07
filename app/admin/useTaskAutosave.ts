@@ -5,8 +5,32 @@ import type { TaskRecord } from "@/lib/validation";
 
 export type AutosaveState = "saved" | "pending" | "saving" | "error";
 
+/** Quanto tempo de silêncio no teclado antes de gravar um campo de texto. */
+export const TEXT_IDLE_MS = 2500;
+
+/** "Vazio" tem três grafias no formulário — `null`, `undefined` e `""` — e as
+ * três significam a mesma coisa para o card. Comparar os bytes crus fazia um
+ * campo de texto que a pessoa focou e deixou em branco contar como edição:
+ * saía um PATCH, e o PATCH virava notificação de "card editado" sem que nada
+ * tivesse sido editado. */
+function normalize(value: unknown): unknown {
+  if (value === undefined || value === null || value === "") return null;
+  // `recurrence_weekdays` e `assignee_profile_ids` são conjuntos, não
+  // sequências: [1,3] e [3,1] são a mesma recorrência. A ordem muda quando a
+  // pessoa desmarca e remarca um dia, e só isso já disparava um salvamento.
+  if (Array.isArray(value)) return [...value.map(normalize)].sort();
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => [k, normalize(v)] as const)
+      .filter(([, v]) => v !== null)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return Object.fromEntries(entries);
+  }
+  return value;
+}
+
 function equal(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
 }
 
 export function diffTaskPatch(current: Record<string, unknown>, confirmed: Record<string, unknown>) {
@@ -98,7 +122,12 @@ export function useTaskAutosave({
     setState("pending");
     if (!valid) return;
     if (timer.current) clearTimeout(timer.current);
-    if (keys.every((key) => textKeys.includes(key))) timer.current = setTimeout(() => void persist(), 700);
+    // Janela de digitação. Eram 700ms: escrever um parágrafo virava uma dezena
+    // de salvamentos, e cada salvamento era uma notificação para todo mundo do
+    // card. Fechar o card faz `flush` e o `beforeunload` avisa se algo estiver
+    // pendente, então esperar mais não arrisca perder texto — só junta o que a
+    // pessoa ainda está escrevendo num salvamento só.
+    if (keys.every((key) => textKeys.includes(key))) timer.current = setTimeout(() => void persist(), TEXT_IDLE_MS);
     else void persist();
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [enabled, persist, textKeys.join("|"), valid, values]);

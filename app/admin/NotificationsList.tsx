@@ -15,9 +15,11 @@ import type { NotificationRecord, NotificationType } from "@/lib/notificationTyp
 const TYPE_ICON: Record<NotificationType, string> = {
   task_review_assigned: "◉",
   task_due_soon: "◔",
+  task_assigned: "◍",
   task_created: "✦",
   task_commented: "💬",
   task_updated: "✎",
+  task_due_changed: "⏱",
   task_status_changed: "⇄",
 };
 

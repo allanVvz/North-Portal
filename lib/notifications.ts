@@ -1,6 +1,8 @@
 import { createClient } from "./supabase/server";
 import { HttpError } from "./validation";
 import { type NotificationRecord, type NotificationType } from "./notificationTypes";
+// Usado aqui dentro (upsertDueSoonNotifications), não só re-exportado.
+import { dueSoonMessage } from "./notifiableChange";
 
 // Re-exportados para não quebrar quem já importa daqui; a definição vive em
 // ./notificationTypes porque este módulo é server-only.
@@ -46,50 +48,20 @@ export function isDueSoon(dueDate: string | null, today: Date, windowDays: numbe
   return diffDays >= 0 && diffDays <= windowDays;
 }
 
-const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})/;
-
-function formatDateBR(dueDate: string): string {
-  const m = DATE_ONLY_RE.exec(dueDate);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : dueDate;
-}
-
-export function dueSoonMessage(title: string, dueDate: string): string {
-  return `Prazo próximo: "${title}" vence em ${formatDateBR(dueDate)}.`;
-}
-
-// Rótulo curto do status para a mensagem. Deliberadamente sem o prefixo
-// "Kanban ·" que STATUS_KANBAN usa em lib/supabase.ts: ali o contexto é a
-// coluna do quadro, aqui é uma frase.
-const STATUS_LABEL: Record<string, string> = {
-  backlog: "Entrada",
-  em_producao: "Em produção",
-  revisao: "Revisão",
-  aprovacao: "Aprovação",
-  // `aprovado` é o estágio final agora, e o quadro o chama de "Concluído".
-  // Dizer "mudou para Aprovado" numa notificação enquanto a coluna diz
-  // "Concluído" é a mesma coisa com dois nomes.
-  aprovado: "Concluído",
-  // Legado: `concluido` saiu do vocabulário, mas uma notificação antiga ainda
-  // pode carregar a string. Melhor resolver do que mostrar a chave crua.
-  concluido: "Concluído",
-  parada: "Parada",
-};
-
-export function statusChangedMessage(title: string, status: string): string {
-  return `"${title}" mudou para ${STATUS_LABEL[status] ?? status}.`;
-}
-
-export function taskCreatedMessage(title: string): string {
-  return `"${title}" foi criado.`;
-}
-
-export function taskUpdatedMessage(title: string): string {
-  return `"${title}" foi editado.`;
-}
-
-export function taskCommentedMessage(title: string, author: string): string {
-  return `${author} comentou em "${title}".`;
-}
+// Os construtores de mensagem moraram aqui até 2026-09-06 e foram para
+// ./notifiableChange junto com a decisão de O QUE notificar — texto e critério
+// são a mesma pergunta, e este módulo é server-only (importa next/headers pelo
+// ./supabase/server), o que impedia testá-los sem carregar meio Next. Seguem
+// re-exportados para não mexer em quem já importa daqui.
+export {
+  dueSoonMessage,
+  statusChangedMessage,
+  taskCreatedMessage,
+  taskUpdatedMessage,
+  taskCommentedMessage,
+  dueChangedMessage,
+  assignedMessage,
+} from "./notifiableChange";
 
 // ---- data access ----------------------------------------------------------
 

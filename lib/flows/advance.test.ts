@@ -13,7 +13,16 @@ type Row = Record<string, unknown>;
 
 function fakeAdmin(tables: Record<string, Row[]>) {
   const inserts: Row[] = [];
+  // As chamadas de notificação ficavam invisíveis: o fake não tinha `.rpc`,
+  // então `notifyFromAutomation` estourava "admin.rpc is not a function"
+  // dentro do próprio try/catch dela e nenhum teste percebia. Registrar aqui é
+  // o que permite afirmar QUEM foi excluído do leque.
+  const rpcs: { name: string; args: Record<string, unknown> }[] = [];
   const api = {
+    rpc(name: string, args: Record<string, unknown>) {
+      rpcs.push({ name, args });
+      return Promise.resolve({ data: null, error: null });
+    },
     from(table: string) {
       let rows = [...(tables[table] ?? [])];
       const chain = {
@@ -47,7 +56,7 @@ function fakeAdmin(tables: Record<string, Row[]>) {
       return chain;
     },
   };
-  return { admin: api as unknown as AdminClient, inserts };
+  return { admin: api as unknown as AdminClient, inserts, rpcs };
 }
 
 const TYPE_ROWS: Row[] = [
@@ -169,6 +178,30 @@ describe("advanceFlow", () => {
   });
 });
 
+describe("quem provocou a cascata não recebe aviso da própria ação", () => {
+  // A cascata roda com o service role, onde `auth.uid()` é nulo — então o
+  // banco não tem de onde tirar o ator, e `p_actor` chegava sempre nulo.
+  // Resultado: quem concluía o roteiro recebia de volta "Captação foi criado".
+  it("propaga o ator até o RPC de notificação", async () => {
+    const { admin, rpcs } = fakeAdmin(world());
+    await advanceFlow(admin, doneStep("card-roteiro", "roteiro"), "user-1");
+
+    const notificacoes = rpcs.filter((r) => r.name === "notify_task_participants");
+    expect(notificacoes.length).toBeGreaterThan(0);
+    for (const chamada of notificacoes) expect(chamada.args.p_actor).toBe("user-1");
+  });
+
+  // O cron e as automações continuam sem ator: "o sistema fez isso" avisa todo
+  // mundo, inclusive quem provocou o erro que parou o card.
+  it("sem ator, o leque continua inteiro", async () => {
+    const { admin, rpcs } = fakeAdmin(world());
+    await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
+
+    const notificacoes = rpcs.filter((r) => r.name === "notify_task_participants");
+    expect(notificacoes.length).toBeGreaterThan(0);
+    for (const chamada of notificacoes) expect(chamada.args.p_actor).toBeNull();
+  });
+});
 describe("materializeFirstStep", () => {
   it("cria a primeira etapa de uma ocorrência vazia e a liga por slot", async () => {
     const state = { tasks: [delivery("occ", "Vídeo institucional") as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS] };

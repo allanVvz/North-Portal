@@ -17,11 +17,18 @@
 export const NOTIFICATION_TYPES = [
   "task_review_assigned",
   "task_due_soon",
+  // Endereçado a UMA pessoa — quem acabou de entrar no card. Não passa pelo
+  // leque de participantes (ver notifyProfiles).
+  "task_assigned",
   // Atividade do card — todos os envolvidos recebem (ver
   // notifyTaskParticipants e a migration 20260826090200).
   "task_created",
   "task_commented",
   "task_updated",
+  // Mexer em prazo é o que mais muda o compromisso de quem trabalha no card,
+  // então saiu de dentro do "foi editado" genérico e virou tipo próprio: dá
+  // para ligar e desligar sozinho, e a mensagem já traz a data nova.
+  "task_due_changed",
   "task_status_changed",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -39,8 +46,10 @@ export type NotificationRecord = {
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   task_review_assigned: "Revisão",
   task_due_soon: "Prazo",
+  task_assigned: "Atribuição",
   task_created: "Card novo",
   task_commented: "Comentário",
   task_updated: "Edição",
+  task_due_changed: "Prazo alterado",
   task_status_changed: "Status",
 };
