@@ -3667,6 +3667,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .plan-strat-fill { display: block; height: 100%; background: var(--a-teal); border-radius: 999px; }
 .plan-strat-progress b { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--a-sec); min-width: 34px; text-align: right; }
 .plan-strat-empty { margin: 12px 0 0; }
+.plan-strat-pending { margin: 10px 0 0; font-size: 12px; color: var(--a-muted); font-style: italic; }
 .plan-strat-questions { display: grid; grid-template-columns: minmax(160px,.8fr) minmax(160px,.7fr) minmax(240px,1.5fr); gap: 10px; margin-top: 16px; padding: 12px; border-radius: 13px; background: var(--a-inset); }
 .plan-strat-questions div { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 2px 8px; }
 .plan-strat-questions strong { color: var(--a-ink); font-size: 12.5px; line-height: 1.4; font-weight: 650; overflow-wrap: anywhere; }

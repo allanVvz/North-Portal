@@ -12,7 +12,8 @@ import StrategicView from "../plano/StrategicView";
 import { sortItems } from "../taskSort";
 import { useSortPref, type SortScope } from "../taskSortPrefs";
 import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
-import { FLOW_STEP_COUNT_KEY, subtypeLabel } from "@/lib/taskCatalog";
+import { subtypeLabel } from "@/lib/taskCatalog";
+import { partsLabel, pendingLabel } from "../parentCounts";
 import type { ParentCard } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -51,13 +52,6 @@ function parentMatches(d: ParentCard, query: string): boolean {
     ...d.activities.map((a) => taskSearchText(a, { clientName: d.clientName })),
   ].join(" ");
   return terms.every((term) => haystack.includes(term));
-}
-
-/** Quantas etapas o tipo previa quando a entrega nasceu. Vem do snapshot em
- *  payload, não de uma consulta: o tipo pode ter mudado desde então, e a
- *  entrega tem que continuar contando pelo que combinou no início. */
-function stepTotal(d: ParentCard): number {
-  return Number(d.payload?.[FLOW_STEP_COUNT_KEY]) || d.activities.length;
 }
 
 export default function ParentCardsBoard({
@@ -134,9 +128,8 @@ export default function ParentCardsBoard({
         <div className="plan-acc">
           {parents.map((d) => {
             const open = openId === d.id;
-            const total = stepTotal(d);
             const current = d.activities.length ? d.activities[d.activities.length - 1] : null;
-            const pending = Math.max(0, total - d.activities.length);
+            const faltam = pendingLabel(d);
             return (
               <div className={`plan-acc-item ${open ? "open" : ""}`} key={d.id}>
                 <div className="plan-acc-head">
@@ -154,9 +147,7 @@ export default function ParentCardsBoard({
                     </span>
                     <em>
                       {d.clientName} · {showTypeLabel ? `${d.typeLabel} · ` : ""}
-                      {showStepCount
-                        ? `etapa ${d.activities.length}/${total}`
-                        : `${d.activities.length} atividade${d.activities.length === 1 ? "" : "s"}`}
+                      {partsLabel(d)}
                       {showStepCount && current ? ` · ${subtypeLabel(current.subtype) || current.title}` : ""}
                     </em>
                     <span className={`plan-acc-description ${d.description ? "" : "is-hint"}`}>
@@ -185,9 +176,9 @@ export default function ParentCardsBoard({
                     </ul>
                     {/* As etapas que faltam não são linhas do banco — só o
                         contador do tipo revela que elas existem. */}
-                    {showStepCount && pending > 0 ? (
+                    {showStepCount && faltam ? (
                       <p className="admin-sub">
-                        {pending === 1 ? "Falta 1 etapa" : `Faltam ${pending} etapas`} — cada uma nasce quando a anterior é concluída.
+                        {faltam} — cada uma nasce quando a anterior é concluída.
                       </p>
                     ) : null}
                     {!showStepCount && d.activities.length === 0 ? (

@@ -6,6 +6,7 @@ import type { ActionPlan, PlanActivity } from "@/lib/supabase";
 import { parseAssignees } from "@/lib/assignees";
 import { normalizeSearchText } from "@/lib/taskSearch";
 import TaskKindIcon from "../TaskKindIcon";
+import { partsLabel, pendingLabel } from "../parentCounts";
 import DateRangeField from "../DateRangeField";
 import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "../FloatingPopover";
 import {
@@ -281,7 +282,11 @@ export default function StrategicView<T extends ActionPlan>({
                       <span className={`plan-acc-caret ${open ? "on" : ""}`} aria-hidden>▸</span>
                       <span className="plan-strat-headtext">
                         <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} size="lg" /><strong>{p.title}</strong></span>
-                        <span className="plan-strat-count">{p.activities.length} atividade{p.activities.length === 1 ? "" : "s"}</span>
+                        {/* Entrega conta pelo MOLDE ("etapa 2/4"), plano conta o que
+                            tem. Esta tela dizia "N atividades" para os dois, o que fazia
+                            uma entrega com só o roteiro pronto parecer um plano de um
+                            item — completo. */}
+                        <span className="plan-strat-count">{partsLabel(p)}</span>
                         <span className="plan-strat-description">{p.description || "Descreva o motivo, o resultado esperado e como saberemos que o plano funcionou."}</span>
                       </span>
                     </button>
@@ -335,6 +340,15 @@ export default function StrategicView<T extends ActionPlan>({
                       ))}
                     </div>
                   )}
+
+                  {/* O que ainda VAI nascer. Sem esta linha a entrega parece
+                      terminada quando só a primeira etapa existe — as outras não
+                      são cards ainda, então não aparecem em raia nenhuma. */}
+                  {pendingLabel(p) ? (
+                    <p className="admin-sub plan-strat-pending">
+                      {pendingLabel(p)} — cada uma nasce quando a anterior é concluída.
+                    </p>
+                  ) : null}
                   </>
                   ) : null}
                 </div>
