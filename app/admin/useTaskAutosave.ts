@@ -139,7 +139,18 @@ export function useTaskAutosave({
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [state]);
-  useEffect(() => () => { mounted.current = false; }, []);
+  // `mounted` existe para não chamar setState depois que o modal fechou. Mas
+  // ele só era posto em `false`, e nada o devolvia para `true` — e em
+  // StrictMode (dev, `reactStrictMode: true` no next.config) o React roda
+  // montar → limpar → montar de propósito. Depois dessa sequência a flag ficava
+  // `false` PARA SEMPRE, e o efeito era exatamente o oposto do pretendido: o
+  // card salvava (o PATCH ia e voltava 200), mas `onSaved` nunca era chamado e
+  // o estado nunca saía de "Salvando…". Só aparecia em dev, e só um teste
+  // olhava esse rótulo — os outros conferem o banco, que estava certo.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   return { state, flush: persist, retry: persist };
 }

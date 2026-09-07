@@ -11,3 +11,10 @@
 //   E2E_ADMIN_PASSWORD=...
 export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? "admin@north.com";
 export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "SenhaForte123!";
+
+// Nota sobre timeouts de login nos specs: a espera pelo /admin depois do
+// clique em "Entrar" usa 45s, e não é login lento — é a PRIMEIRA compilação de
+// /login pelo next dev depois de um cache .next limpo. O CLAUDE.md registra 16.8s
+// medidos, e com cache frio passa disso. Em 15s isso aparecia como falha
+// aleatória do primeiro spec da fila, e já custou duas investigações de causa
+// errada.

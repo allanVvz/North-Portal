@@ -31,7 +31,7 @@ async function login(page: Page, email: string, password: string): Promise<void>
   await page.getByPlaceholder("voce@empresa.com").fill(email);
   await page.getByPlaceholder("Sua senha").fill(password);
   await page.getByRole("button", { name: /Entrar/ }).click();
-  await page.waitForURL(/\/admin/, { timeout: 15_000 });
+  await page.waitForURL(/\/admin/, { timeout: 45_000 });
 }
 
 // A tiny valid 1x1 PNG, used as the mock profile-photo upload.

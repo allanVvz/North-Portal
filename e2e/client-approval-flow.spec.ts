@@ -52,7 +52,7 @@ async function login(page: Page) {
   await page.getByPlaceholder("voce@empresa.com").fill(CLIENT_EMAIL);
   await page.getByPlaceholder("Sua senha").fill(CLIENT_PASSWORD);
   await page.getByRole("button", { name: /Entrar/ }).click();
-  await page.waitForURL(new RegExp(`/${CLIENT_SLUG}`), { timeout: 15_000 });
+  await page.waitForURL(new RegExp(`/${CLIENT_SLUG}`), { timeout: 45_000 });
 }
 
 test.describe("Feedbacks do cliente — fluxo de aprovação (e2e contra o backend real)", () => {

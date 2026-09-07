@@ -33,7 +33,7 @@ async function login(page: Page) {
   await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);
   await page.getByPlaceholder("Sua senha").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: /Entrar/ }).click();
-  await page.waitForURL(/\/admin/, { timeout: 15_000 });
+  await page.waitForURL(/\/admin/, { timeout: 45_000 });
 }
 
 test.describe("Agenda do cliente — dado real, sem mock (e2e contra o backend real)", () => {

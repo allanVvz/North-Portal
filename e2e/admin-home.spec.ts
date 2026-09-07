@@ -18,7 +18,7 @@ async function login(page: import("@playwright/test").Page) {
   await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);
   await page.getByPlaceholder("Sua senha").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: /Entrar/ }).click();
-  await page.waitForURL(/\/admin/, { timeout: 15_000 });
+  await page.waitForURL(/\/admin/, { timeout: 45_000 });
 }
 
 test.describe("Home do admin", () => {
