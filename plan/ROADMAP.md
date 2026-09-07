@@ -39,6 +39,12 @@ mobile gaveta; **cron real de automações ligado em prod** (R1.1 — segredo
 monta o patch a partir do objeto salvo; `content.trilhas`/`content.documentos`
 aposentados); limpeza de comentários mortos citando `flow_template_id`
 (R1.5 — entrega hoje é marcada por `payload.flow_parent`, elos por `task_links`);
+**faxina das notificações** (2026-09-06 — decisão por lista branca de campos em
+`lib/notifiableChange.ts`, prazo com tipo próprio, "foi editado" nomeando os
+campos, ator propagado na cascata, autosave sem salvamento-fantasma, regras
+separadas por evento com edição nascendo silenciada, `task_assigned`
+direcionado, e o grid de funções roteando tráfego — migrações `20260906140000`
+e `20260906150000`);
 **editor de fluxos em Configurações › Tipos e fluxos** (R2.1 — CRUD de etapas com
 prazo/peso/responsável/`client_visible`, drag-reorder da cascata, travas de
 desativação e exclusão; `35af152`); **calendário composto deixou de ser cópia**
@@ -362,8 +368,8 @@ Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
 | R5.1 | **Sino / central de notificações no portal do cliente.** `notifyClients` está `false` por default porque não há rota nem componente no lado cliente. | `fluxos-cascata` (memória) | Médio. Greenfield cliente. |
 | R5.2 | **Notificações push desktop/mobile** direcionadas por login individual. In-app já existe; push não. | `memory.md` RoadMap §6 | Médio-grande. |
 | R5.3 | **Due-soon proativo:** hoje é lazy/on-demand; disparo por prazo próximo exige cron. Infra de cron (pg_cron + Vault) já existe da R1.1 — reusar o padrão do `automations-run-daily`. | `roadmap-2026-08-19` (memória) | Pequeno. |
-| R5.4 | **Papel "gestor de tráfego"** como **atributo aditivo** (não 3º valor do enum `level`; todo admin geral também é gestor). Migration + revisão de RLS. | `memory.md` RoadMap §2, `plan/AUTOMACOES-IA-HARNESS.md` | Médio. Risco: RLS. Bloqueia R5.5 e parte de R4. |
-| R5.5 | **Alertas ao gestor de tráfego** sobre métricas de anúncios (pontos de atenção acionáveis). | `memory.md` RoadMap §5 | Depende de R5.1/R5.4. |
+| ~~R5.4~~ | **Gestor de tráfego. ✅ FEITO (2026-09-06, migração `20260906150000`).** Resolvido por um caminho mais barato do que esta entrada previa: em vez de atributo novo em `profiles`, a frente **reaproveitou o grid de Configurações › Equipe & papéis** que já existia — `metricas` virou `gestor_trafego`, e **Allan + Luiza** estão marcados em produção. **Nada de RLS foi tocado**, e o risco que fazia dela um item pesado desapareceu: `profiles.level` ficou intacto, então ninguém ganhou nem perdeu permissão. A marcação só **roteia notificação** (`notify_responsibility_holders`): quem cuida da frente recebe os relatórios das automações mesmo sem estar no card, com dedupe contra os participantes e um interruptor próprio (`trafficRouting`). *(A armadilha que a entrada original apontava era real e continua valendo: `level` é campo de valor único e carrega `is_manager()` em 4 policies vivas; os 4 admins são `gerente`, então dar um 3º valor a alguém o rebaixaria em silêncio. A saída foi não encostar nele.)* | `plan/AUTOMACOES-IA-HARNESS.md` | Feito. |
+| R5.5 | **Alertas ao gestor de tráfego** sobre métricas de anúncios (pontos de atenção acionáveis). **Destravada em 2026-09-06:** o trilho de "notificar quem cuida da frente" existe (`notify_responsibility_holders`) e já é usado pelos relatórios das automações. O que falta é o que caracteriza um *ponto de atenção* — o critério de quando uma métrica merece alarme —, que é decisão de produto, não de código. | `memory.md` RoadMap §5 | Depende de R5.1 (portal) só para o lado cliente; para o admin, já dá. |
 
 ---
 

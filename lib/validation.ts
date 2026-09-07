@@ -744,7 +744,10 @@ export const teamCargoPatchSchema = z.object({
   cargo: z.string().trim().max(40).nullable(),
 });
 
-export const RESPONSIBILITY_KEYS = ["edicao", "captacao", "roteiro", "metricas", "aprovacao"] as const;
+// `metricas` virou `gestor_trafego` em 20260906150000: a key deixou de ser
+// enum decorativo e passou a ser literal dentro de uma função SQL que decide
+// quem é notificado (notify_responsibility_holders).
+export const RESPONSIBILITY_KEYS = ["edicao", "captacao", "roteiro", "gestor_trafego", "aprovacao"] as const;
 export type ResponsibilityKey = (typeof RESPONSIBILITY_KEYS)[number];
 
 // PATCH /api/admin/team/responsibilities — liga/desliga uma atribuição por vez
@@ -849,24 +852,53 @@ export const adminTabsVisibilitySchema = z.object({
 // SECURITY DEFINER existe para atender, não consegue ler a configuração.
 export type NotificationRules = {
   comments: boolean;
-  updates: boolean;
+  /** `updates` governava três eventos ao mesmo tempo — card novo, edição e
+   *  mudança de status —, então não dava para calar o ruidoso sem calar o
+   *  sinal. Virou três chaves em 20260906140000. */
+  created: boolean;
+  edits: boolean;
+  statusChanges: boolean;
+  dueChanged: boolean;
+  assigned: boolean;
   reviewAssigned: boolean;
   dueSoon: boolean;
   /** Conta de cliente recebe linha? Falso por padrão: não existe sino no
    *  portal, então hoje elas só acumulam sem que ninguém veja. */
   notifyClients: boolean;
+  /** Quem cuida de uma frente é avisado dos eventos dela mesmo sem estar no
+   *  card (ver notify_responsibility_holders). */
+  trafficRouting: boolean;
 };
 export const NOTIFICATION_RULES_DEFAULT: NotificationRules = {
-  comments: true, updates: true, reviewAssigned: true, dueSoon: true, notifyClients: false,
+  comments: true,
+  created: true,
+  // A única que nasce desligada, e é o motivo desta frente existir: "foi
+  // editado" era o que enchia a caixa.
+  edits: false,
+  statusChanges: true,
+  dueChanged: true,
+  assigned: true,
+  reviewAssigned: true,
+  dueSoon: true,
+  notifyClients: false,
+  trafficRouting: true,
 };
 // `.optional()` em tudo porque o PATCH é uma fusão parcial — mesma forma de
-// adminTabsVisibilitySchema.
+// adminTabsVisibilitySchema. `updates` continua aceito por uma release: uma aba
+// aberta antes do deploy ainda manda a chave velha, e recusar o PATCH inteiro
+// por causa dela seria trocar um ruído por um erro.
 export const notificationRulesSchema = z.object({
   comments: z.boolean().optional(),
-  updates: z.boolean().optional(),
+  created: z.boolean().optional(),
+  edits: z.boolean().optional(),
+  statusChanges: z.boolean().optional(),
+  dueChanged: z.boolean().optional(),
+  assigned: z.boolean().optional(),
   reviewAssigned: z.boolean().optional(),
   dueSoon: z.boolean().optional(),
   notifyClients: z.boolean().optional(),
+  trafficRouting: z.boolean().optional(),
+  updates: z.boolean().optional(),
 });
 
 export type Metric = {

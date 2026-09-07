@@ -285,4 +285,106 @@ test.describe("Notificações reais no sino do rail (e2e contra o backend real)"
       .eq("profile_id", colegaId).eq("task_id", taskId).eq("type", "task_due_changed").limit(1);
     expect(data?.[0]?.message).toContain("24/12/2026");
   });
+  // Fase 3: `updates` governava criação + edição + status juntos, então não
+  // dava pra calar o ruidoso sem calar o sinal. Agora são chaves separadas, e
+  // `edits` nasce desligada.
+  test("edição nasce silenciada e liga sozinha, sem arrastar a mudança de status junto", async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page);
+
+    const contar = async (tipo: string) => {
+      const { data } = await sb
+        .from("notifications").select("id")
+        .eq("profile_id", colegaId).eq("task_id", taskId).eq("type", tipo);
+      return (data ?? []).length;
+    };
+
+    // Default: edição não vira linha.
+    const editadosAntes = await contar("task_updated");
+    await page.request.patch(`/api/admin/tasks/${taskId}`, { data: { description: `Texto ${RUN}` } });
+    expect(await contar("task_updated")).toBe(editadosAntes);
+
+    // Ligar SÓ `edits` passa a gerar, e não precisou ligar mais nada.
+    const ligar = await page.request.patch("/api/admin/settings/notification-rules", { data: { edits: true } });
+    expect(ligar.ok()).toBe(true);
+    await page.request.patch(`/api/admin/tasks/${taskId}`, { data: { description: `Outro texto ${RUN}` } });
+    await expect.poll(() => contar("task_updated"), { timeout: 15_000 }).toBeGreaterThan(editadosAntes);
+
+    // E a mensagem nomeia o campo, em vez do antigo "foi editado" seco.
+    const { data } = await sb
+      .from("notifications").select("message")
+      .eq("profile_id", colegaId).eq("task_id", taskId).eq("type", "task_updated")
+      .order("created_at", { ascending: false }).limit(1);
+    expect(data?.[0]?.message).toContain("descrição");
+
+    await page.request.patch("/api/admin/settings/notification-rules", { data: { edits: false } });
+  });
+
+  // Fase 4: "atribuíram algo a você" vai para UMA pessoa. O leque não serve —
+  // quem acabou de entrar no card, por definição, não estava nele.
+  test("atribuir alguém avisa só a pessoa atribuída, não o card inteiro", async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page);
+
+    const contar = async (perfil: string) => {
+      const { data } = await sb
+        .from("notifications").select("id")
+        .eq("profile_id", perfil).eq("task_id", taskId).eq("type", "task_assigned");
+      return (data ?? []).length;
+    };
+    expect(await contar(colegaId)).toBe(0);
+
+    // O colega já é assignee do card no fixture; tirar e repor é o que produz a
+    // transição "entrou agora".
+    await sb.from("task_assignees").delete().eq("task_id", taskId).eq("profile_id", colegaId);
+    const res = await page.request.patch(`/api/admin/tasks/${taskId}`, {
+      data: { assignee_profile_ids: [colegaId] },
+    });
+    expect(res.ok()).toBe(true);
+
+    await expect.poll(() => contar(colegaId), { timeout: 15_000 }).toBe(1);
+    // Quem fez a atribuição não é avisado de que atribuiu.
+    expect(await contar(userId)).toBe(0);
+  });
+
+  // Fase 6: o grid de Equipe & papéis deixou de ser decorativo. Testado pela
+  // função direto — o caminho completo dependeria de rodar a automação com
+  // Meta/Windsor reais, que é caro e frágil para o que se quer provar aqui.
+  test("gestor de tráfego é avisado mesmo sem estar no card, e sem receber duas vezes", async () => {
+    test.setTimeout(90_000);
+
+    const contar = async () => {
+      const { data } = await sb
+        .from("notifications").select("id")
+        .eq("profile_id", colegaId).eq("task_id", taskId).eq("type", "task_commented");
+      return (data ?? []).length;
+    };
+
+    // O colega NÃO participa deste card agora — só é gestor de tráfego.
+    await sb.from("task_assignees").delete().eq("task_id", taskId).eq("profile_id", colegaId);
+    await sb.from("tasks").update({ reviewer_id: null, approver_id: null }).eq("id", taskId);
+    await sb.from("responsibility_assignments")
+      .upsert({ responsibility: "gestor_trafego", profile_id: colegaId }, { onConflict: "responsibility,profile_id" });
+
+    const antes = await contar();
+    const { error } = await sb.rpc("notify_responsibility_holders", {
+      p_task_id: taskId, p_responsibility: "gestor_trafego",
+      p_type: "task_commented", p_message: "Relatório de tráfego pronto.", p_actor: null,
+    });
+    expect(error).toBeNull();
+    expect(await contar()).toBe(antes + 1);
+
+    // Agora ele TAMBÉM participa do card: o leque já o atende, e o roteamento
+    // não pode somar uma segunda linha do mesmo evento.
+    await sb.from("task_assignees").insert({ task_id: taskId, profile_id: colegaId });
+    const depoisDeParticipar = await contar();
+    await sb.rpc("notify_responsibility_holders", {
+      p_task_id: taskId, p_responsibility: "gestor_trafego",
+      p_type: "task_commented", p_message: "Segundo relatório.", p_actor: null,
+    });
+    expect(await contar()).toBe(depoisDeParticipar);
+
+    await sb.from("responsibility_assignments")
+      .delete().eq("responsibility", "gestor_trafego").eq("profile_id", colegaId);
+  });
 });

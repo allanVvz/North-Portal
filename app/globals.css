@@ -2994,6 +2994,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .set-theme-toggle button.on { background: var(--a-surface); color: var(--a-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(12,44,44,.08); }
 .set-note { margin: 16px 0 0; font-size: 12.5px; color: var(--a-muted); background: var(--a-teal-soft); padding: 11px 14px; border-radius: 10px; }
 .set-notif-list { display: flex; flex-direction: column; gap: 14px; }
+/* Dez interruptores numa lista plana viram parede; o cabeçalho separa pela
+   pergunta que cada bloco responde (app/admin/configuracoes/NotificationsSettings.tsx). */
+.set-notif-list > section { display: flex; flex-direction: column; gap: 14px; }
+.set-notif-list > section + section { margin-top: 8px; padding-top: 18px; border-top: 1px solid var(--a-border); }
+.set-notif-group { margin: 0; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--a-teal-text); }
+.set-notif-list > section > .admin-sub { margin: -8px 0 2px; }
 
 @media (max-width: 860px) {
   .set { grid-template-columns: 1fr; }

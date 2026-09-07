@@ -27,7 +27,7 @@ import { renderSalesReportPdf } from "@/lib/reports/salesReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
-import { notifyFromAutomation } from "./notify";
+import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { adsAccountFor, getClientById, type ServiceMetaSettings } from "./serviceIntegrations";
 import type { WindsorSettings } from "@/lib/windsor";
 import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
@@ -275,6 +275,7 @@ async function processOccurrence(
   if (markErr) throw markErr;
 
   await notifyFromAutomation(admin, card2.id, "task_commented", `Automação anexou o relatório de vendas em "${card2.title}".`);
+  await notifyResponsibilityHolders(admin, card2.id, "gestor_trafego", "task_commented", `Relatório de vendas pronto em "${card2.title}".`);
   return true;
 }
 

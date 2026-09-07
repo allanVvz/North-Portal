@@ -8,7 +8,7 @@ import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { flowStepKeyOf } from "@/lib/taskRelations";
-import { notifyTaskParticipants } from "@/lib/notifications";
+import { notifyProfiles, notifyTaskParticipants } from "@/lib/notifications";
 import { notifiableChange } from "@/lib/notifiableChange";
 import { HttpError, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
@@ -39,8 +39,14 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
 // entrada de todo mundo virava um fluxo de "foi editado" de cards que ninguém
 // tinha tocado. Agora um salvamento sem mudança significativa não avisa nada.
 async function notifyTaskChange(before: TaskRecord, after: TaskRecord): Promise<void> {
-  const { fanout } = notifiableChange(before, after);
+  const { fanout, direct } = notifiableChange(before, after);
   if (fanout) await notifyTaskParticipants(after.id, fanout.type, fanout.message);
+  // Quem ACABOU de entrar no card não está no leque — por definição, já que o
+  // leque é derivado do card. Mudar o status e atribuir alguém no mesmo
+  // salvamento são dois fatos para duas plateias.
+  for (const alvo of direct) {
+    await notifyProfiles([alvo.profileId], after.id, "task_assigned", alvo.message);
+  }
 }
 
 // Concluir uma etapa cria a próxima dentro deste mesmo request. Devolvê-la

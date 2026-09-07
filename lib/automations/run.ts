@@ -12,7 +12,7 @@
 // silently or aborting the rest of the run.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { notifyFromAutomation } from "./notify";
+import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
 import { inPeriod, previousPeriod } from "@/app/admin/performance/insights";
@@ -188,6 +188,9 @@ async function runOneReportAutomation(
       if (c1Error) throw c1Error;
       await advanceFlowMold(admin, target, today);
       await notifyFromAutomation(admin, card1.id, "task_commented", `Automação comentou em "${card1.title}".`);
+      // Relatório de tráfego é assunto de quem gerencia tráfego, esteja ou não
+      // no card — a frente do grid de Equipe & papéis é quem responde isso.
+      await notifyResponsibilityHolders(admin, card1.id, "gestor_trafego", "task_commented", `Relatório de tráfego pronto em "${card1.title}".`);
     } catch (error) {
       const message = errorMessage(error);
       await markTaskParada(admin, card1.id, `Falha ao gerar o relatório de anúncios: ${message}`);
@@ -221,6 +224,7 @@ async function runOneReportAutomation(
       .eq("id", actingTask.id);
     if (statusError) throw statusError;
     await notifyFromAutomation(admin, actingTask.id, "task_commented", `Automação comentou em "${actingTask.title}".`);
+    await notifyResponsibilityHolders(admin, actingTask.id, "gestor_trafego", "task_commented", `Relatório de tráfego pronto em "${actingTask.title}".`);
   } catch (error) {
     const message = errorMessage(error);
     await markTaskParada(admin, actingTask.id, `Falha ao gerar o relatório de anúncios: ${message}`);

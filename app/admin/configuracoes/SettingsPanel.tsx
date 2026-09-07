@@ -363,15 +363,16 @@ function AgencyForm({ initial }: { initial: AgencyProfile }) {
   );
 }
 
-// As 5 frentes como você descreveu. Cadastro informativo por enquanto — não
-// influencia nenhum picker de Responsável/Revisor/Aprovador nos cards; a
-// tabela por trás (responsibility_assignments) foi desenhada pra não exigir
-// retrabalho se isso um dia virar sugestão automática.
+// As 5 frentes. Deixou de ser cadastro puramente informativo em 2026-09-06:
+// `gestor_trafego` decide quem recebe os relatórios das automações de tráfego
+// mesmo sem estar no card (notify_responsibility_holders). As outras quatro
+// seguem informativas — não sugerem nem restringem Responsável/Revisor/
+// Aprovador.
 const RESPONSIBILITIES: { key: ResponsibilityKey; label: string }[] = [
   { key: "edicao", label: "Edição" },
   { key: "captacao", label: "Captação" },
   { key: "roteiro", label: "Roteiro" },
-  { key: "metricas", label: "Métricas" },
+  { key: "gestor_trafego", label: "Gestor de tráfego" },
   { key: "aprovacao", label: "Aprovação" },
 ];
 
@@ -447,7 +448,7 @@ function TeamList({ team, initialAssignments }: { team: TeamMember[]; initialAss
 
       <div className="set-card">
         <h2 className="set-h">Responsabilidades</h2>
-        <p className="admin-sub">Quem cuida de cada frente — cadastro informativo, ainda não sugere nem restringe Responsável/Revisor/Aprovador nos cards.</p>
+        <p className="admin-sub">Quem cuida de cada frente. <strong>Gestor de tráfego</strong> recebe os relatórios das automações mesmo sem estar no card; as demais são cadastro informativo e ainda não sugerem nem restringem Responsável/Revisor/Aprovador.</p>
         {respMsg ? <p className="set-msg">{respMsg}</p> : null}
         {admins.length === 0 ? (
           <p className="admin-sub">Nenhum admin cadastrado.</p>

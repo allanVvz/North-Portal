@@ -150,6 +150,39 @@ export async function notifyTaskParticipants(
   }
 }
 
+/**
+ * Avisa pessoas NOMEADAS, e não o leque do card.
+ *
+ * O caso é "você virou responsável": só interessa a quem ainda não estava no
+ * card, e por definição essa pessoa não está no leque que
+ * `notify_task_participants` deriva. Aquela função não aceitar destinatário é
+ * garantia dela — é o que impede um chamador de usá-la para escrever na caixa
+ * de qualquer um —, então o endereçado tem porta própria.
+ *
+ * Best-effort, igual ao leque: uma notificação que falha não pode derrubar o
+ * salvamento que o usuário acabou de fazer.
+ */
+export async function notifyProfiles(
+  profileIds: string[],
+  taskId: string,
+  type: NotificationType,
+  message: string,
+): Promise<void> {
+  if (!profileIds.length) return;
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.rpc("notify_profiles", {
+      p_profile_ids: profileIds,
+      p_task_id: taskId,
+      p_type: type,
+      p_message: message,
+    });
+    if (error) console.error("Notifications direct error", { code: error.code, message: error.message?.slice(0, 240) });
+  } catch (error) {
+    console.error("Notifications direct threw", error);
+  }
+}
+
 /** Marks either specific notification ids, or the caller's whole unread
  *  inbox (`"all"`), read. Always scoped to `profileId` — RLS enforces this
  *  too, but the .eq() keeps a mistaken cross-account id list a no-op instead

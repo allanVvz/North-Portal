@@ -48,3 +48,39 @@ export async function notifyFromAutomation(
     console.error("Automation fan-out threw", error);
   }
 }
+
+/**
+ * Avisa quem cuida de uma FRENTE, mesmo sem estar no card.
+ *
+ * O grid de Configurações › Equipe & papéis era cadastro decorativo: nada lia a
+ * marcação. `gestor_trafego` é a primeira frente que decide alguma coisa — os
+ * relatórios que as automações produzem interessam a quem gerencia tráfego,
+ * ainda que o card seja de outra pessoa.
+ *
+ * Quem é gestor E participante do card não recebe duas linhas: a função no
+ * banco desconta os participantes. Chamar DEPOIS do leque deixa isso óbvio na
+ * leitura, embora a ordem não mude o resultado.
+ */
+export async function notifyResponsibilityHolders(
+  admin: AdminClient,
+  taskId: string,
+  responsibility: "gestor_trafego",
+  type: NotificationType,
+  message: string,
+  actorId: string | null = null,
+): Promise<void> {
+  try {
+    const { error } = await admin.rpc("notify_responsibility_holders", {
+      p_task_id: taskId,
+      p_responsibility: responsibility,
+      p_type: type,
+      p_message: message,
+      p_actor: actorId,
+    });
+    if (error) {
+      console.error("Responsibility fan-out error", { code: error.code, message: error.message?.slice(0, 240) });
+    }
+  } catch (error) {
+    console.error("Responsibility fan-out threw", error);
+  }
+}
