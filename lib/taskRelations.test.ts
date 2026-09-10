@@ -19,6 +19,7 @@ import {
   slotOf,
   stepOrderOf,
   visibleOnTaskBoard,
+  type TaskParentLink,
 } from "./taskRelations";
 
 // Elo de pertencimento como o banco devolve. `position` é a ordem da etapa
@@ -148,6 +149,40 @@ describe("etapa de entrega × membro de plano", () => {
     expect(familyRootIdOf(soEtapa)).toBe(entregaId);
     expect(familyRootIdOf(soMembro)).toBe(planoId);
     expect(familyRootIdOf({ parents: [] })).toBeNull();
+  });
+});
+
+// P0-A: `append_task_comment`/`edit_task_comment`/`delete_task_comment`
+// devolvem `returning t.*` — só colunas de `tasks`, sem os joins que
+// mergeTaskAssigneeRow usa para montar `parents`. Antes da correção em
+// lib/supabase.ts, um card assim chegava ao front SEM a propriedade, e
+// `TaskModal.tsx` lia `t.parents.some(...)` sem guarda: TypeError, árvore
+// React inteira derrubada só por comentar. `parents` não é opcional no tipo
+// `TaskRecord` (é a promessa que a resposta crua quebrava), então este teste
+// só existe porque o runtime não confia nela — cada helper de leitura tem que
+// sobreviver a `parents: undefined`, não só a `parents: []`.
+describe("resiliência a `parents` ausente (card não hidratado, ver P0-A)", () => {
+  const semParents = { parents: undefined } as unknown as { parents: TaskParentLink[] };
+
+  it("helpers de leitura tratam parents ausente como lista vazia, não como TypeError", () => {
+    expect(() => parentIdsOf(semParents)).not.toThrow();
+    expect(parentIdsOf(semParents)).toEqual([]);
+    expect(hasParent(semParents, "qualquer")).toBe(false);
+    expect(slotOf(semParents, "qualquer")).toBeNull();
+    expect(stepOrderOf(semParents, "qualquer")).toBe(0);
+    expect(planParentIdOf(semParents)).toBeNull();
+    expect(deliveryParentIdsOf(semParents)).toEqual([]);
+    expect(familyRootIdOf(semParents)).toBeNull();
+  });
+
+  it("um card sem parents numa lista não quebra as varreduras por pai — só nunca aparece como filho de ninguém", () => {
+    const outro = { id: "outro", parents: [{ id: "p1", slot: null, position: 0 }] };
+    const lista = [{ id: "sem-parents", ...semParents }, outro];
+    expect(() => childrenOf("p1", lista)).not.toThrow();
+    expect(childrenOf("p1", lista)).toEqual([outro]);
+    expect(flowStepsOf("p1", lista)).toEqual([]);
+    expect(actionPlanMembersOf("p1", lista)).toEqual([outro]);
+    expect(childrenByParent(lista).get("p1")).toEqual([outro]);
   });
 });
 

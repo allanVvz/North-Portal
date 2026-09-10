@@ -1932,7 +1932,15 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   // e nulo, e sem ele quem concluiu a etapa recebia de volta o aviso de que a
   // etapa seguinte nasceu — aviso da propria acao.
   await advanceFlowAfterUpdate(current, updated, actorId);
-  return updated;
+  // Toda rota interna de `routeTaskGroupUpdate` termina num `updateTask` cru
+  // (`select(TASK_COLUMNS)`, sem os joins de `mergeTaskAssigneeRow`) — só a
+  // rota admin (`app/api/admin/tasks/[id]/route.ts`) sabia disso e refazia o
+  // fetch antes de responder. A rota do cliente (aprovação/comentário no
+  // portal) devolvia `updated` direto, sem `parents`: mesma família do bug de
+  // `append_task_comment` (ver rehydrateOrRaw), só que aqui pelo caminho de
+  // PATCH em vez do de comentário. Re-hidratar no ÚNICO ponto que as duas rotas
+  // compartilham evita repetir essa lembrança em cada chamador.
+  return rehydrateOrRaw(updated.id, updated);
 }
 
 async function completeTaskCycleForRequest(
@@ -2041,11 +2049,19 @@ export async function completeTaskCycle(
 export async function detachTaskRelation(taskId: string, parentId: string): Promise<TaskRecord> {
   const task = await getTaskById(taskId);
   if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
-  const isLinked = task.parents.some((p) => p.id === parentId);
+  // `task` sempre vem de getTaskById (já hidratado), mas isto é chamado por uma
+  // rota HTTP com o corpo de outro request no meio — `?? []` é defesa contra
+  // qualquer chamador futuro que passe um TaskRecord cru, não porque este vem
+  // undefined hoje.
+  const isLinked = (task.parents ?? []).some((p) => p.id === parentId);
   const recurrencePatch = detachedRecurrencePatch(task, parentId);
   if (!isLinked && !recurrencePatch) throw new HttpError(409, "Esta ligacao nao existe mais.");
   if (isLinked) await unlinkTasks(parentId, taskId);
-  if (recurrencePatch) return updateTask(taskId, recurrencePatch);
+  // `updateTask` cru não tem `parents`/`assignee_profile_ids` (mesma família do
+  // bug de `append_task_comment`) — esta rota (relations/[parentId] DELETE)
+  // devolve o retorno direto para o cliente, então tem que ser a linha
+  // re-hidratada, não a crua do UPDATE.
+  if (recurrencePatch) { await updateTask(taskId, recurrencePatch); return rehydrateOrRaw(taskId, task); }
   const refreshed = await getTaskById(taskId);
   return refreshed ?? task;
 }
@@ -2080,6 +2096,25 @@ export async function setTaskAssigneeProfiles(taskId: string, profileIds: string
   if (error) fail(error);
 }
 
+// Os três RPCs de comentário (`edit_task_comment`, `delete_task_comment`,
+// `append_task_comment`, migrações 20260826120000/20260827001000) devolvem
+// `returning t.*` — só as colunas de `tasks`. `parents` (e `assignee_profile_ids`
+// / `created_by_name`) não é coluna: é derivado de `task_links`/`task_assignees`
+// por `mergeTaskAssigneeRow`, que só entra numa consulta feita por AQUI (via
+// getTaskById). Devolver a linha crua do RPC direto para a rota HTTP mandava
+// esse card sem `parents` para o cliente, que funde a resposta no estado do
+// board — e todo leitor de `parents` que confiava nele vir sempre preenchido
+// (TaskModal.tsx `t.parents.some(...)`) quebrava com um TypeError, derrubando a
+// árvore React inteira só por comentar. Re-hidratar aqui, no único lugar onde
+// os três RPCs terminam, é mais seguro do que confiar em cada call site lembrar
+// de refazer o fetch. Se o re-fetch falhar (ou o card tiver sido apagado entre
+// o RPC e aqui — janela minúscula), cai para a linha crua: incompleta é melhor
+// que um 500 numa ação que já foi persistida com sucesso.
+async function rehydrateOrRaw(taskId: string, row: TaskRecord): Promise<TaskRecord> {
+  const fresh = await getTaskById(taskId).catch(() => null);
+  return fresh ?? row;
+}
+
 /**
  * Edita/exclui um comentário da thread. `expectedAt` é o carimbo que o cliente
  * viu naquela posição: o RPC recusa se não bater, em vez de mexer no comentário
@@ -2093,7 +2128,7 @@ export async function editTaskComment(taskId: string, index: number, expectedAt:
   if (error) throw new HttpError(409, error.message.includes("mudou") ? "Comentário mudou desde que você abriu o card." : "Não foi possível editar o comentário.");
   const row = Array.isArray(data) ? data[0] : data;
   if (!row) throw new HttpError(404, "Tarefa não encontrada.");
-  return row as TaskRecord;
+  return rehydrateOrRaw(taskId, row as TaskRecord);
 }
 
 export async function deleteTaskComment(taskId: string, index: number, expectedAt: string): Promise<TaskRecord> {
@@ -2104,7 +2139,7 @@ export async function deleteTaskComment(taskId: string, index: number, expectedA
   if (error) throw new HttpError(409, error.message.includes("mudou") ? "Comentário mudou desde que você abriu o card." : "Não foi possível excluir o comentário.");
   const row = Array.isArray(data) ? data[0] : data;
   if (!row) throw new HttpError(404, "Tarefa não encontrada.");
-  return row as TaskRecord;
+  return rehydrateOrRaw(taskId, row as TaskRecord);
 }
 
 export async function appendTaskComment(taskId: string, authorId: string, text: string): Promise<TaskRecord> {
@@ -2113,7 +2148,7 @@ export async function appendTaskComment(taskId: string, authorId: string, text: 
   if (error) fail(error);
   const row = Array.isArray(data) ? data[0] : data;
   if (!row) throw new HttpError(404, "Tarefa não encontrada.");
-  return row as TaskRecord;
+  return rehydrateOrRaw(taskId, row as TaskRecord);
 }
 
 // ---- Revisões & Aprovações (admin) -------------------------------------------

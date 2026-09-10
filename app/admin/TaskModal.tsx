@@ -783,7 +783,11 @@ export default function TaskModal({
         t.client_id === chainDelivery.client_id &&
         t.kind === chainDelivery.kind &&
         t.subtype === slot &&
-        !t.parents.some((parent) => parent.id === chainDelivery.id),
+        // `?? []`: um card que chegou de uma resposta crua da API (ex.: RPC de
+        // comentário devolvendo só `t.*`, sem os joins de `mergeTaskAssigneeRow`)
+        // não tem `parents` nenhum — sem a guarda isto quebrava a árvore inteira
+        // (TypeError: Cannot read properties of undefined) só por comentar um card.
+        !(t.parents ?? []).some((parent) => parent.id === chainDelivery.id),
     );
   }
 
@@ -856,7 +860,8 @@ export default function TaskModal({
     return () => { cancelled = true; };
   }, [isNewPlan, draft.clientSlug]);
   const newPlanCandidates = isNewPlan
-    ? newPlanClientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !t.parents.length && !pendingMembers.some((m) => m.kind === "existing" && m.taskId === t.id))
+    // Mesma guarda de baixo (`?? []`): ver comentário em chainCandidates.
+    ? newPlanClientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !(t.parents ?? []).length && !pendingMembers.some((m) => m.kind === "existing" && m.taskId === t.id))
     : [];
   function addPendingExisting(candidate: { id: string; title: string }) {
     setPendingMembers((current) => [...current, { key: `e-${candidate.id}`, kind: "existing", taskId: candidate.id, title: candidate.title }]);
