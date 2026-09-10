@@ -222,6 +222,13 @@ function PlanMemberComposer({
   assignees,
   defaultAssignee,
   defaultDueDate,
+  // Vocabulário real de tipos (mesma fonte que /api/admin/task-types serve ao
+  // NewTaskButton) — sem isto o composer só sabia criar "Tarefa" (ver P0-B: uma
+  // Entrega criada por dentro de um Plano nascia operacional e pelada). Só um
+  // tipo na lista esconde o seletor: é o caso do Plano ainda não salvo, onde o
+  // fluxo de criação de membro não é este (ver comentário em createLinkedActivity).
+  types,
+  defaultType,
   busy,
   onLinkExisting,
   onCreateNew,
@@ -230,15 +237,18 @@ function PlanMemberComposer({
   assignees: string[];
   defaultAssignee: string;
   defaultDueDate: string;
+  types: { key: string; label: string }[];
+  defaultType: string;
   busy: boolean;
   onLinkExisting: (candidate: { id: string; title: string }) => void;
-  onCreateNew: (data: { title: string; assignee: string; due_date: string }) => void;
+  onCreateNew: (data: { title: string; assignee: string; due_date: string; kind: string }) => void;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [formAssignee, setFormAssignee] = useState(defaultAssignee);
   const [formDate, setFormDate] = useState(defaultDueDate);
+  const [formKind, setFormKind] = useState(defaultType);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -261,6 +271,7 @@ function PlanMemberComposer({
   function startCreate() {
     setFormAssignee(defaultAssignee);
     setFormDate(defaultDueDate);
+    setFormKind(defaultType);
     setCreating(true);
     setOpen(false);
   }
@@ -268,7 +279,7 @@ function PlanMemberComposer({
   function submitCreate() {
     const title = query.trim();
     if (!title) return;
-    onCreateNew({ title, assignee: formAssignee, due_date: formDate });
+    onCreateNew({ title, assignee: formAssignee, due_date: formDate, kind: formKind });
     setQuery("");
     setCreating(false);
   }
@@ -278,6 +289,13 @@ function PlanMemberComposer({
       <div className="tm-member-createform">
         <p className="tm-member-createform-title">Nova atividade: “{query.trim()}”</p>
         <div className="kb-modal-row">
+          {types.length > 1 ? (
+            <label className="admin-field"><span>Tipo</span>
+              <select value={formKind} onChange={(e) => setFormKind(e.target.value)}>
+                {types.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select>
+            </label>
+          ) : null}
           <label className="admin-field"><span>Responsável</span>
             <select value={formAssignee} onChange={(e) => setFormAssignee(e.target.value)}>
               <option value="">— Sem responsável —</option>
@@ -875,13 +893,22 @@ export default function TaskModal({
 
   // Same idea for an already-saved plan: creates the activity straight away
   // (instead of queueing) and links it via plan_id in the same request.
-  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string }) {
+  //
+  // O `kind` vem de quem chamou (o seletor do PlanMemberComposer), nunca mais
+  // cravado em "operacional" — era isso que fazia uma atividade "Entrega"
+  // criada por dentro do plano nascer como Tarefa comum, e só quebrar de
+  // verdade quando alguém trocava o Tipo depois num PATCH avulso (P0-B: o card
+  // ficava com `kind: criativo` mas sem `flow_parent`, sem peso congelado, sem
+  // etapa nenhuma). A porta é a mesma do NewTaskButton — POST
+  // /api/admin/tasks?scope=task — então um tipo `behavior:'entrega'` já
+  // cascateia sozinho (createFlowDelivery), sem lógica nova aqui.
+  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string; kind: string }) {
     if (!liveTask) return;
     setBusy(true);
     setError("");
     const body: Record<string, unknown> = {
       title: data.title,
-      kind: "operacional",
+      kind: data.kind,
       assignee: data.assignee || null,
       due_date: data.due_date || null,
       start_date: data.due_date || null,
@@ -896,6 +923,17 @@ export default function TaskModal({
       });
       if (!res.ok) throw new Error();
       onTaskPatched?.(await res.json());
+      // Para um tipo Entrega, a resposta é a PRIMEIRA ETAPA — quem realmente
+      // entrou no plano foi a entrega (route.ts liga `flow.delivery.id`, não a
+      // etapa), e a resposta do POST não a traz. Sem reler os filhos do plano,
+      // a caixa "Atividades do plano" fica sem o membro novo até um reload —
+      // o card existe certo no banco, só não aparece na hora.
+      const related = await fetch(`/api/admin/tasks?parentId=${encodeURIComponent(liveTask.id)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      if (Array.isArray(related?.tasks)) {
+        for (const relatedTask of related.tasks as TaskRecord[]) onTaskPatched?.(relatedTask);
+      }
     } catch {
       setError("Não foi possível criar a atividade.");
     }
@@ -1578,6 +1616,15 @@ export default function TaskModal({
                     assignees={assignees}
                     defaultAssignee={draft.assignee}
                     defaultDueDate={draft.start_date || draft.due_date}
+                    // Plano já salvo (liveTask): oferece o vocabulário real —
+                    // Entrega criada aqui cascateia sozinha (ver
+                    // createLinkedActivity). Plano ainda não salvo (mode="new"):
+                    // addPendingNew só sabe criar Tarefa hoje (fila local, sem
+                    // id de plano ainda) — mostrar outros tipos aqui prometeria
+                    // uma promoção que esse caminho não faz. Fora de escopo
+                    // deste ticket (P0-B); ver relatório do agente.
+                    types={liveTask ? taskTypes.filter((t) => t.creatable && t.behavior !== "plano") : [{ key: "operacional", label: "Tarefa" }]}
+                    defaultType={liveTask ? (taskTypes.find((t) => t.key === "operacional")?.key ?? taskTypes[0]?.key ?? "operacional") : "operacional"}
                     busy={busy}
                     onLinkExisting={(c) => { if (liveTask) void linkMember(c.id, liveTask.id); else addPendingExisting(c); }}
                     onCreateNew={(data) => { if (liveTask) void createLinkedActivity(data); else addPendingNew(data); }}

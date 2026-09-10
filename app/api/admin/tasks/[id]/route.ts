@@ -1,18 +1,29 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getClient, getClientFlowFlags, getTaskById, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
+import { deleteTask, getClient, getClientFlowFlags, getTaskById, promoteTaskToFlowDelivery, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceWeekdays } from "@/lib/recurrence";
-import { recurrenceParentIdOf } from "@/lib/taskRelations";
+import { isFlowDelivery, recurrenceParentIdOf } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
+import { flowDemotionProblem } from "@/lib/flows/demotion";
 import { flowStepKeyOf } from "@/lib/taskRelations";
+import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
 import { notifyProfiles, notifyTaskParticipants } from "@/lib/notifications";
 import { notifiableChange } from "@/lib/notifiableChange";
 import { HttpError, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Mesmo cálculo do POST (app/api/admin/tasks/route.ts) — cada rota resolve o
+// próprio vocabulário porque o `behavior` do tipo é o que decide o que um
+// PATCH de `kind` faz, exatamente como decide o que um POST cria.
+async function taskBehaviorOf(kind: string): Promise<TaskBehavior> {
+  const supabase = await createClient();
+  return findType(await listTaskTypes(supabase), kind)?.behavior ?? "simples";
+}
 
 // GET /api/admin/tasks/[id] — single task, for surfaces (e.g. Plano de Ação's
 // strategic view) that only hold a summary shape and need the full record to
@@ -125,12 +136,40 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
+    // Promoção "tipo comum → Entrega" (P0-B). O POST já faz o equivalente na
+    // CRIAÇÃO (createFlowDelivery); o PATCH não tinha nada parecido, e trocar
+    // o Tipo de uma atividade de plano para uma Entrega deixava o card com
+    // `kind=criativo` e mais nada — confirmado em produção (card `04331233`,
+    // pelado: sem flow_parent, sem peso congelado, sem etapa). `baseTask` é o
+    // que `updateTaskGroup` abaixo vê como "current": depois da promoção ele
+    // já reflete o status/payload novos, senão o resto deste mesmo patch
+    // rotearia contra o card pré-promoção.
+    let baseTask = current;
+    if (typeof patch.kind === "string" && patch.kind !== current.kind) {
+      const nextBehavior = await taskBehaviorOf(patch.kind);
+      if (nextBehavior === "entrega" && !isFlowDelivery(current)) {
+        baseTask = await promoteTaskToFlowDelivery(id, current, patch.kind);
+        // A promoção já decidiu kind/subtype/status (ver
+        // promoteTaskToFlowDelivery) — não deixar o patch original
+        // sobrescrevê-los de volta (ex.: o subtype/status que a atividade
+        // comum já tinha antes da troca de Tipo).
+        delete (patch as Record<string, unknown>).kind;
+        delete (patch as Record<string, unknown>).subtype;
+        delete (patch as Record<string, unknown>).status;
+      } else if (nextBehavior !== "entrega" && isFlowDelivery(current)) {
+        // Caminho inverso (Entrega → tipo comum): recusa com erro claro em vez
+        // de deixar a corrente de etapas órfã. Ver lib/flows/demotion.ts.
+        const problem = flowDemotionProblem(current);
+        if (problem) throw new HttpError(400, problem);
+      }
+    }
+
     // "Plano de Ação" continua sendo um campo único no card, mas agora ele
     // escreve um ELO, não uma coluna: `plan_id` passou a significar só
     // "ocorrência de recorrência". setTaskPlanLink mexe apenas no elo sem
     // slot, para não derrubar as ligações de etapa de uma corrente.
     const { plan_id: planLink, ...taskPatch } = patch as Record<string, unknown>;
-    let task = await updateTaskGroup(id, current, taskPatch, session.userId);
+    let task = await updateTaskGroup(id, baseTask, taskPatch, session.userId);
     if (planLink !== undefined) {
       await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null);
     }

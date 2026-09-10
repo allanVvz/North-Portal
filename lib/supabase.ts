@@ -1642,6 +1642,63 @@ export async function createRecurringFlowDelivery(
   }
 }
 
+/**
+ * Promove um card COMUM (Tarefa, Plano, Checkpoint…) a Entrega, no lugar —
+ * chamada pelo PATCH quando alguém troca o Tipo para um tipo `behavior:'entrega'`
+ * (P0-B). O POST já faz o equivalente na CRIAÇÃO (`createFlowDelivery`), mas
+ * cria um card novo; aqui o card já existe, então a promoção não pode
+ * recriá-lo — ela marca o que já está lá e materializa a primeira etapa.
+ *
+ * Reusa deliberadamente as MESMAS peças que `createFlowDelivery` usa para as
+ * marcas de fluxo (`typeTotalWeight`, `DELIVERY_INITIAL_STATUS`,
+ * `FLOW_PARENT_KEY`/`FLOW_TOTAL_WEIGHT_KEY`/`FLOW_STEP_COUNT_KEY`) — o mesmo
+ * congelamento de peso, para não reescrever depois — e `materializeFirstStep`,
+ * o motor que já resolve exatamente este problema para a ocorrência de uma
+ * entrega recorrente que "nasce vazia" (ver lib/flows/advance.ts). Nenhuma
+ * regra de cascata nova nasce aqui.
+ *
+ * Idempotente por construção: um card que já é `flow_parent` volta sem
+ * mudança nenhuma — promover duas vezes (reenvio, corrida) não duplica etapa
+ * nem reescreve o peso congelado.
+ */
+export async function promoteTaskToFlowDelivery(id: string, current: TaskRecord, nextKind: string): Promise<TaskRecord> {
+  if (isFlowDelivery(current)) return current;
+  const supabase = await createClient();
+  const type = findType(await listTaskTypes(supabase), nextKind);
+  if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
+  const problem = deliveryTypeProblem(type);
+  if (problem) throw new HttpError(400, problem);
+
+  const promoted = await updateTask(id, {
+    kind: type.key,
+    // A troca de Tipo no modal já limpa o subtipo (ver TaskModal pickKind);
+    // aqui é defesa: um subtipo do vocabulário ANTERIOR sobrevivendo à
+    // promoção reprovaria no trigger de vocabulário (tasks_valida_vocabulario)
+    // ou, pior, colidiria por acaso com uma key válida do novo tipo.
+    subtype: null,
+    // Mesma razão de createFlowDelivery: uma entrega existe porque o trabalho
+    // começou, e ela não aparece no quadro — deixá-la em Backlog (o status que
+    // a atividade comum já tinha) a prenderia num arrasto que ninguém vai dar.
+    status: DELIVERY_INITIAL_STATUS,
+    payload: {
+      ...(current.payload ?? {}),
+      [FLOW_PARENT_KEY]: true,
+      [FLOW_TOTAL_WEIGHT_KEY]: typeTotalWeight(type),
+      [FLOW_STEP_COUNT_KEY]: type.subtypes.length,
+    },
+  });
+
+  // Best-effort, como a materialização da ocorrência recorrente: falhar aqui
+  // não pode desfazer a promoção que a pessoa acabou de pedir —
+  // `reconcileFlows` (cron) resgata qualquer entrega sem etapa nenhuma.
+  await materializeFirstStep(createAdminClient(), promoted).catch((error) => {
+    console.error("materializeFirstStep falhou na promocao de card a entrega", { taskId: promoted.id, error });
+  });
+
+  const refreshed = await getTaskById(id);
+  return refreshed ?? promoted;
+}
+
 export async function updateTask(id: string, patch: Record<string, unknown>): Promise<TaskRecord> {
   const supabase = await createClient();
   const { data, error } = await supabase
