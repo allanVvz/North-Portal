@@ -15,6 +15,15 @@ import type { TaskRecord } from "./validation";
 // desligar uma ocorrência recorrente (branch `recurrencePatch`), devolvia o
 // `updateTask` cru em vez de re-hidratar.
 
+// Timeout explícito: estes dois arquivos importam lib/supabase.ts, que puxa o
+// grafo inteiro do app (inclusive @react-pdf/renderer, via lib/reports). O
+// custo é do IMPORT, não do teste — e sob carga ele passa dos 5s default do
+// vitest. Foi exatamente assim que os dois falharam no meio de um
+// `npm run verify` (6503ms e 6389ms) e passaram sozinhos logo em seguida:
+// flakiness de relógio, não de lógica. Um teste cujo tempo é dominado por
+// import não pode viver com o timeout default.
+vi.setConfig({ testTimeout: 30_000 });
+
 type QueryResult = { data: unknown; error: unknown };
 
 function selectBuilder(result: QueryResult) {

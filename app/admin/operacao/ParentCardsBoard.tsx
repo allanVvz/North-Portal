@@ -14,6 +14,7 @@ import { useSortPref, type SortScope } from "../taskSortPrefs";
 import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
 import { subtypeLabel } from "@/lib/taskCatalog";
 import { partsLabel, pendingLabel } from "../parentCounts";
+import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import type { ParentCard } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -128,7 +129,13 @@ export default function ParentCardsBoard({
         <div className="plan-acc">
           {parents.map((d) => {
             const open = openId === d.id;
-            const current = d.activities.length ? d.activities[d.activities.length - 1] : null;
+            // A etapa que o card pai anuncia é a CORRENTE, não a última criada.
+            // As duas coincidem enquanto a corrente só avança — e divergem
+            // exatamente quando importa: uma etapa reaberta (ou `parada`) volta
+            // a ser o trabalho de agora, e o pai continuava anunciando a etapa
+            // seguinte, que ninguém está tocando. Mesma regra do modal, para as
+            // duas telas nunca discordarem sobre onde a entrega está.
+            const current = currentFlowStepOf(d.activities);
             const faltam = pendingLabel(d);
             return (
               <div className={`plan-acc-item ${open ? "open" : ""}`} key={d.id}>
@@ -148,7 +155,12 @@ export default function ParentCardsBoard({
                     <em>
                       {d.clientName} · {showTypeLabel ? `${d.typeLabel} · ` : ""}
                       {partsLabel(d)}
-                      {showStepCount && current ? ` · ${subtypeLabel(current.subtype) || current.title}` : ""}
+                      {/* Etapa E estado da etapa: "Captação · Em produção".
+                          Só a etapa dizia ONDE a entrega está, nunca COMO ela
+                          está — e o status do próprio card pai não serve para
+                          isso (é o carimbo que a cascata deixou, congelado
+                          entre o início e o fim). Ver mirroredParentStatus. */}
+                      {showStepCount && current ? ` · ${subtypeLabel(current.subtype) || current.title} · ${STATUS_LABEL[current.status]}` : ""}
                     </em>
                     <span className={`plan-acc-description ${d.description ? "" : "is-hint"}`}>
                       {d.description || texts.descriptionHint}

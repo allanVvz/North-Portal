@@ -1,5 +1,65 @@
 # Changelog
 
+## 10 de setembro de 2026 — revisão de Fluxos: 4 bugs, um deles derrubava o portal
+
+Branch `fix/fluxos-revisao-e2e`, commits `0efc07c`→`519b7bb`, em produção.
+
+- **O portal caía inteiro ao comentar** (`Application error: a client-side
+  exception has occurred`). O sintoma parecia de front, mas nasce no banco:
+  `append_task_comment` faz `returning t.*`, e `parents` NÃO é coluna de
+  `tasks` — é derivado de `task_links`. O card voltava sem `parents`, entrava no
+  estado do quadro, e `t.parents.some(...)` sem guarda estourava um TypeError.
+  O segundo sintoma relatado (a caixa "Faz parte de" sumir ao comentar num card
+  filho) é a mesma causa, sem crash: `planParentIdOf` lê `(parents ?? [])` e
+  devolve null. Corrigido com re-hidratação no ponto de saída
+  (`rehydrateOrRaw`). A auditoria achou o mesmo defeito **vivo** em
+  `updateTaskGroup` — cujo retorno a rota do PORTAL DO CLIENTE devolvia direto,
+  sem o re-fetch que a rota admin já fazia — e no branch de recorrência de
+  `detachTaskRelation`. Nenhum dos dois tinha sido reportado.
+- **Trocar o Tipo para Entrega não criava a corrente.** A promoção
+  tipo-comum→Entrega só existia no POST (`createFlowDelivery`); o PATCH não
+  tinha equivalente. Dentro de um Plano de Ação a única porta de criação cravava
+  `kind: "operacional"`, então quem queria uma Entrega criava a atividade e
+  trocava o Tipo depois — e sobrava um `criativo` pelado, sem `flow_parent`, sem
+  peso congelado, sem etapa. Agora `promoteTaskToFlowDelivery` no PATCH
+  (idempotente, reusa a cascata), o composer do plano oferece o vocabulário real
+  de tipos, e o caminho inverso é recusado com 400 em vez de deixar etapas
+  órfãs. **Backfill aplicado em produção** (migração `20260909180000`): 1 card.
+  O corte `created_at >= '2026-08-30'` é essencial — sem ele o mesmo filtro bate
+  em ~20 cards `criativo` legítimos anteriores à cascata, e promovê-los seria o
+  mesmo bug ao contrário.
+- **Progresso proporcional à corrente inteira.** Cada etapa vale N "casas", e N
+  é quantas paradas do funil aquele card atravessa: 5 com revisão e aprovação, 4
+  sem aprovação, 3 sem nenhuma — lido de `requires_review`/`requires_approval`
+  do próprio card, então `taskProgress` continua puro e síncrono. A mudança de
+  fato é que **entrar** numa etapa já conta uma casa: num fluxo, a etapa existir
+  é prova de que a anterior foi aprovada. Fluxo de 4 etapas com roteiro
+  concluído e captação em Entrada marca 31%, e não 25%. `STATUS_PCT.backlog`
+  continua 0 — a régua nova só vale dentro de uma entrega, para não regredir o
+  percentual de Tarefa solta, Checkpoint e membro comum de Plano.
+- **O card pai espelha a etapa corrente** (`mirroredParentStatus`). A entrega
+  não é arrastada por ninguém, e a coluna `status` dela ficava congelada
+  enquanto as etapas andavam: roteiro em revisão, pai ainda dizendo "Em
+  produção". Espelhado e **não persistido**, pelo mesmo princípio do progresso.
+  O status espelhado pode retroceder (a Entrada da segunda etapa); a barra não,
+  porque soma casas acumuladas — a segunda entrada é a quinta casa de dezesseis.
+- **Comentário no card pai grava na etapa corrente**, nas duas portas. A do
+  portal do cliente gravava sempre no id da URL, e o caso não é hipotético:
+  `deliveryStatusOnFinish` põe a própria entrega em `aprovacao` quando o cliente
+  é aprovador e não há revisor. A regra virou `lib/flows/commentTarget.ts`, e
+  roda com o client de serviço — a etapa raramente é `client_visible`, então
+  lendo os elos com a sessão do cliente a corrente voltaria vazia e o desvio
+  silenciosamente não aconteceria.
+- **O card pai agora se identifica como pai** (selo "Criativo · card pai" no
+  lugar de um seletor de Subtipo que não fazia sentido ali), e a caixa "Faz
+  parte de" deixou de ser exclusiva de card filho — era isso que fazia um modal
+  mostrar só o plano e o outro só as etapas, quando os dois deveriam mostrar as
+  duas coisas particionadas.
+
+Pendente: as 4 specs em `e2e/` foram escritas mas dependem de execução manual.
+`plan/FLUXOS-COMPOSICAO.md` mapeia as composições ainda inexistentes — nenhuma
+precisa de migração, porque `task_links` não restringe tipo no schema.
+
 ## 2 de setembro de 2026 — fluxo de conversão ligado (dormente) para os 6 clientes
 
 Commit `a059199` + configuração em produção.

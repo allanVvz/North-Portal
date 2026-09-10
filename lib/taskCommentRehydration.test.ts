@@ -15,6 +15,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // deleteTaskComment agora devolvem o card RE-HIDRATADO — com `parents`
 // preenchido — e não a linha crua do RPC, exceto quando o re-fetch falha.
 
+// Timeout explícito: estes dois arquivos importam lib/supabase.ts, que puxa o
+// grafo inteiro do app (inclusive @react-pdf/renderer, via lib/reports). O
+// custo é do IMPORT, não do teste — e sob carga ele passa dos 5s default do
+// vitest. Foi exatamente assim que os dois falharam no meio de um
+// `npm run verify` (6503ms e 6389ms) e passaram sozinhos logo em seguida:
+// flakiness de relógio, não de lógica. Um teste cujo tempo é dominado por
+// import não pode viver com o timeout default.
+vi.setConfig({ testTimeout: 30_000 });
+
 type QueryResult = { data: unknown; error: unknown };
 
 // `.from("tasks").select(...).eq(...).limit(1)` — o formato de getTaskById.
