@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { appendTaskComment, deleteTaskComment, editTaskComment, getTaskById, listRelatedTasks } from "@/lib/supabase";
+import { appendTaskComment, deleteTaskComment, editTaskComment, getTaskById } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { notifyTaskParticipants, taskCommentedMessage } from "@/lib/notifications";
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleConversionComment } from "@/lib/automations/conversionFlow";
-import { flowStepsOf, isFlowDelivery } from "@/lib/taskRelations";
-import { currentFlowStepOf } from "@/lib/flows/currentStep";
+import { flowCommentTargetId } from "@/lib/flows/commentTarget";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
 export const runtime = "nodejs";
@@ -22,17 +21,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { text } = taskCommentCreateSchema.parse(await request.json());
     // Comentar no card PAI (a entrega) grava o comentário na ETAPA CORRENTE,
     // não no pai — a LEITURA não muda (mergeFamilyComments já junta tudo no
-    // pai), só o destino da ESCRITA (P1-D). Plano de Ação fica de fora de
-    // propósito: ali o comentário continua no próprio plano, então só desvia
-    // quando `id` é uma entrega de verdade (isFlowDelivery).
+    // pai), só o destino da ESCRITA (P1-D). A regra inteira mora em
+    // lib/flows/commentTarget.ts porque a outra porta de comentário (o portal
+    // do cliente) precisa responder exatamente a mesma coisa; ver o cabeçalho
+    // daquele módulo.
     const parent = await getTaskById(id);
-    let targetId = id;
-    if (parent && isFlowDelivery(parent)) {
-      const steps = flowStepsOf(id, await listRelatedTasks(id));
-      // Sem etapa nenhuma ainda (entrega recém-criada, corrente vazia):
-      // continua comentando na própria entrega — não há para onde desviar.
-      targetId = currentFlowStepOf(steps)?.id ?? id;
-    }
+    const targetId = parent ? await flowCommentTargetId(createAdminClient(), parent) : id;
     const task = await appendTaskComment(targetId, session.userId, text);
     // handleConversionComment e notifyTaskParticipants leem o id EFETIVO (a
     // etapa), não o da URL — é o card que de fato recebeu o comentário, e é

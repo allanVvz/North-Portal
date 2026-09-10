@@ -27,6 +27,7 @@ import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindI
 import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
+import { mirroredParentStatus } from "@/lib/flows/parentStatus";
 import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
 import type { AdminDocument } from "@/lib/supabase";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
@@ -75,7 +76,12 @@ export type TaskCreationPrefill = { clientSlug?: string; status?: TaskStatus; as
 
 type PendingMember =
   | { key: string; kind: "existing"; taskId: string; title: string }
-  | { key: string; kind: "new"; title: string; assignee: string; due_date: string };
+  // `taskKind` e não `kind`: `kind` já é o discriminante desta união ("existing"
+  // / "new"). O tipo do card que vai nascer é outro eixo — e é justamente ele
+  // que faltava, o que fazia o mesmo composer criar Entrega quando o plano já
+  // existia e Tarefa quando não existia (o sintoma "o mesmo botão dá resultado
+  // diferente conforme a tela").
+  | { key: string; kind: "new"; taskKind: string; title: string; assignee: string; due_date: string };
 
 function draftFrom(
   task: TaskRecord | null,
@@ -912,8 +918,9 @@ export default function TaskModal({
   function addPendingExisting(candidate: { id: string; title: string }) {
     setPendingMembers((current) => [...current, { key: `e-${candidate.id}`, kind: "existing", taskId: candidate.id, title: candidate.title }]);
   }
-  function addPendingNew(data: { title: string; assignee: string; due_date: string }) {
-    setPendingMembers((current) => [...current, { key: `n-${Date.now()}-${current.length}`, kind: "new", ...data }]);
+  function addPendingNew(data: { title: string; assignee: string; due_date: string; kind: string }) {
+    const { kind: taskKind, ...rest } = data;
+    setPendingMembers((current) => [...current, { key: `n-${Date.now()}-${current.length}`, kind: "new", taskKind, ...rest }]);
   }
   function removePendingMember(key: string) {
     setPendingMembers((current) => current.filter((m) => m.key !== key));
@@ -1208,9 +1215,14 @@ export default function TaskModal({
               body: JSON.stringify({ plan_id: savedTask.id }),
             });
           }
+          // Mesma porta (`?scope=task`) e mesmo `kind` escolhido no composer:
+          // um tipo com behavior 'entrega' cascateia sozinho no servidor (ver
+          // createFlowDelivery na rota), exatamente como quando o plano já
+          // existia. Antes isto cravava "operacional", e era o último lugar
+          // onde a regra "uma porta só de criação" ainda não valia.
           const memberBody: Record<string, unknown> = {
             title: member.title,
-            kind: "operacional",
+            kind: member.taskKind,
             assignee: member.assignee || null,
             due_date: member.due_date || null,
             start_date: member.due_date || null,
@@ -1265,7 +1277,24 @@ export default function TaskModal({
 
   // -1 quando o card está parado: nenhuma etapa aparece cumprida, que é a
   // leitura certa para um card que travou em vez de avançar.
-  const stepIdx = WORKFLOW_ORDER.indexOf(draft.status);
+  // O status que o CABEÇALHO mostra. Para um card comum é o do rascunho; para
+  // uma ENTREGA é o espelho da etapa corrente (lib/flows/parentStatus.ts).
+  //
+  // A entrega não é arrastada por ninguém — o status dela na coluna `status` é
+  // só o carimbo que a cascata deixou (nasce em `em_producao`, vai para
+  // revisão/aprovação quando a última etapa fecha). Entre esses dois momentos
+  // ele ficava CONGELADO enquanto as etapas andavam, e era isso que fazia o
+  // card pai mentir: roteiro em revisão, pai ainda dizendo "Em produção".
+  // Espelhado, e não persistido, pelo mesmo motivo do progresso — ver o
+  // comentário de `mirroredParentStatus`.
+  const mirroredStatus = isDelivery ? mirroredParentStatus(chainSteps) : null;
+  const displayStatus = mirroredStatus ?? draft.status;
+  // Só um card que tem status PRÓPRIO pode ter o status trocado pelo stepper.
+  // Numa entrega espelhada, clicar ali escreveria na coluna do pai um valor
+  // que a próxima etapa a mudar sobrescreveria na tela — um controle que não
+  // controla nada.
+  const stepperEditable = mirroredStatus === null;
+  const stepIdx = WORKFLOW_ORDER.indexOf(displayStatus);
 
   return (
     <>
@@ -1356,8 +1385,10 @@ export default function TaskModal({
                   <button
                     type="button"
                     key={column.status}
-                    className={`tm-step ${column.status !== "parada" && stepIdx >= 0 && WORKFLOW_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${draft.status === column.status ? "current" : ""} ${column.status === "parada" ? "tm-step-halt" : ""}`}
-                    onClick={() => set("status", column.status)}
+                    className={`tm-step ${column.status !== "parada" && stepIdx >= 0 && WORKFLOW_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${displayStatus === column.status ? "current" : ""} ${column.status === "parada" ? "tm-step-halt" : ""}`}
+                    onClick={() => { if (stepperEditable) set("status", column.status); }}
+                    disabled={!stepperEditable}
+                    title={stepperEditable ? undefined : "O status da entrega espelha a etapa corrente — mova a etapa, não o pai."}
                   >
                     <span className="tm-step-dot" />
                     <span className="tm-step-label">{column.label}</span>
@@ -1556,7 +1587,7 @@ export default function TaskModal({
               </Cell>
 
               <Cell icon="⚑" label="Status" hidden={!visible("status")}>
-                <span className="tm-cell-static">{STATUS_LABEL[draft.status]}</span>
+                <span className="tm-cell-static">{STATUS_LABEL[displayStatus]}</span>
               </Cell>
               <Cell icon="⚑" label="Prioridade" hidden={!visible("priority")}>
                 <select value={draft.priority} onChange={(e) => set("priority", e.target.value as TaskPriority)}>
@@ -1655,7 +1686,10 @@ export default function TaskModal({
                       <div className="tm-member" key={m.key}>
                         <button type="button" className="tm-member-unlink" title="Remover" aria-label={`Remover ${m.title}`} onClick={() => removePendingMember(m.key)}>✕</button>
                         <span className="tm-member-open tm-member-pending">
-                          <TaskKindIcon kind="operacional" size="sm" />
+                          {/* O ícone do tipo que a pessoa escolheu — antes era
+                              sempre o de Tarefa, e a fila mostrava um ✦ Entrega
+                              disfarçado de ⚙ Tarefa até o plano ser salvo. */}
+                          <TaskKindIcon kind={m.kind === "new" ? m.taskKind : "operacional"} size="sm" />
                           <span className="tm-member-title">{m.title}</span>
                           <span className="tm-member-status">
                             {m.kind === "existing" ? "Vincular ao criar" : [m.assignee, m.due_date].filter(Boolean).join(" · ") || "Criar ao salvar"}
@@ -1676,15 +1710,14 @@ export default function TaskModal({
                     assignees={assignees}
                     defaultAssignee={draft.assignee}
                     defaultDueDate={draft.start_date || draft.due_date}
-                    // Plano já salvo (liveTask): oferece o vocabulário real —
-                    // Entrega criada aqui cascateia sozinha (ver
-                    // createLinkedActivity). Plano ainda não salvo (mode="new"):
-                    // addPendingNew só sabe criar Tarefa hoje (fila local, sem
-                    // id de plano ainda) — mostrar outros tipos aqui prometeria
-                    // uma promoção que esse caminho não faz. Fora de escopo
-                    // deste ticket (P0-B); ver relatório do agente.
-                    types={liveTask ? taskTypes.filter((t) => t.creatable && t.behavior !== "plano") : [{ key: "operacional", label: "Tarefa" }]}
-                    defaultType={liveTask ? (taskTypes.find((t) => t.key === "operacional")?.key ?? taskTypes[0]?.key ?? "operacional") : "operacional"}
+                    // O MESMO vocabulário nos dois casos — plano já salvo ou
+                    // ainda não. Com o plano salvo o card nasce na hora
+                    // (createLinkedActivity); sem ele o membro fica numa fila
+                    // local e nasce em `save()`, pela mesma rota e com o mesmo
+                    // `kind`. Ter dois vocabulários aqui era o próprio bug que
+                    // este ticket veio corrigir, só que um nível abaixo.
+                    types={taskTypes.filter((t) => t.creatable && t.behavior !== "plano")}
+                    defaultType={taskTypes.find((t) => t.key === "operacional")?.key ?? taskTypes[0]?.key ?? "operacional"}
                     busy={busy}
                     onLinkExisting={(c) => { if (liveTask) void linkMember(c.id, liveTask.id); else addPendingExisting(c); }}
                     onCreateNew={(data) => { if (liveTask) void createLinkedActivity(data); else addPendingNew(data); }}

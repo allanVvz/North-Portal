@@ -3,6 +3,9 @@ import { apiError } from "@/lib/api";
 import { notifyTaskParticipants, statusChangedMessage, taskCommentedMessage } from "@/lib/notifications";
 import { getProfileName, getTaskById, updateTaskGroup } from "@/lib/supabase";
 import { requireClientAccess } from "@/lib/supabase/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { appendedCommentPayload, getAdminTask } from "@/lib/automations/taskAccess";
+import { flowCommentTargetId } from "@/lib/flows/commentTarget";
 import { clientApprovalActionSchema, HttpError, validateSlug } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -39,16 +42,39 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     if (action === "aprovar") {
       patch.status = "aprovado";
     }
+    // O comentário do cliente segue a MESMA regra do lado admin: escrito num
+    // card de entrega, ele é gravado na ETAPA CORRENTE, não no pai (ver
+    // lib/flows/commentTarget.ts). Não é um caso de canto: quando o cliente é
+    // o aprovador e não há revisor, `deliveryStatusOnFinish` põe a PRÓPRIA
+    // entrega em `aprovacao` — então "Solicitar ajustes" é clicado justamente
+    // sobre uma entrega, e sem este desvio o feedback caía no card pai
+    // enquanto o mesmo texto, escrito pelo admin, ia para a etapa.
+    //
+    // O STATUS continua sendo do pai: aprovar a entrega é aprovar a entrega.
+    // Só a escrita do comentário é que se desloca — por isso as duas coisas
+    // deixaram de viajar no mesmo `patch`.
+    const admin = createAdminClient();
+    const commentTargetId = await flowCommentTargetId(admin, task);
     let commentAuthor: string | null = null;
     if (comment?.trim()) {
-      const existing = task.payload as Record<string, unknown>;
-      const comments = Array.isArray(existing.comments) ? existing.comments : [];
-      const authorName = (await getProfileName(session.userId)) ?? session.email ?? "Cliente";
-      commentAuthor = authorName;
-      patch.payload = {
-        ...existing,
-        comments: [...comments, { author: authorName, text: comment.trim(), at: new Date().toISOString() }],
-      };
+      commentAuthor = (await getProfileName(session.userId)) ?? session.email ?? "Cliente";
+      if (commentTargetId === id) {
+        patch.payload = appendedCommentPayload(task.payload, comment.trim(), commentAuthor);
+      } else {
+        // Client de SERVIÇO: a etapa não é `client_visible`, então a sessão do
+        // cliente não tem permissão de escrever nela (política "tasks client
+        // approve own" cobre só o card que ele aprova). Mesmo precedente de
+        // lib/flows/advance.ts, que cria a etapa seguinte quando é o cliente
+        // quem conclui a atual.
+        const step = await getAdminTask(admin, commentTargetId);
+        if (step) {
+          const { error } = await admin
+            .from("tasks")
+            .update({ payload: appendedCommentPayload(step.payload, comment.trim(), commentAuthor), updated_at: new Date().toISOString() })
+            .eq("id", commentTargetId);
+          if (error) throw error;
+        }
+      }
     }
 
     const updated = await updateTaskGroup(id, task, patch, session.userId);
@@ -59,8 +85,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     // entrada de ninguém), coisa que nunca chegou a ser ligada. A regra é lida
     // dentro do banco, o que aqui é obrigatório: `site_settings` tem RLS
     // admin-only e uma sessão de cliente não conseguiria consultá-la.
+    // Notifica o card que REALMENTE recebeu o comentário — o leque de
+    // participantes da etapa é quem precisa ler o pedido de ajuste, e é lá que
+    // o texto está.
     if (commentAuthor) {
-      await notifyTaskParticipants(id, "task_commented", taskCommentedMessage(task.title, commentAuthor));
+      await notifyTaskParticipants(commentTargetId, "task_commented", taskCommentedMessage(task.title, commentAuthor));
     }
     if (action === "aprovar") {
       await notifyTaskParticipants(id, "task_status_changed", statusChangedMessage(task.title, "aprovado"));
