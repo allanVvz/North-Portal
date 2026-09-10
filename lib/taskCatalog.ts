@@ -9,6 +9,7 @@
 import { TASK_STATUSES, type TaskRecord, type TaskStatus } from "@/lib/validation";
 import { FLOW_PARENT_KEY } from "@/lib/taskRelations";
 import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
+import { flowStepPct } from "@/lib/flows/flowProgress";
 
 // ---- Kinds --------------------------------------------------------------------
 
@@ -151,6 +152,16 @@ export const subtypeLabel = (subtype: string | null | undefined) =>
 //
 // Consequência assumida: card de Tarefa em "Em produção" vai de 60% para 35%,
 // e Entrega concluída vai de 90% para 100%.
+//
+// `backlog: 0` continua valendo aqui de propósito, mesmo depois de P1-C
+// (progresso por "casas" dentro de um fluxo) ter feito uma etapa de fluxo
+// contar uma casa só por existir. Essa régua nova é do FLUXO, não deste mapa
+// global — mora em lib/flows/flowProgress.ts e só é usada dentro do rollup de
+// uma entrega (ver flowMemberPct em rollupProgress, abaixo). Mudar o 0 aqui
+// regrediria toda tela que chama taskProgress FORA de um fluxo: uma Tarefa
+// comum ou um Checkpoint em Entrada não fez trabalho nenhum, então continuam
+// em 0% — só uma etapa de entrega tem a garantia de que "existir" já significa
+// que a etapa anterior foi aprovada.
 export const STATUS_PCT: Partial<Record<TaskStatus, number>> = {
   backlog: 0,
   em_producao: 35,
@@ -176,6 +187,12 @@ type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight"> & {
   id?: string;
   recurrence_cadence?: TaskRecord["recurrence_cadence"];
   payload?: TaskRecord["payload"];
+  // Só lidas dentro de um rollup de ENTREGA (ver flowMemberPct) — a régua de
+  // casas do fluxo depende delas. Opcionais para não quebrar os dezenas de
+  // call sites que montam um ProgressTask sem pensar em fluxo; ausentes,
+  // valem como falsy (regra "nenhuma das duas" = 3 casas).
+  requires_review?: TaskRecord["requires_review"];
+  requires_approval?: TaskRecord["requires_approval"];
 };
 
 /** Key an automation writes into payload when it halts a card into `parada`,
@@ -225,9 +242,15 @@ export function isRollupParent(task: ProgressTask): boolean {
  *   rollup of their children. A delivery divides by the template snapshot
  *   (FLOW_TOTAL_WEIGHT_KEY) so steps not materialized yet still count against
  *   it; the others divide by the weight of the members they actually have.
+ *   Dentro de uma entrega, cada etapa-membro entra na média pela régua de
+ *   "casas" de lib/flows/flowProgress.ts (flowMemberPct), não pelo statusPct
+ *   comum — é o que faz uma etapa recém-nascida em Entrada já valer alguma
+ *   coisa (a etapa anterior foi aprovada), sem tocar no statusPct global que
+ *   as outras telas usam.
  * - `parada` (automation halted the card): frozen at the percentage of
  *   whatever status it was in right before halting (payload.pre_parada_status).
- * - Everything else: the percentage for the card's current status.
+ * - Everything else (Tarefa comum, Checkpoint, membro solto de Plano):
+ *   the percentage for the card's current status, via STATUS_PCT — inalterado.
  * Pass `members` (tasks whose plan_id === this card's id) for plan rollups.
  * Pass `membersByParent` too when a member can itself be a parent — a delivery
  * inside a Plano de Ação, say. Without it a nested parent is asked for its own
@@ -264,6 +287,27 @@ export function taskProgress(
   return progressOf(task, members, membersByParent, new Set());
 }
 
+/** Percentual (0–100) de UMA etapa de fluxo, na régua de casas que vale para
+ * ela (lib/flows/flowProgress.ts). É o "statusPct de dentro de um fluxo": o
+ * número que entra na média ponderada por progress_weight no lugar do
+ * statusPct comum — mesma forma, régua diferente.
+ *
+ * `parada` segue a mesma regra congelada de fora do fluxo: se a automação
+ * anotou de onde o card veio (PRE_PARADA_STATUS_KEY), a etapa fica travada
+ * naquele degrau da SUA PRÓPRIA régua; sem a anotação, 0 — mesma rede de
+ * segurança do caminho comum, para não inventar progresso de um dado incompleto. */
+function flowMemberPct(task: ProgressTask): number {
+  const flags = { requires_review: task.requires_review, requires_approval: task.requires_approval };
+  if (task.status === "parada") {
+    const frozen = task.payload?.[PRE_PARADA_STATUS_KEY];
+    if (typeof frozen === "string" && (TASK_STATUSES as readonly string[]).includes(frozen)) {
+      return flowStepPct(frozen as TaskStatus, flags);
+    }
+    return 0;
+  }
+  return flowStepPct(task.status, flags);
+}
+
 function rollupProgress(
   task: ProgressTask,
   members: ProgressTask[],
@@ -273,10 +317,21 @@ function rollupProgress(
   const memberWeight = members.reduce((s, m) => s + (m.progress_weight || 1), 0);
   const totalWeight = flowTotalWeight(task) || memberWeight;
   if (totalWeight === 0) return 0;
-  const weighted = members.reduce(
-    (s, m) => s + progressOf(m, membersByParent?.get(m.id ?? "") ?? [], membersByParent, seen) * (m.progress_weight || 1),
-    0,
-  );
+  // Só uma ENTREGA aplica a régua de casas aos próprios membros — Plano de
+  // Ação e pai de recorrência continuam com a média ponderada por statusPct
+  // comum (via progressOf), porque os membros deles não são etapas de um
+  // funil único: são atividades soltas ou ocorrências inteiras, cada uma já
+  // dona do próprio progresso. Um membro que É ele mesmo um pai (a entrega
+  // dentro de um Plano, a ocorrência dentro do molde recorrente) também cai
+  // no caminho antigo — a régua de casas só faz sentido para uma etapa FOLHA,
+  // com status próprio, não para um rollup que já devolve 0–100 sozinho.
+  const isFlow = task.payload?.[FLOW_PARENT_KEY] === true;
+  const weighted = members.reduce((s, m) => {
+    const pct = isFlow && !isRollupParent(m)
+      ? flowMemberPct(m)
+      : progressOf(m, membersByParent?.get(m.id ?? "") ?? [], membersByParent, seen);
+    return s + pct * (m.progress_weight || 1);
+  }, 0);
   return Math.round(weighted / totalWeight);
 }
 

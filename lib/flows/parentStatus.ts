@@ -36,3 +36,32 @@ export function deliveryIsFinished(
   if (steps.length < totalSteps) return false;
   return steps.every((step) => Boolean(step.completed_at));
 }
+
+/**
+ * O status que o card PAI deve MOSTRAR — o da etapa corrente da corrente:
+ * a mais antiga ainda sem `completed_at`, ou a última quando a corrente já
+ * terminou (nenhuma etapa em aberto). "Roteiro em revisão" → pai mostra
+ * revisão; "roteiro concluído, captação em Entrada" → pai mostra Entrada.
+ *
+ * De propósito NÃO é persistida em `tasks.status` — mesmo princípio já
+ * documentado para o progresso ("Progresso de pai é sempre rollup dos
+ * filhos; nunca persistido", docs/ARQUITETURA-TAREFAS.md): quem for exibir o
+ * status de uma entrega (a etapa família no modal, o card de Operação) chama
+ * isto sobre as etapas atuais em vez de ler `delivery.status` do banco. Isso
+ * também é o que deixa a regra "o progresso nunca retrocede" sair de graça:
+ * `taskProgress` soma casas de TODAS as etapas materializadas, concluídas
+ * inclusive, e nunca lê este valor — o status espelhado pode voltar para
+ * Entrada na etapa seguinte sem que uma única casa já conquistada suma.
+ *
+ * `orderedSteps` precisa vir na ordem da corrente (posição do elo — ver
+ * `stepOrderOf`/`flowStepsOf` em lib/taskRelations.ts); esta função não
+ * ordena, só percorre. `null` quando a entrega ainda não tem etapa nenhuma
+ * (vazia, esperando `materializeFirstStep`) — não há o que espelhar.
+ */
+export function mirroredParentStatus<T extends Pick<TaskRecord, "status" | "completed_at">>(
+  orderedSteps: readonly T[],
+): TaskStatus | null {
+  if (orderedSteps.length === 0) return null;
+  const current = orderedSteps.find((step) => !step.completed_at) ?? orderedSteps[orderedSteps.length - 1];
+  return current.status;
+}
