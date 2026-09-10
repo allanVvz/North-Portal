@@ -3091,6 +3091,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-headpick-trigger:hover { background: rgba(255,255,255,.5); color: var(--a-ink); }
 .tm-headpick-label { display: inline-flex; align-items: center; gap: 4px; }
 .tm-headpick-ico { font-size: 11px; }
+/* "card pai" (P1-D2) — mesma pílula do Subtipo que substitui, mas sem caret de
+   dropdown (não é clicável: a entrega não ocupa slot, então não tem subtipo
+   pra escolher) e com um respiro/tom próprio para não passar por texto
+   incolor perdido no meio dos outros metadados do cabeçalho. Classe pura
+   (sem `elemento.classe`) para não brigar com a cascata do cabeçalho. */
+.tm-head-parentflag { font-weight: 700; color: var(--a-teal-text); background: var(--a-teal-soft); padding: 2px 8px; border-radius: 999px; }
 .tm-headpick-caret { font-size: 10px; color: var(--a-muted); transition: transform .16s ease; }
 .tm-headpick-caret.on { transform: rotate(180deg); }
 .tm-headpick-panel {

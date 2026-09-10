@@ -26,6 +26,7 @@ import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
+import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
 import type { AdminDocument } from "@/lib/supabase";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
@@ -673,7 +674,13 @@ export default function TaskModal({
 
   // O mesmo, para o Plano de Ação a que o card pertence (elo sem slot). Igual à
   // entrega, o plano não aparece no quadro, então o normal é buscar por id.
-  const planParentId = liveTask && !isDelivery && !isRecurringParent && !kindDef(liveTask.kind).isPlan
+  //
+  // SEM excluir `isDelivery` de propósito (P1-D3): quando o fluxo nasce "por
+  // dentro" de um plano, é a ENTREGA que carrega o `plan_id` direto — a rota
+  // de criação liga `flow.delivery.id` ao plano, não uma das etapas. Excluir
+  // isDelivery aqui era o que fazia o card que É a entrega nunca mostrar "Faz
+  // parte de": a caixa de etapas (FlowStepsBox) aparecia, a de plano nunca.
+  const planParentId = liveTask && !isRecurringParent && !kindDef(liveTask.kind).isPlan
     ? planParentIdOf(liveTask)
     : null;
   useEffect(() => {
@@ -759,35 +766,56 @@ export default function TaskModal({
   // ele é a entrega, as do pai quando ele é uma etapa.
   const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
 
-  // As caixas "Faz parte de" do modal de um FILHO: uma linha enxuta por card
-  // pai (entrega, plano, molde de recorrência), só para navegar. Um card pode
-  // ser etapa de uma entrega E atividade de um plano ao mesmo tempo, daí a lista.
-  const parentBoxes: { parent: TaskRecord; subtitle: string; progress: number }[] = [];
-  if (liveTask && !isDelivery && !kd.isPlan) {
-    if (flowDelivery) {
+  // As caixas "Faz parte de": uma linha enxuta por card pai (entrega, plano,
+  // molde de recorrência), só para navegar. Um card pode ter mais de uma ao
+  // mesmo tempo (etapa de uma entrega E atividade de um plano; ou entrega E
+  // ocorrência de um fluxo recorrente), daí a lista.
+  //
+  // QUAIS relações valem para este card vêm de `relevantParentRelationKinds`
+  // (lib/flows/parentBoxes.ts, função pura testada) — não são decididas aqui
+  // de novo. Antes, esta lista E a condição do placeholder "Carregando card
+  // pai…" (mais abaixo) repetiam cada uma a sua própria combinação de flags,
+  // e as duas divergiram: a de recorrência excluía `isDelivery` aqui mas não
+  // na condição do placeholder, o que deixava uma entrega-ocorrência de fluxo
+  // recorrente (flow_parent + recurrence_parent_id ao mesmo tempo) presa em
+  // "Carregando card pai…" para sempre — o id da recorrência existia, mas
+  // nenhuma caixa nascia para preenchê-lo. Com as duas nascendo do mesmo
+  // `parentSlots`, não tem como voltar a divergir.
+  const parentRelationKinds = liveTask ? relevantParentRelationKinds({ isDelivery, isPlan: Boolean(kd.isPlan) }) : [];
+  const parentSlotOf = (kind: ParentRelationKind): { id: string | null; parent: TaskRecord | null; subtitle: string; progress: number } => {
+    if (kind === "entrega") {
       const total = deliveryType?.subtypes.length ?? 0;
-      const stepLabel = subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo";
-      parentBoxes.push({
+      const stepLabel = liveTask ? subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo" : "";
+      return {
+        id: flowDeliveryId,
         parent: flowDelivery,
         subtitle: flowStepIndex >= 0 && total ? `Etapa ${flowStepIndex + 1} de ${total} · ${stepLabel}` : stepLabel,
-        progress: taskProgress(flowDelivery, chainSteps),
-      });
+        progress: flowDelivery ? taskProgress(flowDelivery, chainSteps) : 0,
+      };
     }
-    if (planParent) {
-      parentBoxes.push({
+    if (kind === "plano") {
+      return {
+        id: planParentId,
         parent: planParent,
         subtitle: "Atividade do plano",
-        progress: taskProgress(planParent, actionPlanMembersOf(planParent.id, clientTasks)),
-      });
+        progress: planParent ? taskProgress(planParent, actionPlanMembersOf(planParent.id, clientTasks)) : 0,
+      };
     }
-    if (recurrenceParent) {
-      parentBoxes.push({
-        parent: recurrenceParent,
-        subtitle: "Execução da recorrência",
-        progress: taskProgress(recurrenceParent, recurrenceExecutionsOf(recurrenceParent.id, clientTasks)),
-      });
-    }
-  }
+    return {
+      id: recurrenceParentId,
+      parent: recurrenceParent,
+      subtitle: "Execução da recorrência",
+      progress: recurrenceParent ? taskProgress(recurrenceParent, recurrenceExecutionsOf(recurrenceParent.id, clientTasks)) : 0,
+    };
+  };
+  const parentSlots = parentRelationKinds.map(parentSlotOf);
+  const parentBoxes = parentSlots
+    .filter((slot): slot is { id: string | null; parent: TaskRecord; subtitle: string; progress: number } => Boolean(slot.parent))
+    .map((slot) => ({ parent: slot.parent, subtitle: slot.subtitle, progress: slot.progress }));
+  // Um slot cujo id já se conhece mas cujo card pai ainda não chegou (fetch em
+  // voo) — o placeholder de carregamento usa isto, e só isto, em vez de
+  // recalcular quais relações valem.
+  const pendingParentBox = parentSlots.some((slot) => slot.id && !slot.parent);
 
   /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo tipo, mesmo
    * subtipo, e ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
@@ -1036,7 +1064,15 @@ export default function TaskModal({
       });
       if (!res.ok) throw new Error();
       const updated = await res.json() as TaskRecord;
-      setLiveTask(updated); onTaskPatched?.(updated);
+      // Comentar no PAI grava na etapa corrente (ver lib/flows/currentStep.ts
+      // + a rota) — o servidor pode devolver um card DIFERENTE do que está
+      // aberto aqui. Só troca o `liveTask` quando é o mesmo card; senão,
+      // empurra a etapa atualizada para o estado do quadro (`clientTasks`) e
+      // deixa o thread mesclado (`familyThreadOf`) recalcular a partir dela —
+      // sem esta guarda o modal do pai "virava" a etapa assim que alguém
+      // comentava, porque `updated` passava a ser o card errado.
+      if (updated.id === liveTask.id) setLiveTask(updated);
+      onTaskPatched?.(updated);
     } catch { setComment(text); setError("Não foi possível enviar o comentário."); }
   }
 
@@ -1279,7 +1315,24 @@ export default function TaskModal({
                     </HeadDropdown>
                   </>
                 ) : null}
-                {subtypeOptions.length ? (
+                {isDelivery ? (
+                  // O card da ENTREGA não ocupa slot nenhum — ele É a soma das
+                  // etapas ("Criativo" agregado = roteiro + captação + edição +
+                  // publicação), então o seletor de Subtipo não fazia sentido
+                  // aqui: escolher uma etapa nele não move nada na corrente, só
+                  // reescrevia um campo que o card pai não usa. Bug relatado
+                  // (P1-D2): nada na tela avisava que este card É o pai —
+                  // mostrava só "Subtipo" vazio, igual a qualquer card comum.
+                  <>
+                    <span className="tm-head-sep">·</span>
+                    <span
+                      className="tm-headpick-label tm-head-parentflag"
+                      title="Este card é o pai da corrente: soma todas as etapas do fluxo abaixo."
+                    >
+                      {typeLabelOf(draft.kind)} · card pai
+                    </span>
+                  </>
+                ) : subtypeOptions.length ? (
                   <>
                     <span className="tm-head-sep">·</span>
                     <HeadDropdown
@@ -1513,8 +1566,13 @@ export default function TaskModal({
 
             </div>
 
-            {/* Modal de um FILHO: a(s) caixa(s) "Faz parte de", enxutas e só de
-                navegação. O stepper editável e o 🔗 ficam do lado da entrega. */}
+            {/* A(s) caixa(s) "Faz parte de", enxutas e só de navegação — de uma
+                ETAPA (aponta pra entrega) e/ou de QUALQUER card ligado a um
+                Plano de Ação, incluindo a própria ENTREGA (P1-D3: o elo do
+                plano mora nela quando o fluxo nasce "por dentro" do plano).
+                Renderiza ANTES da caixa de Etapas de propósito — plano em
+                cima, etapas abaixo, quando os dois existem no mesmo card. O
+                stepper editável e o 🔗 ficam do lado da entrega. */}
             {parentBoxes.map((box) => (
               <CardParentBox
                 key={box.parent.id}
@@ -1525,7 +1583,9 @@ export default function TaskModal({
                 onOpen={() => void openRelatedTask(box.parent)}
               />
             ))}
-            {liveTask && !isDelivery && !kd.isPlan && (flowDeliveryId || planParentId || recurrenceParentId) && parentBoxes.length === 0 ? (
+            {/* Deriva de `pendingParentBox` (mesmos `parentSlots` que geram as
+                caixas acima) — não repete a combinação de flags aqui. */}
+            {pendingParentBox ? (
               <div className="tm-box tm-parentbox">
                 <p className="tm-box-label">Faz parte de</p>
                 <p className="admin-sub" style={{ margin: 0 }}>Carregando card pai…</p>
