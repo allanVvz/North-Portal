@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import TaskModal from "./TaskModal";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord } from "@/lib/validation";
+import type { ResponsibilityAssignment } from "@/lib/supabase";
 
 const EMPTY_RELATED_TASKS: TaskRecord[] = [];
 
@@ -51,6 +52,9 @@ export default function CardModalLauncher({
   // Every Responsável option (team + historical names) — the field is a
   // dropdown-only now, never free text.
   const [assignees, setAssignees] = useState<string[]>([]);
+  // Equipe & papéis — só pra colorir o dropdown de responsável e o selo de
+  // papel nos comentários (TaskModal); independente de cliente.
+  const [responsibilityAssignments, setResponsibilityAssignments] = useState<ResponsibilityAssignment[]>([]);
   const rootTaskIdRef = useRef(task.id);
 
   useEffect(() => {
@@ -80,6 +84,10 @@ export default function CardModalLauncher({
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (!cancelled && data?.assignees) setAssignees(data.assignees); })
       .catch(() => { /* Responsável picker just shows the current one */ });
+    fetch("/api/admin/team/responsibilities")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) setResponsibilityAssignments(data); })
+      .catch(() => { /* dropdown/comentário simplesmente não coloram por papel */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -146,6 +154,7 @@ export default function CardModalLauncher({
       planCandidates={planCandidates}
       planoVisibilityOn={planoVisibilityOn}
       flowFlags={flowFlags}
+      responsibilityAssignments={responsibilityAssignments}
       onTaskPatched={patchActiveTask}
       onOpenRelatedTask={(related) => { patchLocal(related); setHistory((items) => [...items, activeTask]); setActiveTask(related); }}
       onBack={history.length ? () => {

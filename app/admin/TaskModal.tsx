@@ -27,9 +27,14 @@ import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindI
 import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
-import { mirroredParentStatus } from "@/lib/flows/parentStatus";
+import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus } from "@/lib/flows/parentStatus";
+import { currentFlowStepOf } from "@/lib/flows/currentStep";
+import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
+import { responsibilityForSubtype } from "@/lib/flows/responsibilityForSubtype";
+import { ROLE_LABEL, REVISOR_LABEL, roleTone } from "@/lib/flows/roleTone";
+import { stepRoleOf } from "@/lib/flows/stepRole";
 import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
-import type { AdminDocument } from "@/lib/supabase";
+import type { AdminDocument, ResponsibilityAssignment } from "@/lib/supabase";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
 import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
@@ -366,6 +371,7 @@ export default function TaskModal({
   clientTasks = [],
   planoVisibilityOn = false,
   flowFlags = null,
+  responsibilityAssignments = [],
   onTaskPatched,
   onOpenRelatedTask,
   onBack,
@@ -386,6 +392,11 @@ export default function TaskModal({
   clientTasks?: TaskRecord[];
   planoVisibilityOn?: boolean;
   flowFlags?: ClientFlowFlags | null;
+  // Equipe & papéis (responsibility_assignments) — quem tem qual
+  // responsabilidade, para colorir o dropdown de responsável e o selo de
+  // papel nos comentários. Opcional/default vazio: uma tela que ainda não
+  // busca isto (ex.: automações) simplesmente não colore nada, sem quebrar.
+  responsibilityAssignments?: ResponsibilityAssignment[];
   onTaskPatched?: (task: TaskRecord) => void;
   onOpenRelatedTask?: (task: TaskRecord) => void;
   onBack?: () => void;
@@ -509,6 +520,12 @@ export default function TaskModal({
   // passo, para a posição atual nunca ficar literalmente invisível.
   const revisaoStepHidden = revisaoOff && draft.status !== "revisao";
   const aprovacaoStepHidden = aprovacaoOff && draft.status !== "aprovacao";
+  // `requires_review` nunca é escrito à mão — é sempre derivado de quem é o
+  // revisor e quem são os responsáveis vinculados (lib/flows/reviewSkip.ts),
+  // a mesma função usada pelo servidor (fonte de verdade). Zera aqui o
+  // reviewer_id já considerando a etapa desligada, para as duas chamadas do
+  // save (autosave e save() manual) nunca divergirem entre si.
+  const effectiveReviewerId = revisaoOff ? null : draft.reviewer_id || null;
   // Revisão e Aprovação são as únicas etapas que somem, e por CLIENTE, não por
   // tipo: são contrato de cliente, não modelo de card. O recorte por tipo que
   // existia aqui era o "Publicado", que deixou de ser etapa.
@@ -524,10 +541,10 @@ export default function TaskModal({
       title: draft.title.trim(), kind: draft.kind, subtype: draft.subtype || null,
       status: draft.status, priority: draft.priority, assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
-      reviewer_id: revisaoOff ? null : draft.reviewer_id || null,
+      reviewer_id: effectiveReviewerId,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
-      requires_review: revisaoOff ? false : Boolean(draft.reviewer_id),
+      requires_review: deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids),
       requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
       due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
       start_date: draft.start_date.trim() || draft.due_date.trim() || null,
@@ -582,6 +599,16 @@ export default function TaskModal({
     [liveTask, clientTasks, draft.kind],
   );
   const ownComments = liveTask ? commentsOf(liveTask) : [];
+  // Card de origem de cada comentário da família — para o selo de papel
+  // (calculado NA HORA, nunca congelado: lê os dados atuais de reviewer_id/
+  // assignee_profile_ids do card, não algo salvo junto do comentário).
+  // `clientTasks` já traz `assignee_profile_ids` via join (TASK_COLUMNS_WITH_ASSIGNEES),
+  // então nenhuma busca nova é necessária aqui.
+  const stepsById = useMemo(() => {
+    const map = new Map(clientTasks.map((t) => [t.id, t]));
+    if (liveTask) map.set(liveTask.id, liveTask);
+    return map;
+  }, [clientTasks, liveTask]);
   // Same client first (most relevant), other clients' documents below —
   // never hidden entirely, since a comment can reasonably reference either.
   const commentDocs = draft.clientSlug
@@ -1163,13 +1190,15 @@ export default function TaskModal({
       priority: draft.priority,
       assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
-      reviewer_id: revisaoOff ? null : draft.reviewer_id || null,
+      reviewer_id: effectiveReviewerId,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
-      // requires_* are derived from the presence of a revisor/aprovador —
-      // "Sem revisor"/"Sem aprovação" means that stage is skipped. A client
-      // with the flow admin-disabled never requires it, regardless of draft.
-      requires_review: revisaoOff ? false : Boolean(draft.reviewer_id),
+      // requires_* são derivados de quem é revisor/aprovador — "Sem
+      // revisor"/"Sem aprovação" pula a etapa. Um cliente com a etapa
+      // desligada nunca exige, independente do draft; e um revisor que é o
+      // ÚNICO responsável vinculado também pula (lib/flows/reviewSkip.ts) —
+      // revisar o próprio trabalho não é revisão.
+      requires_review: deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids),
       requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
       due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
       recurrence_cadence: draft.recurrence_cadence,
@@ -1287,7 +1316,14 @@ export default function TaskModal({
   // card pai mentir: roteiro em revisão, pai ainda dizendo "Em produção".
   // Espelhado, e não persistido, pelo mesmo motivo do progresso — ver o
   // comentário de `mirroredParentStatus`.
-  const mirroredStatus = isDelivery ? mirroredParentStatus(chainSteps) : null;
+  //
+  // A entrega também não tem DATA nem RESPONSÁVEL próprios — resolve a etapa
+  // corrente UMA VEZ aqui e lê os três espelhos dela, em vez de cada campo
+  // varrer `chainSteps` de novo por conta própria.
+  const currentChainStep = isDelivery ? currentFlowStepOf(chainSteps) : null;
+  const mirroredStatus = mirroredParentStatus(currentChainStep);
+  const mirroredDate = mirroredParentDate(currentChainStep);
+  const mirroredAssignee = mirroredParentAssignee(currentChainStep);
   const displayStatus = mirroredStatus ?? draft.status;
   // Só um card que tem status PRÓPRIO pode ter o status trocado pelo stepper.
   // Numa entrega espelhada, clicar ali escreveria na coluna do pai um valor
@@ -1295,6 +1331,22 @@ export default function TaskModal({
   // controla nada.
   const stepperEditable = mirroredStatus === null;
   const stepIdx = WORKFLOW_ORDER.indexOf(displayStatus);
+
+  // Cor por papel no dropdown de responsável: o subtipo relevante é o da
+  // etapa corrente (se for entrega, espelhando o resto) ou o próprio subtipo
+  // do card (se for uma etapa comum). Sem responsabilidade cadastrada pro
+  // subtipo (ex.: publicacao, ou um card fora do funil de criativo),
+  // `accountTone` fica undefined e o AssigneePicker não colore nada — a lista
+  // de candidatos continua sem restrição nenhuma, é só decoração.
+  const relevantSubtype = isDelivery ? currentChainStep?.subtype ?? null : draft.subtype;
+  const relevantResponsibility = responsibilityForSubtype(relevantSubtype);
+  const accountTone = useMemo(() => {
+    if (!relevantResponsibility) return undefined;
+    const holders = new Set(
+      responsibilityAssignments.filter((a) => a.responsibility === relevantResponsibility).map((a) => a.profile_id),
+    );
+    return (id: string) => (holders.has(id) ? roleTone(relevantResponsibility) : undefined);
+  }, [responsibilityAssignments, relevantResponsibility]);
 
   return (
     <>
@@ -1511,29 +1563,39 @@ export default function TaskModal({
               {/* Um único campo inteligente concentra início, fim opcional,
                   horário e recorrência. Dia do mês vive dentro do calendário. */}
               <Cell icon="▦" label="Data">
-                <CalendarPicker
-                  value={draft.start_date || draft.due_date}
-                  onChange={(value) => setDraft((current) => {
-                    const day = value ? new Date(`${value}T12:00:00`).getDay() : null;
-                    return {
-                      ...current,
-                      start_date: value,
-                      due_date: liveTask?.recurrence_cadence ? current.due_date : value,
-                      end_date: value && (!current.end_date || current.end_date < value) ? value : current.end_date,
-                      recurrence_weekdays: current.recurrence_cadence && !current.recurrence_weekdays.length && day !== null ? [day] : current.recurrence_weekdays,
-                    };
-                  })}
-                  endValue={draft.end_date}
-                  onEndChange={(value) => set("end_date", value)}
-                  timeValue={draft.hora}
-                  onTimeChange={(value) => set("hora", value)}
-                  placeholder="Sem data"
-                  recurrence={{ cadence: draft.recurrence_cadence, weekdays: draft.recurrence_weekdays, dayOfMonth: draft.recurrence_day_of_month }}
-                  onRecurrenceChange={(value) => setDraft((current) => ({ ...current, recurrence_cadence: value.cadence, recurrence_weekdays: value.weekdays, recurrence_day_of_month: value.dayOfMonth }))}
-                  recurrenceFeatureEnabled
-                  recurrenceRequired={mode === "new" && effectiveScope === "routine"}
-                  nextExecutionValue={isRecurringParent ? liveTask?.due_date ?? undefined : undefined}
-                />
+                {isDelivery ? (
+                  // A entrega não tem data própria — espelha a etapa
+                  // corrente, mesmo princípio de mirroredStatus acima.
+                  <span className="tm-cell-static">
+                    {mirroredDate?.start_date || mirroredDate?.due_date
+                      ? [mirroredDate.start_date ?? mirroredDate.due_date, mirroredDate.end_date].filter(Boolean).join(" – ")
+                      : "Sem etapa"}
+                  </span>
+                ) : (
+                  <CalendarPicker
+                    value={draft.start_date || draft.due_date}
+                    onChange={(value) => setDraft((current) => {
+                      const day = value ? new Date(`${value}T12:00:00`).getDay() : null;
+                      return {
+                        ...current,
+                        start_date: value,
+                        due_date: liveTask?.recurrence_cadence ? current.due_date : value,
+                        end_date: value && (!current.end_date || current.end_date < value) ? value : current.end_date,
+                        recurrence_weekdays: current.recurrence_cadence && !current.recurrence_weekdays.length && day !== null ? [day] : current.recurrence_weekdays,
+                      };
+                    })}
+                    endValue={draft.end_date}
+                    onEndChange={(value) => set("end_date", value)}
+                    timeValue={draft.hora}
+                    onTimeChange={(value) => set("hora", value)}
+                    placeholder="Sem data"
+                    recurrence={{ cadence: draft.recurrence_cadence, weekdays: draft.recurrence_weekdays, dayOfMonth: draft.recurrence_day_of_month }}
+                    onRecurrenceChange={(value) => setDraft((current) => ({ ...current, recurrence_cadence: value.cadence, recurrence_weekdays: value.weekdays, recurrence_day_of_month: value.dayOfMonth }))}
+                    recurrenceFeatureEnabled
+                    recurrenceRequired={mode === "new" && effectiveScope === "routine"}
+                    nextExecutionValue={isRecurringParent ? liveTask?.due_date ?? undefined : undefined}
+                  />
+                )}
               </Cell>
 
               {/* Atributos por kind */}
@@ -1574,15 +1636,21 @@ export default function TaskModal({
               {/* Multiple people stay backwards-compatible in one DB field,
                   but behave as a reusable list in the editor. */}
               <Cell icon="◔" label="Responsável" hidden={!visible("assignee")}>
+                {/* A entrega não tem responsável próprio — espelha o(s) da
+                    etapa corrente, somente leitura (mesmo princípio do
+                    Status/Data acima). accountTone colore por papel de
+                    Equipe & papéis nos dois modos. */}
                 <AssigneePicker
-                  assignee={draft.assignee}
-                  assigneeProfileIds={draft.assignee_profile_ids}
+                  assignee={isDelivery ? mirroredAssignee?.assignee ?? null : draft.assignee}
+                  assigneeProfileIds={isDelivery ? mirroredAssignee?.assigneeProfileIds ?? [] : draft.assignee_profile_ids}
                   accountOptions={adminReviewers}
                   freeTextOptions={assignees}
                   onChange={({ assignee, assigneeProfileIds }) =>
                     setDraft((current) => ({ ...current, assignee: assignee ?? "", assignee_profile_ids: assigneeProfileIds }))
                   }
                   disabled={busy}
+                  readOnly={isDelivery}
+                  accountTone={accountTone}
                 />
               </Cell>
 
@@ -1838,12 +1906,24 @@ export default function TaskModal({
                     const own = c.taskId === liveTask?.id;
                     const storedIndex = own ? ownComments.findIndex((o) => o.at === c.at && o.text === c.text) : -1;
                     const editing = own && editingComment?.index === storedIndex;
+                    // Papel de quem comentou NO CARD ONDE O COMENTÁRIO CAIU —
+                    // não no card aberto agora. Recalculado a cada render, a
+                    // partir do estado atual (nunca congelado no comentário).
+                    const originStep = stepsById.get(c.taskId) ?? null;
+                    const role = originStep && c.author_id
+                      ? stepRoleOf(originStep, new Set(originStep.assignee_profile_ids), c.author_id)
+                      : null;
+                    const roleLabel = role?.kind === "revisor" ? REVISOR_LABEL : role?.responsibility ? ROLE_LABEL[role.responsibility] : null;
+                    const roleClass = role?.kind === "revisor" ? "t-tone-neutral" : role?.responsibility ? roleTone(role.responsibility) : null;
+                    const destinationLabel = !own && originStep ? subtypeLabel(originStep.subtype) || originStep.title : null;
                     return (
                       <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.taskId}-${c.at}-${i}`}>
                         <CommentAvatar comment={c} className="tm-comment-av" />
                         <div className="tm-comment-body">
                           <p className="tm-comment-meta">
                             <b>{c.author}</b>
+                            {roleLabel ? <span className={`kb-type ${roleClass}`}>{roleLabel}</span> : null}
+                            {destinationLabel ? <small className="tm-comment-origin" title="Onde este comentário foi gravado">→ {destinationLabel}</small> : null}
                             <small>{formatCommentTime(c.at)}</small>
                             {c.edited_at ? <small className="tm-comment-edited">editado</small> : null}
                             {own && storedIndex >= 0 ? (

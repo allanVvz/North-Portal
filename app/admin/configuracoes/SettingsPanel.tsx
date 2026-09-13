@@ -363,11 +363,12 @@ function AgencyForm({ initial }: { initial: AgencyProfile }) {
   );
 }
 
-// As 5 frentes. Deixou de ser cadastro puramente informativo em 2026-09-06:
-// `gestor_trafego` decide quem recebe os relatórios das automações de tráfego
-// mesmo sem estar no card (notify_responsibility_holders). As outras quatro
-// seguem informativas — não sugerem nem restringem Responsável/Revisor/
-// Aprovador.
+// As 5 frentes. `gestor_trafego` decide quem recebe os relatórios das
+// automações de tráfego mesmo sem estar no card (notify_responsibility_holders,
+// 2026-09-06). Edição/Captação/Roteiro coloram o dropdown de Responsável do
+// subtipo correspondente e priorizam o roteamento de comentário do pai numa
+// entrega (lib/flows/roleTone.ts, lib/flows/commentTarget.ts, 2026-09-13) —
+// nunca restringem quem pode ser escolhido. Aprovação segue só informativa.
 const RESPONSIBILITIES: { key: ResponsibilityKey; label: string }[] = [
   { key: "edicao", label: "Edição" },
   { key: "captacao", label: "Captação" },
@@ -448,7 +449,7 @@ function TeamList({ team, initialAssignments }: { team: TeamMember[]; initialAss
 
       <div className="set-card">
         <h2 className="set-h">Responsabilidades</h2>
-        <p className="admin-sub">Quem cuida de cada frente. <strong>Gestor de tráfego</strong> recebe os relatórios das automações mesmo sem estar no card; as demais são cadastro informativo e ainda não sugerem nem restringem Responsável/Revisor/Aprovador.</p>
+        <p className="admin-sub">Quem cuida de cada frente. <strong>Gestor de tráfego</strong> recebe os relatórios das automações mesmo sem estar no card; <strong>Edição/Captação/Roteiro</strong> coloram o responsável do subtipo correspondente e têm prioridade no roteamento de comentário; <strong>Aprovação</strong> segue só informativa. Nenhuma restringe quem pode ser escolhido num card.</p>
         {respMsg ? <p className="set-msg">{respMsg}</p> : null}
         {admins.length === 0 ? (
           <p className="admin-sub">Nenhum admin cadastrado.</p>

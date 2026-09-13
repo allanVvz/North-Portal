@@ -26,6 +26,7 @@ import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
 import { belongsToTaskScreen, childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
+import type { ResponsibilityAssignment } from "@/lib/supabase";
 import { calendarMonthDates } from "./calendarUtils";
 
 type ClientLite = { slug: string; name: string };
@@ -140,6 +141,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // Whether ANY client currently has Revisão/Aprovação admin-enabled — drives
   // whether those Kanban columns show at all (see visibleColumns below).
   const [flowSummary, setFlowSummary] = useState({ anyRevisaoAdmin: false, anyAprovacaoAdmin: false });
+  // Equipe & papéis (quem tem qual responsabilidade) — uma busca só por
+  // montagem do quadro, não por card aberto; usada só pra colorir o dropdown
+  // de responsável e o selo de papel nos comentários (TaskModal).
+  const [responsibilityAssignments, setResponsibilityAssignments] = useState<ResponsibilityAssignment[]>([]);
   useEffect(() => {
     fetch("/api/admin/settings/plano-visibility")
       .then((res) => (res.ok ? res.json() : null))
@@ -148,6 +153,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     fetch("/api/admin/settings/flow-flags-summary")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data) setFlowSummary(data); })
+      .catch(() => {});
+    fetch("/api/admin/team/responsibilities")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setResponsibilityAssignments(data); })
       .catch(() => {});
   }, []);
 
@@ -966,6 +975,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           clientTasks={tasks}
           planoVisibilityOn={planoVisibilityOn}
           flowFlags={flowFlags}
+          responsibilityAssignments={responsibilityAssignments}
           onTaskPatched={applyChanged}
           onOpenRelatedTask={(related) => { applyChanged(related); setModalState({ mode: "edit", taskId: related.id }); }}
           onClose={() => setModalState(null)}

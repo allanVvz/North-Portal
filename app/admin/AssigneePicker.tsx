@@ -11,6 +11,8 @@ export default function AssigneePicker({
   accountOptions,
   freeTextOptions,
   disabled = false,
+  readOnly = false,
+  accountTone,
   onChange,
 }: {
   assignee: string | null;
@@ -20,6 +22,14 @@ export default function AssigneePicker({
   // Suggestions for the free-text remainder (legacy/freelancer names with no login).
   freeTextOptions: string[];
   disabled?: boolean;
+  // Um card-entrega não tem responsável próprio — mostra o espelho da etapa
+  // corrente, sem botão de adicionar/remover nem edição por duplo-clique,
+  // mas com os MESMOS chips (mesma cor, mesmo layout) do modo editável.
+  readOnly?: boolean;
+  // Cor por papel (Equipe & papéis) — lookup que quem chama já resolveu a
+  // partir de responsibility_assignments; ausente = sem cor (candidato sem
+  // papel cadastrado pro subtipo deste card, ou feature ainda não carregada).
+  accountTone?: (id: string) => string | undefined;
   onChange: (next: { assignee: string | null; assigneeProfileIds: string[] }) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -84,35 +94,45 @@ export default function AssigneePicker({
   }
 
   const hasAny = linkedChips.length > 0 || freeNames.length > 0;
+  const toneClass = (id: string) => {
+    const tone = accountTone?.(id);
+    return tone ? ` ${tone}` : "";
+  };
 
   return (
-    <div className="assignee-picker" ref={rootRef} onDoubleClick={() => !disabled && setEditing(true)}>
+    <div className="assignee-picker" ref={rootRef} onDoubleClick={() => !readOnly && !disabled && setEditing(true)}>
       <div className="assignee-picker-value">
         {linkedChips.map((account) => (
-          <span className="assignee-chip assignee-chip-linked" key={account.id} title="Conta vinculada">
+          <span className={`assignee-chip assignee-chip-linked${toneClass(account.id)}`} key={account.id} title="Conta vinculada">
             {account.label}
-            <button type="button" disabled={disabled} onClick={() => removeAccount(account.id)} aria-label={`Remover ${account.label}`}>×</button>
+            {readOnly ? null : (
+              <button type="button" disabled={disabled} onClick={() => removeAccount(account.id)} aria-label={`Remover ${account.label}`}>×</button>
+            )}
           </span>
         ))}
         {freeNames.map((name) => (
           <span className="assignee-chip" key={name}>
             {name}
-            <button type="button" disabled={disabled} onClick={() => removeFreeText(name)} aria-label={`Remover ${name}`}>×</button>
+            {readOnly ? null : (
+              <button type="button" disabled={disabled} onClick={() => removeFreeText(name)} aria-label={`Remover ${name}`}>×</button>
+            )}
           </span>
         ))}
-        {!hasAny && !editing ? <span className="assignee-empty">Sem responsável</span> : null}
-        <button
-          type="button"
-          className="assignee-add"
-          disabled={disabled}
-          onClick={() => setOpen((current) => !current)}
-          onDoubleClick={(event) => { event.stopPropagation(); setEditing(true); setOpen(false); }}
-          aria-label="Adicionar responsável"
-          title="Clique para escolher uma conta ou clique duas vezes para escrever um nome sem conta"
-        >+</button>
+        {!hasAny && !editing ? <span className="assignee-empty">{readOnly ? "Sem etapa" : "Sem responsável"}</span> : null}
+        {readOnly ? null : (
+          <button
+            type="button"
+            className="assignee-add"
+            disabled={disabled}
+            onClick={() => setOpen((current) => !current)}
+            onDoubleClick={(event) => { event.stopPropagation(); setEditing(true); setOpen(false); }}
+            aria-label="Adicionar responsável"
+            title="Clique para escolher uma conta ou clique duas vezes para escrever um nome sem conta"
+          >+</button>
+        )}
       </div>
 
-      {editing ? (
+      {!readOnly && editing ? (
         <input
           ref={inputRef}
           className="assignee-new-input"
@@ -128,10 +148,10 @@ export default function AssigneePicker({
         />
       ) : null}
 
-      {open ? (
+      {!readOnly && open ? (
         <div className="assignee-options" role="listbox" aria-label="Responsáveis disponíveis">
           {availableAccounts.map((account) => (
-            <button type="button" role="option" aria-selected={false} key={account.id} onClick={() => addAccount(account.id)}>
+            <button type="button" role="option" aria-selected={false} className={`assignee-option${toneClass(account.id)}`} key={account.id} onClick={() => addAccount(account.id)}>
               {account.label}
             </button>
           ))}

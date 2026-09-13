@@ -19,6 +19,7 @@ import {
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceWeekdays } from "@/lib/recurrence";
 import { recurrenceParentPayload } from "@/lib/recurrenceState";
+import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, taskCreateSchema, validateSlug } from "@/lib/validation";
 import { createClient } from "@/lib/supabase/server";
@@ -128,6 +129,12 @@ export async function POST(request: Request) {
       if (!flags.revisaoAdmin) { fields.reviewer_id = null; fields.requires_review = false; }
       if (!flags.aprovacaoAdmin) { fields.approver_id = null; fields.requires_approval = false; }
     }
+
+    // Auto-revisão (lib/flows/reviewSkip.ts): nasce sem exigir revisão quando
+    // o revisor já é o único responsável vinculado — revisar o próprio
+    // trabalho não é revisão. Roda incondicionalmente na criação (sem
+    // "só se o patch mexeu nisso" — aqui é tudo o campo, não há "current").
+    fields.requires_review = deriveRequiresReview(fields.reviewer_id ?? null, assignee_profile_ids ?? []);
 
     // plan_id é elo, não coluna: sai dos campos do insert e vira uma ligação
     // depois que o card existe.

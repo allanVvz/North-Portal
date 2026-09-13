@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { flowDemotionProblem } from "@/lib/flows/demotion";
+import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { flowStepKeyOf } from "@/lib/taskRelations";
 import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
 import { notifyProfiles, notifyTaskParticipants } from "@/lib/notifications";
@@ -134,6 +135,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         patch.approver_id = null;
         patch.requires_approval = false;
       }
+    }
+
+    // Auto-revisão (lib/flows/reviewSkip.ts): um revisor que é o ÚNICO
+    // responsável vinculado do card pula a etapa de revisão — revisar o
+    // próprio trabalho não é revisão. Só recalcula quando o patch mexe em
+    // reviewer_id OU assignee_profile_ids — um PATCH de status puro (ex.: um
+    // arrasto no kanban) não deve tocar em `requires_review`. Sem backfill:
+    // isto só passa a valer na próxima edição de responsável/revisor de cada
+    // card, nunca retroativo.
+    if (patch.reviewer_id !== undefined || assignee_profile_ids !== undefined) {
+      const nextReviewerId = patch.reviewer_id !== undefined ? patch.reviewer_id : current.reviewer_id;
+      const nextAssigneeIds = assignee_profile_ids !== undefined ? assignee_profile_ids : current.assignee_profile_ids;
+      patch.requires_review = deriveRequiresReview(nextReviewerId, nextAssigneeIds);
     }
 
     // Promoção "tipo comum → Entrega" (P0-B). O POST já faz o equivalente na

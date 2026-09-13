@@ -10,8 +10,17 @@ import { responsibilityPatchSchema } from "@/lib/validation";
 // Deixou de ser cadastro puramente informativo em 2026-09-06: marcar alguém em
 // `gestor_trafego` faz essa pessoa receber os relatórios das automações de
 // tráfego MESMO sem estar no card (public.notify_responsibility_holders,
-// migração 20260906150000). As outras quatro frentes seguem informativas — não
-// sugerem nem restringem Responsável/Revisor/Aprovador nos cards.
+// migração 20260906150000).
+//
+// Desde 2026-09-13, Edição/Captação/Roteiro também têm efeito real, só que
+// visual e de roteamento — nunca de restrição: quem está marcado colore o
+// próprio nome no dropdown de Responsável do subtipo correspondente
+// (lib/flows/roleTone.ts) e ganha prioridade no roteamento de comentário do
+// card pai de uma entrega quando é revisor/responsável de uma etapa aberta
+// (lib/flows/commentTarget.ts). Continua não RESTRINGINDO quem pode ser
+// escolhido — qualquer admin segue selecionável em qualquer card, cadastrado
+// aqui ou não. Aprovação segue puramente informativa (nenhum subtipo do funil
+// de criativo corresponde a ela).
 export async function GET() {
   try {
     await requireAdmin();
