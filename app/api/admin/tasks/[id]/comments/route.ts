@@ -26,7 +26,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // do cliente) precisa responder exatamente a mesma coisa; ver o cabeçalho
     // daquele módulo.
     const parent = await getTaskById(id);
-    const targetId = parent ? await flowCommentTargetId(createAdminClient(), parent) : id;
+    const targetId = parent ? await flowCommentTargetId(createAdminClient(), parent, session.userId) : id;
     const task = await appendTaskComment(targetId, session.userId, text);
     // handleConversionComment e notifyTaskParticipants leem o id EFETIVO (a
     // etapa), não o da URL — é o card que de fato recebeu o comentário, e é

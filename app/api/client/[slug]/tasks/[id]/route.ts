@@ -54,7 +54,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     // Só a escrita do comentário é que se desloca — por isso as duas coisas
     // deixaram de viajar no mesmo `patch`.
     const admin = createAdminClient();
-    const commentTargetId = await flowCommentTargetId(admin, task);
+    const commentTargetId = await flowCommentTargetId(admin, task, session.userId);
     let commentAuthor: string | null = null;
     if (comment?.trim()) {
       commentAuthor = (await getProfileName(session.userId)) ?? session.email ?? "Cliente";

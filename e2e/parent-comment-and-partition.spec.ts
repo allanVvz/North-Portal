@@ -118,6 +118,92 @@ test.describe("Comentário no pai grava na etapa corrente (P1-D)", () => {
   });
 });
 
+test.describe("Papel vence a corrente por posição no roteamento de comentário (2026-09-12)", () => {
+  test.setTimeout(120_000);
+  let sb: SupabaseClient;
+  let clientId = "";
+  let adminProfileId = "";
+  let deliveryId = "";
+  let captacaoId = ""; // aberta, mais antiga por posição — SERIA a corrente pelo fallback antigo
+  let edicaoId = ""; // aberta, em revisão, revisor = o próprio admin logado
+
+  const deliveryTitle = `${PREFIX} Evento fora de ordem`;
+  const commentText = `Comentário de revisor no pai — ${RUN}`;
+
+  async function insert(fields: Record<string, unknown>): Promise<string> {
+    const { data, error } = await sb.from("tasks").insert(fields).select("id").single();
+    if (error || !data) throw new Error(`seed falhou: ${error?.message}`);
+    return data.id as string;
+  }
+
+  test.beforeAll(async () => {
+    sb = serviceClient();
+    const { data: client, error } = await sb.from("clients").select("id").eq("slug", "karpinski").single();
+    if (error || !client) throw new Error(`cliente karpinski não encontrado: ${error?.message}`);
+    clientId = client.id as string;
+
+    // `profiles` não guarda e-mail (só auth.users) — resolve pelo admin API,
+    // não pela tabela pública.
+    const { data: usersPage, error: usersErr } = await sb.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (usersErr) throw new Error(`listUsers falhou: ${usersErr.message}`);
+    const adminUser = usersPage.users.find((u) => u.email === ADMIN_EMAIL);
+    if (!adminUser) throw new Error(`usuário e2e ${ADMIN_EMAIL} não encontrado`);
+    adminProfileId = adminUser.id;
+
+    deliveryId = await insert({
+      client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
+      status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
+    });
+    // Captação: mais antiga por posição e ainda aberta — é ela que o fallback
+    // por posição pura (currentFlowStepOf) escolheria, e é exatamente o card
+    // real que motivou esta regra (captação aberta, edição já adiantada).
+    captacaoId = await insert({
+      client_id: clientId, kind: "criativo", subtype: "captacao",
+      title: `${deliveryTitle} — Captação`, status: "em_producao", position: 20, payload: {},
+    });
+    // Edição: mais adiante, já em revisão, com o admin logado como revisor
+    // DESTA etapa — é ele quem vai comentar no pai a seguir.
+    edicaoId = await insert({
+      client_id: clientId, kind: "criativo", subtype: "edicao",
+      title: `${deliveryTitle} — Edição`, status: "revisao", position: 30,
+      reviewer_id: adminProfileId, requires_review: true, payload: {},
+    });
+    const { error: linkErr } = await sb.from("task_links").insert([
+      { parent_id: deliveryId, child_id: captacaoId, slot: "captacao", position: 20 },
+      { parent_id: deliveryId, child_id: edicaoId, slot: "edicao", position: 30 },
+    ]);
+    if (linkErr) throw new Error(`seed link falhou: ${linkErr.message}`);
+  });
+
+  test.afterAll(async () => {
+    const ids = [deliveryId, captacaoId, edicaoId].filter(Boolean);
+    if (ids.length) await sb.from("tasks").delete().in("id", ids);
+  });
+
+  test("revisor de uma etapa em revisão comenta nela, mesmo com uma etapa anterior ainda aberta", async ({ page }) => {
+    await login(page);
+    await page.goto(`/admin/kanban?task=${deliveryId}`);
+    const modal = page.locator(".tm");
+    await expect(modal).toBeVisible({ timeout: 20_000 });
+
+    await modal.getByPlaceholder("Escrever comentário…").fill(commentText);
+    await modal.getByRole("button", { name: "Enviar" }).click();
+    await expect(modal.locator(".tm-comment", { hasText: commentText })).toBeVisible({ timeout: 15_000 });
+
+    const [{ data: delivery }, { data: captacao }, { data: edicao }] = await Promise.all([
+      sb.from("tasks").select("payload").eq("id", deliveryId).single(),
+      sb.from("tasks").select("payload").eq("id", captacaoId).single(),
+      sb.from("tasks").select("payload").eq("id", edicaoId).single(),
+    ]);
+    const commentsOf = (row: { payload: unknown } | null | undefined) =>
+      ((row?.payload as { comments?: { text: string }[] } | null)?.comments ?? []).map((c) => c.text);
+
+    expect(commentsOf(edicao)).toContain(commentText);
+    expect(commentsOf(captacao)).not.toContain(commentText);
+    expect(commentsOf(delivery)).not.toContain(commentText);
+  });
+});
+
 test.describe("A caixa de família particiona Plano + Etapas quando a entrega é membro de um plano (P1-D3)", () => {
   test.setTimeout(120_000);
   let sb: SupabaseClient;

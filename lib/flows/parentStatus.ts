@@ -38,30 +38,49 @@ export function deliveryIsFinished(
 }
 
 /**
- * O status que o card PAI deve MOSTRAR — o da etapa corrente da corrente:
- * a mais antiga ainda sem `completed_at`, ou a última quando a corrente já
- * terminou (nenhuma etapa em aberto). "Roteiro em revisão" → pai mostra
- * revisão; "roteiro concluído, captação em Entrada" → pai mostra Entrada.
+ * O status que o card PAI deve MOSTRAR — o da etapa corrente da corrente.
+ * "Roteiro em revisão" → pai mostra revisão; "roteiro concluído, captação em
+ * Entrada" → pai mostra Entrada.
  *
  * De propósito NÃO é persistida em `tasks.status` — mesmo princípio já
  * documentado para o progresso ("Progresso de pai é sempre rollup dos
  * filhos; nunca persistido", docs/ARQUITETURA-TAREFAS.md): quem for exibir o
  * status de uma entrega (a etapa família no modal, o card de Operação) chama
- * isto sobre as etapas atuais em vez de ler `delivery.status` do banco. Isso
+ * isto sobre a etapa atual em vez de ler `delivery.status` do banco. Isso
  * também é o que deixa a regra "o progresso nunca retrocede" sair de graça:
  * `taskProgress` soma casas de TODAS as etapas materializadas, concluídas
  * inclusive, e nunca lê este valor — o status espelhado pode voltar para
  * Entrada na etapa seguinte sem que uma única casa já conquistada suma.
  *
- * `orderedSteps` precisa vir na ordem da corrente (posição do elo — ver
- * `stepOrderOf`/`flowStepsOf` em lib/taskRelations.ts); esta função não
- * ordena, só percorre. `null` quando a entrega ainda não tem etapa nenhuma
- * (vazia, esperando `materializeFirstStep`) — não há o que espelhar.
+ * Recebe a etapa JÁ RESOLVIDA por `currentFlowStepOf` (lib/flows/currentStep)
+ * — não re-varre a lista. Antes esta função reimplementava a mesma busca
+ * (".find(!completed_at) ?? última") só que localmente, e as duas cópias já
+ * quase divergiram uma vez; agora há um resolvedor só, chamado uma vez por
+ * quem for mostrar o pai, e `mirroredParentStatus`/`mirroredParentDate`/
+ * `mirroredParentAssignee` só leem campos do resultado. `null` quando a
+ * entrega ainda não tem etapa nenhuma (vazia, esperando
+ * `materializeFirstStep`) — não há o que espelhar.
  */
-export function mirroredParentStatus<T extends Pick<TaskRecord, "status" | "completed_at">>(
-  orderedSteps: readonly T[],
+export function mirroredParentStatus<T extends Pick<TaskRecord, "status">>(
+  currentStep: T | null,
 ): TaskStatus | null {
-  if (orderedSteps.length === 0) return null;
-  const current = orderedSteps.find((step) => !step.completed_at) ?? orderedSteps[orderedSteps.length - 1];
-  return current.status;
+  return currentStep?.status ?? null;
+}
+
+/** Mesma ideia de `mirroredParentStatus`, para as datas — o pai não tem data
+ * própria, só mostra a da etapa corrente. */
+export function mirroredParentDate<T extends Pick<TaskRecord, "start_date" | "due_date" | "end_date">>(
+  currentStep: T | null,
+): { start_date: string | null; due_date: string | null; end_date: string | null } | null {
+  if (!currentStep) return null;
+  return { start_date: currentStep.start_date, due_date: currentStep.due_date, end_date: currentStep.end_date };
+}
+
+/** Mesma ideia, para o responsável — o pai não tem responsável próprio, só
+ * mostra o da etapa corrente. */
+export function mirroredParentAssignee<T extends Pick<TaskRecord, "assignee" | "assignee_profile_ids">>(
+  currentStep: T | null,
+): { assignee: string | null; assigneeProfileIds: string[] } | null {
+  if (!currentStep) return null;
+  return { assignee: currentStep.assignee, assigneeProfileIds: currentStep.assignee_profile_ids };
 }

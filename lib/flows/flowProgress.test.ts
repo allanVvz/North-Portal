@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FLOW_TOTAL_WEIGHT_KEY, dedupePlanMembers, taskProgress } from "@/lib/taskCatalog";
+import { currentFlowStepOf } from "./currentStep";
 import { flowFunnelSize, flowFunnelStops, flowStepCasas, flowStepPct } from "./flowProgress";
 import { mirroredParentStatus } from "./parentStatus";
 import type { TaskStatus } from "@/lib/validation";
@@ -265,7 +266,7 @@ describe("monotonicidade: progresso nunca recua enquanto o status espelhado sobe
         progresses.push(taskProgress(molde, members));
         // A corrente inteira, na ordem — é isto que mirroredParentStatus lê
         // para decidir o status do pai.
-        mirroredStatuses.push(mirroredParentStatus(members)!);
+        mirroredStatuses.push(mirroredParentStatus(currentFlowStepOf(members))!);
       }
     }
 
