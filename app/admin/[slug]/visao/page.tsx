@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getAdminClientDetail, getClient, listActionPlans, listTasks } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
+import { createClient } from "@/lib/supabase/server";
 import { taskProgress } from "@/lib/taskCatalog";
+import { listTaskTypes } from "@/lib/taskTypes";
 import InstagramPanel from "./InstagramPanel";
 import ClientOverview from "./ClientOverview";
 
@@ -16,7 +18,15 @@ export default async function ClientVisaoPage({ params }: { params: Promise<{ sl
   const [detail, client] = await Promise.all([getAdminClientDetail(slug), getClient(slug, true)]);
   if (!detail || !client) notFound();
 
-  const [tasks, allPlans] = await Promise.all([listTasks(client.id), listActionPlans()]);
+  const [tasks, allPlans, taskTypes] = await Promise.all([
+    listTasks(client.id),
+    listActionPlans(),
+    // Rótulo de um tipo criado pela tela (sem entrada em TASK_KINDS) — esta
+    // página é um Server Component, sem acesso ao cache ao vivo do admin
+    // (lib/taskCatalog/liveKinds.ts, que só existe no cliente/AdminShell).
+    listTaskTypes(await createClient()),
+  ]);
+  const labelByKind = new Map(taskTypes.map((t) => [t.key, t.label]));
   const checkpoints = tasks
     .filter((t) => t.kind === "checkpoint_comercial")
     .map((t) => ({
@@ -32,7 +42,14 @@ export default async function ClientVisaoPage({ params }: { params: Promise<{ sl
   const openTasks = tasks
     .filter((t) => t.kind !== "checkpoint_comercial" && t.status !== "aprovado")
     .slice(0, 6)
-    .map((t) => ({ id: t.id, title: t.title, status: t.status, kind: t.kind, progress: taskProgress(t) }));
+    .map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      kind: t.kind,
+      typeLabel: labelByKind.get(t.kind) ?? null,
+      progress: taskProgress(t),
+    }));
 
   return (
     <section className="admin-page">

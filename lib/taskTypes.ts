@@ -6,11 +6,14 @@
 // "etapas" para manter em sincronia com a de subtipos.
 //
 // Divisão de responsabilidade com lib/taskCatalog.ts: esta tabela é a fonte do
-// VOCABULÁRIO (o que existe, em que ordem, com que comportamento); o catálogo
-// em código segue sendo a fonte do VISUAL (tom, ícone) e do PROGRESSO
-// (workflow, percentuais). Os campos do catálogo são lidos de forma síncrona em
-// dezenas de componentes de tela; trazê-los para o banco obrigaria a tornar
-// assíncrono o Kanban, o Calendário, a Performance e o portal inteiro.
+// VOCABULÁRIO (o que existe, em que ordem, com que comportamento) E do ícone/
+// tom de um tipo de TOPO (colunas `icon`/`tone`, 2026-09-13) — o catálogo em
+// código (`TASK_KINDS`) continua sendo o dono dos 5 tipos embutidos e do
+// PROGRESSO (workflow, percentuais), mas passa a consultar aqui como segundo
+// critério (lib/taskCatalog/liveKinds.ts) para um tipo criado só pela tela.
+// Isso evita o custo que fazia essa unificação ficar de fora antes: virar
+// assíncrono o Kanban, o Calendário, a Performance e o portal inteiro — o
+// catálogo em código continua síncrono, só ganha um cache alimentado uma vez.
 
 import type { AdminClient } from "@/lib/automations/taskAccess";
 import { HttpError } from "@/lib/validation";
@@ -27,6 +30,11 @@ export type TaskSubtypeDef = {
   client_visible: boolean;
 };
 
+/** As 5 tonalidades que já existem no design system (app/globals.css) — sem
+ * token de cor novo. `null` num tipo de topo é o fallback genérico
+ * (lib/taskCatalog.ts). Etapas não têm tom próprio, herdam o do tipo. */
+export type TaskKindTone = "green" | "gold" | "blue" | "purple" | "neutral";
+
 export type TaskTypeDef = {
   id: string;
   key: string;
@@ -35,6 +43,10 @@ export type TaskTypeDef = {
   behavior: TaskBehavior;
   creatable: boolean;
   active: boolean;
+  /** Só relevante em linha de topo — `null` numa etapa. */
+  icon: string | null;
+  tone: TaskKindTone | null;
+  show_in_performance: boolean;
   subtypes: TaskSubtypeDef[];
 };
 
@@ -44,7 +56,7 @@ export type TaskTypeDef = {
 export type TypeReader = Pick<AdminClient, "from">;
 
 const COLUMNS =
-  "id,parent_id,key,label,order_index,behavior,creatable,active,lead_days,progress_weight,default_assignee,client_visible";
+  "id,parent_id,key,label,order_index,behavior,creatable,active,lead_days,progress_weight,default_assignee,client_visible,icon,tone,show_in_performance";
 
 type Row = {
   id: string;
@@ -59,6 +71,9 @@ type Row = {
   progress_weight: number;
   default_assignee: string | null;
   client_visible: boolean;
+  icon: string | null;
+  tone: TaskKindTone | null;
+  show_in_performance: boolean;
 };
 
 /** Monta a árvore a partir das linhas cruas. Separado da consulta porque o
@@ -94,6 +109,9 @@ function groupRows(rows: Row[]): TaskTypeEditorNode[] {
       behavior: row.behavior,
       creatable: row.creatable,
       active: row.active,
+      icon: row.icon,
+      tone: row.tone,
+      show_in_performance: row.show_in_performance,
       // A ordem É a cascata. Empate cai na key para a sequência nunca depender
       // da ordem em que o Postgres devolveu as linhas.
       subtypes: (subtypesByParent.get(row.id) ?? []).sort(
@@ -153,12 +171,15 @@ export function deliveryTypeProblem(type: TaskTypeDef): string | null {
 // peso e visibilidade) só mudava por SQL. O que segue é a camada de escrita
 // dessa mesma tabela, com as travas que o SQL cru não tinha.
 //
-// O que este editor NÃO faz, deliberadamente: criar um TIPO de topo novo. O
-// tipo existe em dois lugares — `task_types` (vocabulário) e `lib/taskCatalog.ts`
-// (tom, ícone, blurb, e a união `TaskKind`). Uma linha criada só no banco
-// renderiza com o visual de fallback ("Tarefa", cinza) em todo card, então
-// tipo novo continua sendo mudança de código; aqui se editam os tipos que
-// existem e, com CRUD completo, as etapas de cada um.
+// `createTaskType` (abaixo) cria um TIPO de topo novo — antes disso era
+// deliberadamente fora de escopo, porque o tipo existia em dois lugares
+// (`task_types` e a união `TaskKind` em `lib/taskCatalog.ts`) e uma linha só
+// no banco renderizava com o visual de fallback ("Tarefa", cinza) em todo
+// card. Com `icon`/`tone` agora colunas de `task_types` e `kindDef` lendo o
+// cache ao vivo (lib/taskCatalog/liveKinds.ts) como segundo critério, um tipo
+// criado só pela tela já nasce com identidade visual própria — sem mudança de
+// código. `createTaskSubtype`/`updateTaskType`/`deleteTaskType` continuam
+// sendo o CRUD das etapas de qualquer tipo, novo ou embutido.
 
 export type TaskTypeEditorSubtype = TaskSubtypeDef & { id: string; active: boolean };
 export type TaskTypeEditorNode = Omit<TaskTypeDef, "subtypes"> & { subtypes: TaskTypeEditorSubtype[] };
@@ -309,31 +330,28 @@ export type SubtypeInput = {
   client_visible?: boolean;
 };
 
-/** Cria uma etapa no fim da fila do tipo. Só tipo de topo aceita filho —
- * o vocabulário tem dois níveis, e um subtipo de subtipo não teria como ser
- * validado pelo trigger (que procura o filho direto do `kind`). */
-export async function createTaskSubtype(
+/** O insert cru de uma etapa, sem checar unicidade de key — quem chama já
+ * resolveu isso contra a fonte certa de "etapas irmãs já existentes": linhas
+ * já no banco para `createTaskSubtype`, o array ainda sendo montado em
+ * memória para `createTaskType`. Extraído para as duas nunca terem duas
+ * cópias divergentes da mesma lógica de insert. */
+async function insertSubtypeRow(
   db: TypeWriter,
   parentId: string,
+  orderIndex: number,
+  key: string,
   input: SubtypeInput,
 ): Promise<TaskTypeEditorSubtype> {
-  const { type, subtype } = await locate(db, parentId);
-  if (subtype) throw new HttpError(400, "Uma etapa nao pode ter etapas dentro dela.");
-
-  const key = slugifyTypeKey(input.key ?? input.label);
-  if (!key) throw new HttpError(400, "O nome da etapa precisa ter ao menos uma letra ou numero.");
-  if (type.subtypes.some((s) => s.key === key)) {
-    throw new HttpError(409, `O tipo "${type.label}" ja tem uma etapa com a chave "${key}".`);
-  }
-
   const { data, error } = await db
     .from("task_types")
     .insert({
-      parent_id: type.id,
+      parent_id: parentId,
       key,
       label: input.label.trim(),
-      order_index: nextOrderIndex(type.subtypes),
-      lead_days: input.lead_days ?? 0,
+      order_index: orderIndex,
+      // Default 1, não 0 (2026-09-14) — cada card ajusta a própria data na
+      // hora; o molde só evita uma etapa nascer com prazo no mesmo dia.
+      lead_days: input.lead_days ?? 1,
       progress_weight: input.progress_weight ?? 1,
       default_assignee: input.default_assignee ?? null,
       client_visible: input.client_visible ?? false,
@@ -354,6 +372,113 @@ export async function createTaskSubtype(
     client_visible: row.client_visible,
     active: row.active,
   };
+}
+
+/** Cria uma etapa no fim da fila do tipo. Só tipo de topo aceita filho —
+ * o vocabulário tem dois níveis, e um subtipo de subtipo não teria como ser
+ * validado pelo trigger (que procura o filho direto do `kind`). */
+export async function createTaskSubtype(
+  db: TypeWriter,
+  parentId: string,
+  input: SubtypeInput,
+): Promise<TaskTypeEditorSubtype> {
+  const { type, subtype } = await locate(db, parentId);
+  if (subtype) throw new HttpError(400, "Uma etapa nao pode ter etapas dentro dela.");
+
+  const key = slugifyTypeKey(input.key ?? input.label);
+  if (!key) throw new HttpError(400, "O nome da etapa precisa ter ao menos uma letra ou numero.");
+  if (type.subtypes.some((s) => s.key === key)) {
+    throw new HttpError(409, `O tipo "${type.label}" ja tem uma etapa com a chave "${key}".`);
+  }
+
+  return insertSubtypeRow(db, type.id, nextOrderIndex(type.subtypes), key, input);
+}
+
+export type TaskTypeCreateInput = {
+  label: string;
+  behavior: TaskBehavior;
+  icon: string;
+  tone: TaskKindTone;
+  show_in_performance: boolean;
+  steps: SubtypeInput[];
+};
+
+/** Cria um TIPO de topo novo — a peça que faltava para "criar um fluxo em
+ * cascata pela tela" funcionar de ponta a ponta. Ícone/tom vêm no input (uma
+ * paleta fixa escolhida na tela, lib/taskCatalog.ts lê isso via o cache ao
+ * vivo em vez de precisar de uma entrada em código para cada tipo novo).
+ *
+ * Sem RPC/transação Postgres nova: cria a linha de topo, depois cada etapa em
+ * sequência; se uma etapa falhar no meio, apaga a linha de topo — o `on
+ * delete cascade` de `task_types.parent_id` já limpa as etapas já inseridas
+ * sozinho. Mesmo padrão que `createFlowDelivery` (lib/supabase.ts) já usa
+ * para "cria pai, tenta criar filhos, desfaz o pai se algum filho falhar".
+ */
+export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput): Promise<TaskTypeEditorNode> {
+  if (!input.steps.length) throw new HttpError(400, "Um fluxo em cascata precisa de pelo menos uma etapa.");
+
+  const key = slugifyTypeKey(input.label);
+  if (!key) throw new HttpError(400, "O nome do tipo precisa ter ao menos uma letra ou numero.");
+  const { types: existingTypes } = await listTaskTypesForEditor(db);
+  if (existingTypes.some((t) => t.key === key)) {
+    throw new HttpError(409, `Já existe um tipo com a chave "${key}".`);
+  }
+
+  // Resolve as keys das etapas e barra colisão ENTRE ELAS antes de inserir
+  // qualquer coisa — falha rápido no erro de digitação comum (duas etapas com
+  // o mesmo nome), em vez de deixar a segunda pisar na primeira no banco.
+  const stepKeys: string[] = [];
+  for (const step of input.steps) {
+    const stepKey = slugifyTypeKey(step.key ?? step.label);
+    if (!stepKey) throw new HttpError(400, "O nome da etapa precisa ter ao menos uma letra ou numero.");
+    if (stepKeys.includes(stepKey)) {
+      throw new HttpError(409, `Duas etapas não podem ter a mesma chave ("${stepKey}").`);
+    }
+    stepKeys.push(stepKey);
+  }
+
+  const { data, error } = await db
+    .from("task_types")
+    .insert({
+      parent_id: null,
+      key,
+      label: input.label.trim(),
+      order_index: nextOrderIndex(existingTypes),
+      behavior: input.behavior,
+      creatable: true,
+      icon: input.icon,
+      tone: input.tone,
+      show_in_performance: input.show_in_performance,
+    })
+    .select(COLUMNS)
+    .limit(1);
+  if (error) throw error;
+  const rootRow = (data ?? [])[0] as Row | undefined;
+  if (!rootRow) throw new HttpError(503, "Não foi possível criar o tipo.");
+
+  try {
+    const subtypes: TaskTypeEditorSubtype[] = [];
+    for (let i = 0; i < input.steps.length; i++) {
+      subtypes.push(await insertSubtypeRow(db, rootRow.id, (i + 1) * 10, stepKeys[i], input.steps[i]));
+    }
+    return {
+      id: rootRow.id,
+      key: rootRow.key,
+      label: rootRow.label,
+      order_index: rootRow.order_index,
+      behavior: rootRow.behavior,
+      creatable: rootRow.creatable,
+      active: rootRow.active,
+      icon: rootRow.icon,
+      tone: rootRow.tone,
+      show_in_performance: rootRow.show_in_performance,
+      subtypes,
+    };
+  } catch (stepError) {
+    // Desfaz o tipo inteiro — o cascade já leva as etapas já inseridas junto.
+    await db.from("task_types").delete().eq("id", rootRow.id);
+    throw stepError;
+  }
 }
 
 export type TypePatch = Partial<{

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createTaskType,
   deactivationProblem,
   deletionProblem,
   lastStepProblem,
@@ -8,6 +9,7 @@ import {
   tallyVocabUsage,
   usageKey,
   type TaskTypeEditorNode,
+  type TypeWriter,
 } from "./taskTypes";
 
 function step(id: string, key: string, active = true) {
@@ -33,6 +35,9 @@ function deliveryType(subtypes: ReturnType<typeof step>[]): TaskTypeEditorNode {
     behavior: "entrega",
     creatable: true,
     active: true,
+    icon: null,
+    tone: null,
+    show_in_performance: true,
     subtypes,
   };
 }
@@ -103,5 +108,104 @@ describe("posição de uma etapa nova", () => {
   it("entra no fim da fila com folga para uma inserção manual depois", () => {
     expect(nextOrderIndex([])).toBe(10);
     expect(nextOrderIndex([{ order_index: 10 }, { order_index: 40 }])).toBe(50);
+  });
+});
+
+// Fake mínimo de `TypeWriter`: um array em memória por tabela, thenable
+// (então `await db.from(...).select(...)` funciona sem envolver Promise de
+// verdade), sustentando só as cadeias que createTaskType realmente usa
+// (select sem filtro, insert + select + limit, delete + eq). `failStepIndex`
+// simula a N-ésima etapa falhando no insert, para provar a limpeza compensatória.
+function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number | null = null): TypeWriter {
+  const state: { task_types: Record<string, unknown>[]; tasks: Record<string, unknown>[] } = {
+    task_types: [...seedTypes],
+    tasks: [],
+  };
+  let insertCount = -1; // -1 = a próxima insert é a linha de topo; 0+ = índice da etapa
+
+  function builder(table: "task_types" | "tasks") {
+    let mode: "select" | "insert" | "delete" = "select";
+    let insertPayload: Record<string, unknown> | null = null;
+    let failThis = false;
+    const filters: { col: string; val: unknown }[] = [];
+
+    const api = {
+      select() { return api; },
+      insert(payload: Record<string, unknown>) {
+        mode = "insert";
+        if (payload.parent_id !== null && payload.parent_id !== undefined) {
+          insertCount += 1;
+          if (failStepIndex !== null && insertCount === failStepIndex) failThis = true;
+        }
+        insertPayload = { id: `row-${state[table].length + 1}`, active: true, ...payload };
+        return api;
+      },
+      delete() { mode = "delete"; return api; },
+      eq(col: string, val: unknown) { filters.push({ col, val }); return api; },
+      order() { return api; },
+      range() { return api; },
+      limit() { return api; },
+      then(resolve: (v: { data: unknown; error: { message: string } | null }) => void) {
+        if (mode === "insert") {
+          if (failThis) { resolve({ data: null, error: { message: "insercao falhou (simulado)" } }); return; }
+          state[table].push(insertPayload!);
+          resolve({ data: [insertPayload], error: null });
+          return;
+        }
+        if (mode === "delete") {
+          const doomed = state[table].filter((r) => filters.every((f) => r[f.col] === f.val));
+          const doomedIds = new Set(doomed.map((r) => r.id));
+          // Simula o `on delete cascade` de task_types.parent_id — a etapa
+          // já inserida some junto quando a linha de topo é apagada.
+          state[table] = state[table].filter((r) => !doomedIds.has(r.id) && !doomedIds.has(r.parent_id));
+          resolve({ data: null, error: null });
+          return;
+        }
+        const rows = state[table].filter((r) => filters.every((f) => r[f.col] === f.val));
+        resolve({ data: rows, error: null });
+      },
+    };
+    return api;
+  }
+
+  return { from: (table: string) => builder(table as "task_types" | "tasks") } as unknown as TypeWriter;
+}
+
+const baseCreateInput = {
+  label: "Reels",
+  behavior: "entrega" as const,
+  icon: "▶",
+  tone: "purple" as const,
+  show_in_performance: true,
+  steps: [{ label: "Roteiro" }, { label: "Gravação" }, { label: "Corte" }],
+};
+
+describe("createTaskType — nasce um tipo de topo novo", () => {
+  it("cria a linha de topo e as etapas na ordem enviada", async () => {
+    const db = fakeDb();
+    const created = await createTaskType(db, baseCreateInput);
+    expect(created.key).toBe("reels");
+    expect(created.icon).toBe("▶");
+    expect(created.tone).toBe("purple");
+    expect(created.subtypes.map((s) => s.key)).toEqual(["roteiro", "gravacao", "corte"]);
+    expect(created.subtypes.map((s) => s.order_index)).toEqual([10, 20, 30]);
+  });
+
+  it("recusa um tipo cuja key já existe", async () => {
+    const db = fakeDb([{ id: "t1", parent_id: null, key: "reels", label: "Reels", active: true, behavior: "entrega" }]);
+    await expect(createTaskType(db, baseCreateInput)).rejects.toThrow(/já existe/i);
+  });
+
+  it("recusa etapas com a mesma key entre si, antes de inserir qualquer coisa", async () => {
+    const db = fakeDb();
+    const input = { ...baseCreateInput, steps: [{ label: "Corte" }, { label: "Corte" }] };
+    await expect(createTaskType(db, input)).rejects.toThrow(/mesma chave/i);
+  });
+
+  it("se uma etapa falha no meio, apaga a linha de topo (limpeza compensatória)", async () => {
+    const db = fakeDb([], 1); // a 2ª etapa (índice 1) falha
+    await expect(createTaskType(db, baseCreateInput)).rejects.toThrow(/simulado/);
+    const { data } = (await db.from("task_types").select()) as { data: unknown[] };
+    expect(data).toEqual([]);
   });
 });

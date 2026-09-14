@@ -6,7 +6,7 @@ import DriveFolderPreviews from "./DriveFolderPreviews";
 
 type Checkpoint = { id: string; title: string; status: TaskStatus; done: boolean; dueDate: string | null };
 type Plan = { id: string; title: string; progress: number; activities: number; status: TaskStatus };
-type OpenTask = { id: string; title: string; status: TaskStatus; kind: string; progress: number };
+type OpenTask = { id: string; title: string; status: TaskStatus; kind: string; typeLabel: string | null; progress: number };
 
 const PLANO_LABEL: Record<string, string> = { start: "Start", growth: "Growth", custom: "Custom" };
 
@@ -152,7 +152,7 @@ export default function ClientOverview({
                 <li key={t.id}>
                   <div className="home-list-main">
                     <strong>{t.title}</strong>
-                    <span className="admin-hint">{kindLabel(t.kind)}</span>
+                    <span className="admin-hint">{t.typeLabel ?? kindLabel(t.kind)}</span>
                   </div>
                   <strong className="visao-pct">{t.progress}%</strong>
                 </li>

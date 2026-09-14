@@ -185,7 +185,12 @@ function taskDate(t: TaskRecord): Date | null {
 // independentemente do tipo do card. Não muda o que os clientes veem hoje:
 // nenhum card `agendamento` era visível ao cliente, então esta função já
 // devolvia null e o portal já caía no conteúdo estático (mesmo padrão do Plano).
-function agendaFromTasks(rows: TaskRecord[], now: Date = new Date()): PortalContent["agenda"] | null {
+function agendaFromTasks(
+  rows: TaskRecord[],
+  labelByKind: Map<string, string>,
+  toneByKind: Map<string, string>,
+  now: Date = new Date(),
+): PortalContent["agenda"] | null {
   const events = rows
     .filter((t) => t.client_visible && t.scheduled_start_at !== null)
     .map((t) => ({ t, date: taskDate(t) }))
@@ -203,8 +208,8 @@ function agendaFromTasks(rows: TaskRecord[], now: Date = new Date()): PortalCont
       month: MESES[date.getMonth()],
       title: t.title,
       meta: `${hh}:${mm}${platform ? ` · ${platform}` : ""}`,
-      tag: subtypeLabel(t.subtype) || kindLabel(t.kind),
-      tone: kindTone(t.kind) as Tone,
+      tag: subtypeLabel(t.subtype) || labelByKind.get(t.kind) || kindLabel(t.kind),
+      tone: (toneByKind.get(t.kind) || kindTone(t.kind)) as Tone,
     };
   });
 
@@ -228,7 +233,10 @@ function agendaFromTasks(rows: TaskRecord[], now: Date = new Date()): PortalCont
     if (!t.client_visible) continue;
     const d = taskDate(t);
     if (!d || d.getFullYear() !== year || d.getMonth() !== month) continue;
-    marks[String(d.getDate())] = { tag: subtypeLabel(t.subtype) || kindLabel(t.kind), tone: kindTone(t.kind) as Tone };
+    marks[String(d.getDate())] = {
+      tag: subtypeLabel(t.subtype) || labelByKind.get(t.kind) || kindLabel(t.kind),
+      tone: (toneByKind.get(t.kind) || kindTone(t.kind)) as Tone,
+    };
   }
 
   const legendMap = new Map<string, Tone>();
@@ -295,7 +303,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const client = await getClient(slug);
   if (!client) throw new HttpError(404, "Cliente nao encontrado.");
 
-  const [briefing, links, results, content, prefs, tasks, documents, northTrilhas, credentials, planoVisibility, flowFlags] = await Promise.all([
+  const [briefing, links, results, content, prefs, tasks, documents, northTrilhas, credentials, planoVisibility, flowFlags, taskTypes] = await Promise.all([
     supabase.from("briefing_answers").select("answers,submitted,updated_at").eq("client_id", client.id).limit(1),
     supabase.from("client_drive_links").select("brand_url,products_url,uploads_url").eq("client_id", client.id).limit(1),
     supabase.from("client_results").select("insights,top_metrics,report_url,feedback_url").eq("client_id", client.id).limit(1),
@@ -322,6 +330,11 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     listClientCredentials(client.id),
     getPlanoVisibility(),
     getClientFlowFlags(client.id),
+    // Rótulo/tom de um tipo criado pela tela (sem entrada em TASK_KINDS) —
+    // o portal do cliente não tem o cache ao vivo do admin (AdminShell.tsx),
+    // e não pode chamar /api/admin/task-types (requireAdmin), então resolve
+    // isso no servidor, igual ao que listParentCards já faz (labelByKind).
+    listTaskTypes(supabase),
   ]);
   if (briefing.error) fail(briefing.error);
   if (links.error) fail(links.error);
@@ -356,7 +369,9 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     .filter((t) => t.kind === "checkpoint_comercial")
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const mergedContent = mergeContent(c?.data);
-  const agenda = agendaFromTasks(visibleRows);
+  const labelByKind = new Map(taskTypes.map((t) => [t.key, t.label]));
+  const toneByKind = new Map(taskTypes.filter((t) => t.tone).map((t) => [t.key, t.tone as string]));
+  const agenda = agendaFromTasks(visibleRows, labelByKind, toneByKind);
   const content_ = {
     ...mergedContent,
     ...(planoRows.length ? { plano: planoFromTasks(planoRows, visibleRows) } : {}),
@@ -394,6 +409,13 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
       .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
     checkpoints: checkpointRows,
     flowFlags: { revisaoCliente: flowFlags.revisaoCliente, aprovacaoCliente: flowFlags.aprovacaoCliente },
+    // Rótulo/tom de cada `kind` presente nas listas acima — o portal não tem
+    // o cache ao vivo do admin (lib/taskCatalog/liveKinds.ts), então um tipo
+    // criado pela tela de Configurações precisa vir pronto do servidor.
+    // PortalPaged.tsx lê isto com fallback pro catálogo em código.
+    kindVisuals: Object.fromEntries(
+      Array.from(labelByKind.keys()).map((key) => [key, { label: labelByKind.get(key)!, tone: toneByKind.get(key) ?? null }]),
+    ),
   };
 }
 

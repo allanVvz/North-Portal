@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { createTaskSubtype, listTaskTypes, listTaskTypesForEditor } from "@/lib/taskTypes";
-import { taskSubtypeCreateSchema } from "@/lib/validation";
+import { createTaskSubtype, createTaskType, listTaskTypes, listTaskTypesForEditor } from "@/lib/taskTypes";
+import { taskSubtypeCreateSchema, taskTypeCreateSchema } from "@/lib/validation";
 
 // GET /api/admin/task-types -> o vocabulario inteiro (tipos + subtipos), para
 // os dropdowns de Tipo/Subtipo e para a caixa de etapas do modal. Uma consulta
@@ -26,15 +26,21 @@ export async function GET(request: Request) {
   }
 }
 
-// POST /api/admin/task-types -> cria uma ETAPA (subtipo) no fim da fila de um
-// tipo. Tipo de topo nao nasce por aqui: ele tem contraparte em
-// lib/taskCatalog.ts (tom, icone, uniao TaskKind), e uma linha so no banco
-// renderizaria com o visual de fallback em todo card.
+// POST /api/admin/task-types -> cria uma ETAPA (subtipo) de um tipo existente
+// OU um TIPO de topo novo, conforme o corpo tem `parent_id` ou não. Um tipo de
+// topo novo (2026-09-13) já nasce com identidade visual própria (icon/tone,
+// colunas de task_types) — lib/taskCatalog.ts le isso via o cache ao vivo
+// (lib/taskCatalog/liveKinds.ts) em vez de precisar de uma entrada em código.
 export async function POST(request: Request) {
   try {
     await requireAdmin();
-    const { parent_id, ...input } = taskSubtypeCreateSchema.parse(await request.json());
+    const body = await request.json();
     const supabase = await createClient();
+    if (body && typeof body === "object" && !("parent_id" in body)) {
+      const input = taskTypeCreateSchema.parse(body);
+      return NextResponse.json(await createTaskType(supabase, input), { status: 201 });
+    }
+    const { parent_id, ...input } = taskSubtypeCreateSchema.parse(body);
     return NextResponse.json(await createTaskSubtype(supabase, parent_id, input), { status: 201 });
   } catch (error) {
     return apiError(error);

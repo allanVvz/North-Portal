@@ -623,6 +623,36 @@ export const taskSubtypeCreateSchema = z.object({
   default_assignee: z.string().max(120).nullable().optional(),
   client_visible: z.boolean().optional(),
 });
+
+// As 5 tonalidades que já existem no design system (app/globals.css) — sem
+// token de cor novo pra um tipo criado pela tela.
+export const TASK_KIND_TONES = ["green", "gold", "blue", "purple", "neutral"] as const;
+
+// Cria um TIPO de topo novo (2026-09-13) — o pedaço que faltava pra "criar um
+// fluxo em cascata pela tela" (reels, carrossel, ...) funcionar sem mudança de
+// código. `steps.min(1)`: a mesma regra que `lastStepProblem` já garante em
+// outro lugar (uma Entrega não pode ficar sem etapa ativa), checada aqui mais
+// cedo, antes de qualquer INSERT.
+export const taskTypeCreateSchema = z.object({
+  label: z.string().min(1).max(80),
+  behavior: z.enum(["entrega", "plano", "simples"]).default("entrega"),
+  icon: z.string().min(1).max(4),
+  tone: z.enum(TASK_KIND_TONES),
+  show_in_performance: z.boolean().optional().default(true),
+  steps: z
+    .array(
+      z.object({
+        label: z.string().min(1).max(80),
+        key: z.string().max(40).optional(),
+        lead_days: z.number().int().min(0).max(365).optional(),
+        progress_weight: z.number().min(0.1).max(100).optional(),
+        default_assignee: z.string().max(120).nullable().optional(),
+        client_visible: z.boolean().optional(),
+      }),
+    )
+    .min(1),
+});
+
 export const taskTypePatchSchema = z.object({
   label: z.string().min(1).max(80).optional(),
   order_index: z.number().int().min(0).max(100000).optional(),
@@ -632,6 +662,9 @@ export const taskTypePatchSchema = z.object({
   client_visible: z.boolean().optional(),
   active: z.boolean().optional(),
   creatable: z.boolean().optional(),
+  icon: z.string().min(1).max(4).optional(),
+  tone: z.enum(TASK_KIND_TONES).optional(),
+  show_in_performance: z.boolean().optional(),
 });
 
 // ---- Trilhas North (global educational material list) -------------------------
@@ -972,6 +1005,10 @@ export type PortalPayload = {
   // revisaoCliente is currently unused by the UI (no client-facing Revisão
   // page exists), kept for schema symmetry / future-proofing.
   flowFlags: { revisaoCliente: boolean; aprovacaoCliente: boolean };
+  // Rótulo/tom (de task_types) de cada `kind` presente nas listas do payload
+  // — o portal não roda o cache ao vivo do admin nem pode chamar a rota
+  // admin-only de tipos, então um tipo criado pela tela chega já resolvido.
+  kindVisuals: Record<string, { label: string; tone: string | null }>;
 };
 
 export const clientApprovalActionSchema = z

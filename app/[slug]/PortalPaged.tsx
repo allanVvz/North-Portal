@@ -1389,6 +1389,12 @@ function EntregasPage(props: {
   const [busyId, setBusyId] = useState("");
   const [adjustFor, setAdjustFor] = useState<ClientTask | null>(null);
   const [toast, setToast] = useState("");
+  // Rótulo/tom de um tipo criado pela tela de Configurações (sem entrada em
+  // TASK_KINDS) — o servidor já resolve isso em kindVisuals; kindLabel/
+  // kindTone seguem como fallback pros 5 tipos embutidos.
+  const kindVisuals = ctx.payload?.kindVisuals ?? {};
+  const typeLabel = (kind: string) => kindVisuals[kind]?.label || kindLabel(kind);
+  const typeTone = (kind: string) => kindVisuals[kind]?.tone || kindTone(kind);
 
   function flash(msg: string) {
     setToast(msg);
@@ -1435,8 +1441,8 @@ function EntregasPage(props: {
             const materialLink = extractLatestLink(comments) ?? ctx.links?.uploadsUrl ?? null;
             return (
               <div className={`np-approval ${yourTurn ? "np-approval-turn" : ""}`} key={t.id}>
-                <div className={`np-approval-cover tone-${kindTone(t.kind)}`}>
-                  <span className="np-pill light">{kindLabel(t.kind)}</span>
+                <div className={`np-approval-cover tone-${typeTone(t.kind)}`}>
+                  <span className="np-pill light">{typeLabel(t.kind)}</span>
                   {yourTurn ? <span className="np-pill gold np-approval-flag">Sua vez</span> : null}
                 </div>
                 <div className="np-approval-body">
@@ -1487,10 +1493,10 @@ function EntregasPage(props: {
         <ul className="np-recent">
           {resolved.map((t) => (
             <li key={t.id}>
-              <span className={`np-recent-thumb tone-${kindTone(t.kind)}`} />
+              <span className={`np-recent-thumb tone-${typeTone(t.kind)}`} />
               <div className="np-recent-text">
                 <strong>{t.title}</strong>
-                <em>{kindLabel(t.kind)}{t.assignee ? ` · ${t.assignee}` : ""}</em>
+                <em>{typeLabel(t.kind)}{t.assignee ? ` · ${t.assignee}` : ""}</em>
               </div>
               <span className="np-muted-sm">{fmtWhen(t.updated_at)}</span>
               <span className="np-pill green">Concluído</span>

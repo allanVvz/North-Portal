@@ -10,6 +10,8 @@ import type { TeamPhotoIndex } from "../avatar/photoKey";
 import NotificationsList from "./NotificationsList";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
 import type { NotificationRecord } from "@/lib/notificationTypes";
+import { buildLiveKindDefs, setLiveKinds } from "@/lib/taskCatalog/liveKinds";
+import type { TaskTypeDef } from "@/lib/taskTypes";
 
 type Theme = "light" | "dark";
 
@@ -258,6 +260,19 @@ export default function AdminShell({
     refetchNotifications();
   }, [refetchNotifications]);
   useNotificationsRealtime(userId, refetchNotifications);
+
+  // Aquece o cache de identidade visual de tipos criados pela tela
+  // (lib/taskCatalog/liveKinds.ts) uma vez por sessão admin — é daqui que
+  // TaskKindIcon.tsx e todo o resto que chama kindIcon/kindTone/kindLabel
+  // aprendem o ícone/tom de um tipo que não está em TASK_KINDS.
+  useEffect(() => {
+    fetch("/api/admin/task-types")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { types: TaskTypeDef[] } | null) => {
+        if (data) setLiveKinds(buildLiveKindDefs(data.types));
+      })
+      .catch(() => {});
+  }, []);
 
   // opening the bell marks the whole inbox read (optimistic locally, fire-
   // and-forget PATCH) — same "read on view" idiom as a typical inbox

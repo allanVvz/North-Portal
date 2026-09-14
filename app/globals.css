@@ -2922,11 +2922,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .voc-type { border: 1px solid var(--a-border); border-radius: 12px; padding: 14px 16px; background: var(--a-surface); }
 .voc-type.off { opacity: .6; }
 .voc-type-head { display: flex; align-items: flex-start; gap: 12px; }
+.voc-type-toggle { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.voc-chevron { flex-shrink: 0; margin-top: 3px; color: var(--a-muted); display: inline-block; transition: transform .15s; }
+.voc-chevron.open { transform: rotate(90deg); }
 .voc-type-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .voc-type-titlerow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .voc-type-titlerow strong { font-size: 14px; font-weight: 600; color: var(--a-ink); }
-.voc-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--a-muted); }
 .voc-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.voc-showinactive { align-self: flex-start; }
 .voc-inline { flex: 1; display: flex; align-items: flex-end; gap: 10px; }
 .voc-inline .admin-field { flex: 1; margin: 0; }
 .voc-steps { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-left: 4px; }
@@ -3427,6 +3430,22 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .meta-scopes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .meta-scopes li { padding: 10px 12px; border: 1px solid var(--a-border); border-radius: 10px; font-size: 13px; color: var(--a-ink); }
 .meta-scopes code { font-size: 11px; color: var(--a-muted); background: var(--a-inset); padding: 1px 6px; border-radius: 6px; }
+
+/* ---- Novo fluxo modal (criar um tipo de topo + as etapas dele numa vez) ---- */
+.novofluxo { width: min(640px, 94vw); max-height: 90vh; overflow-y: auto; background: var(--a-surface); border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.3); }
+.novofluxo-body { padding: 4px 24px 18px; display: flex; flex-direction: column; gap: 14px; }
+.novofluxo-icons { display: flex; flex-wrap: wrap; gap: 6px; }
+.novofluxo-icon-opt {
+  width: 36px; height: 36px; display: inline-grid; place-items: center; font-size: 16px;
+  border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); color: var(--a-ink); cursor: pointer;
+}
+.novofluxo-icon-opt.on { border-color: var(--a-teal-strong); background: var(--a-teal-soft); }
+.novofluxo-tones { display: flex; flex-wrap: wrap; gap: 6px; }
+.novofluxo-tone-opt {
+  padding: 7px 12px; border-radius: 999px; border: 1px solid transparent; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.novofluxo-tone-opt.on { border-color: currentColor; }
+.novofluxo-steps { display: flex; flex-direction: column; gap: 8px; }
 
 /* ---- Document preview modal (reuses the TaskModal .tm/.tm-lg/.tm-head/
    .tm-layout/.tm-side/.tm-cell shell — see app/admin/TaskModal.tsx — so the

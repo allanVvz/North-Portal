@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { TaskTypeEditorNode, TaskTypeEditorSubtype, VocabUsageMap } from "@/lib/taskTypes";
 import { usageKey } from "@/lib/taskTypes";
+import NovoFluxoModal from "./NovoFluxoModal";
 
 // Configurações › Tipos e fluxos — o molde das Entregas fora do SQL.
 //
@@ -20,7 +21,7 @@ const BEHAVIOR_LABEL: Record<string, string> = {
   simples: "Tarefa",
 };
 
-type StepDraft = {
+export type StepDraft = {
   label: string;
   lead_days: number;
   progress_weight: number;
@@ -38,7 +39,10 @@ function toStepDraft(step: TaskTypeEditorSubtype): StepDraft {
   };
 }
 
-const EMPTY_STEP: StepDraft = { label: "", lead_days: 0, progress_weight: 1, default_assignee: "", client_visible: false };
+// Default de prazo é 1 dia por etapa (não 0) — cada card ganha a própria data
+// ajustada na hora; isto só evita nascer "vencido no mesmo dia". Decisão do
+// usuário 2026-09-14, sem backfill: só vale para etapa criada daqui pra frente.
+export const EMPTY_STEP: StepDraft = { label: "", lead_days: 1, progress_weight: 1, default_assignee: "", client_visible: false };
 
 export default function FluxosPanel() {
   const [data, setData] = useState<EditorData | null>(null);
@@ -49,6 +53,22 @@ export default function FluxosPanel() {
   const [stepDraft, setStepDraft] = useState<StepDraft>(EMPTY_STEP);
   const [typeLabel, setTypeLabel] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [novoFluxoOpen, setNovoFluxoOpen] = useState(false);
+  // Tudo nasce recolhido — só as etapas de um tipo que a pessoa abriu de
+  // propósito aparecem. Tipo inativo (molde velho, sem card nenhum) nem entra
+  // na lista até "Mostrar inativos" — não é escondido por padrão nem no que
+  // já está expandido, expandir e mostrar inativos são dois filtros
+  // independentes (2026-09-14, pedido do usuário: "informação demais").
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showInactive, setShowInactive] = useState(false);
+
+  function toggleExpanded(typeId: string) {
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (next.has(typeId)) next.delete(typeId); else next.add(typeId);
+      return next;
+    });
+  }
 
   useEffect(() => {
     fetch("/api/admin/task-types?scope=editor")
@@ -238,24 +258,35 @@ export default function FluxosPanel() {
     );
   }
 
+  const inactiveCount = data.types.filter((t) => !t.active).length;
+  const visibleTypes = showInactive ? data.types : data.types.filter((t) => t.active);
+
   return (
     <div className="set-card">
       <div className="set-appearance-head">
         <div>
           <h2 className="set-h">Tipos e fluxos</h2>
-          <p className="admin-sub">
-            O vocabulário dos cards. Um tipo <strong>Entrega</strong> cascateia pelas etapas na ordem abaixo — arraste para
-            reordenar. Editar um molde vale para as entregas <strong>novas</strong>: as que já estão em andamento
-            congelaram o próprio denominador de progresso quando nasceram, e não mudam de tamanho no meio do caminho.
-          </p>
+          <p className="admin-sub">Clique num tipo para ver e editar as etapas dele.</p>
         </div>
+        <button className="admin-btn primary" onClick={() => setNovoFluxoOpen(true)}>+ Novo tipo</button>
       </div>
 
       {error ? <p className="admin-error">{error}</p> : null}
 
+      {novoFluxoOpen ? (
+        <NovoFluxoModal
+          onClose={() => setNovoFluxoOpen(false)}
+          onCreated={(created) => {
+            setData((cur) => (cur ? { ...cur, types: [...cur.types, created] } : cur));
+            setNovoFluxoOpen(false);
+          }}
+        />
+      ) : null}
+
       <div className="voc-list">
-        {data.types.map((type) => {
+        {visibleTypes.map((type) => {
           const typeUsage = data.usage[usageKey(type.key)];
+          const isExpanded = expanded.has(type.id);
           return (
             <section className={`voc-type ${type.active ? "" : "off"}`} key={type.id}>
               <header className="voc-type-head">
@@ -274,21 +305,23 @@ export default function FluxosPanel() {
                   </div>
                 ) : (
                   <>
-                    <div className="voc-type-meta">
-                      <div className="voc-type-titlerow">
-                        <strong>{type.label}</strong>
-                        <span className="voc-key">{type.key}</span>
-                        <span className={`set-badge ${type.behavior === "entrega" ? "publicada" : "rascunho"}`}>
-                          {BEHAVIOR_LABEL[type.behavior] ?? type.behavior}
+                    <button type="button" className="voc-type-toggle" onClick={() => toggleExpanded(type.id)} aria-expanded={isExpanded}>
+                      <span className={`voc-chevron ${isExpanded ? "open" : ""}`} aria-hidden>▸</span>
+                      <div className="voc-type-meta">
+                        <div className="voc-type-titlerow">
+                          <strong>{type.label}</strong>
+                          <span className={`set-badge ${type.behavior === "entrega" ? "publicada" : "rascunho"}`}>
+                            {BEHAVIOR_LABEL[type.behavior] ?? type.behavior}
+                          </span>
+                          {type.active ? null : <span className="set-badge rascunho">Inativo</span>}
+                          {type.creatable ? null : <span className="set-badge rascunho">Fora do dropdown</span>}
+                        </div>
+                        <span className="admin-sub">
+                          {type.subtypes.filter((s) => s.active).length} etapa(s)
+                          {typeUsage ? ` · ${typeUsage.total} card(s)` : " · nenhum card"}
                         </span>
-                        {type.active ? null : <span className="set-badge rascunho">Inativo</span>}
-                        {type.creatable ? null : <span className="set-badge rascunho">Fora do dropdown</span>}
                       </div>
-                      <span className="admin-sub">
-                        {type.subtypes.filter((s) => s.active).length} etapa(s) ativa(s)
-                        {typeUsage ? ` · ${typeUsage.total} card(s), ${typeUsage.open} em aberto` : " · nenhum card"}
-                      </span>
-                    </div>
+                    </button>
                     <div className="voc-actions">
                       <button
                         className="admin-btn ghost"
@@ -305,6 +338,7 @@ export default function FluxosPanel() {
                 )}
               </header>
 
+              {isExpanded ? (
               <div className="voc-steps">
                 {type.subtypes.map((step, index) =>
                   editing === step.id ? (
@@ -330,16 +364,12 @@ export default function FluxosPanel() {
                       <div className="voc-step-meta">
                         <div className="voc-type-titlerow">
                           <strong>{step.label}</strong>
-                          <span className="voc-key">{step.key}</span>
                           {step.client_visible ? <span className="set-badge publicada">Cliente vê</span> : null}
                           {step.active ? null : <span className="set-badge rascunho">Inativa</span>}
                         </div>
                         <span className="admin-sub">
-                          prazo +{step.lead_days}d · peso {step.progress_weight}
+                          peso {step.progress_weight}
                           {step.default_assignee ? ` · ${step.default_assignee}` : ""}
-                          {data.usage[usageKey(type.key, step.key)]
-                            ? ` · ${data.usage[usageKey(type.key, step.key)].total} card(s)`
-                            : ""}
                         </span>
                       </div>
                       <div className="voc-actions">
@@ -391,15 +421,22 @@ export default function FluxosPanel() {
                   </button>
                 )}
               </div>
+              ) : null}
             </section>
           );
         })}
+
+        {inactiveCount > 0 ? (
+          <button type="button" className="admin-btn ghost voc-showinactive" onClick={() => setShowInactive((v) => !v)}>
+            {showInactive ? "Esconder inativos" : `Mostrar inativos (${inactiveCount})`}
+          </button>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function StepEditor({
+export function StepEditor({
   draft,
   setDraft,
   busy,

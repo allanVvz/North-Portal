@@ -10,6 +10,7 @@ import { TASK_STATUSES, type TaskRecord, type TaskStatus } from "@/lib/validatio
 import { FLOW_PARENT_KEY } from "@/lib/taskRelations";
 import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
 import { flowStepPct } from "@/lib/flows/flowProgress";
+import { getLiveKindDef } from "@/lib/taskCatalog/liveKinds";
 
 // ---- Kinds --------------------------------------------------------------------
 
@@ -112,27 +113,43 @@ export const SUBTYPE_LABEL: Record<string, string> = {
 
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];
 
-/** Compatibility at the read boundary while old rows are being migrated.
- * Legacy classifications never become selectable kinds again.
+/** Compatibility at the read boundary while old rows are being migrated —
+ * SÓ para strings mortas de verdade, de uma migração de schema antiga.
  *
  * `agendamento` e `planejamento` entram aqui porque deixaram de ser tipos: a
  * migração zera o kind das linhas, mas esta função é o que segura a tela entre
  * o deploy e a migração, e o que impede um card antigo de renderizar cru se
- * alguma linha escapar. O fallback final para `operacional` é a mesma rede —
- * com o vocabulário encolhendo, é ele que separa uma linha velha de um crash. */
-export function canonicalTaskClassification(kind: string, subtype?: string | null): { kind: TaskKind; subtype: string | null } {
+ * alguma linha escapar.
+ *
+ * Um `kind` que não é nenhuma dessas strings mortas E não está em
+ * `TASK_KINDS` NÃO é mais coagido para `"operacional"` (2026-09-13) — antes
+ * era, e isso quebrava um tipo criado só pela tela (Configurações › Tipos e
+ * fluxos): `TaskModal.tsx` usa o `.kind` daqui pra montar o rascunho, e
+ * salvar reescrevia o card como "Tarefa" pra sempre no primeiro save. Hoje um
+ * kind desconhecido simplesmente passa adiante — `kindDef` (abaixo) é quem
+ * decide o visual dele, olhando o cache ao vivo antes de cair no fallback
+ * genérico. */
+export function canonicalTaskClassification(kind: string, subtype?: string | null): { kind: string; subtype: string | null } {
   if (kind === "publicacao_recorrente") return { kind: "criativo", subtype: subtype ?? null };
   if (kind === "roteiro") return { kind: "operacional", subtype: subtype ?? "roteiro" };
   if (kind === "gravacao") return { kind: "operacional", subtype: subtype ?? "gravacao" };
   if (kind === "agendamento" || kind === "planejamento") return { kind: "operacional", subtype: subtype ?? null };
-  return { kind: isTaskKind(kind) ? kind : "operacional", subtype: subtype ?? null };
+  return { kind, subtype: subtype ?? null };
 }
 
 export function isTaskKind(x: string): x is TaskKind {
   return x in TASK_KINDS;
 }
+
+/** Sem ícone/tom/rótulo próprio — nem nos 5 tipos embutidos, nem no cache ao
+ * vivo (ainda não carregou, ou o tipo não tem icon/tone gravado). Tom neutro,
+ * nunca aparece em Performance até a identidade real chegar. */
+const FALLBACK_KIND_DEF: KindDef = { label: "Tarefa", icon: "●", tone: "neutral", blurb: "", performance: false };
+
 export function kindDef(kind: string): KindDef {
-  return TASK_KINDS[canonicalTaskClassification(kind).kind];
+  const canonical = canonicalTaskClassification(kind).kind;
+  if (isTaskKind(canonical)) return TASK_KINDS[canonical];
+  return getLiveKindDef(canonical) ?? FALLBACK_KIND_DEF;
 }
 export const kindLabel = (kind: string) => kindDef(kind).label;
 export const kindTone = (kind: string) => kindDef(kind).tone;

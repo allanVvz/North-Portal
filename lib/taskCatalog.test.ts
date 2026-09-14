@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { TASK_KIND_KEYS, canonicalTaskClassification, checkpointsProgress, taskProgress } from "./taskCatalog";
+import { afterEach, describe, expect, it } from "vitest";
+import { TASK_KIND_KEYS, canonicalTaskClassification, checkpointsProgress, kindDef, taskProgress } from "./taskCatalog";
+import { setLiveKinds } from "./taskCatalog/liveKinds";
 import type { TaskStatus } from "./validation";
 
 const t = (kind: string, status: TaskStatus, progress_weight = 1) => ({ kind, status, progress_weight });
@@ -61,6 +62,41 @@ describe("catálogo canônico de tipos", () => {
     // deploy e a migração, nem depois se alguma escapar.
     expect(canonicalTaskClassification("agendamento", "gravacao")).toEqual({ kind: "operacional", subtype: "gravacao" });
     expect(canonicalTaskClassification("planejamento")).toEqual({ kind: "operacional", subtype: null });
+  });
+
+  // 2026-09-13: um kind desconhecido (ex.: um tipo criado só pela tela de
+  // Configurações, ainda sem entrada em TASK_KINDS) NÃO é mais coagido para
+  // "operacional" — antes era, e isso reescrevia o card como Tarefa no
+  // primeiro save (TaskModal.tsx usa o `.kind` daqui pra montar o rascunho).
+  it("um kind desconhecido passa adiante, sem virar operacional", () => {
+    expect(canonicalTaskClassification("reels")).toEqual({ kind: "reels", subtype: null });
+    expect(canonicalTaskClassification("reels", "gravacao")).toEqual({ kind: "reels", subtype: "gravacao" });
+  });
+});
+
+describe("kindDef — visual de um tipo, embutido ou ao vivo", () => {
+  afterEach(() => setLiveKinds({}));
+
+  it("os 5 tipos embutidos vêm de TASK_KINDS, sem depender do cache", () => {
+    expect(kindDef("criativo").label).toBe("Entrega");
+    expect(kindDef("criativo").tone).toBe("purple");
+  });
+
+  it("kind desconhecido sem nada no cache: fallback genérico, neutro, fora do Performance", () => {
+    const def = kindDef("reels");
+    expect(def.tone).toBe("neutral");
+    expect(def.performance).toBe(false);
+  });
+
+  it("kind desconhecido com entrada no cache ao vivo: usa a identidade cadastrada", () => {
+    setLiveKinds({ reels: { label: "Reels", icon: "▶", tone: "purple", blurb: "", performance: true } });
+    const def = kindDef("reels");
+    expect(def).toEqual({ label: "Reels", icon: "▶", tone: "purple", blurb: "", performance: true });
+  });
+
+  it("um tipo embutido nunca é sobrescrito pelo cache ao vivo, mesmo se a key colidir", () => {
+    setLiveKinds({ criativo: { label: "Outra coisa", icon: "?", tone: "gold", blurb: "", performance: false } });
+    expect(kindDef("criativo").label).toBe("Entrega");
   });
 });
 
