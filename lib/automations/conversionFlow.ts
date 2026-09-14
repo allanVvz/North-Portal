@@ -38,17 +38,23 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 /** O fluxo de conversão (Automação 2) só funciona com um backend de IA para ler
  *  o comentário do gestor em linguagem natural. Sem ele, `extractMetrics`
  *  devolveria tudo zero e o relatório de vendas fecharia a semana com dados
- *  errados — então a Automação 2 fica DORMENTE (a config existe, não roda) e a
- *  Automação 1 se comporta como o relatório de tráfego normal até a chave da
- *  Anthropic ser cadastrada (Configurações › Integrações › Provedor de IA).
- *  `AI_CLI=1` (dev/e2e) conta como backend. */
+ *  errados — então a Automação 2 fica DORMENTE (a config existe, não roda) até
+ *  um provedor de IA suportado estar cadastrado (Configurações › Integrações
+ *  › Provedor de IA). `AI_CLI=1` (dev/e2e) conta como backend.
+ *
+ *  "Suportado" consulta `isAiVendorSupported` (lib/ai/complete.ts) em vez de
+ *  checar o vendor aqui de novo — é a mesma pergunta que `aiComplete` faz na
+ *  hora de completar de verdade, e as duas checagens já quase divergiram uma
+ *  vez (esta função só reconhecia Anthropic enquanto o vendor configurado
+ *  virou ChatGPT, 2026-09-14). */
 export async function conversionAiReady(): Promise<boolean> {
   if (process.env.AI_CLI === "1") return true;
   try {
     const { getAiProviderSettingsService } = await import("@/lib/ai/provider");
+    const { isAiVendorSupported } = await import("@/lib/ai/complete");
     const settings = await getAiProviderSettingsService();
     if (!settings?.apiKey) return false;
-    return !settings.vendor || settings.vendor === "anthropic";
+    return isAiVendorSupported(settings.vendor);
   } catch {
     return false;
   }
