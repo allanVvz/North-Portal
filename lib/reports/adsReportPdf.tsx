@@ -1,40 +1,38 @@
 // PDF do "Relatório de anúncios" (Automação 1 — relatorio_trafego_semanal).
 //
-// Formato-alvo: o resumo que a equipe manda hoje à mão — KPIs agrupados por
-// TIPO DE CAMPANHA (tráfego site / tráfego perfil / mensagens / engajamento),
-// a lista de CRIATIVOS abaixo de cada campanha, e o FUNIL por último,
-// agregando tudo. Sem gráfico de linha diário.
+// Pergunta que responde: COMO A MÍDIA PERFORMOU NESTA SEMANA? Determinístico —
+// só dados da API, nenhuma IA.
 //
-// O bloco de cada campanha vem de `config.campaignBlocks` (tag manual no
-// template; suggestCampaignBlock só como fallback). A fonte #1/#2/#3 de cada
-// criativo vem de `config.adSourceTags`. As etapas do funil vêm de
-// `config.acquisition.funnelStages`; uma etapa de cauda sem dado sai do funil
-// (funnelStageCount).
+// Ordem de leitura (modelo v2):
+//   1. Performance da semana — cinco números da mídia inteira e a leitura em
+//      uma frase. É o que precisa caber nos primeiros segundos.
+//   2. Funil de aquisição — alcance → cliques → conversas (ou visitas ao perfil,
+//      para quem quase não recebe mensagem), com a taxa ENTRE as etapas.
+//   3. Performance por objetivo — os objetivos lado a lado, para comparar na
+//      horizontal em vez de ler doze cartões empilhados.
+//   4. Criativos — três destaques calculados por regra, depois a tabela.
 //
-// Renderiza server-side com @react-pdf/renderer (sem browser, sem rede) — Node
-// runtime obrigatório (app/api/admin/automations/run/route.ts). Cores em
-// reportTheme.ts, fontes em reportFonts.ts, componentes em reportComponents.tsx.
+// Toda a leitura (totais, criticidade, destaques, frase) vem de adsInsights.ts;
+// este arquivo só decide onde cada coisa aparece. Métrica técnica (CPC, CPE)
+// só aparece quando é crítica, e sempre com a frase que a explica.
 
-import { Document, Page, Path, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
-import {
-  acquisitionMetricLabel, formatAcquisitionValue, resolveAcquisitionMetric,
-  totalWhenPresent, type NullableMetric,
-} from "@/app/admin/performance/acquisitionInsights";
-import {
-  campaignSummaries, metricLabel, recomputeRatios, sumMetricsInto,
-  type Period,
-} from "@/app/admin/performance/insights";
-import { metricRefInverse, metricRefKind, metricValue } from "@/app/admin/performance/performanceLabels";
-import { CAMPAIGN_BLOCK_LABEL, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
-import type { MetaPost, MetaPostMetricKey } from "@/lib/windsor";
-import { funnelStageCount } from "./funnelGeometry";
+import { Document, Page, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import { formatAcquisitionValue } from "@/app/admin/performance/acquisitionInsights";
+import { previousPeriod, type Period } from "@/app/admin/performance/insights";
+import type { PerformanceTemplateConfig } from "@/lib/performanceTemplates";
+import type { MetaPost } from "@/lib/windsor";
 import { registerReportFonts } from "./reportFonts";
-import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
+import { blockResolver } from "./campaignBlockKpis";
 import {
-  CompassNode, DeltaText, FunnelSvg, REPORT_STYLES as S,
-  ResultPanel, gaugeKind,
-} from "./reportComponents";
-import { CampaignBlocksSection, ZERO_NOT_DASH, blockResolver } from "./campaignBlockKpis";
+  OUTCOME_WORDS, READING_LABEL, attentionCard, creativeHighlights, creativeRows, deltaOf, mediaNarrative, mediaOutcome,
+  mediaTotals, money, num, objectiveSummaries, outcomeCost, outcomeValue,
+  type Direction, type ObjectiveSummary,
+} from "./adsInsights";
+import { journeyFor } from "./conversionFocus";
+import {
+  DataTable, FooterNote, HighlightCards, InsightRow, KpiBand, ObjectivePanels, PageHeader, SectionHead, StatStack, TrapezoidFunnel, V,
+  type BandItem, type InsightItem, type PanelView, type StatItem,
+} from "./reportBlocks";
 
 registerReportFonts();
 
@@ -46,225 +44,179 @@ export type AdsReportInput = {
   posts: MetaPost[];
   prevPosts: MetaPost[];
   // Linhas em nível de anúncio (só na conexão direta com a Meta) — a tabela de
-  // criativos por campanha sai daqui. Vazio = conta sem detalhe por criativo.
+  // criativos sai daqui. Vazio = conta sem detalhe por criativo.
   adPosts: MetaPost[];
   generatedAt: Date;
 };
 
-// A seção "Resultados por campanha" (KPIs por bloco de objetivo) e o conjunto
-// ZERO_NOT_DASH vivem em ./campaignBlockKpis — compartilhados com o relatório de
-// vendas.
+export const fullDay = (iso: string) => iso.split("-").reverse().join("/");
+export const shortDay = (iso: string) => iso.slice(5).split("-").reverse().join("/");
+const share = (v: number | null) => (v === null ? "—" : `${formatAcquisitionValue(v, "decimal")}%`);
+const dlt = (c: number | null, p: number | null, dir: Direction) => {
+  const d = deltaOf(c, p, dir);
+  return { text: d.text, tone: d.tone };
+};
 
-// ---- componentes locais ----------------------------------------------
-
-function GaugeCard({
-  label, current, previous, kind, inverse,
-}: {
-  label: string; current: NullableMetric; previous: NullableMetric;
-  kind: "money" | "percent" | "decimal"; inverse: boolean;
-}) {
-  const max = Math.max(current ?? 0, previous ?? 0);
-  const progress = current === null || max === 0 ? 0 : Math.max(7, (current / max) * 100);
-  const cx = 48;
-  const cy = 44;
-  const R = 34;
-  const theta = ((180 - (progress / 100) * 180) * Math.PI) / 180;
-  const px = cx + R * Math.cos(theta);
-  const py = cy - R * Math.sin(theta);
-  return (
-    <View style={S.gaugeCard} wrap={false}>
-      <Svg viewBox="0 0 96 52" style={{ width: 78, height: 42 }}>
-        <Path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`} fill="none" stroke={C.inset} strokeWidth={8} />
-        {progress > 0 ? (
-          <Path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${px} ${py}`} fill="none" stroke={C.tealStrong} strokeWidth={8} strokeLinecap="round" />
-        ) : null}
-      </Svg>
-      <Text style={S.gaugeLabel}>{label.toUpperCase()}</Text>
-      <Text style={S.gaugeValue}>{formatAcquisitionValue(current, kind)}</Text>
-      <DeltaText current={current} previous={previous} inverse={inverse} />
-    </View>
-  );
+/** Os objetivos lado a lado — compartilhado com o relatório de resultados, que
+ *  mostra a mesma mídia com menos peso. Até dois painéis: com mais objetivos, os
+ *  de maior verba, e uma nota diz quantos ficaram de fora. */
+export function objectivePanelsView(objectives: ObjectiveSummary[]): PanelView[] {
+  return objectives.slice(0, 2).map((o) => ({
+    title: o.label,
+    meta: `${money(o.spend)} investidos`,
+    slots: o.slots.map((s) => ({ label: s.label, value: s.value, delta: { text: s.delta.text, tone: s.delta.tone }, note: s.note })),
+  }));
 }
 
-// Linhas de criativo de UMA campanha, agregadas por adId (soma entre
-// plataformas), ratios re-derivadas do total. Puro.
-type CreativeRow = { adId: string; name: string; metrics: Partial<Record<MetaPostMetricKey, number>>; currency?: string };
-function creativeRowsFor(adPosts: MetaPost[], campaignId: string): CreativeRow[] {
-  const byId = new Map<string, CreativeRow>();
-  for (const p of adPosts) {
-    if (!p.adId || p.campaignId !== campaignId) continue;
-    let row = byId.get(p.adId);
-    if (!row) {
-      row = { adId: p.adId, name: p.adName || p.caption || p.adId, metrics: {}, currency: p.currency };
-      byId.set(p.adId, row);
-    }
-    sumMetricsInto(row.metrics, p.metrics);
-  }
-  const rows = [...byId.values()];
-  for (const row of rows) recomputeRatios(row.metrics);
-  return rows.sort((a, b) => (b.metrics.custo ?? 0) - (a.metrics.custo ?? 0));
-}
+function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPosts, generatedAt }: AdsReportInput) {
+  const hidden = new Set(config.acquisition.hiddenSections);
+  const { postBlock } = blockResolver(config);
 
-const CREATIVE_COLS: { key: MetaPostMetricKey; label: string; kind: "number" | "money" | "percent" }[] = [
-  { key: "alcance", label: "Alcance", kind: "number" },
-  { key: "impressoes", label: "Impr.", kind: "number" },
-  { key: "cliquesLink", label: "Cliques", kind: "number" },
-  { key: "contatos", label: "Mensagens", kind: "number" },
-  { key: "custo", label: "Invest.", kind: "money" },
-  { key: "ctr", label: "CTR", kind: "percent" },
-];
+  const cur = mediaTotals(posts);
+  const prev = prevPosts.some((p) => p.source === "paid") ? mediaTotals(prevPosts) : null;
+  const prevRange = previousPeriod(period);
+  const comparedWith = prev ? `${shortDay(prevRange.from)} a ${shortDay(prevRange.to)}` : null;
 
-// ---- documento ------------------------------------------------------
+  const outcome = mediaOutcome(cur);
+  const W = OUTCOME_WORDS[outcome];
+  const value = outcomeValue(cur, outcome);
+  const cost = outcomeCost(cur, outcome);
+  const objectives = objectiveSummaries(posts, prevPosts, postBlock);
+  const narrative = mediaNarrative(cur, prev, comparedWith, outcome);
+  const attention = attentionCard(objectives);
+  const { rows: creatives, hiddenNoise } = creativeRows(adPosts);
+  const highlights = creativeHighlights(creatives, cur.conversations);
+  const CREATIVE_ROWS = 6;
+  // O que ficou fora da tabela vai no cabeçalho da seção: uma linha solta
+  // depois da tabela chegou a abrir uma página 2 só para ela.
+  const creativeMicro = [
+    "leitura por regra",
+    creatives.length > CREATIVE_ROWS ? `+${creatives.length - CREATIVE_ROWS} com menos investimento` : null,
+    hiddenNoise > 0 ? `${hiddenNoise} com gasto irrisório omitido${hiddenNoise > 1 ? "s" : ""}` : null,
+  ].filter(Boolean).join(" · ");
 
-function AdsReportDocument({ clientName, period, cadenceLabel, config, posts, prevPosts, adPosts, generatedAt }: AdsReportInput) {
-  const acq = config.acquisition;
-  const cm = config.prefs.customMetrics;
-  const hidden = new Set(acq.hiddenSections);
+  // 1. Faixa — o desfecho da mídia ganha o destaque, investimento sem cor.
+  const band: BandItem[] = [
+    { label: "Investimento", value: money(cur.spend), delta: dlt(cur.spend, prev?.spend ?? null, "neutral") },
+    { label: "Alcance", value: num(cur.reach), delta: dlt(cur.reach, prev?.reach ?? null, "higher_is_better") },
+    { label: "Cliques", value: num(cur.clicks), delta: dlt(cur.clicks, prev?.clicks ?? null, "higher_is_better") },
+    { label: W.Plural, value: num(value), delta: dlt(value, prev ? outcomeValue(prev, outcome) : null, "higher_is_better") },
+    {
+      label: `Custo por ${W.unit}`,
+      value: cost === null ? "—" : money(cost),
+      delta: cost === null ? { text: `sem ${W.plural} no período`, tone: "neutral" } : dlt(cost, prev ? outcomeCost(prev, outcome) : null, "lower_is_better"),
+    },
+  ];
 
-  const { blockOf } = blockResolver(config);
+  // Leitura: com dois ou mais objetivos, onde foi a verba e de onde veio o
+  // resultado; com um objetivo só, esses dois cartões seriam "100%" e cedem o
+  // lugar ao criativo e ao ponto de atenção.
+  const top = objectives.slice(0, 2);
+  const byOutcome = [...objectives].sort((a, b) => (b.conversations ?? 0) - (a.conversations ?? 0))[0];
+  const insightCards: InsightItem[] = objectives.length >= 2
+    ? [
+        {
+          title: "Distribuição da verba",
+          headline: top.map((o) => `${share(o.spendShare)} ${o.label}`).join(" · "),
+          body: `${top[0].label} ${(top[0].spendShare ?? 0) >= 50 ? "concentrou a maior parte" : "recebeu a maior fatia"} do investimento.`,
+        },
+        {
+          title: "De onde vieram as conversas",
+          headline: top.map((o) => `${share(o.conversationShare)} ${o.label}`).join(" · "),
+          body: (cur.conversations ?? 0) > 0 && byOutcome ? `${byOutcome.label} trouxe a maior parte das conversas.` : "Nenhum objetivo gerou conversa na semana.",
+        },
+      ]
+    : [
+        ...(highlights[0] ? [{ title: "Criativo em destaque", headline: highlights[0].name, body: `${highlights[0].value} · ${highlights[0].detail}` }] : []),
+        ...(attention ? [{ title: attention.label, headline: attention.value, body: attention.detail }] : []),
+      ];
 
-  // O relatório é por CAMPANHA, não por campanha×plataforma — campaignSummaries
-  // devolve uma linha por plataforma, então agregamos por campaignId aqui.
-  const byCampaign = new Map<string, { id: string; campaignId?: string; caption: string; objective?: string; metrics: Partial<Record<MetaPostMetricKey, number>>; currency?: string }>();
-  for (const c of campaignSummaries(posts)) {
-    const id = c.campaignId || c.caption;
-    let agg = byCampaign.get(id);
-    if (!agg) {
-      agg = { id, campaignId: c.campaignId, caption: c.caption, objective: c.objective, metrics: {}, currency: c.currency };
-      byCampaign.set(id, agg);
-    }
-    sumMetricsInto(agg.metrics, c.metrics);
-  }
-  const allCampaigns = [...byCampaign.values()]
-    .map((c) => {
-      recomputeRatios(c.metrics);
-      return { ...c, block: blockOf(c.campaignId, c.caption, c.objective) };
-    })
-    .sort((a, b) => (b.metrics.custo ?? b.metrics.alcance ?? 0) - (a.metrics.custo ?? a.metrics.alcance ?? 0));
-  // Uma folha só: no máximo 6 campanhas e 3 criativos por campanha.
-  const CAMPAIGN_CAP = 6;
-  const CREATIVE_CAP = 3;
-  const campaigns = allCampaigns.slice(0, CAMPAIGN_CAP);
-  const campaignsOverflow = allCampaigns.length - campaigns.length;
-
-  // Funil agregado. Só `contatos` vira 0 (não faixa tracejada): é uma contagem
-  // que o relatório mostra zerada de propósito. Etapa sem dado nenhum (`null`)
-  // sai do funil em QUALQUER posição, não só na cauda — uma faixa tracejada
-  // vazia no meio ("Novos seguidores", que a Meta não entrega) confunde. A
-  // cauda `0` continua sendo aparada pelo funnelStageCount.
-  const resolvedStages = acq.funnelStages
-    .map((r) => ({ ref: r, value: resolveAcquisitionMetric(posts, r, cm) ?? (ZERO_NOT_DASH.has(r) ? 0 : null) }))
-    .filter((s) => s.value !== null);
-  const keepN = funnelStageCount(resolvedStages.map((s) => s.value));
-  const funnelValues = resolvedStages.slice(0, keepN).map((s) => s.value);
-  const funnelLabels = resolvedStages.slice(0, keepN).map((s) => acquisitionMetricLabel(s.ref, cm, metricLabel));
-  const spend = totalWhenPresent(posts, "custo");
-
-  const subtitle = `${cadenceLabel} · ${period.from} a ${period.to} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`;
+  // 2. Funil + pilha lateral.
+  const journey = journeyFor(outcome === "conversas" ? "midia" : "seguidores", cur, { vendas: null, agendamentos: null, receita: null, seguidores: null }, null);
+  const per1000 = value !== null && cur.reach ? (value / cur.reach) * 1000 : null;
+  const stats: StatItem[] = [
+    { label: `Custo por ${W.unit}`, value: cost === null ? "—" : money(cost), detail: `investimento dividido pelas ${W.plural} do período`, soft: true },
+    ...(per1000 !== null
+      ? [{ label: "A cada 1.000 alcançados", value: formatAcquisitionValue(per1000, "decimal"), detail: `${outcome === "conversas" ? "conversaram" : "visitaram o perfil"} — leitura agregada das campanhas` }]
+      : []),
+    ...(objectives.length >= 2 && attention ? [{ label: attention.label, value: attention.value, detail: attention.detail, tone: attention.tone }] : []),
+    ...(objectives.length < 2 && highlights[1] ? [{ label: highlights[1].tag.replace("★ ", ""), value: highlights[1].value, detail: `${highlights[1].name} · ${highlights[1].detail}` }] : []),
+  ];
 
   return (
     <Document>
-      <Page size="A4" style={S.page} wrap>
-        <View style={S.header}>
-          <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 20, height: 20 }}>
-            {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
-          </Svg>
-          <View>
-            <Text style={S.title}>Relatório de anúncios — {clientName}</Text>
-            <Text style={S.subtitle}>{subtitle}</Text>
-          </View>
+      <Page size="A4" style={V.page} wrap>
+        <PageHeader
+          eyebrow={clientName}
+          title="Relatório de anúncios"
+          subtitle={`${fullDay(period.from)} a ${fullDay(period.to)} · mídia, campanhas e criativos · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`}
+          pill="Relatório 1"
+        />
+
+        <View style={V.section}>
+          <SectionHead title="Performance da semana" micro={comparedWith ? `comparado com ${comparedWith}` : "primeira semana registrada"} />
+          <KpiBand items={band} heroIndex={3} />
+          <InsightRow primary={{ title: "Leitura da semana", headline: narrative.headline, body: narrative.body }} cards={insightCards} />
         </View>
 
-        {/* KPIs por bloco de objetivo */}
-        {!hidden.has("kpis") ? (
-          <CampaignBlocksSection config={config} posts={posts} prevPosts={prevPosts} />
-        ) : null}
-
-        {/* Criativos por campanha */}
-        <View style={S.section}>
-          <Text style={S.kicker}>Criativos</Text>
-          {campaigns.length ? campaigns.map((c) => {
-            const all = c.campaignId ? creativeRowsFor(adPosts, c.campaignId) : [];
-            const rows = all.slice(0, CREATIVE_CAP);
-            const rowsOverflow = all.length - rows.length;
-            return (
-              <View key={c.id} wrap={false}>
-                <View style={S.campaignHead}>
-                  <Text style={S.campaignName}>{c.caption || "Sem nome"}</Text>
-                  <Text style={S.chip}>{CAMPAIGN_BLOCK_LABEL[c.block]}</Text>
-                </View>
-                {rows.length ? (
-                  <>
-                    <View style={S.table}>
-                      <View style={S.tableRow}>
-                        <Text style={[S.tableHeaderCell, { flex: 0.5 }]}>#</Text>
-                        <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Criativo</Text>
-                        {CREATIVE_COLS.map((col) => <Text style={S.tableHeaderCell} key={col.key}>{col.label}</Text>)}
-                      </View>
-                      {rows.map((row, i) => (
-                        <View style={i === rows.length - 1 ? S.tableRowLast : S.tableRow} key={row.adId} wrap={false}>
-                          <Text style={[S.tableCell, { flex: 0.5 }]}>{config.adSourceTags[row.adId] ? `#${config.adSourceTags[row.adId]}` : "—"}</Text>
-                          <Text style={[S.tableCell, S.tableCellFirst]}>{row.name}</Text>
-                          {CREATIVE_COLS.map((col) => {
-                            const raw = row.metrics[col.key] ?? (ZERO_NOT_DASH.has(col.key) ? 0 : undefined);
-                            return (
-                              <Text style={S.tableCell} key={col.key}>
-                                {raw === undefined ? "—" : metricValue(raw, col.kind, row.currency)}
-                              </Text>
-                            );
-                          })}
-                        </View>
-                      ))}
-                    </View>
-                    {rowsOverflow > 0 ? <Text style={S.tableMore}>+{rowsOverflow} criativo{rowsOverflow > 1 ? "s" : ""} com menos investimento.</Text> : null}
-                  </>
-                ) : (
-                  <Text style={S.empty}>Sem detalhe por criativo nesta conta.</Text>
-                )}
+        {!hidden.has("funnel") && journey.stages.length >= 2 ? (
+          <View style={V.section} wrap={false}>
+            <SectionHead title="Funil de aquisição" micro="leitura agregada de todas as campanhas" />
+            <View style={V.funnelWrap}>
+              <View style={V.funnelCol}>
+                <TrapezoidFunnel stages={journey.stages.map((s) => ({ label: s.label, value: num(s.value) }))} gaps={journey.gaps} />
               </View>
-            );
-          }) : <Text style={S.empty}>Nenhuma campanha com dados no período.</Text>}
-          {campaignsOverflow > 0 ? <Text style={S.tableMore}>+{campaignsOverflow} campanha{campaignsOverflow > 1 ? "s" : ""} com menos investimento no período.</Text> : null}
+              <StatStack items={stats.slice(0, 3)} />
+            </View>
+          </View>
+        ) : null}
+
+        {objectives.length ? (
+          <View style={V.section} wrap={false}>
+            <SectionHead title="Performance por objetivo" micro="comparação direta" />
+            <ObjectivePanels panels={objectivePanelsView(objectives)} />
+            {objectives.length > 2 ? (
+              <Text style={V.note}>+{objectives.length - 2} objetivo{objectives.length - 2 > 1 ? "s" : ""} com menos verba no período.</Text>
+            ) : null}
+            {objectives.some((o) => o.efficiency?.critical) ? (
+              <Text style={V.note}>Custos unitários (por clique, por engajamento) só aparecem quando pioraram de forma relevante — nas outras semanas o espaço mostra a parte da verba.</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        <View style={V.section}>
+          <SectionHead title="Criativos em destaque" micro={creativeMicro} />
+          {creatives.length ? (
+            <>
+              <HighlightCards items={highlights} />
+              <DataTable
+                columns={[
+                  { key: "leitura", label: "Leitura", flex: 1.25 },
+                  { key: "criativo", label: "Criativo", flex: 2.6 },
+                  { key: "alcance", label: "Alcance", align: "right" },
+                  { key: "cliques", label: "Cliques", align: "right" },
+                  { key: "conversas", label: "Conversas", align: "right" },
+                  { key: "invest", label: "Invest.", align: "right" },
+                ]}
+                rows={creatives.slice(0, CREATIVE_ROWS).map((r) => ({
+                  cells: {
+                    leitura: READING_LABEL[r.reading],
+                    criativo: r.name,
+                    alcance: num(r.reach),
+                    cliques: num(r.clicks),
+                    conversas: num(r.conversations),
+                    invest: money(r.spend),
+                  },
+                  tone: { leitura: r.reading === "revisar" ? "bad" : r.reading === "estavel" ? "neutral" : "good" },
+                }))}
+              />
+            </>
+          ) : (
+            <Text style={V.note}>Sem detalhe por criativo nesta conta.</Text>
+          )}
         </View>
 
-        {/* Eficiência de mídia (opcional, controlado pelo template) */}
-        {!hidden.has("gauges") && acq.gaugeSlots.length ? (
-          <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>Eficiência de mídia</Text>
-            <View style={S.grid}>
-              {acq.gaugeSlots.map((ref) => (
-                <GaugeCard
-                  key={ref}
-                  label={acquisitionMetricLabel(ref, cm, metricLabel)}
-                  current={resolveAcquisitionMetric(posts, ref, cm)}
-                  previous={resolveAcquisitionMetric(prevPosts, ref, cm)}
-                  kind={gaugeKind(metricRefKind(ref, cm))}
-                  inverse={metricRefInverse(ref, cm)}
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {/* Funil agregado — por último */}
-        {!hidden.has("funnel") && funnelValues.length >= 2 ? (
-          <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>Visão geral</Text>
-            <Text style={S.sectionTitle}>Funil de aquisição</Text>
-            <View style={S.funnelRow}>
-              <FunnelSvg labels={funnelLabels} values={funnelValues} />
-              <ResultPanel
-                label={funnelLabels.at(-1) ?? "Resultado"}
-                value={funnelValues.at(-1) ?? null}
-                previousStage={funnelValues.at(-2) ?? null}
-                previousLabel={funnelLabels.at(-2) ?? ""}
-                spend={spend}
-              />
-            </View>
-          </View>
-        ) : null}
-
-        <Text style={S.footer} fixed>North — relatório gerado automaticamente</Text>
+        <FooterNote left="North · relatório gerado automaticamente" right="Relatório 1 · mídia, campanhas e criativos" />
       </Page>
     </Document>
   );

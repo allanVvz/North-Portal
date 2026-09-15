@@ -12,6 +12,49 @@ componentes em `lib/reports/reportComponents.tsx`.
 
 ---
 
+## Modelo v2 (15/09) — o que vale hoje
+
+Baseado no modelo `modelo-relatorios-north-v2.html` e nas decisões do usuário. Onde este
+bloco contradiz as seções mais abaixo, **este bloco vale**.
+
+**Relatório 1 — anúncios** (`adsReportPdf.tsx`): performance da semana (5 números da
+mídia inteira + leitura em uma frase) → funil de aquisição trapezoidal com a taxa entre
+etapas → objetivos lado a lado → criativos com destaques por regra e tabela com coluna
+"Leitura".
+
+**Relatório 2 — resultados** (`salesReportPdf.tsx`): voltou a mostrar mídia E conversão,
+mas **ancorado na conversão mais importante da jornada informada**
+(`conversionFocus.focusOf`: venda/receita > agendamento > seguidor). Ela ganha o número
+grande, a frase, o fim do funil e o histórico. Ordem: resultado da semana → funil
+completo → eficiência comercial e origem → histórico → mídia com menos peso → criativos →
+vendas descritas.
+
+**Métrica técnica** (CPC, CPE, taxa de clique): só aparece quando é **crítica** (custo
+unitário ≥ 30% pior que a semana anterior) e sempre com a frase que a explica ("cada
+engajamento custou R$ 0,17 — 305% mais caro"). Fora disso o espaço dela é reaproveitado
+por um número de leigo (parte da verba, parte das conversas). Regra em
+`adsInsights.efficiencyOf`.
+
+**Desfecho da mídia** (`adsInsights.mediaOutcome`): conversa quando a conta recebe ao
+menos 3 na semana; senão visita ao perfil. Muda o destaque da faixa, o funil, a frase e a
+regra de "Revisar" dos criativos — numa conta sem conversa, "sem gerar conversa" não é
+defeito do criativo.
+
+**Funil que cruza fontes**: taxa dita como proporção ("agendamentos = 34,78% das
+conversas"), nunca como passagem, e uma nota lista quais etapas vêm da mídia e quais do
+feedback.
+
+**Sem repetição**: cada número aparece uma vez com destaque; faixa, cartões de leitura e
+pilha lateral do funil trazem informações diferentes.
+
+**Glifos**: valores em Fraunces não usam "→" nem "↑" (a fonte não tem os glifos); setas só
+em texto Inter.
+
+Módulos: `adsInsights.ts` e `conversionFocus.ts` (leitura, puros e testados),
+`reportBlocks.tsx` (componentes visuais).
+
+---
+
 ## Princípio de leitura em três níveis
 
 1. **5 segundos** — a frase de abertura diz se a semana foi boa e o resultado principal.

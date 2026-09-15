@@ -1,37 +1,46 @@
-// PDF do "Relatório de vendas" (Automação 2 — relatorio_vendas).
+// PDF do "Relatório de resultados" (Automação 2 — relatorio_vendas).
 //
-// Fecha o fluxo de conversão: cruza os números do Meta (tráfego, conversas) com
-// as conversões que o responsável lançou no comentário do card manual (via
-// lib/ai/extractMetrics). Uma folha A4.
+// Pergunta que responde: O QUE A SEMANA RENDEU PARA O NEGÓCIO — e como a mídia
+// se relaciona com isso. Mostra mídia E conversão, mas sempre ancorado na
+// CONVERSÃO MAIS IMPORTANTE DA JORNADA INFORMADA (conversionFocus.focusOf):
+// venda/receita > agendamento > seguidor. Ela ganha o número grande, a frase de
+// abertura, o fim do funil e o histórico; a mídia vem depois, com menos peso.
 //
-// A ordem das seções é a ordem de leitura do dono do negócio, não a ordem em
-// que os dados chegam: (1) a frase que resume a semana, (2) resumo do período —
-// receita primeiro, custo nenhum (ele vive como base do ROAS), (3) o funil do
-// anúncio até a venda, que é a peça que se lê sem legenda, (4) como a mídia
-// performou, por objetivo, (5) fonte de tráfego × objetivo, (6) vendas e
-// agendamentos detalhados. Sem tag de fonte no template, a conversão por
-// objetivo não é rastreável e a seção (4) mostra só a mídia.
+// Ordem de leitura:
+//   1. Resultado da semana — faixa com a conversão principal primeiro + leitura.
+//   2. Funil completo — mídia até a conversão principal, taxa entre etapas.
+//   3. Eficiência comercial e origem — quando há vendas.
+//   4. Histórico — a conversão principal semana a semana.
+//   5. Performance da mídia — os mesmos objetivos do relatório 1, menor peso.
+//   6. Criativos que explicam a semana — só os destaques.
+//   7. Vendas descritas no feedback — quando houver.
 //
-// Reusa reportComponents.tsx / reportTheme.ts / reportFonts.ts / funnelGeometry.ts
-// — mesmos KPIs, mesmo funil e mesmo painel de resultado do relatório de anúncios.
+// Duas regras que não se negociam:
+// - AUSÊNCIA NÃO É ZERO: métrica não informada não vira cartão, etapa nem conta.
+// - Quando o funil cruza fontes (mídia × feedback, que inclui todos os canais),
+//   a taxa é dita como proporção e o relatório avisa que é leitura agregada.
 
-import { Document, Page, Svg, Text, View, renderToBuffer } from "@react-pdf/renderer";
-import {
-  formatAcquisitionValue, ratio, resolveAcquisitionMetric,
-  totalWhenPresent, type NullableMetric,
-} from "@/app/admin/performance/acquisitionInsights";
-import type { Period } from "@/app/admin/performance/insights";
-import { metricValue } from "@/app/admin/performance/performanceLabels";
-import { CAMPAIGN_BLOCK_LABEL, type PerformanceTemplateConfig, type AdSourceTag } from "@/lib/performanceTemplates";
+import { Document, Page, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import { formatAcquisitionValue } from "@/app/admin/performance/acquisitionInsights";
+import { previousPeriod, type Period } from "@/app/admin/performance/insights";
+import type { PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { MetaPost } from "@/lib/windsor";
-import { funnelStageCount } from "./funnelGeometry";
 import { registerReportFonts } from "./reportFonts";
-import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
-import { CompassNode, FunnelSvg, KpiCard, REPORT_STYLES as S, ResultPanel } from "./reportComponents";
 import { blockResolver } from "./campaignBlockKpis";
+import { attributionOf, type InformedTotals } from "./conversionMode";
 import { salesHeadline } from "./salesHeadline";
-import { attributionOf } from "./conversionMode";
+import { creativeHighlights, creativeRows, mediaTotals, money, num, objectiveSummaries } from "./adsInsights";
+import {
+  FOCUS_LABEL, costLadder, focusOf, followersNarrative, historyChart, journeyFor, resultKpis,
+  type HistoryPoint,
+} from "./conversionFocus";
+import { fullDay, objectivePanelsView, shortDay } from "./adsReportPdf";
+import {
+  DataTable, FooterNote, HighlightCards, HistoryBars, InsightRow, KpiBand, ListBox, ObjectivePanels, PageHeader,
+  SectionHead, StatStack, SummaryBox, TrapezoidFunnel, V,
+  type InsightItem, type StatItem,
+} from "./reportBlocks";
 
 registerReportFonts();
 
@@ -45,23 +54,17 @@ export type SalesReportInput = {
   prevCampaignPosts: MetaPost[];
   conversoes: ConversionRow[];
   prevConversoes?: ConversionRow[];
-  /** Totais relatados no comentário (o gestor diz "5 vendas, 9 orçamentos" sem
-   *  detalhar linha a linha). Quando ausentes, caem na contagem das linhas de
-   *  `conversoes`; as linhas ficam só para a tabela de detalhe e o rateio por
-   *  fonte. */
+  /** Totais relatados no comentário. Ausentes = não informados; as linhas de
+   *  `conversoes` só completam o total quando existem. */
   receitaTotal?: number | null;
   vendasTotal?: number | null;
   agendamentosTotal?: number | null;
-  /** Total de seguidores do perfil ao fim do período (snapshot, não o ganho —
-   *  ver KNOWN_METRIC_TAGS em lib/metricTags.ts). */
+  /** Total de seguidores do perfil ao fim do período (snapshot, não o ganho). */
   seguidores?: number | null;
-  /** O MESMO conjunto de totais do período anterior deste cliente, lido da
-   *  série em `task_metrics` (period_to). É o que transforma "4 vendas" em "4
-   *  vs. 5 na semana passada" — sem isto cada PDF é uma ilha e o número não
-   *  vira tendência. Preferido sobre derivar de `prevConversoes`: o gestor
-   *  pode ter relatado "5 vendas" sem detalhar linha a linha, e aí a contagem
-   *  das linhas diria 0 e a variação sairia mentindo. */
+  /** Totais do período anterior deste cliente, da série em `task_metrics`. */
   prevTotals?: SalesPrevTotals | null;
+  /** A série da conversão, semanas anteriores E a atual (ordem livre). */
+  history?: HistoryPoint[] | null;
   generatedAt: Date;
 };
 
@@ -70,10 +73,8 @@ export type SalesPrevTotals = {
   agendamentos: number | null;
   receita: number | null;
   seguidores: number | null;
-  /** O período REAL da linha usada como base. Não é necessariamente o período
-   *  de calendário imediatamente anterior — uma semana sem relatório deixa um
-   *  buraco na série, e a legenda tem que dizer com o que a comparação foi
-   *  feita de verdade, não com o que deveria ter existido. */
+  /** O período REAL da linha usada como base (uma semana sem relatório deixa
+   *  buraco na série — a legenda diz com o que a comparação foi feita). */
   from?: string | null;
   to?: string | null;
 };
@@ -87,330 +88,309 @@ function totalsOf(conversoes: ConversionRow[]): SalesTotals {
   };
 }
 
-const SOURCE_ROWS: (AdSourceTag | null)[] = ["1", "2", "3", null];
-const SOURCE_LABEL = (tag: AdSourceTag | null) => (tag ? `Fonte #${tag}` : "Sem tag");
+const pct = (a: number, b: number) => `${formatAcquisitionValue((a / b) * 100, "decimal")}%`;
+const signed = (v: number) => `${v >= 0 ? "+" : "−"}${num(Math.abs(v))}`;
 
 function SalesReportDocument({
-  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, receitaTotal, vendasTotal, agendamentosTotal, seguidores, prevTotals, generatedAt,
+  clientName, period, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes,
+  receitaTotal, vendasTotal, agendamentosTotal, seguidores, prevTotals, history, generatedAt,
 }: SalesReportInput) {
-  const cm = config.prefs.customMetrics;
+  // ---- o que foi informado (null = não informado, nunca 0) ----
   const temLinhas = conversoes.length > 0;
-  const linhasTotals = totalsOf(conversoes);
-  // NÃO INFORMADO É `null`, NUNCA 0. O total exibido é o relatado no comentário
-  // quando existe; senão, a contagem das linhas detalhadas — mas só quando há
-  // linhas. Sem nenhum dos dois o número não existe, e o relatório diz isso em
-  // vez de afirmar que a semana foi zero.
-  const vendas = vendasTotal ?? (temLinhas ? linhasTotals.vendas : null);
-  const agendados = agendamentosTotal ?? (temLinhas ? linhasTotals.agendamentos : null);
-  const cur: { vendas: number | null; agendamentos: number | null; receita: number | null } = {
+  const linhas = totalsOf(conversoes);
+  const vendas = vendasTotal ?? (temLinhas ? linhas.vendas : null);
+  const agendados = agendamentosTotal ?? (temLinhas ? linhas.agendamentos : null);
+  const informed: InformedTotals = {
     vendas,
-    // Agendamentos nunca fica abaixo de vendas — uma venda fechada passou por um
-    // agendamento. Mas só quando os dois existem: derivar agendamento de venda
-    // seria inventar uma etapa que ninguém relatou.
     agendamentos: agendados !== null && vendas !== null ? Math.max(agendados, vendas) : agendados,
-    receita: receitaTotal ?? (temLinhas && linhasTotals.receita > 0 ? linhasTotals.receita : null),
+    receita: receitaTotal ?? (temLinhas && linhas.receita > 0 ? linhas.receita : null),
+    seguidores: seguidores ?? null,
   };
-  // Mesma precedência do período atual: o total relatado vence a contagem das
-  // linhas. `prevTotals` (da série em task_metrics) primeiro; as linhas da
-  // semana anterior só entram onde o total não veio.
-  const prevLinhas = prevConversoes ? totalsOf(prevConversoes) : null;
-  const prev: { agendamentos: number | null; vendas: number | null; receita: number | null } | null =
-    prevTotals || prevLinhas
-      ? {
-          agendamentos: prevTotals?.agendamentos ?? prevLinhas?.agendamentos ?? null,
-          vendas: prevTotals?.vendas ?? prevLinhas?.vendas ?? null,
-          receita: prevTotals?.receita ?? prevLinhas?.receita ?? null,
-        }
-      : null;
-  const spend = totalWhenPresent(campaignPosts, "custo") ?? 0;
-  const prevSpend = totalWhenPresent(prevCampaignPosts, "custo") ?? 0;
-
-  const kpi = (label: string, value: NullableMetric, previous: NullableMetric, kind: "money" | "number" | "percent" | "decimal", inverse = false) =>
-    ({ label, value, previous, kind, inverse, notIntegrated: false });
-
-  // Ganho de seguidores na semana. `seguidores` é o TOTAL do perfil (snapshot),
-  // então o que o cliente quer ler — "+12" — só existe contra a série.
-  const seguidoresGanho = seguidores != null && prevTotals?.seguidores != null
-    ? seguidores - prevTotals.seguidores
+  const prevLinhas = prevConversoes?.length ? totalsOf(prevConversoes) : null;
+  const prevInformed: InformedTotals | null = prevTotals || prevLinhas
+    ? {
+        vendas: prevTotals?.vendas ?? prevLinhas?.vendas ?? null,
+        agendamentos: prevTotals?.agendamentos ?? prevLinhas?.agendamentos ?? null,
+        receita: prevTotals?.receita ?? (prevLinhas && prevLinhas.receita > 0 ? prevLinhas.receita : null),
+        seguidores: prevTotals?.seguidores ?? null,
+      }
     : null;
 
-  // Uma métrica derivada só existe quando numerador E denominador existem.
-  // `ratio` já devolve null para denominador 0, mas não sabe distinguir
-  // "não informado" de zero — por isso a guarda vem antes.
-  const derivado = (num: number | null, den: number | null): NullableMetric =>
-    num === null || den === null ? null : ratio(num, den);
+  const focus = focusOf(informed);
+  const media = mediaTotals(campaignPosts);
+  const prevMedia = prevCampaignPosts.some((p) => p.source === "paid") ? mediaTotals(prevCampaignPosts) : null;
 
-  // Ordem = ordem de leitura do dono do negócio. Investimento saiu daqui de
-  // propósito — é contexto de mídia, e abrir o relatório pelo quanto se gastou
-  // enterra o resultado. Cada cartão só entra se a métrica foi informada: o
-  // layout se recompõe em vez de reservar espaço para buraco.
-  const summaryKpis = [
-    ...(cur.receita !== null ? [kpi("Receita da semana", cur.receita, prev?.receita ?? null, "money")] : []),
-    ...(cur.vendas !== null ? [kpi("Vendas fechadas", cur.vendas, prev?.vendas ?? null, "number")] : []),
-    ...(cur.agendamentos !== null ? [kpi("Agendamentos", cur.agendamentos, prev?.agendamentos ?? null, "number")] : []),
-    ...(cur.receita !== null && cur.vendas !== null
-      ? [kpi("Ticket médio", derivado(cur.receita, cur.vendas), derivado(prev?.receita ?? null, prev?.vendas ?? null), "money")]
-      : []),
-    // ROAS precisa de receita informada E de investimento real. Sem os dois não
-    // vira "0,00" — simplesmente não aparece.
-    ...(cur.receita !== null && spend > 0
-      ? [{ ...kpi("Retorno sobre o anúncio", ratio(cur.receita, spend), prev?.receita != null && prevSpend > 0 ? ratio(prev.receita, prevSpend) : null, "decimal"),
-          unit: "×",
-          hint: `sobre ${formatAcquisitionValue(spend, "money")} investidos` }]
-      : []),
-    // Seguidores: o total é o valor, o GANHO é a leitura. A variação percentual
-    // numa base de centenas ("↑1,45%") não diz nada que "+12" não diga melhor.
-    ...(seguidores != null
-      ? [{ ...kpi("Seguidores", seguidores, null, "number"),
-          deltaText: seguidoresGanho === null ? "sem semana anterior" : `${seguidoresGanho >= 0 ? "+" : "−"}${Math.abs(seguidoresGanho)} na semana`,
-          deltaTone: (seguidoresGanho === null ? "neutral" : seguidoresGanho >= 0 ? "good" : "bad") as "good" | "bad" | "neutral" }]
-      : []),
-  ];
+  // ---- série: a semana atual entra se ainda não estiver lá ----
+  const series: HistoryPoint[] = [...(history ?? [])].sort((a, b) => a.periodTo.localeCompare(b.periodTo));
+  if (!series.some((h) => h.periodTo === period.to)) series.push({ periodTo: period.to, ...informed });
+  const idx = series.findIndex((h) => h.periodTo === period.to);
+  const prevPoint = prevTotals?.seguidores != null ? { seguidores: prevTotals.seguidores } : idx > 0 ? series[idx - 1] : null;
+  const followersGain = informed.seguidores !== null && prevPoint?.seguidores != null ? informed.seguidores - prevPoint.seguidores : null;
+  const prevFollowersGain = idx >= 2 && series[idx - 1].seguidores != null && series[idx - 2].seguidores != null
+    ? (series[idx - 1].seguidores as number) - (series[idx - 2].seguidores as number)
+    : null;
 
-  // As métricas que o gestor não informou, nomeadas — uma nota discreta vale
-  // mais que um cartão vazio, e deixa claro que o relatório não "perdeu" o dado.
-  const naoInformadas = [
-    ...(cur.receita === null ? ["receita"] : []),
-    ...(cur.vendas === null ? ["vendas"] : []),
-    ...(cur.agendamentos === null ? ["agendamentos"] : []),
-    ...(seguidores == null ? ["seguidores"] : []),
-  ];
+  const comparedRange = prevTotals?.from && prevTotals?.to ? { from: prevTotals.from, to: prevTotals.to } : prevInformed ? previousPeriod(period) : null;
+  const comparedWith = comparedRange ? `${shortDay(comparedRange.from)} a ${shortDay(comparedRange.to)}` : null;
 
-  // Uma tabela só: cada FONTE #1/#2/#3 é uma linha, com o OBJETIVO da(s)
-  // campanha(s) taggeada(s) como coluna — cruza receita (do comentário) com
-  // custo/conversas (do anúncio taggeado) sem repetir os números por objetivo
-  // numa seção à parte. Só entra a linha que tem algum dado.
-  const { postBlock } = blockResolver(config);
-  const sourceRows = SOURCE_ROWS.map((tag) => {
-    const conv = conversoes.filter((c) => (c.fonte ?? null) === tag);
-    const ads = adPosts.filter((p) => (config.adSourceTags[p.adId ?? ""] ?? null) === tag);
-    const t = totalsOf(conv);
-    const custo = totalWhenPresent(ads, "custo") ?? 0;
-    const blocks = [...new Set(ads.map(postBlock))];
-    const objetivo = blocks.length === 0 ? "—" : blocks.length === 1 ? CAMPAIGN_BLOCK_LABEL[blocks[0]] : "Vários";
-    return {
-      tag,
-      objetivo,
-      custo,
-      conversas: totalWhenPresent(ads, "contatos"),
-      agendamentos: t.agendamentos,
-      vendas: t.vendas,
-      receita: t.receita,
-      // ROAS por origem só com receita POR ORIGEM. Sem ela o número não é 0,00 —
-      // ele não existe, e receita total nunca é distribuída entre fontes.
-      roas: t.receita > 0 ? ratio(t.receita, custo) : null,
-      hasData: conv.length > 0 || ads.length > 0,
+  // ---- 1. faixa + leitura ----
+  const kpis = resultKpis({ kind: focus, cur: informed, prev: prevInformed, media, prevMedia, followersGain, prevFollowersGain });
+  const atribuicao = attributionOf(informed.vendas, conversoes);
+  const spend = media.spend;
+
+  let primary: InsightItem;
+  const cards: InsightItem[] = [];
+  if (focus === "vendas" || focus === "agendamentos") {
+    const head = salesHeadline({
+      receita: informed.receita, vendas: informed.vendas, agendamentos: informed.agendamentos, seguidoresGanho: followersGain,
+      prev: prevInformed ? { receita: prevInformed.receita, vendas: prevInformed.vendas } : null,
+    });
+    const parts = [
+      informed.agendamentos && informed.vendas !== null ? `${pct(informed.vendas, informed.agendamentos)} dos agendamentos viraram venda` : null,
+      informed.receita !== null && informed.vendas ? `ticket médio de ${money(informed.receita / informed.vendas)}` : null,
+      media.conversations !== null ? `${num(media.conversations)} conversas pela mídia` : null,
+    ].filter(Boolean);
+    primary = { title: "Leitura comercial", headline: head, body: parts.length ? `${parts.join(", ")}.`.replace(/^./, (c) => c.toUpperCase()) : undefined };
+    const target = focus === "vendas" ? informed.vendas : informed.agendamentos;
+    if (spend && target) {
+      cards.push({
+        title: `Custo de mídia por ${focus === "vendas" ? "venda" : "agendamento"}`,
+        headline: money(spend / target),
+        body: `todo o investimento dividido por ${focus === "vendas" ? "todas as vendas relatadas" : "todos os agendamentos relatados"} — inclui outros canais`,
+      });
+    }
+    // Seguidores já entram na faixa quando informados; o segundo cartão traz
+    // o que ainda não apareceu: de onde vieram as vendas, ou o que ficou em aberto.
+    if (atribuicao.coberturaPct !== null) {
+      cards.push({ title: "Origem das vendas", headline: `${atribuicao.comOrigem} de ${atribuicao.informadas} com origem`, body: "descrita no feedback como fonte #1, #2 ou #3" });
+    } else if (informed.agendamentos !== null && informed.vendas !== null && informed.agendamentos > informed.vendas) {
+      cards.push({ title: "Agendamentos em aberto", headline: num(informed.agendamentos - informed.vendas), body: "agendados na semana que ainda não viraram venda" });
+    } else if (followersGain !== null && kpis.every((k) => k.label !== "Seguidores novos")) {
+      cards.push({ title: "Resultado adicional", headline: `${signed(followersGain)} seguidores`, body: `perfil com ${num(informed.seguidores)}` });
+    }
+  } else if (focus === "seguidores") {
+    const n = followersNarrative(followersGain, prevFollowersGain, informed.seguidores, media.profileVisits);
+    primary = { title: "Leitura da audiência", headline: n.headline, body: n.body };
+    if (spend && followersGain && followersGain > 0) {
+      cards.push({ title: "Custo por seguidor novo", headline: money(spend / followersGain), body: "investimento total dividido pelos seguidores ganhos — inclui quem chegou sem anúncio" });
+    }
+    // Visitas já estão na faixa e no funil; aqui entra o que ainda não foi dito —
+    // quanto o perfil cresceu em proporção.
+    if (informed.seguidores !== null && prevPoint?.seguidores) {
+      const growth = ((informed.seguidores - prevPoint.seguidores) / prevPoint.seguidores) * 100;
+      cards.push({
+        title: "Crescimento do perfil",
+        headline: `${growth >= 0 ? "+" : "−"}${formatAcquisitionValue(Math.abs(growth), "decimal")}%`,
+        body: `de ${num(prevPoint.seguidores)} para ${num(informed.seguidores)} seguidores em uma semana`,
+      });
+    } else if (media.profileVisits !== null) {
+      cards.push({ title: "Visitas ao perfil", headline: num(media.profileVisits), body: media.reach ? `${pct(media.profileVisits, media.reach)} de quem foi alcançado pela mídia` : "levadas pela mídia no período" });
+    }
+  } else {
+    primary = {
+      title: "Leitura da semana",
+      headline: "Sem números comerciais informados nesta semana.",
+      body: "O resultado comercial aparece quando o feedback da semana for respondido; abaixo, só a mídia.",
     };
-  }).filter((r) => r.hasData);
+    if (spend !== null) cards.push({ title: "Investimento", headline: money(spend), body: "no período" });
+    if (media.conversations !== null) cards.push({ title: "Conversas", headline: num(media.conversations), body: "geradas pela mídia" });
+  }
 
-  // Detalhe linha a linha do que o gestor descreveu (serviço/valor/fonte/status).
-  // Uma folha só: no máximo 12 linhas, priorizando as de maior valor.
-  const DETALHE_CAP = 12;
-  const conversoesOrdenadas = [...conversoes].sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0));
-  const detalhe = conversoesOrdenadas.slice(0, DETALHE_CAP);
-  const conversoesOverflow = conversoesOrdenadas.length - detalhe.length;
-  // Quantas das vendas/agendamentos relatados foram descritos linha a linha — o
-  // gestor pode dizer "5 vendas" e detalhar só 2. Nota só quando difere.
-  const descritas = conversoesOrdenadas.length;
-  const relatadas = Math.max(cur.vendas ?? 0, cur.agendamentos ?? 0);
-  const parcialmenteDetalhado = detalhe.length > 0 && descritas < relatadas;
-
-  // COBERTURA DE ATRIBUIÇÃO — a mesma conta que vai para
-  // `conversion_reports.attribution` (lib/reports/conversionMode.ts). Sem ela,
-  // "nenhuma linha na tabela de fontes" é ambíguo: não houve venda, ou houve e
-  // ninguém marcou a origem?
-  const atribuicao = attributionOf(cur.vendas, conversoes);
-  const cobertura = atribuicao.coberturaPct !== null && atribuicao.informadas !== null
-    ? { informadas: atribuicao.informadas, comOrigem: atribuicao.comOrigem, pct: atribuicao.coberturaPct }
-    : null;
-
-  // FUNIL COMERCIAL — conversa → agendamento → venda. Aquisição (alcance,
-  // cliques) é assunto do relatório de anúncios: refazer aqui atravessa as duas
-  // pipelines e sugere uma atribuição ponta a ponta que o dado não sustenta.
-  // Etapa não informada simplesmente não é desenhada.
-  const conversas = resolveAcquisitionMetric(campaignPosts, "contatos", cm);
-  const funnelRaw: { label: string; value: NullableMetric }[] = [
-    { label: "Conversas", value: conversas },
-    { label: "Agendamentos", value: cur.agendamentos },
-    { label: "Vendas", value: cur.vendas },
+  const naoInformadas = [
+    ...(informed.receita === null ? ["receita"] : []),
+    ...(informed.vendas === null ? ["vendas"] : []),
+    ...(informed.agendamentos === null ? ["agendamentos"] : []),
+    ...(informed.seguidores === null ? ["seguidores"] : []),
   ];
-  const funnelStages = funnelRaw.filter((s) => s.value !== null);
-  const values = funnelStages.map((s) => s.value);
-  const keepN = funnelStageCount(values);
-  const funnelLabels = funnelStages.slice(0, keepN).map((s) => s.label);
-  const funnelValues = values.slice(0, keepN);
 
-  const dia = (iso: string) => iso.split("-").reverse().join("/");
-  const subtitle = `${cadenceLabel} · ${dia(period.from)} a ${dia(period.to)} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`;
-  const fmtMoney = (v: NullableMetric) => formatAcquisitionValue(v, "money");
+  // ---- 2. funil + pilha ----
+  const journey = journeyFor(focus, media, informed, followersGain);
+  const ladder = costLadder(spend, media.conversations, informed);
+  // A nota de fontes cita só as etapas que ESTE funil desenhou.
+  const listPt = (items: string[]) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} e ${items[items.length - 1]}`);
+  const mediaStages = journey.stages.filter((s) => s.source === "midia").map((s) => s.label.toLowerCase());
+  const feedbackStages = journey.stages.filter((s) => s.source === "feedback").map((s) => s.label.toLowerCase());
+  const crossNote = `${listPt(mediaStages).replace(/^./, (c) => c.toUpperCase())} vêm da mídia; ${listPt(feedbackStages)} vêm do feedback e incluem todos os canais — as proporções entre essas etapas são indicativas.`;
+  const stats: StatItem[] = [];
+  if (focus === "vendas") {
+    // Receita e ticket já estão na faixa; a pilha traz o que se tira deles.
+    if (informed.receita !== null && spend) {
+      stats.push({ label: "Receita por R$ 1 investido", value: money(informed.receita / spend), detail: "todas as vendas da semana sobre todo o investimento — não só o que veio de anúncio", soft: true });
+    }
+    // Sem seta: a Fraunces não tem o glifo "→" e ele sairia como um apóstrofo.
+    if (ladder.length >= 2) {
+      stats.push({ label: "Custo de mídia da conversa à venda", value: `de ${ladder[0].value} a ${ladder[ladder.length - 1].value}`, detail: `${ladder[0].label} e ${ladder[ladder.length - 1].label}, sobre o investimento total` });
+    }
+    if (informed.agendamentos !== null && informed.vendas !== null && informed.agendamentos > informed.vendas && atribuicao.coberturaPct !== null) {
+      stats.push({ label: "Agendamentos em aberto", value: num(informed.agendamentos - informed.vendas), detail: "agendados na semana que ainda não viraram venda" });
+    }
+  } else if (focus === "seguidores") {
+    if (informed.seguidores !== null) stats.push({ label: "Seguidores no perfil", value: num(informed.seguidores), detail: prevPoint?.seguidores != null ? `${num(prevPoint.seguidores)} na semana anterior` : "primeira semana registrada", soft: true });
+    // Ganho e visitas já estão no funil ao lado — a pilha traz o que se tira deles.
+    if (spend && media.profileVisits) stats.push({ label: "Custo por visita ao perfil", value: money(spend / media.profileVisits), detail: "investimento dividido pelas visitas que a mídia levou" });
+    if (media.profileVisits !== null && media.reach) stats.push({ label: "A cada 1.000 alcançados", value: formatAcquisitionValue((media.profileVisits / media.reach) * 1000, "decimal"), detail: "visitaram o perfil — leitura agregada das campanhas" });
+  } else {
+    if (informed.agendamentos !== null) stats.push({ label: "Agendamentos", value: num(informed.agendamentos), detail: "informados no feedback", soft: true });
+    if (spend !== null) stats.push({ label: "Investimento", value: money(spend), detail: "no período" });
+    if (media.costPerConversation !== null) stats.push({ label: "Custo por conversa", value: money(media.costPerConversation), detail: "investimento dividido pelas conversas" });
+  }
 
-  // A frase que abre o relatório — a única leitura em palavras da semana.
-  const headline = salesHeadline({
-    receita: cur.receita,
-    vendas: cur.vendas,
-    agendamentos: cur.agendamentos,
-    seguidoresGanho,
-    prev: prev ? { receita: prev.receita, vendas: prev.vendas } : null,
+  // ---- 3. eficiência + origem ----
+  const showEfficiency = focus === "vendas" && (ladder.length > 0 || (informed.agendamentos && informed.vendas !== null));
+  const efficiencyHeadline = informed.agendamentos && informed.vendas !== null
+    ? pct(informed.vendas, informed.agendamentos)
+    : informed.receita !== null && informed.vendas ? money(informed.receita / informed.vendas) : num(informed.vendas);
+  const efficiencyCaption = informed.agendamentos && informed.vendas !== null
+    ? "dos agendamentos viraram venda"
+    : informed.receita !== null && informed.vendas ? "de ticket médio" : "vendas na semana";
+  const originRows = [
+    ...Object.entries(atribuicao.porFonte).map(([fonte, t]) => ({
+      left: `Fonte #${fonte}`,
+      right: `${t!.vendas} venda${t!.vendas > 1 ? "s" : ""}${t!.receita !== null ? ` · ${money(t!.receita)}` : ""}`,
+    })),
+    ...(atribuicao.informadas !== null && atribuicao.informadas > atribuicao.comOrigem
+      ? [{ left: "Sem origem descrita", right: `${atribuicao.informadas - atribuicao.comOrigem} venda${atribuicao.informadas - atribuicao.comOrigem > 1 ? "s" : ""}` }]
+      : []),
+  ];
+  const extraRows = [
+    ...(followersGain !== null ? [{ left: "Seguidores novos", right: signed(followersGain) }] : []),
+    ...(informed.agendamentos !== null && informed.vendas !== null && informed.agendamentos > informed.vendas
+      ? [{ left: "Agendamentos ainda sem venda", right: num(informed.agendamentos - informed.vendas) }]
+      : []),
+    ...(media.conversations !== null ? [{ left: "Conversas pela mídia", right: num(media.conversations) }] : []),
+  ];
+
+  // ---- 4. histórico ----
+  const chart = historyChart(focus, series);
+  const weekRows = series.slice(-4).map((h, i, arr) => {
+    if (focus === "seguidores") {
+      const before = i > 0 ? arr[i - 1].seguidores : null;
+      return { left: shortDay(h.periodTo), right: h.seguidores === null ? "não informado" : `${num(h.seguidores)}${before !== null && before !== undefined ? ` (${signed(h.seguidores - before)})` : ""}` };
+    }
+    const bits = [h.vendas !== null ? `${num(h.vendas)} vendas` : null, h.agendamentos !== null ? `${num(h.agendamentos)} agend.` : null, h.receita !== null ? money(h.receita) : null].filter(Boolean);
+    return { left: shortDay(h.periodTo), right: bits.length ? bits.join(" · ") : "não informado" };
   });
-  // Legenda única do comparativo: dita uma vez sob o resumo, em vez de "vs.
-  // anterior" repetido em cada cartão. Usa o período REAL da linha comparada.
-  // Sem o ano: o subtítulo logo acima já o carimbou, e "29/08 a 04/09" lê mais
-  // rápido que a data por extenso repetida duas vezes.
-  const diaCurto = (iso: string) => iso.slice(5).split("-").reverse().join("/");
-  const comparadoCom = prevTotals?.from && prevTotals?.to
-    ? `Comparado com ${diaCurto(prevTotals.from)} a ${diaCurto(prevTotals.to)}.`
-    : prev
-      ? "Comparado com o período anterior."
-      : "Primeira semana da série — ainda sem período anterior para comparar.";
+
+  // ---- 5/6. mídia com menos peso ----
+  const { postBlock } = blockResolver(config);
+  const objectives = objectiveSummaries(campaignPosts, prevCampaignPosts, postBlock);
+  const { rows: creatives } = creativeRows(adPosts);
+  const highlights = creativeHighlights(creatives, media.conversations);
+
+  // ---- 7. detalhe ----
+  const detalhe = [...conversoes].sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0)).slice(0, 10);
 
   return (
     <Document>
-      <Page size="A4" style={S.page} wrap>
-        <View style={S.header}>
-          <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 20, height: 20 }}>
-            {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
-          </Svg>
-          <View>
-            <Text style={S.title}>Relatório de vendas — {clientName}</Text>
-            <Text style={S.subtitle}>{subtitle}</Text>
-          </View>
-        </View>
+      <Page size="A4" style={V.page} wrap>
+        <PageHeader
+          eyebrow={clientName}
+          title="Relatório de resultados"
+          subtitle={`${fullDay(period.from)} a ${fullDay(period.to)} · mídia + conversão · foco em ${FOCUS_LABEL[focus].toLowerCase()} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`}
+          pill="Relatório 2"
+        />
 
-        <Text style={S.headline}>{headline}</Text>
-
-        <View style={S.section}>
-          <Text style={S.kicker}>Resumo do período</Text>
-          <View style={S.grid}>
-            {summaryKpis.map((k) => <KpiCard key={k.label} {...k} deltaSuffix="" />)}
-          </View>
-          <Text style={S.legend}>{comparadoCom}</Text>
-        </View>
-
-        {naoInformadas.length ? (
-          <Text style={S.legend}>Não informado no feedback da semana: {naoInformadas.join(", ")}.</Text>
-        ) : null}
-
-        {funnelValues.length >= 2 ? (
-          <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>Da conversa à venda</Text>
-            <View style={S.funnelRow}>
-              <FunnelSvg labels={funnelLabels} values={funnelValues} />
-              <ResultPanel
-                label={funnelLabels.at(-1) ?? "Vendas"}
-                value={funnelValues.at(-1) ?? null}
-                previousStage={funnelValues.at(-2) ?? null}
-                previousLabel={funnelLabels.at(-2) ?? ""}
-                spend={spend}
-              />
-            </View>
-          </View>
-        ) : null}
-
-        {/* CONTEXTO da mídia, não a seção de mídia. Quem quiser saber como a
-            mídia performou tem o relatório de anúncios da mesma semana — repetir
-            aqui os doze cartões por objetivo fazia deste documento "o relatório
-            de anúncios com vendas no topo". Aqui ficam só os dois números que
-            sustentam a leitura comercial: o que foi investido e quantas
-            conversas aquilo gerou. */}
-        {spend > 0 || conversas !== null ? (
-          <View style={S.section}>
-            <Text style={S.kicker}>Contexto da mídia</Text>
-            <Text style={S.contextLine}>
-              {[
-                spend > 0 ? `${formatAcquisitionValue(spend, "money")} investidos` : null,
-                conversas !== null ? `${formatAcquisitionValue(conversas)} conversas` : null,
-                cobertura ? `${cobertura.informadas} ${cobertura.informadas === 1 ? "venda relatada" : "vendas relatadas"}` : null,
-              ].filter(Boolean).join("  ·  ")}
-            </Text>
-            <Text style={S.legend}>Como a mídia performou por campanha e criativo está no relatório de anúncios desta mesma semana.</Text>
-          </View>
-        ) : null}
-
-        {/* Cobertura de atribuição: "5 vendas, nenhuma com origem" é MUITO
-            diferente de "nenhuma venda", e sem esta linha as duas leem igual
-            (tabela vazia). Nunca vira ROAS por origem sem receita por origem. */}
-        {cobertura && cobertura.comOrigem < cobertura.informadas ? (
-          <View style={S.section}>
-            <Text style={S.kicker}>Cobertura de atribuição</Text>
-            <Text style={S.contextLine}>
-              {cobertura.comOrigem} de {cobertura.informadas} com origem identificada  ·  {cobertura.pct}%
-            </Text>
-            <Text style={S.legend}>
-              {cobertura.comOrigem === 0
-                ? "As vendas foram informadas, mas nenhuma tem origem identificada — não dá para atribuir receita a fonte de anúncio nesta semana."
-                : "As demais vendas foram informadas sem origem — a tabela por fonte cobre só as identificadas."}
-            </Text>
-          </View>
-        ) : null}
-
-        <View style={S.section}>
-          <Text style={S.kicker}>Fonte de tráfego e objetivo</Text>
-          {/* Esta tabela conta só o que foi descrito venda a venda no comentário;
-              o resumo lá em cima usa os totais relatados. Sem esta nota os dois
-              números ("5 vendas" no topo, "1 venda" aqui) se contradizem na
-              mesma folha e o cliente não tem como saber qual vale. */}
-          {sourceRows.length ? (
-            <Text style={S.legend}>Só as vendas e agendamentos descritos um a um no comentário — o resumo acima usa os totais relatados.</Text>
+        <View style={V.section}>
+          <SectionHead title="Resultado da semana" micro={comparedWith ? `comparado com ${comparedWith}` : "primeira semana da série"} />
+          {kpis.length ? <KpiBand items={kpis.map((k) => ({ label: k.label, value: k.value, delta: { text: k.delta.text, tone: k.delta.tone } }))} /> : null}
+          <InsightRow primary={primary} cards={cards.slice(0, 2)} />
+          {naoInformadas.length && focus !== "midia" ? (
+            <Text style={V.note}>Não informado no feedback da semana: {naoInformadas.join(", ")}.</Text>
           ) : null}
-          {sourceRows.length ? (
-            <View style={S.table}>
-              <View style={S.tableRow}>
-                <Text style={[S.tableHeaderCell, { flex: 1.3 }]}>Fonte</Text>
-                <Text style={[S.tableHeaderCell, { flex: 1.8 }]}>Objetivo</Text>
-                <Text style={S.tableHeaderCell}>Invest.</Text>
-                <Text style={S.tableHeaderCell}>Conversas</Text>
-                <Text style={S.tableHeaderCell}>Agend. detalh.</Text>
-                <Text style={S.tableHeaderCell}>Vendas detalh.</Text>
-                <Text style={S.tableHeaderCell}>Receita</Text>
-                <Text style={S.tableHeaderCell}>ROAS</Text>
+        </View>
+
+        {journey.stages.length >= 2 ? (
+          <View style={V.section} wrap={false}>
+            <SectionHead title="Funil completo" micro={journey.crossesSources ? "jornada agregada — mídia + feedback" : "leitura agregada das campanhas"} />
+            <View style={V.funnelWrap}>
+              <View style={V.funnelCol}>
+                <TrapezoidFunnel stages={journey.stages.map((s) => ({ label: s.label, value: num(s.value) }))} gaps={journey.gaps} />
               </View>
-              {sourceRows.map((r, i) => (
-                <View style={i === sourceRows.length - 1 ? S.tableRowLast : S.tableRow} key={r.tag ?? "none"} wrap={false}>
-                  <Text style={[S.tableCell, { flex: 1.3 }]}>{SOURCE_LABEL(r.tag)}</Text>
-                  <Text style={[S.tableCell, { flex: 1.8 }]}>{r.objetivo}</Text>
-                  <Text style={S.tableCell}>{fmtMoney(r.custo || null)}</Text>
-                  <Text style={S.tableCell}>{formatAcquisitionValue(r.conversas)}</Text>
-                  <Text style={S.tableCell}>{r.agendamentos}</Text>
-                  <Text style={S.tableCell}>{r.vendas}</Text>
-                  <Text style={S.tableCell}>{fmtMoney(r.receita || null)}</Text>
-                  <Text style={S.tableCell}>{r.roas === null ? "—" : metricValue(r.roas, "decimal")}</Text>
-                </View>
-              ))}
+              {stats.length ? <StatStack items={stats.slice(0, 3)} /> : null}
+            </View>
+            {journey.crossesSources ? (
+              <Text style={V.note}>{crossNote}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {showEfficiency ? (
+          <View style={[V.section, V.split]} wrap={false}>
+            <SummaryBox
+              label="Eficiência comercial"
+              headline={efficiencyHeadline}
+              caption={efficiencyCaption}
+              money={ladder.map((s) => ({ value: s.value, label: s.label }))}
+            />
+            {originRows.length ? (
+              <ListBox label="Resultado por origem" rows={originRows} note="Origem e receita por fonte aparecem só quando informadas no feedback — a receita total nunca é distribuída entre fontes." />
+            ) : extraRows.length ? (
+              <ListBox label="Resultado adicional" rows={extraRows} />
+            ) : null}
+          </View>
+        ) : null}
+
+        <View style={V.section} wrap={false}>
+          <SectionHead title="Histórico" micro={chart ? chart.title.toLowerCase() : "começa na segunda semana registrada"} />
+          {chart ? (
+            <View style={V.split}>
+              <View style={[V.box, { flex: 1.25, alignItems: "center" }]}>
+                <HistoryBars periods={chart.periods} series={chart.series.map((s) => ({ label: s.label, values: s.values }))} width={290} />
+              </View>
+              <ListBox label="Semana a semana" rows={weekRows} flex={0.75} />
             </View>
           ) : (
-            <Text style={S.empty}>Nenhuma conversão com fonte identificada no período.</Text>
+            <Text style={V.note}>
+              {focus === "midia"
+                ? "Sem conversão informada para acompanhar semana a semana."
+                : `Esta é a primeira semana com ${FOCUS_LABEL[focus].toLowerCase()} registrados — o histórico aparece a partir da próxima.`}
+            </Text>
           )}
         </View>
 
-        {detalhe.length ? (
-          <View style={S.section}>
-            <Text style={S.kicker}>Vendas e agendamentos detalhados</Text>
-            {parcialmenteDetalhado ? (
-              <Text style={S.empty}>{descritas} de {relatadas} descrito{descritas > 1 ? "s" : ""} no comentário; o resumo acima usa os totais relatados.</Text>
-            ) : null}
-            <View style={S.table}>
-              <View style={S.tableRow}>
-                <Text style={[S.tableHeaderCell, S.tableCellFirst]}>Serviço</Text>
-                <Text style={S.tableHeaderCell}>Fonte</Text>
-                <Text style={S.tableHeaderCell}>Situação</Text>
-                <Text style={S.tableHeaderCell}>Valor</Text>
-              </View>
-              {detalhe.map((row, i) => (
-                <View style={i === detalhe.length - 1 ? S.tableRowLast : S.tableRow} key={i} wrap={false}>
-                  <Text style={[S.tableCell, S.tableCellFirst]}>{row.servico ?? "—"}</Text>
-                  <Text style={S.tableCell}>{row.fonte ? `#${row.fonte}` : "—"}</Text>
-                  <Text style={S.tableCell}>{row.status === "fechado" ? "Fechada" : row.status === "agendado" ? "Agendada" : "—"}</Text>
-                  <Text style={S.tableCell}>{fmtMoney(row.valor)}</Text>
-                </View>
-              ))}
-            </View>
-            {conversoesOverflow > 0 ? (
-              <Text style={S.tableMore}>+{conversoesOverflow} conversã{conversoesOverflow > 1 ? "es" : "o"} não detalhada{conversoesOverflow > 1 ? "s" : ""} no comentário.</Text>
-            ) : null}
+        {/* Com funil, eficiência e histórico a página 1 fecha o resultado
+            comercial; a mídia começa numa página própria em vez de pular sozinha
+            e deixar um vão no pé da primeira. */}
+        {objectives.length ? (
+          <View style={V.section} wrap={false} break={Boolean(chart && showEfficiency)}>
+            <SectionHead title="Performance da mídia" micro="mesmos dados do relatório 1, com menos peso" />
+            <ObjectivePanels panels={objectivePanelsView(objectives)} />
           </View>
         ) : null}
 
-        <Text style={S.footer} fixed>North — relatório gerado automaticamente</Text>
+        {highlights.length ? (
+          <View style={V.section} wrap={false}>
+            <SectionHead title="Criativos que explicam a semana" micro="destaques por regra" />
+            <HighlightCards items={highlights} />
+          </View>
+        ) : null}
+
+        {detalhe.length ? (
+          <View style={V.section}>
+            <SectionHead title="Vendas descritas no feedback" micro={informed.vendas !== null && detalhe.length < informed.vendas ? `${detalhe.length} de ${informed.vendas} descritas uma a uma` : undefined} />
+            <DataTable
+              columns={[
+                { key: "servico", label: "Serviço", flex: 2.4 },
+                { key: "fonte", label: "Origem" },
+                { key: "status", label: "Situação" },
+                { key: "valor", label: "Valor", align: "right" },
+              ]}
+              rows={detalhe.map((row) => ({
+                cells: {
+                  servico: row.servico ?? "não descrito",
+                  fonte: row.fonte ? `#${row.fonte}` : "sem origem",
+                  status: row.status === "fechado" ? "Fechada" : row.status === "agendado" ? "Agendada" : "não informada",
+                  valor: row.valor === null ? "não informado" : money(row.valor),
+                },
+              }))}
+            />
+          </View>
+        ) : null}
+
+        <FooterNote
+          left="North · relatório gerado automaticamente"
+          right="Relatório 2 · origem, receita por fonte e outros detalhes comerciais só aparecem quando informados no feedback"
+        />
       </Page>
     </Document>
   );

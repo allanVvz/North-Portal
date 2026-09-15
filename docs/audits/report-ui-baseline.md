@@ -3,6 +3,11 @@
 Data: 2026-09-15. Avaliação feita sobre PDFs **reais de produção** (CRIS CAR CARE,
 semana de 05/09 a 11/09), abertos e lidos na tela, não sobre mocks.
 
+> **Atualização (15/09, noite):** `dashboard-designer` foi instalada depois desta avaliação,
+> em `.claude/skills/dashboard-designer`, e a passada dela está em
+> `dashboard-designer-report-review.md`. A nota abaixo reflete o momento em que este
+> baseline foi escrito.
+>
 > **Sobre as skills.** O briefing pedia quatro passadas usando `dashboard-designer`,
 > `data-visualization`, `dataviz` e `ui-design-pro`. **Nenhuma das quatro existe** —
 > nem instalada nem no catálogo de plugins oficial. As quatro passadas abaixo foram

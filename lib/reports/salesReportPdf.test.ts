@@ -45,6 +45,39 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
     expect(buf.byteLength).toBeGreaterThan(3000);
   });
 
+  // --- foco na conversão principal + histórico -----------------------------
+  it("foco em vendas com histórico de duas semanas não lança", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      vendasTotal: 5, agendamentosTotal: 8, receitaTotal: 4100, seguidores: 841,
+      prevTotals: { vendas: 4, agendamentos: 6, receita: 3200, seguidores: 829, from: "2026-07-25", to: "2026-07-31" },
+      history: [
+        { periodTo: "2026-07-31", vendas: 4, agendamentos: 6, receita: 3200, seguidores: 829 },
+        { periodTo: "2026-08-30", vendas: 5, agendamentos: 8, receita: 4100, seguidores: 841 },
+      ],
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
+  it("foco em seguidores com histórico não lança", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      conversoes: [],
+      seguidores: 1251,
+      prevTotals: { vendas: null, agendamentos: null, receita: null, seguidores: 1214, from: "2026-07-25", to: "2026-07-31" },
+      history: [
+        { periodTo: "2026-07-31", vendas: null, agendamentos: null, receita: null, seguidores: 1214 },
+        { periodTo: "2026-08-30", vendas: null, agendamentos: null, receita: null, seguidores: 1251 },
+      ],
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
+  it("nada informado (só mídia) não lança", async () => {
+    const buf = await renderSalesReportPdf({ ...base, conversoes: [], vendasTotal: null, agendamentosTotal: null, receitaTotal: null, seguidores: null });
+    expect(isPdf(buf)).toBe(true);
+  });
+
   // --- modos: o layout se recompõe pelo que foi informado ------------------
   it("followers_only: só seguidores, sem vendas/receita/ROAS zerados", async () => {
     const buf = await renderSalesReportPdf({

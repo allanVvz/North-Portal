@@ -38,6 +38,7 @@ import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { getClientById } from "./serviceIntegrations";
 import { periodForCadence, resolveTemplateConfig } from "./reportData";
 import { attributionOf, conversionModeOf } from "@/lib/reports/conversionMode";
+import type { HistoryPoint } from "@/lib/reports/conversionFocus";
 import {
   attachConversionDocument,
   claimConversionReport,
@@ -188,6 +189,30 @@ async function previousPeriodTotals(
   };
 }
 
+/** A série da conversão deste cliente até o período atual (inclusive), para o
+ *  histórico do relatório de resultados. Mesma fonte e mesmo eixo de
+ *  `previousPeriodTotals`: `task_metrics` por `period_to`, nunca por
+ *  `created_at`. Chave ausente = não informado (null), nunca 0. */
+async function conversionHistory(admin: AdminClient, clientId: string, periodTo: string): Promise<HistoryPoint[]> {
+  const { data, error } = await admin
+    .from("task_metrics")
+    .select("metrics, period_to")
+    .eq("client_id", clientId)
+    .not("period_to", "is", null)
+    .lte("period_to", periodTo)
+    .order("period_to", { ascending: false })
+    .limit(8);
+  if (error) throw error;
+  return ((data ?? []) as { metrics: Record<string, unknown> | null; period_to: string }[]).map((row) => {
+    const read = (key: string): number | null => {
+      const raw = row.metrics?.[key];
+      const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+      return Number.isFinite(n) ? n : null;
+    };
+    return { periodTo: row.period_to, vendas: read("vendas"), agendamentos: read("agendamentos"), receita: read("receita"), seguidores: read("seguidores") };
+  });
+}
+
 async function generateSalesReport(
   admin: AdminClient,
   config: AutomationConfigRow,
@@ -210,7 +235,10 @@ async function generateSalesReport(
   const { campaignPosts = [], prevCampaignPosts = [], adPosts = [] } = traffic.snapshot ?? {};
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
-  const prevTotals = await previousPeriodTotals(admin, clientId, period.from);
+  const [prevTotals, history] = await Promise.all([
+    previousPeriodTotals(admin, clientId, period.from),
+    conversionHistory(admin, clientId, period.to),
+  ]);
 
   const pdf = await renderSalesReportPdf({
     clientName: client.name,
@@ -226,6 +254,7 @@ async function generateSalesReport(
     agendamentosTotal: typeof ext.valores.agendamentos === "number" ? ext.valores.agendamentos : null,
     seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
     prevTotals,
+    history,
     generatedAt: new Date(),
   });
 
