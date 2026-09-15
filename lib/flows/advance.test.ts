@@ -178,6 +178,56 @@ describe("advanceFlow", () => {
   });
 });
 
+// Diária de gravação (lib/flows/shootDayRows.ts): UM roteiro e UMA captação
+// ligados nos slots de várias entregas. A regra que importa é a da operação:
+// concluir o roteiro não pode criar captações por peça, e concluir a captação
+// cria exatamente uma edição por peça — mesmo que a conclusão dispare de novo.
+describe("diária de gravação compartilhada", () => {
+  const TYPES_WITH_EDICAO: Row[] = [
+    ...TYPE_ROWS.filter((row) => row.key !== "publicacao"),
+    { id: "s4", parent_id: "t1", key: "edicao", label: "Edição", order_index: 25, behavior: "simples", creatable: true, active: true, lead_days: 4, progress_weight: 1, default_assignee: null, client_visible: false },
+    { id: "s3", parent_id: "t1", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
+  ];
+
+  function shootDay() {
+    const pieces = ["reels-1", "reels-2", "carrossel-1"];
+    return {
+      pieces,
+      state: {
+        tasks: [
+          ...pieces.map((id) => delivery(id, id) as unknown as Row),
+          doneStep("roteiro-diaria", "roteiro") as unknown as Row,
+          doneStep("captacao-diaria", "captacao") as unknown as Row,
+        ],
+        task_links: pieces.flatMap((id) => [
+          { parent_id: id, child_id: "roteiro-diaria", slot: "roteiro", position: 10 },
+          { parent_id: id, child_id: "captacao-diaria", slot: "captacao", position: 20 },
+        ]) as Row[],
+        task_types: [...TYPES_WITH_EDICAO],
+      },
+    };
+  }
+
+  it("concluir o roteiro não cria captação por peça (o slot já é da captação compartilhada)", async () => {
+    const { state } = shootDay();
+    const { admin, inserts } = fakeAdmin(state);
+    const outcome = await advanceFlow(admin, doneStep("roteiro-diaria", "roteiro"));
+    expect(outcome.created).toHaveLength(0);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("concluir a captação cria uma edição por peça, e repetir não duplica", async () => {
+    const { state, pieces } = shootDay();
+    const { admin, inserts } = fakeAdmin(state);
+    const first = await advanceFlow(admin, doneStep("captacao-diaria", "captacao"));
+    expect(first.created.map((task) => task.id).sort()).toEqual(pieces.map((id) => flowStepTaskId(id, "edicao")).sort());
+    const again = await advanceFlow(admin, doneStep("captacao-diaria", "captacao"));
+    expect(again.created).toHaveLength(0);
+    expect(inserts.filter((row) => row.subtype === "edicao")).toHaveLength(pieces.length);
+    expect(state.task_links.filter((link) => link.slot === "edicao")).toHaveLength(pieces.length);
+  });
+});
+
 describe("quem provocou a cascata não recebe aviso da própria ação", () => {
   // A cascata roda com o service role, onde `auth.uid()` é nulo — então o
   // banco não tem de onde tirar o ator, e `p_actor` chegava sempre nulo.

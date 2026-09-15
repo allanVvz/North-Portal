@@ -1,64 +1,20 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { apiError } from "@/lib/api";
-import { getAdminClientDetail, getClient, listAutomationConfigs, listClientTasksAll, listClients } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError, validateSlug } from "@/lib/validation";
-import { clientInsight } from "@/lib/northai/gaps";
-import { GED_AREAS, gedFolderPath } from "@/lib/ged/paths";
-import { gedProviderName } from "@/lib/ged";
-import { todayInTimezone } from "@/app/admin/recurringState";
+import { getNorthAiClientContext } from "@/lib/northai/context";
 
-// GET /api/admin/northai/context?slug= — o painel direito do Estúdio: quão
-// amarrado o cliente está, os números do dia, o que falta e onde fica o GED.
+const querySchema = z.object({ slug: z.string().min(1).max(80).transform((value) => validateSlug(value)) });
+
+// GET /api/admin/northai/context?slug= — o contexto do cliente no Estúdio.
 export async function GET(request: Request) {
   try {
     await requireAdmin();
-    const slug = validateSlug(new URL(request.url).searchParams.get("slug") ?? "");
-    const client = await getClient(slug, true);
-    if (!client) throw new HttpError(404, "Cliente nao encontrado.");
-
-    // Sem o filtro do quadro: planos, entregas e moldes de rotina contam aqui
-    // (rotinas padrão, plano aberto, card-alvo de automação).
-    const [tasks, detail, automations, clients] = await Promise.all([
-      listClientTasksAll(client.id),
-      getAdminClientDetail(slug),
-      listAutomationConfigs(),
-      listClients(),
-    ]);
-    const provider = gedProviderName();
-    const contract = (detail?.contract ?? {}) as Record<string, unknown>;
-    const hasContract = Object.values(contract).some((value) => (Array.isArray(value) ? value.length > 0 : Boolean(value)));
-    const today = todayInTimezone("America/Sao_Paulo");
-
-    const insight = clientInsight({
-      tasks,
-      automations: automations.map((automation) => ({ automationKey: automation.automationKey, active: automation.active, targetTaskId: automation.targetTaskId })),
-      hasContract,
-      briefingSubmitted: Boolean(clients.find((entry) => entry.slug === slug)?.briefing_submitted),
-      gedReady: provider === "storage" || Boolean(detail?.driveFolders.rootFolderId),
-      today,
-    });
-
-    // Cards que podem receber uma automação: rotinas (moldes recorrentes) do cliente.
-    const targets = tasks
-      .filter((task) => task.recurrence_cadence && task.status !== "aprovado")
-      .map((task) => ({ id: task.id, title: task.title }));
-    const plans = tasks
-      .filter((task) => task.kind === "plano_acao" && task.status !== "aprovado")
-      .map((task) => ({ id: task.id, title: task.title }));
-    const titles = Object.fromEntries(tasks.map((task) => [task.id, task.title]));
-
-    return NextResponse.json({
-      client: { slug: client.slug, name: client.name },
-      today,
-      insight: {
-        ...insight,
-        gaps: insight.gaps.map((gap) => ({ ...gap, tasks: (gap.taskIds ?? []).slice(0, 5).map((id) => ({ id, title: titles[id] ?? "" })) })),
-      },
-      ged: { provider, folders: GED_AREAS.map((area) => ({ key: area.key, path: gedFolderPath(client, area.key) })) },
-      targets,
-      plans,
-    });
+    const { slug } = querySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
+    const context = await getNorthAiClientContext(slug);
+    if (!context) throw new HttpError(404, "Cliente nao encontrado.");
+    return NextResponse.json(context);
   } catch (error) {
     return apiError(error);
   }

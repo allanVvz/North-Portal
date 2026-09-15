@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AdminHomeSummary, HomeFocus } from "@/lib/supabase";
 import { formatShortDate, relativeDue } from "../taskDates";
-import { todayInTimezone } from "../recurringState";
+import { agencyToday } from "../recurringState";
 import { STATUS_LABEL } from "../kanbanShared";
 import { formatCommentTime } from "@/lib/comments";
 import type { TaskRecord } from "@/lib/validation";
@@ -61,7 +61,7 @@ function joinPt(parts: string[]): string {
 
 export default function AdminHome({ summary, focus, userName }: { summary: AdminHomeSummary; focus: HomeFocus; userName: string | null }) {
   const user = useCurrentAdminUser();
-  const todayIso = todayInTimezone("America/Sao_Paulo");
+  const todayIso = agencyToday();
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [weekView, setWeekView] = useState<"lista" | "calendario">("lista");
   // A Home só carrega o resumo do card. O modal precisa do TaskRecord inteiro,

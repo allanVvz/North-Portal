@@ -7,7 +7,7 @@ import { TASK_KIND_KEYS, kindLabel } from "@/lib/taskCatalog";
 import type { TaskRecord } from "@/lib/validation";
 import TaskKindIcon from "./TaskKindIcon";
 import { DEADLINE_LABEL, DEADLINE_ORDER, deadlineStateOf, type DeadlineState } from "./deadlineState";
-import { todayInTimezone } from "./recurringState";
+import { agencyToday } from "./recurringState";
 
 type Row = TaskRecord & { clientName?: string };
 
@@ -25,7 +25,7 @@ const ATTR_DEFS: { key: FilterAttr; label: string; icon: string }[] = [
 ];
 const ATTR_LABEL: Record<FilterAttr, string> = Object.fromEntries(ATTR_DEFS.map((a) => [a.key, a.label])) as Record<FilterAttr, string>;
 
-export function taskMatchesFilters(t: Row, filters: ActiveFilter[], today: string = todayInTimezone("America/Sao_Paulo")): boolean {
+export function taskMatchesFilters(t: Row, filters: ActiveFilter[], today: string = agencyToday()): boolean {
   return filters.every((f) => {
     if (f.attr === "situacao") return deadlineStateOf(t, today) === f.value;
     if (f.attr === "cliente") return (t.clientName ?? "Outros") === f.value;

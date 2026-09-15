@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PortalContent } from "@/app/[slug]/portalData";
+import { AGENCY_TIMEZONE } from "./time/agency";
 
 const MAX_ANSWERS_BYTES = 50000;
 const MAX_TEXT_BYTES = 5000;
@@ -186,6 +187,9 @@ export const taskPayloadSchema = z.object({
   barTone: taskTone.optional(),
   statusLabel: z.string().max(80).optional(),
   statusTone: taskTone.optional(),
+  // Rotina padrão do cadastro (lib/clientRoutines.ts): a chave estável que
+  // identifica "este card É o kickoff", sem depender do título editável.
+  routine_key: z.string().max(60).optional(),
   // Criativo / Agendamento
   formato: z.string().max(80).optional(),
   plataforma: z.string().max(80).optional(),
@@ -483,7 +487,7 @@ const recurringBaseSchema = z.object({
     } catch {
       return false;
     }
-  }, "Fuso horário inválido.").default("America/Sao_Paulo"),
+  }, "Fuso horário inválido.").default(AGENCY_TIMEZONE),
   priority: z.enum(TASK_PRIORITIES).default("media"),
   assignee: z.string().max(120).nullable().optional(),
   active: z.boolean().default(true),

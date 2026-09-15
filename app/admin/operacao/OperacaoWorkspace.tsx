@@ -15,7 +15,7 @@ import { recurringMatchesFilters, recurringMatchesQuery, type RecurringActiveFil
 import CardModalLauncher from "../CardModalLauncher";
 import NewTaskButton from "../NewTaskButton";
 import { PRIORITY_LABEL } from "../kanbanShared";
-import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, todayInTimezone, type RecurringState } from "../recurringState";
+import { RECURRING_STATE_LABEL, RECURRING_STATE_TONE, recurringState, type RecurringState, agencyToday } from "../recurringState";
 import { recurringOccurrences } from "../recurringOccurrences";
 import { RECURRING_GROUP_BY_LABEL, SEM_RESPONSAVEL, groupRecurring, type RecurringGroupBy } from "../recurringGrouping";
 import SortMenu from "../SortMenu";
@@ -135,7 +135,7 @@ export default function OperacaoWorkspace({
 
   // One "today", in the agency's timezone, shared by every derived value below —
   // so the badge, the filter and the columns can never disagree about the date.
-  const today = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
+  const today = useMemo(() => agencyToday(), []);
   const activeClients = useMemo(() => clients.filter((client) => !client.disabled), [clients]);
 
   // Cada visão tem a sua preferência: agrupado por prazo abre no que vence

@@ -5,9 +5,20 @@ description: O que cada receita do Estúdio NorthAi pede, o que cria (operaçõe
 
 # Receitas do Estúdio
 
-Código: `lib/northai/recipes.ts` (puro, com testes). Contrato:
-`lib/northai/blueprint.ts`. Execução: `POST /api/admin/northai/execute`, em
-ordem, sem transação — em falha, a resposta traz o que já foi criado e o erro.
+Fluxo de toda receita: **pedido → rascunho → prévia → confirmação → resultado**.
+Nada é criado por ter sido escrito na caixa.
+
+| Camada | Arquivo | Papel |
+|---|---|---|
+| Pedido digitado | `lib/northai/commandParser.ts`, `scriptParser.ts` | reconhece intenção, cliente, datas, quantidades, roteiros |
+| Rascunho | `lib/northai/drafts.ts` | `applyCommand`/`applyPrefill` preenchem; `buildRecipe` diz o que falta ou devolve o plano — puro, sem rede (teste de regressão em `drafts.test.ts`) |
+| Plano | `lib/northai/recipes.ts` | monta o Blueprint e a prévia agrupada (Compartilhado, Peças, Depois da captação…) |
+| Contrato | `lib/northai/blueprint.ts` | schema zod das operações |
+| Execução | `lib/northai/execute.ts` via `POST /api/admin/northai/execute` | só depois de "Confirmar e criar"; em ordem, sem transação — em falha, devolve o que já foi criado e o erro |
+
+Estados visíveis de um pedido: Rascunho, Pronto para revisar, Criando, Criado,
+Erro (e Cancelado quando descartado). Datas em dias corridos, "hoje" pelo fuso da
+agência (`lib/time/agency.ts`).
 
 Operações do Blueprint:
 
@@ -55,7 +66,10 @@ stories e posts viram "Design — N …" (+7 dias); outras atividades +7 dias.
 dias da semana (opcional), responsável, descrição.
 **Cria:** rotina (`scope=routine`) ou, sem repetição, uma tarefa com data. As
 rotinas padrão que faltam aparecem em "O que falta amarrar" e abrem esta receita
-preenchida.
+preenchida — levando a chave estável (`payload.routine_key`, ex.
+`reuniao_kickoff`), que é como o NorthAi reconhece a rotina depois, mesmo que o
+título seja editado. Cards criados antes de 16/09 não têm a chave e só são
+reconhecidos pelo título exato do catálogo (`findStandardRoutine` em `gaps.ts`).
 
 ## Fluxo
 

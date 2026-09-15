@@ -13,7 +13,7 @@ import { formatShortDate } from "./taskDates";
 import PlanAddCombobox from "./PlanAddCombobox";
 import CycleChecks from "./CycleChecks";
 import { addDaysIso } from "./contentPlan";
-import { todayInTimezone } from "./recurringState";
+import { agencyToday } from "./recurringState";
 import CardParentBox from "./CardParentBox";
 import VisibleToggleField from "./VisibleToggleField";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
@@ -1727,11 +1727,11 @@ export default function TaskModal({
                     busy={busy}
                     contextHint={[
                       draft.assignee ? `Nascem com ${draft.assignee}` : "Nascem sem responsável",
-                      `prazo a partir de ${formatShortDate(draft.start_date || draft.due_date || todayInTimezone("America/Sao_Paulo"))}`,
+                      `prazo a partir de ${formatShortDate(draft.start_date || draft.due_date || agencyToday())}`,
                     ].join(" · ")}
                     onLinkExisting={(c) => { if (liveTask) void linkMember(c.id, liveTask.id); else addPendingExisting(c); }}
                     onCreate={(items) => {
-                      const base = draft.start_date || draft.due_date || todayInTimezone("America/Sao_Paulo");
+                      const base = draft.start_date || draft.due_date || agencyToday();
                       const rows = items.map((item) => ({
                         title: item.title,
                         description: item.description,

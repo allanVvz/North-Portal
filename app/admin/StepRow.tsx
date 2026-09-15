@@ -7,7 +7,7 @@ import CommentAvatar from "./CommentAvatar";
 import CommentText from "@/app/CommentText";
 import { COLUMNS } from "./kanbanShared";
 import { DEADLINE_LABEL, deadlineStateOf } from "./deadlineState";
-import { todayInTimezone } from "./recurringState";
+import { agencyToday } from "./recurringState";
 import { commentsOf, formatCommentTime } from "@/lib/comments";
 import type { ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 
@@ -74,7 +74,7 @@ export default function StepRow({
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
-  const state = deadlineStateOf(card, todayInTimezone("America/Sao_Paulo"));
+  const state = deadlineStateOf(card, agencyToday());
   const comments = commentsOf(card.payload);
   const done = card.status === "aprovado";
   const assigneeId = card.assignee_profile_ids?.[0] ?? team.find((member) => member.label === card.assignee)?.id ?? "";

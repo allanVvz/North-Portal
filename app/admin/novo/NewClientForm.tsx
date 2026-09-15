@@ -328,12 +328,16 @@ export default function NewClientForm({
                 (Clientes/<nome> (<slug>)/Marca, Arquivos, Edição, Roteiros…), sem
                 link colado. Com a conta de serviço do Drive, as pastas nascem lá;
                 sem ela, no armazenamento interno. Ver lib/ged. */}
-            <label className="admin-toggle">
-              <input type="checkbox" checked readOnly disabled />
-              <span className="sw" />
-              <span>Criar GED do cliente — Clientes/{name.trim() || "Cliente"} ({effectiveSlug || "slug"})</span>
-              <em className="admin-chiptag">{driveConfigured ? "Drive da plataforma" : "armazenamento interno"}</em>
-            </label>
+            <div className="client-files-auto">
+              <span className="ck" aria-hidden>✓</span>
+              <div>
+                <strong>Arquivos do cliente — estrutura criada automaticamente</strong>
+                <span>
+                  Marca, Arquivos, Edição, Roteiros, Planilhas e Relatórios ·{" "}
+                  {driveConfigured ? "Google Drive da plataforma" : "armazenamento interno"}
+                </span>
+              </div>
+            </div>
           </ResponsibleSection>
 
           <AccountLinkSection
@@ -409,7 +413,7 @@ export default function NewClientForm({
             </li>
             <li>
               <span className="ck">✓</span>
-              GED do cliente ({driveConfigured ? "Drive da plataforma" : "armazenamento interno"})
+              Arquivos do cliente (estrutura automática)
             </li>
             <li>
               <span className="ck">{routinesProblem ? "○" : "✓"}</span>

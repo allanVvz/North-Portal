@@ -14,6 +14,7 @@ import { mergeAssigneeDisplay } from "./assignees";
 import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
 import { commentsOf, type TaskComment } from "./comments";
 import { appendCycleLog } from "./cycleLog";
+import { AGENCY_TIMEZONE, agencyToday } from "./time/agency";
 import { CLIENT_STANDARD_ROUTINES, type ClientRoutineInput } from "./clientRoutines";
 import {
   HttpError,
@@ -865,7 +866,7 @@ export type HomeFocus = {
 };
 
 function agencyTodayIso(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+  return agencyToday();
 }
 
 function plusDaysIso(iso: string, days: number): string {
@@ -1169,6 +1170,9 @@ export async function provisionClientRoutines(clientId: string, routines: readon
       start_date: input.date,
       end_date: input.date,
       assignee: team.get(input.assigneeId) ?? null,
+      // Identidade estável: o título pode ser editado ("Kickoff e onboarding"),
+      // a chave não. O NorthAi procura as rotinas padrão por ela.
+      payload: { routine_key: def.key },
     };
     const created = def.cadence
       ? await createRecurringTaskGroup(clientId, {
@@ -1404,7 +1408,7 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
         time_of_day: typeof payload.hora === "string" ? payload.hora : null,
         // "Encerrada" (molde aprovado/parado) conta como inativa: nada de novo
         // ciclo, a lista mostra "Histórico" em vez do botão de concluir.
-        timezone: "America/Sao_Paulo", active: Boolean(task.recurrence_cadence) && !recurrenceStopped(task.status),
+        timezone: AGENCY_TIMEZONE, active: Boolean(task.recurrence_cadence) && !recurrenceStopped(task.status),
         completed_cycles: typeof payload.completed_cycles === "number" ? payload.completed_cycles : 0,
         last_completed_at: typeof payload.last_completed_at === "string" ? payload.last_completed_at : null,
         template_payload: payload,

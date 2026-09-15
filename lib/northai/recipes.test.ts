@@ -65,6 +65,6 @@ describe("receitas do Estúdio", () => {
     });
     expect(blueprintSchema.parse(blueprint)).toBeTruthy();
     expect(blueprint.ops[1]).toMatchObject({ op: "createAutomation", targetRef: "alvo" });
-    expect(() => automationBlueprint({ clientSlug: null, automationKey: "relatorio_trafego_semanal", targetTaskId: null, targetTitle: null, newTarget: null, performanceTemplateId: null })).toThrow(/card-alvo/);
+    expect(() => automationBlueprint({ clientSlug: null, automationKey: "relatorio_trafego_semanal", targetTaskId: null, targetTitle: null, newTarget: null, performanceTemplateId: null })).toThrow(/rotina/);
   });
 });

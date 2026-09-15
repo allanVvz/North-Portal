@@ -18,7 +18,7 @@ import SortMenu from "./SortMenu";
 import { sortItems } from "./taskSort";
 import { useSortPref } from "./taskSortPrefs";
 import { formatPeriod, formatShortDate, relativeDue } from "./taskDates";
-import { todayInTimezone } from "./recurringState";
+import { agencyToday } from "./recurringState";
 import { COLUMNS, PRIORITY_LABEL, STATUS_LABEL, commentsOf, taskTone, visibleColumnsFor } from "./kanbanShared";
 import { DEADLINE_LABEL, deadlineStateOf, type DeadlineState } from "./deadlineState";
 import { formatRelativeAge } from "@/lib/comments";
@@ -132,7 +132,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // "Hoje" no fuso da agência, para a tag de atraso e o texto relativo do card.
   // `today` acima é um Date local usado pela grade do calendário; misturar os
   // dois faria um card que vence hoje aparecer atrasado a partir das 21h BRT.
-  const todayIso = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
+  const todayIso = useMemo(() => agencyToday(), []);
   const [cal, setCal] = useState(() => ({ y: new Date().getFullYear(), m: new Date().getMonth() }));
   const [calMode, setCalMode] = useState<"mes" | "semana">("mes");
   // Dia com a lista aberta no mês. Um por vez: abrir dois já traz de volta a

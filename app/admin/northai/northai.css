@@ -1,0 +1,196 @@
+/* NorthAi — Estúdio em tela cheia, conversa com balões, composer fixo.
+   O cabeçalho (NorthAi, abas, cliente ativo) rola junto da conversa: o espaço
+   visual fica para o diálogo. Contexto do cliente à direita em telas largas e em
+   gaveta nas menores; conversas recentes sempre em gaveta — nunca somem. */
+
+/* Abas do NorthAi são links; .clients-section-tabs só estilizava <button>. */
+.clients-section-tabs a { position: relative; padding: 0 0 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--a-muted); font: inherit; font-size: 13.5px; font-weight: 650; text-decoration: none; }
+.clients-section-tabs a:hover { color: var(--a-ink); }
+.clients-section-tabs a.on { color: var(--a-teal-text); border-bottom-color: var(--a-teal-strong); }
+
+.nai-studio { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: 100dvh; background: var(--a-bg); }
+.nai-col { display: flex; flex-direction: column; min-width: 0; height: 100dvh; }
+.nai-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.nai-scroll-inner { width: min(860px, 100%); margin: 0 auto; padding: 20px 24px 28px; }
+
+.nai-header { display: grid; gap: 4px; margin-bottom: 18px; }
+.nai-crumb { margin: 0 0 4px; font-size: 11px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; color: var(--a-teal-text); }
+.nai-header .clients-section-tabs { margin-bottom: 14px; }
+.nai-workspace { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
+.nai-workspace-label { margin: 0; font-size: 11px; color: var(--a-muted); }
+.nai-workspace-title { margin: 0; font-family: var(--font-serif, Georgia, serif); font-size: clamp(24px, 3vw, 32px); line-height: 1.1; color: var(--a-ink); }
+.nai-workspace-meta { padding: 4px 10px; border-radius: 999px; background: var(--a-teal-soft); color: var(--a-teal-text); font-size: 12px; font-weight: 650; }
+
+/* Conversa */
+.nai-thread { display: grid; gap: 12px; }
+.nai-msg { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+.nai-msg.is-user { justify-content: flex-end; }
+.nai-avatar { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: var(--a-teal-soft); color: var(--a-teal-text); font-family: var(--font-serif, Georgia, serif); font-size: 14px; font-weight: 700; }
+.nai-bubble { max-width: min(640px, 82%); padding: 10px 14px; border: 1px solid var(--a-border); border-radius: 18px; border-bottom-left-radius: 6px; background: var(--a-surface); color: var(--a-ink); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.nai-bubble p { margin: 0; }
+.nai-bubble p + p { margin-top: 6px; }
+.nai-msg.is-user .nai-bubble { border-color: transparent; border-radius: 18px; border-bottom-right-radius: 6px; background: var(--a-teal-strong); color: var(--a-inverse); white-space: pre-wrap; }
+.nai-bubble.is-card { width: min(700px, 100%); max-width: calc(100% - 40px); padding: 14px 16px; }
+.nai-bubble.tone-warn { border-color: color-mix(in srgb, var(--a-warn) 55%, var(--a-border)); }
+.nai-bubble.tone-error { border-color: color-mix(in srgb, var(--a-danger) 55%, var(--a-border)); color: var(--a-danger); }
+.nai-bubble-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px !important; font-size: 14.5px; font-weight: 700; color: var(--a-ink); }
+.nai-bubble-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.nai-missing { margin-top: 10px !important; }
+.nai-preview-head { margin: 0 0 8px !important; font-size: 10.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
+
+.nai-status { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: var(--a-surface2); color: var(--a-sec); font-size: 11px; font-weight: 650; }
+.nai-status.s-revisar { background: var(--a-teal-soft); color: var(--a-teal-text); }
+.nai-status.s-criando { background: color-mix(in srgb, var(--a-warn) 18%, var(--a-surface)); color: var(--a-gold-text); }
+.nai-status.s-criado { background: var(--a-teal); color: var(--a-inverse); }
+.nai-status.s-erro { background: color-mix(in srgb, var(--a-danger) 16%, var(--a-surface)); color: var(--a-danger); }
+
+.nai-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 4px 0 0 40px; }
+.nai-action { display: grid; gap: 4px; min-height: 76px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 16px; background: var(--a-surface); color: var(--a-ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.nai-action strong { font-size: 13.5px; }
+.nai-action span { color: var(--a-muted); font-size: 12px; line-height: 1.4; }
+.nai-action:hover, .nai-action:focus-visible { border-color: var(--a-teal); outline: none; transform: translateY(-1px); }
+
+.nai-analysis { display: grid; gap: 6px; margin: 10px 0; padding: 0; list-style: none; font-size: 13px; }
+.nai-analysis li { padding-left: 10px; border-left: 3px solid var(--a-border-strong); }
+.nai-analysis li.sev-alta { border-left-color: var(--a-danger); }
+.nai-analysis li.sev-media { border-left-color: var(--a-warn); }
+
+.nai-muted { margin: 0; color: var(--a-muted); font-size: 12.5px; line-height: 1.5; }
+.nai-link { justify-self: start; padding: 0; border: 0; background: none; color: var(--a-teal-text); font: inherit; font-size: 12.5px; cursor: pointer; }
+
+/* Dropdown composto (mesmo visual da busca e filtro do quadro) */
+.nai-combo.kb-searchbar { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.nai-combo.is-lg { min-width: min(280px, 100%); }
+.nai-combo-box { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 36px; padding: 4px 10px 4px 6px; font: inherit; text-align: left; cursor: pointer; }
+.nai-combo-box:disabled { cursor: default; opacity: .6; }
+.nai-combo.is-sm .nai-combo-box { min-height: 32px; }
+.nai-combo-chip { white-space: nowrap; }
+.nai-combo-chip.is-empty { opacity: .8; }
+.nai-combo-placeholder { padding-left: 6px; color: var(--a-muted); font-size: 13px; white-space: nowrap; }
+.nai-combo-caret { margin-left: auto; color: var(--a-muted); font-size: 11px; }
+.nai-combo .nai-combo-panel { position: absolute; top: calc(100% + 6px); left: 0; right: auto; z-index: 60; min-width: max(240px, 100%); max-height: 320px; overflow-y: auto; }
+.nai-combo-search { width: 100%; margin-bottom: 6px; padding: 7px 10px; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-inset); }
+.nai-combo .kb-searchbar-attr { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.nai-combo .kb-searchbar-attr em { color: var(--a-muted); font-size: 11.5px; font-style: normal; }
+.nai-combo .kb-searchbar-attr.is-on { background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 650; }
+
+/* Formulário guiado */
+.nai-form { display: grid; gap: 12px; }
+.nai-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; }
+.nai-date, .nai-text { display: grid; gap: 4px; min-width: 0; }
+.nai-date > span, .nai-text > span { font-size: 11px; font-weight: 650; color: var(--a-muted); }
+.nai-date input, .nai-text input, .nai-text textarea, .nai-piece-title { min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-inset); color: var(--a-ink); font: inherit; font-size: 13.5px; }
+.nai-text textarea { height: auto; padding: 8px 10px; resize: vertical; }
+.nai-date.is-compact { grid-template-columns: auto 1fr; align-items: center; gap: 6px; }
+.nai-date.is-compact input { height: 32px; }
+.nai-label { margin: 2px 0 0 !important; font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--a-muted); }
+.nai-pieces { display: grid; gap: 8px; }
+.nai-piece { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto 28px; align-items: center; gap: 8px; }
+.nai-piece-n { color: var(--a-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; }
+.nai-piece-title { height: 32px; }
+.nai-add { display: flex; flex-wrap: wrap; gap: 6px; }
+.nai-scripts summary { cursor: pointer; color: var(--a-sec); font-size: 12.5px; font-weight: 600; }
+.nai-scripts textarea { width: 100%; margin: 8px 0; padding: 10px 12px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-inset); color: var(--a-ink); font: inherit; font-size: 13px; }
+.nai-qty { margin: 0; }
+
+/* Prévia */
+.nai-preview { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-inset); }
+.nai-preview.is-compact { gap: 6px; padding: 10px 12px; opacity: .92; }
+.nai-preview-title { margin: 0 0 4px !important; font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--a-teal-text); }
+.nai-preview ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.nai-preview li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.nai-preview-ico { flex: 0 0 16px; color: var(--a-teal-text); text-align: center; }
+.nai-preview-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.nai-preview-text b { font-weight: 600; color: var(--a-ink); }
+.nai-preview-text em { color: var(--a-muted); font-size: 12px; font-style: normal; }
+
+/* Resultado */
+.nai-result { display: grid; gap: 8px; margin-top: 10px; }
+.nai-result-lines { font-size: 13.5px; font-weight: 600; }
+.nai-result-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+
+/* Composer fixo */
+.nai-composer-wrap { flex: 0 0 auto; padding: 10px 24px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--a-border); background: var(--a-bg); }
+.nai-suggestions, .nai-composer, .nai-composer-foot { width: min(860px, 100%); margin: 0 auto; }
+.nai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.nai-composer { display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 8px; border: 1px solid var(--a-border-strong); border-radius: 22px; background: var(--a-surface); box-shadow: 0 8px 24px rgba(0, 0, 0, .08); }
+.nai-composer:focus-within { border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
+.nai-composer textarea { flex: 1; min-height: 38px; max-height: 200px; padding: 9px 4px; border: 0; background: transparent; color: var(--a-ink); font: inherit; font-size: 14px; line-height: 1.45; resize: none; outline: none; }
+.nai-icon-btn { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; border: 0; border-radius: 50%; background: transparent; color: var(--a-muted); font-size: 16px; cursor: pointer; }
+.nai-icon-btn:hover { background: var(--a-hover); color: var(--a-ink); }
+.nai-send { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; border: 0; border-radius: 50%; background: var(--a-teal-strong); color: var(--a-inverse); font-size: 17px; font-weight: 700; cursor: pointer; }
+.nai-send:disabled { opacity: .35; cursor: default; }
+.nai-composer-foot { margin-top: 6px; color: var(--a-muted); font-size: 11px; text-align: center; }
+
+/* Contexto e conversas */
+.nai-side { height: 100dvh; overflow-y: auto; border-left: 1px solid var(--a-border); background: var(--a-surface); }
+.nai-context, .nai-history { display: grid; align-content: start; gap: 14px; padding: 20px 18px 28px; }
+.nai-context-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nai-context-head strong { font-size: 15px; color: var(--a-ink); }
+.nai-card { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-inset); }
+.nai-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.nai-card-title { font-size: 10.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
+.nai-percent { color: var(--a-teal-text); font-size: 20px; font-variant-numeric: tabular-nums; }
+.nai-bar { height: 6px; border-radius: 999px; background: var(--a-surface2); overflow: hidden; }
+.nai-bar span { display: block; height: 100%; border-radius: inherit; background: var(--a-teal-strong); }
+.nai-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--a-muted); }
+.nai-checks li { display: flex; gap: 5px; }
+.nai-checks li.ok { color: var(--a-ink); }
+.nai-checks li.ok span { color: var(--a-teal-text); }
+.nai-ops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.nai-ops div { display: grid; gap: 1px; }
+.nai-ops dt { color: var(--a-muted); font-size: 11px; }
+.nai-ops dd { margin: 0; color: var(--a-ink); font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.nai-ops dd.t-red { color: var(--a-danger); }
+.nai-ops-line { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: 12.5px; }
+.nai-ops-line span { color: var(--a-muted); }
+.nai-ops-line a { overflow: hidden; color: var(--a-teal-text); text-overflow: ellipsis; white-space: nowrap; }
+.nai-ops-line em { color: var(--a-muted); font-style: normal; }
+.nai-gaps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.nai-gaps li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding-left: 10px; border-left: 3px solid var(--a-border-strong); }
+.nai-gaps li.sev-alta { border-left-color: var(--a-danger); }
+.nai-gaps li.sev-media { border-left-color: var(--a-warn); }
+.nai-gaps li > div { display: grid; gap: 2px; min-width: 0; }
+.nai-gaps strong { font-size: 12.5px; color: var(--a-ink); }
+.nai-gaps span { color: var(--a-muted); font-size: 11.5px; line-height: 1.4; }
+.nai-gaps .admin-btn { flex: 0 0 auto; padding: 4px 10px; font-size: 12px; }
+.nai-gap-links { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.nai-gap-links a { color: var(--a-teal-text); }
+.nai-history ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.nai-history li button { display: grid; gap: 2px; width: 100%; padding: 9px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--a-ink); font: inherit; text-align: left; cursor: pointer; }
+.nai-history li button:hover, .nai-history li button.on { background: var(--a-hover); }
+.nai-history li button strong { font-size: 13px; }
+.nai-history li button span { overflow: hidden; color: var(--a-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.nai-history-foot { font-size: 11px; }
+
+.nai-drawer { position: fixed; top: 0; bottom: 0; z-index: 80; width: min(340px, 92vw); overflow-y: auto; background: var(--a-surface); box-shadow: 0 0 40px rgba(0, 0, 0, .25); }
+.nai-drawer.is-left { left: 0; border-right: 1px solid var(--a-border); }
+.nai-backdrop { position: fixed; inset: 0; z-index: 75; border: 0; background: rgba(0, 0, 0, .35); cursor: pointer; }
+.nai-context-toggle { display: none; }
+
+/* Telas menores que 1280: contexto vira gaveta à direita (botão ⓘ no composer). */
+@media (max-width: 1279px) {
+  .nai-studio { grid-template-columns: minmax(0, 1fr); }
+  .nai-side { position: fixed; top: 0; right: 0; bottom: 0; z-index: 80; width: min(360px, 92vw); height: auto; box-shadow: 0 0 40px rgba(0, 0, 0, .25); transform: translateX(105%); transition: transform .2s ease; }
+  .nai-side.is-open { transform: none; }
+  .nai-context-toggle { display: grid; }
+}
+@media (min-width: 1280px) {
+  .nai-studio .nai-backdrop { display: none; }
+  .nai-studio:not(:has(.nai-drawer)) .nai-backdrop { display: none; }
+}
+@media (max-width: 760px) {
+  .nai-scroll-inner { padding: 14px 14px 20px; }
+  .nai-composer-wrap { padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .nai-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-left: 0; }
+  .nai-bubble { max-width: 92%; }
+  .nai-bubble.is-card { max-width: 100%; }
+  .nai-msg.is-assistant .nai-bubble.is-card { margin-left: -40px; width: calc(100% + 40px); }
+  .nai-piece { grid-template-columns: 20px minmax(0, 1fr) 28px; }
+  .nai-piece .nai-combo, .nai-piece .nai-date { grid-column: 2 / 3; }
+  .nai-checks, .nai-ops { grid-template-columns: 1fr 1fr; }
+  .nai-composer-foot { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nai-side, .nai-action { transition: none; }
+}

@@ -16,7 +16,7 @@ import { subtypeLabel } from "@/lib/taskCatalog";
 import { partsLabel, pendingLabel } from "../parentCounts";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { DEADLINE_LABEL, deadlineStateOf } from "../deadlineState";
-import { todayInTimezone } from "../recurringState";
+import { agencyToday } from "../recurringState";
 import type { ParentCard } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -82,7 +82,7 @@ export default function ParentCardsBoard({
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingTarget | null>(null);
   const { sort, setSort } = useSortPref(sortScope);
-  const today = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
+  const today = useMemo(() => agencyToday(), []);
 
   const parents = useMemo(() => {
     const needle = q.trim();

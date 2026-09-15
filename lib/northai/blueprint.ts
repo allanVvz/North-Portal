@@ -23,6 +23,8 @@ export const blueprintTaskSchema = z.object({
   recurrence_cadence: z.enum(["semanal", "quinzenal", "mensal"]).nullable().optional(),
   recurrence_weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
   formato: z.string().max(80).nullable().optional(),
+  /** Rotina padrão do cadastro (lib/clientRoutines.ts) que este card cumpre. */
+  routineKey: z.string().max(60).nullable().optional(),
 });
 
 export const shootDayPieceSchema = z.object({
@@ -85,8 +87,8 @@ export type BlueprintTask = z.infer<typeof blueprintTaskSchema>;
 export type BlueprintOp = z.infer<typeof blueprintOpSchema>;
 export type Blueprint = z.infer<typeof blueprintSchema>;
 
-/** Uma linha da prévia "vai criar". */
-export type PreviewLine = { icon: string; text: string; detail?: string; indent?: boolean };
+/** Uma linha da prévia "o que será criado". `group` agrupa na tela (ex.: Compartilhado, Peças). */
+export type PreviewLine = { icon: string; text: string; detail?: string; indent?: boolean; group?: string };
 
 export type BuiltBlueprint = { blueprint: Blueprint; preview: PreviewLine[] };
 

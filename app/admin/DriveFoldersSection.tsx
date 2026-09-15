@@ -6,24 +6,19 @@ import { driveFolderIdFromUrl } from "@/lib/googleDrive";
 import { GED_AREAS, gedClientFolderName } from "@/lib/ged/paths";
 import DriveBrowser from "./DriveBrowser";
 
-// Materiais do cliente = o GED da plataforma (15/09).
+// Arquivos do cliente (tecnicamente o GED da plataforma — lib/ged).
 //
-// Antes o cadastro pedia para colar o link de três pastas do Drive do cliente.
-// Agora todo cliente tem a sua árvore no GED — Clientes/<nome> (<slug>)/Marca,
-// Arquivos, Edição, Roteiros, Planilhas, Relatórios —, criada pela plataforma:
-// no Drive da plataforma quando a conta de serviço está configurada, senão no
-// armazenamento interno (os arquivos aparecem em Informações). Links do Google
-// enviados ao NorthAi são copiados para dentro dele (lib/ged).
+// Todo cliente tem a sua estrutura, criada pela plataforma: Marca, Arquivos,
+// Edição, Roteiros, Planilhas e Relatórios. No Google Drive da plataforma quando
+// a conta de serviço está configurada; senão no armazenamento interno, e os
+// arquivos aparecem em Informações. O cadastro não pede link colado.
 //
-// Os links antigos colados à mão continuam editáveis, recolhidos, até a
-// migração para o GED.
+// `client` é a identidade SALVA do cliente — nunca o nome em edição.
+//
+// Os links de pasta colados antes da estrutura automática continuam editáveis,
+// recolhidos em "Links antigos do Drive", até a migração (roadmap R4.12).
 
-type FolderSpec = {
-  label: string;
-  folderId: string | null;
-  url: string;
-  onUrl: (v: string) => void;
-};
+type LegacyFolder = { label: string; url: string; onUrl: (value: string) => void };
 
 export default function DriveFoldersSection({
   client,
@@ -42,68 +37,73 @@ export default function DriveFoldersSection({
   brandUrl: string;
   productsUrl: string;
   uploadsUrl: string;
-  onBrandUrl: (v: string) => void;
-  onProductsUrl: (v: string) => void;
-  onUploadsUrl: (v: string) => void;
+  onBrandUrl: (value: string) => void;
+  onProductsUrl: (value: string) => void;
+  onUploadsUrl: (value: string) => void;
 }) {
-  const specs: FolderSpec[] = [
-    { label: "Marca", folderId: folders.brandFolderId, url: brandUrl, onUrl: onBrandUrl },
-    { label: "Arquivos", folderId: folders.productsFolderId, url: productsUrl, onUrl: onProductsUrl },
-    { label: "Edição", folderId: folders.uploadsFolderId, url: uploadsUrl, onUrl: onUploadsUrl },
-  ];
-  const provisioned = specs.filter((spec) => spec.folderId);
-  const legacy = specs.filter((spec) => !spec.folderId);
-  const legacyFilled = legacy.filter((spec) => spec.url.trim()).length;
+  // Pastas que a plataforma criou no Drive e dá para navegar aqui.
+  const browsable = [
+    { label: "Marca", folderId: folders.brandFolderId },
+    { label: "Arquivos", folderId: folders.productsFolderId },
+    { label: "Edição", folderId: folders.uploadsFolderId },
+  ].filter((folder): folder is { label: string; folderId: string } => Boolean(folder.folderId));
+
+  // Links colados à mão antes da estrutura automática (sem pasta da plataforma).
+  const legacy: LegacyFolder[] = [
+    { label: "Marca", url: brandUrl, onUrl: onBrandUrl, hasPlatformFolder: Boolean(folders.brandFolderId) },
+    { label: "Arquivos", url: productsUrl, onUrl: onProductsUrl, hasPlatformFolder: Boolean(folders.productsFolderId) },
+    { label: "Edição", url: uploadsUrl, onUrl: onUploadsUrl, hasPlatformFolder: Boolean(folders.uploadsFolderId) },
+  ]
+    .filter((folder) => !folder.hasPlatformFolder)
+    .map(({ label, url, onUrl }) => ({ label, url, onUrl }));
+  const legacyFilled = legacy.filter((folder) => folder.url.trim()).length;
 
   return (
     <fieldset className="admin-group">
-      <legend>GED — materiais do cliente</legend>
+      <legend>Arquivos do cliente</legend>
       <p className="admin-hint">
-        <b>Clientes/{gedClientFolderName(client)}</b> ·{" "}
-        {driveConfigured
-          ? folders.rootFolderId ? "pastas no Drive da plataforma" : "as pastas no Drive da plataforma são criadas ao salvar um novo cliente"
-          : <>armazenamento interno — os arquivos aparecem em <Link href="/admin/documentos">Informações</Link></>}
+        ✓ Estrutura criada automaticamente em <b>Clientes/{gedClientFolderName(client)}</b> ·{" "}
+        {driveConfigured ? (
+          "Google Drive da plataforma"
+        ) : (
+          <>armazenamento interno — os arquivos aparecem em <Link href="/admin/documentos">Informações</Link></>
+        )}
       </p>
       <ul className="ged-areas">
         {GED_AREAS.map((area) => <li key={area.key}>{area.label}</li>)}
       </ul>
-      {folders.syncedAt ? (
-        <p className="admin-hint">Pastas criadas pela plataforma em {new Date(folders.syncedAt).toLocaleString("pt-BR")}</p>
-      ) : null}
 
-      {provisioned.length ? (
+      {browsable.length ? (
         <div className="drive-folders">
-          {provisioned.map((spec) => (
-            <div className="drive-folder" key={spec.label}>
+          {browsable.map((folder) => (
+            <div className="drive-folder" key={folder.label}>
               <div className="drive-folder-head">
-                <strong>{spec.label}</strong>
-                <span className="admin-pill on">GED</span>
-                {spec.url ? <a className="admin-btn ghost" href={spec.url} target="_blank" rel="noreferrer">Abrir ↗</a> : null}
+                <strong>{folder.label}</strong>
               </div>
-              <DriveBrowser folderId={spec.folderId!} label={spec.label} />
+              <DriveBrowser folderId={folder.folderId} label={folder.label} />
             </div>
           ))}
         </div>
       ) : null}
 
       {legacy.length ? (
-        <details className="ged-legacy" open={legacyFilled > 0 && !provisioned.length}>
-          <summary>Links antigos do Drive{legacyFilled ? ` (${legacyFilled})` : ""} — serão migrados para o GED</summary>
+        <details className="ged-legacy">
+          <summary>Links antigos do Drive{legacyFilled ? ` (${legacyFilled})` : ""}</summary>
+          <p className="admin-hint">Pastas coladas antes da estrutura automática. Continuam valendo até a migração.</p>
           <div className="drive-folders">
-            {legacy.map((spec) => {
-              const browsableId = driveFolderIdFromUrl(spec.url);
+            {legacy.map((folder) => {
+              const browsableId = driveFolderIdFromUrl(folder.url);
               return (
-                <div className="drive-folder" key={spec.label}>
+                <div className="drive-folder" key={folder.label}>
                   <div className="drive-folder-head">
-                    <strong>{spec.label}</strong>
-                    <span className="admin-pill muted">Link antigo</span>
-                    {spec.url ? <a className="admin-btn ghost" href={spec.url} target="_blank" rel="noreferrer">Abrir ↗</a> : null}
+                    <strong>{folder.label}</strong>
+                    {folder.url ? <a className="admin-btn ghost" href={folder.url} target="_blank" rel="noreferrer">Abrir ↗</a> : null}
                   </div>
                   <label className="admin-field">
                     <span>Link da pasta</span>
-                    <input value={spec.url} onChange={(e) => spec.onUrl(e.target.value)} placeholder="https://drive.google.com/…" />
+                    <input value={folder.url} onChange={(event) => folder.onUrl(event.target.value)} placeholder="https://drive.google.com/…" />
                   </label>
-                  {browsableId ? <DriveBrowser folderId={browsableId} label={spec.label} /> : null}
+                  {browsableId ? <DriveBrowser folderId={browsableId} label={folder.label} /> : null}
                 </div>
               );
             })}

@@ -9,6 +9,10 @@ Decisão de 15/09: a plataforma tem o seu próprio GED. Arquivos de cliente não
 dependem de links para Drives de terceiros; um link compartilhado é **copiado**
 para dentro.
 
+Na interface o nome é **Arquivos do cliente** — "GED", "provider" e
+"armazenamento" são termos de código e documentação. A importação pelo Estúdio
+passa pelo caso de uso `lib/northai/importFile.ts`.
+
 ## Caminho padrão
 
 ```

@@ -229,7 +229,8 @@ export default function ClientEditor({ slug, detail, scopeTags, adAccounts, adAc
       />
 
       <DriveFoldersSection
-        client={{ name: name.trim() || detail.name, slug }}
+        // Identidade SALVA: o nome em edição não vale até o save.
+        client={{ name: detail.name, slug }}
         driveConfigured={driveConfigured}
         folders={detail.driveFolders}
         brandUrl={brandUrl}

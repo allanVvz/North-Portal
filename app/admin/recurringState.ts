@@ -45,21 +45,10 @@ type StateInput = Pick<
   "active" | "cadence" | "weekdays" | "next_due_date" | "last_completed_at" | "timezone" | "template_payload"
 >;
 
-/**
- * "Today" as YYYY-MM-DD in the routine's own timezone.
- *
- * Not `new Date()`: the server runs in UTC, so from 21:00 BRT onwards a routine
- * due today would already compare as overdue — the app flagged routines three
- * hours early every single evening.
- */
-export function todayInTimezone(timezone: string, now: Date = new Date()): string {
-  try {
-    // en-CA formats as YYYY-MM-DD, which is exactly the shape we compare on.
-    return new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now);
-  } catch {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
-  }
-}
+// "Hoje" mora em lib/time/agency.ts (uma fonte para telas, rotas e casos de
+// uso). Reexportado daqui porque as telas antigas importam deste módulo.
+import { agencyToday, todayInTimezone } from "@/lib/time/agency";
+export { agencyToday, todayInTimezone };
 
 /** Nominal days between two runs — semanal[seg,qui] is 3, not 7. */
 export function cycleLengthDays(task: Pick<StateInput, "cadence" | "weekdays">): number {

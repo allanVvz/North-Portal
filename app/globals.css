@@ -5311,110 +5311,12 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .kb-searchbar-quick.has b { background: var(--a-danger); color: #fff; }
 .kb-searchbar-quick:hover { border-color: var(--a-danger); color: var(--a-danger); }
 
-/* NorthAi — Estúdio (harness determinístico) e abas. As abas são links, e a
-   regra de .clients-section-tabs só estilizava <button>. */
-.clients-section-tabs a { position: relative; padding: 0 0 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--a-muted); font: inherit; font-size: 13.5px; font-weight: 650; text-decoration: none; }
-.clients-section-tabs a:hover { color: var(--a-ink); }
-.clients-section-tabs a.on { color: var(--a-teal-text); border-bottom-color: var(--a-teal-strong); }
-.nai-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr) 300px; gap: 16px; align-items: start; min-height: calc(100vh - 220px); }
-.nai-history, .nai-context { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); display: grid; gap: 12px; }
-.nai-history { padding: 14px 12px; border: 1px solid var(--a-border); border-radius: 16px; background: var(--a-surface); }
-.nai-history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.nai-history li button { display: grid; gap: 2px; width: 100%; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--a-ink); font: inherit; text-align: left; cursor: pointer; }
-.nai-history li button span { overflow: hidden; color: var(--a-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
-.nai-history li button:hover, .nai-history li button.on { background: var(--a-hover); }
-.nai-history li button strong { font-size: 13px; }
-.nai-history-foot { margin-top: 6px; font-size: 11px; }
-.nai-side-title { margin: 0 0 8px; font-size: 10.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
-.nai-muted { margin: 0; color: var(--a-muted); font-size: 12.5px; line-height: 1.5; }
-.nai-main { display: flex; flex-direction: column; min-width: 0; min-height: calc(100vh - 220px); border: 1px solid var(--a-border); border-radius: 18px; background: var(--a-surface); overflow: hidden; }
-.nai-thread { flex: 1; display: grid; align-content: start; gap: 14px; padding: 22px 24px; }
-.nai-hero { display: grid; justify-items: center; gap: 10px; padding: 36px 8px 12px; text-align: center; }
-.nai-eyebrow { margin: 0; font-size: 10.5px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; color: var(--a-teal-text); }
-.nai-hero h2 { margin: 0; font-family: var(--font-serif, Georgia, serif); font-size: clamp(22px, 2.4vw, 30px); color: var(--a-ink); }
-.nai-hero > .nai-muted { max-width: 560px; font-size: 13.5px; }
-.nai-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: min(720px, 100%); margin-top: 14px; }
-.nai-actions.is-compact { grid-template-columns: repeat(6, minmax(0, 1fr)); width: 100%; margin: 0; }
-.nai-action { display: grid; gap: 4px; min-height: 72px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-inset); color: var(--a-ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
-.nai-action strong { font-size: 13.5px; }
-.nai-action span { color: var(--a-muted); font-size: 12px; line-height: 1.4; }
-.nai-action:hover, .nai-action:focus-visible { border-color: var(--a-teal); outline: none; transform: translateY(-1px); }
-.nai-actions.is-compact .nai-action { min-height: 0; padding: 9px 10px; text-align: center; }
-.nai-entry { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-inset); }
-.nai-entry header { display: flex; justify-content: space-between; gap: 12px; }
-.nai-entry header strong { font-size: 13.5px; color: var(--a-ink); }
-.nai-entry header time { flex: 0 0 auto; color: var(--a-muted); font-size: 11.5px; }
-.nai-entry.is-error { border-color: color-mix(in srgb, var(--a-danger) 45%, var(--a-border)); }
-.nai-entry.is-running { opacity: .8; }
-.nai-preview { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.nai-preview li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; color: var(--a-ink); }
-.nai-preview li > span { width: 16px; color: var(--a-teal-text); text-align: center; }
-.nai-preview li b { font-weight: 600; }
-.nai-preview li em { color: var(--a-muted); font-size: 12px; font-style: normal; }
-.nai-preview li.is-indent { padding-left: 24px; }
-.nai-created { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
-.nai-created > span { color: var(--a-muted); }
-.nai-created a { padding: 3px 9px; border-radius: 999px; background: var(--a-teal-soft); color: var(--a-teal-text); text-decoration: none; }
-.nai-created a:hover { text-decoration: underline; }
-.nai-recipe { display: grid; gap: 14px; padding: 16px 18px; border: 1px solid var(--a-teal); border-radius: 16px; background: var(--a-surface); box-shadow: 0 0 0 3px var(--a-teal-soft); }
-.nai-recipe > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.nai-recipe > header strong { font-size: 14.5px; color: var(--a-ink); }
-.nai-form { display: grid; gap: 12px; }
-.nai-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
-.nai-fields .admin-field { flex: 1 1 150px; margin: 0; }
-.nai-fields .nai-wide { flex: 2 1 260px; }
-.nai-toggle { flex: 1 1 200px; margin: 0 0 6px; }
-.nai-label { margin: 0; font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--a-muted); }
-.nai-pieces { display: grid; gap: 6px; }
-.nai-piece { display: grid; grid-template-columns: 24px minmax(0, 1fr) 130px 148px 28px; align-items: center; gap: 6px; }
-.nai-piece-n { color: var(--a-muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; }
-.nai-piece input, .nai-piece select { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-inset); color: var(--a-ink); font: inherit; font-size: 13px; }
-.nai-add, .nai-weekdays { display: flex; flex-wrap: wrap; gap: 6px; }
-.nai-scripts summary { cursor: pointer; color: var(--a-sec); font-size: 12.5px; font-weight: 600; }
-.nai-scripts textarea { width: 100%; margin: 8px 0; padding: 10px 12px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-inset); color: var(--a-ink); font: inherit; font-size: 13px; }
-.nai-qty { margin: 0; }
-.nai-plan { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--a-border); }
-.nai-plan-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.nai-composer { position: sticky; bottom: 0; display: grid; gap: 6px; padding: 12px 16px 14px; border-top: 1px solid var(--a-border); background: var(--a-surface); }
-.nai-composer-box { display: flex; align-items: flex-end; gap: 8px; padding: 8px; border: 1px solid var(--a-border-strong); border-radius: 14px; background: var(--a-inset); }
-.nai-composer-box:focus-within { border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
-.nai-composer-box textarea { flex: 1; min-height: 36px; max-height: 220px; padding: 8px 6px; border: 0; background: transparent; color: var(--a-ink); font: inherit; font-size: 13.5px; resize: vertical; outline: none; }
-.nai-client { flex: 0 0 auto; max-width: 180px; height: 36px; padding: 0 10px; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 12.5px; }
-.nai-send { width: 40px; height: 36px; padding: 0; font-size: 16px; }
-.nai-notice { margin: 0; color: var(--a-gold-text); font-size: 12.5px; }
-.nai-composer-foot { font-size: 11px; }
-.nai-card { padding: 14px 16px; border: 1px solid var(--a-border); border-radius: 16px; background: var(--a-surface); }
-.nai-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.nai-card-head strong { font-size: 13.5px; color: var(--a-ink); }
-.nai-percent { color: var(--a-teal-text); font-size: 20px; font-variant-numeric: tabular-nums; }
-.nai-bar { height: 6px; margin: 10px 0; border-radius: 999px; background: var(--a-surface2); overflow: hidden; }
-.nai-bar span { display: block; height: 100%; border-radius: inherit; background: var(--a-teal-strong); }
-.nai-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; color: var(--a-muted); }
-.nai-checks li { display: flex; gap: 6px; }
-.nai-checks li.ok { color: var(--a-ink); }
-.nai-checks li.ok span { color: var(--a-teal-text); }
-.nai-numbers { display: grid; grid-template-columns: repeat(3, 1fr); padding: 10px 6px; text-align: center; }
-.nai-numbers div { display: grid; gap: 2px; }
-.nai-numbers div + div { border-left: 1px solid var(--a-border); }
-.nai-numbers strong { font-size: 20px; color: var(--a-ink); font-variant-numeric: tabular-nums; }
-.nai-numbers strong.t-red { color: var(--a-danger); }
-.nai-numbers span { color: var(--a-muted); font-size: 11px; }
-.nai-gaps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.nai-gaps li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding-left: 10px; border-left: 3px solid var(--a-border-strong); }
-.nai-gaps li.sev-alta { border-left-color: var(--a-danger); }
-.nai-gaps li.sev-media { border-left-color: var(--a-warn); }
-.nai-gaps li div { display: grid; gap: 2px; min-width: 0; }
-.nai-gaps li strong { font-size: 12.5px; color: var(--a-ink); }
-.nai-gaps li span { color: var(--a-muted); font-size: 11.5px; line-height: 1.4; }
-.nai-gaps .admin-btn { flex: 0 0 auto; padding: 4px 10px; font-size: 12px; }
-.nai-gap-links { display: flex; flex-wrap: wrap; gap: 4px 8px; }
-.nai-gap-links a { color: var(--a-teal-text); }
-.nai-ged { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
-.nai-ged li { padding: 2px 8px; border-radius: 999px; background: var(--a-surface2); color: var(--a-sec); font-size: 11.5px; }
-.nai-context-foot { font-size: 11.5px; }
-.nai-link { padding: 0; border: 0; background: none; color: var(--a-teal-text); font: inherit; cursor: pointer; }
-@media (max-width: 1240px) { .nai-grid { grid-template-columns: minmax(0, 1fr) 280px; } .nai-history { display: none; } .nai-actions.is-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 900px) { .nai-grid { grid-template-columns: 1fr; } .nai-context { position: static; } .nai-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nai-piece { grid-template-columns: 20px minmax(0, 1fr) 110px; } .nai-piece input[type="date"] { grid-column: 2 / 3; } }
+/* Arquivos do cliente no cadastro: não é escolha, é estrutura automática. */
+.client-files-auto { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-inset); }
+.client-files-auto .ck { display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%; background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 800; }
+.client-files-auto div { display: grid; gap: 2px; }
+.client-files-auto strong { font-size: 13px; color: var(--a-ink); }
+.client-files-auto span { font-size: 12px; color: var(--a-muted); }
 
 /* GED no cadastro do cliente. */
 .ged-areas { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; padding: 0; list-style: none; }

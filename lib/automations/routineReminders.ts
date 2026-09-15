@@ -11,14 +11,11 @@
 // ruído.
 
 import { recurrenceStopped } from "@/lib/recurrenceState";
+import { agencyToday } from "@/lib/time/agency";
 import { notifyFromAutomation } from "./notify";
 import type { AdminClient } from "./taskAccess";
 
 const WINDOW_DAYS = 2;
-
-function agencyToday(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
-}
 
 function plusDays(iso: string, days: number): string {
   const date = new Date(`${iso}T12:00:00Z`);
