@@ -15,7 +15,7 @@ import { clientInsight, type Gap, type OperationToday, type ReadinessCheck } fro
 export type NorthAiGap = Omit<Gap, "taskIds"> & { tasks: { id: string; title: string }[] };
 
 export type NorthAiClientContext = {
-  identity: { slug: string; name: string };
+  identity: { id: string; slug: string; name: string };
   today: string;
   knowledge: { percent: number; checks: ReadinessCheck[] };
   operation: OperationToday;
@@ -24,17 +24,20 @@ export type NorthAiClientContext = {
   options: { plans: { id: string; title: string }[]; routines: { id: string; title: string }[] };
 };
 
-export async function getNorthAiClientContext(slug: string): Promise<NorthAiClientContext | null> {
+/** Por id (o que a @menção carrega) ou por slug (compatibilidade). */
+export async function getNorthAiClientContext(ref: { clientId?: string; slug?: string }): Promise<NorthAiClientContext | null> {
+  const clients = await listClients();
+  const slug = ref.clientId ? clients.find((entry) => entry.id === ref.clientId)?.slug : ref.slug;
+  if (!slug) return null;
   const client = await getClient(slug, true);
-  if (!client) return null;
+  if (!client || (ref.clientId && client.id !== ref.clientId)) return null;
 
   // Leituras em paralelo; qualquer falha lança (HttpError 503) — a tela mostra
   // erro de carregamento em vez de lacunas que não existem.
-  const [tasks, detail, automations, clients] = await Promise.all([
+  const [tasks, detail, automations] = await Promise.all([
     listClientTasksAll(client.id),
     getAdminClientDetail(slug),
     listAutomationConfigs(),
-    listClients(),
   ]);
 
   const contract = (detail?.contract ?? {}) as Record<string, unknown>;
@@ -53,7 +56,7 @@ export async function getNorthAiClientContext(slug: string): Promise<NorthAiClie
 
   const titles = new Map(tasks.map((task) => [task.id, task.title]));
   return {
-    identity: { slug: client.slug, name: client.name },
+    identity: { id: client.id, slug: client.slug, name: client.name },
     today,
     knowledge: insight.readiness,
     operation: insight.operation,

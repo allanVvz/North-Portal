@@ -1,8 +1,10 @@
 "use client";
 
+import { ClientMonogram } from "./ClientIdentity";
 import type { ClientLite, StudioMessage } from "./types";
 
-// Conversas recentes por cliente (gaveta). Ficam neste navegador.
+// Conversas recentes por cliente (gaveta). Indexadas pelo id do cliente; ficam
+// neste navegador.
 export default function SessionHistory({
   clients,
   threads,
@@ -13,31 +15,40 @@ export default function SessionHistory({
   clients: readonly ClientLite[];
   threads: Record<string, StudioMessage[]>;
   activeClient: string | null;
-  onPick: (slug: string) => void;
+  onPick: (clientId: string) => void;
   onClose: () => void;
 }) {
   const rows = Object.entries(threads)
     .filter(([, messages]) => messages.length)
-    .map(([slug, messages]) => {
+    .flatMap(([clientId, messages]) => {
+      const client = clients.find((entry) => entry.id === clientId);
+      if (!client) return [];
       const last = messages[messages.length - 1];
-      const text = last.role === "user" ? last.text : last.kind === "text" ? last.text : last.kind === "recipe" ? last.title : "Análise da operação";
-      return { slug, name: clients.find((client) => client.slug === slug)?.name ?? slug, at: last.at, text };
+      const text =
+        last.role === "user" ? last.text
+          : last.kind === "text" || last.kind === "choice" ? last.text
+            : last.kind === "recipe" ? last.title
+              : "Análise da operação";
+      return [{ client, at: last.at, text }];
     })
     .sort((a, b) => b.at.localeCompare(a.at));
 
   return (
     <div className="nai-history">
-      <div className="nai-context-head">
-        <strong>Conversas recentes</strong>
+      <div className="nai-inspector-top">
+        <span className="nai-section-label">Conversas recentes</span>
         <button type="button" className="kb-modal-close" onClick={onClose} aria-label="Fechar conversas">✕</button>
       </div>
       {rows.length ? (
         <ul>
           {rows.map((row) => (
-            <li key={row.slug}>
-              <button type="button" className={row.slug === activeClient ? "on" : ""} onClick={() => onPick(row.slug)}>
-                <strong>{row.name}</strong>
-                <span>{row.text}</span>
+            <li key={row.client.id}>
+              <button type="button" className={row.client.id === activeClient ? "on" : ""} onClick={() => onPick(row.client.id)}>
+                <ClientMonogram client={row.client} size="sm" />
+                <span className="nai-history-text">
+                  <strong>{row.client.name}</strong>
+                  <span>{row.text}</span>
+                </span>
               </button>
             </li>
           ))}

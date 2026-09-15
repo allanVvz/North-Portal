@@ -139,8 +139,32 @@ export function applyPrefill(drafts: StudioDrafts, recipe: RecipeKey, prefill: R
   return drafts;
 }
 
+export type ContextSourceChip = { key: string; label: string };
+
+/**
+ * De onde vem o que o pedido usa — só o que foi de fato lido. Hoje as fontes são
+ * determinísticas (cadastro, catálogo, rotinas, roteiros importados); com o
+ * harness (R4.11) o mesmo lugar mostra o que a IA consultou.
+ */
+export function recipeSources(recipe: FormRecipe, drafts: StudioDrafts, env: { hasContext: boolean }): ContextSourceChip[] {
+  const sources: ContextSourceChip[] = env.hasContext ? [{ key: "cadastro", label: "Cadastro do cliente" }] : [];
+  if (recipe === "diaria") {
+    sources.push({ key: "etapas", label: "Etapas de entrega" });
+    if (drafts.diaria.docUrl || drafts.diaria.scriptsText.trim()) sources.push({ key: "roteiros", label: "Roteiros" });
+  } else if (recipe === "rotina") {
+    if (drafts.rotina.routineKey) sources.push({ key: "rotinas-padrao", label: "Rotinas padrão" });
+  } else if (recipe === "fluxo") {
+    sources.push({ key: "etapas", label: "Etapas de entrega" });
+    if (drafts.fluxo.planId) sources.push({ key: "plano", label: "Plano de ação" });
+  } else if (recipe === "automacao") {
+    sources.push({ key: "automacoes", label: "Catálogo de automações" });
+    if (drafts.automacao.mode === "existing" && drafts.automacao.targetTaskId) sources.push({ key: "rotinas", label: "Rotinas do cliente" });
+  }
+  return sources;
+}
+
 export type BuildEnv = {
-  client: { slug: string; name: string } | null;
+  client: { id?: string; slug: string; name: string } | null;
   deliveryTypes: readonly { key: string; label: string }[];
   routines: readonly { id: string; title: string }[];
   today: string;
@@ -148,6 +172,14 @@ export type BuildEnv = {
 
 /** O que a receita vai criar, ou o que ainda falta preencher. */
 export function buildRecipe(recipe: FormRecipe, drafts: StudioDrafts, env: BuildEnv): { value: BuiltBlueprint | null; problem: string | null } {
+  const result = buildRecipeFor(recipe, drafts, env);
+  // O plano leva a identidade estruturada do cliente; o executor recusa se o
+  // slug e o id não forem do mesmo cliente.
+  if (result.value && env.client?.id) result.value.blueprint.clientId = env.client.id;
+  return result;
+}
+
+function buildRecipeFor(recipe: FormRecipe, drafts: StudioDrafts, env: BuildEnv): { value: BuiltBlueprint | null; problem: string | null } {
   if (!env.client) return { value: null, problem: "Escolha o cliente." };
   const client = env.client;
   try {

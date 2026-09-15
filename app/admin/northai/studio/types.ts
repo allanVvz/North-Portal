@@ -1,7 +1,8 @@
 import type { BlueprintResult, PreviewLine } from "@/lib/northai/blueprint";
 import type { RecipeKey } from "@/lib/northai/commandParser";
+import type { NorthAiClientOption } from "@/lib/northai/clients";
 
-export type ClientLite = { slug: string; name: string };
+export type ClientLite = NorthAiClientOption;
 export type TypeLite = { key: string; label: string; behavior: string; shootReady: boolean };
 
 /** Estados visíveis de um pedido — um vocabulário só na tela. */
@@ -17,7 +18,16 @@ export const STATUS_LABEL: Record<RecipeStatus, string> = {
 };
 
 export type StudioMessage =
-  | { id: string; at: string; role: "user"; text: string }
+  | {
+      id: string;
+      at: string;
+      role: "user";
+      text: string;
+      /** Cliente em que o pedido foi feito (id, não nome). */
+      clientId: string;
+      /** Rótulo da @menção explícita, quando houve. */
+      mentionLabel?: string;
+    }
   | { id: string; at: string; role: "assistant"; kind: "text"; text: string; tone?: "info" | "warn" | "error" }
   | {
       id: string;
@@ -40,6 +50,17 @@ export type StudioMessage =
       percent: number;
       summary: string;
       gaps: { title: string; detail: string; severity: string }[];
+    }
+  | {
+      id: string;
+      at: string;
+      role: "assistant";
+      kind: "choice";
+      text: string;
+      options: { clientId: string; label: string }[];
+      pendingText: string;
+      chosenClientId: string | null;
     };
 
 export type RecipeMessage = Extract<StudioMessage, { kind: "recipe" }>;
+export type ChoiceMessage = Extract<StudioMessage, { kind: "choice" }>;

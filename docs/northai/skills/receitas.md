@@ -16,6 +16,16 @@ Nada é criado por ter sido escrito na caixa.
 | Contrato | `lib/northai/blueprint.ts` | schema zod das operações |
 | Execução | `lib/northai/execute.ts` via `POST /api/admin/northai/execute` | só depois de "Confirmar e criar"; em ordem, sem transação — em falha, devolve o que já foi criado e o erro |
 
+**Contexto do pedido.** O composer entrega `{ text, mentions }` (`lib/northai/mentions.ts`):
+a @menção carrega o `clientId`, nunca só o nome. Em qual cliente o pedido acontece
+é decidido por `resolveNorthAiContext` (`lib/northai/contextResolution.ts`):
+menção estruturada → cliente citado no texto (compatibilidade) → conversa → workspace.
+Menção e texto em clientes diferentes viram uma pergunta na conversa — nunca uma
+execução no cliente errado. O Blueprint leva `clientId`; o executor recusa (409)
+se não bater com o slug. O inspetor carrega o contexto por cliente num cache
+indexado por id (`lib/northai/contextCache.ts`), então resposta atrasada não pinta
+outro cliente.
+
 Estados visíveis de um pedido: Rascunho, Pronto para revisar, Criando, Criado,
 Erro (e Cancelado quando descartado). Datas em dias corridos, "hoje" pelo fuso da
 agência (`lib/time/agency.ts`).

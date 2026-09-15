@@ -20,6 +20,11 @@ export function blueprintNeedsManager(blueprint: Blueprint): boolean {
 export async function executeBlueprint(blueprint: Blueprint, actor: { userId: string }): Promise<BlueprintResult> {
   const client = blueprint.clientSlug ? await getClient(blueprint.clientSlug, true) : null;
   if (blueprint.clientSlug && !client) throw new HttpError(404, "Cliente nao encontrado.");
+  // Nunca executar num cliente inesperado: o id estruturado e o slug precisam
+  // ser do mesmo cliente, e a checagem acontece antes de qualquer criação.
+  if (blueprint.clientId && blueprint.clientId !== (client?.id ?? null)) {
+    throw new HttpError(409, "O pedido não pertence a este cliente. Nada foi criado.");
+  }
 
   const refs = new Map<string, string>();
   const created: BlueprintResult["created"] = [];

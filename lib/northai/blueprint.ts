@@ -74,6 +74,8 @@ export const blueprintSchema = z.object({
   recipe: z.enum(["diaria", "plano", "rotina", "fluxo", "automacao"]),
   title: z.string().min(1).max(300),
   clientSlug: z.string().min(1).max(80).nullable(),
+  /** Identidade estruturada do cliente (da @menção/workspace). Quando vem, precisa bater com o slug. */
+  clientId: z.string().uuid().nullable().optional(),
   ops: z.array(blueprintOpSchema).min(1).max(80),
 }).superRefine((blueprint, ctx) => {
   blueprint.ops.forEach((op, index) => {

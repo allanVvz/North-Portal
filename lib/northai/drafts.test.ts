@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseCommand } from "./commandParser";
-import { applyCommand, applyPrefill, buildRecipe, initialDrafts } from "./drafts";
+import { applyCommand, applyPrefill, buildRecipe, initialDrafts, recipeSources } from "./drafts";
 
 const today = "2026-09-15";
 const clients = [{ slug: "tock-fatal", name: "Tock Fatal" }, { slug: "baita", name: "Baita" }];
@@ -38,6 +38,29 @@ describe("regressão: “3 reels e 1 carrossel, gravação 22/09 Tock Fatal”",
     expect(lines).toContain("Compartilhado: Captação — 22/09");
     expect(lines).toContain("Depois da captação: 4 edições serão criadas automaticamente");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("@Tock Fatal + “3 reels e 1 carrossel, gravação 22/09” (sem citar o cliente no texto)", () => {
+  it("abre a diária da Tock com o id estruturado no plano", () => {
+    const text = "3 reels e 1 carrossel, gravação 22/09";
+    const parsed = parseCommand(text, { clients, today });
+    expect(parsed.clientSlug).toBeNull();
+    const { drafts } = applyCommand(fresh(), parsed, text);
+    const built = buildRecipe("diaria", drafts, { ...env, client: { id: "uuid-tock", slug: "tock-fatal", name: "Tock Fatal" } });
+    expect(built.value?.blueprint).toMatchObject({ clientSlug: "tock-fatal", clientId: "uuid-tock", recipe: "diaria" });
+  });
+});
+
+describe("fontes do pedido", () => {
+  it("só lista o que foi usado", () => {
+    const drafts = fresh();
+    expect(recipeSources("plano", drafts, { hasContext: false })).toEqual([]);
+    expect(recipeSources("diaria", drafts, { hasContext: true }).map((s) => s.key)).toEqual(["cadastro", "etapas"]);
+    const withDoc = { ...drafts, diaria: { ...drafts.diaria, docUrl: "https://docs.google.com/document/d/x" } };
+    expect(recipeSources("diaria", withDoc, { hasContext: true }).map((s) => s.key)).toContain("roteiros");
+    const prefilled = applyPrefill(drafts, "rotina", { title: "Onboarding", routineKey: "onboarding" });
+    expect(recipeSources("rotina", prefilled, { hasContext: true }).map((s) => s.key)).toEqual(["cadastro", "rotinas-padrao"]);
   });
 });
 
