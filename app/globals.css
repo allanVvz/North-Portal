@@ -5199,9 +5199,11 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .tm-step-fields select, .tm-step-fields input { min-width: 0; height: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: 8px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 12.5px; }
 .tm-step-fields select:hover:not(:disabled), .tm-step-fields input:hover:not(:disabled) { border-color: var(--a-border); }
 .tm-step-fields select:focus-visible, .tm-step-fields input:focus-visible { outline: none; border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
-.tm-step-status { width: 120px; }
-.tm-step-date { width: 126px; }
-.tm-step-assignee { width: 142px; }
+/* A data nativa precisa de ~140px para "dd/mm/aaaa" + ícone; com 126px o
+   valor aparecia cortado ("05/") nos prints de produção. */
+.tm-step-status { width: 116px; }
+.tm-step-fields .tm-step-date { width: 148px; padding: 0 6px; }
+.tm-step-assignee { width: 136px; }
 .tm-step-row.is-atrasada .tm-step-date { border-color: var(--a-danger); color: var(--a-danger); font-weight: 650; }
 .tm-step-comments { display: inline-flex; align-items: center; gap: 4px; }
 .tm-step-thread { display: grid; gap: 8px; margin: 2px 0 0 26px; padding: 10px; border-radius: 10px; background: var(--a-surface); border: 1px solid var(--a-border); }
