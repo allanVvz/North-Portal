@@ -33,6 +33,7 @@ import { CONVERSION_METRICS_DEFAULT, metricTagLabel } from "@/lib/metricTags";
 import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
+import { loadStoredPreviews } from "./creativeAssets";
 import { appendedCommentPayload, asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { getClientById } from "./serviceIntegrations";
@@ -232,12 +233,13 @@ async function generateSalesReport(
   // números (auditoria, A3), e esta pipeline não depende da API estar no ar.
   // Snapshot vazio (cliente sem conta de anúncios) = PDF só com o que o gestor
   // relatou, sem investimento/ROAS. Não é erro.
-  const { campaignPosts = [], prevCampaignPosts = [], adPosts = [] } = traffic.snapshot ?? {};
+  const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews } = traffic.snapshot ?? {};
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
-  const [prevTotals, history] = await Promise.all([
+  const [prevTotals, history, previews] = await Promise.all([
     previousPeriodTotals(admin, clientId, period.from),
     conversionHistory(admin, clientId, period.to),
+    loadStoredPreviews(admin, storedPreviews),
   ]);
 
   const pdf = await renderSalesReportPdf({
@@ -248,6 +250,8 @@ async function generateSalesReport(
     campaignPosts,
     prevCampaignPosts,
     adPosts,
+    prevAdPosts,
+    previews,
     conversoes,
     receitaTotal: typeof ext.valores.receita === "number" ? ext.valores.receita : null,
     vendasTotal: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,

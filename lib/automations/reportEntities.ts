@@ -14,11 +14,16 @@ import type { MetaPost } from "@/lib/windsor";
 import type { TaskRecord } from "@/lib/validation";
 import type { Attribution, ConversionMode } from "@/lib/reports/conversionMode";
 import type { AdminClient } from "./taskAccess";
+import type { StoredPreview } from "./creativeAssets";
 
 export type TrafficSnapshot = {
   campaignPosts: MetaPost[];
   prevCampaignPosts: MetaPost[];
   adPosts: MetaPost[];
+  /** Anúncios da semana anterior — destaques que comparam semanas. */
+  prevAdPosts?: MetaPost[];
+  /** Por adId: miniatura guardada no storage e link do post (creativeAssets.ts). */
+  previews?: Record<string, StoredPreview>;
 };
 
 export type TrafficReportStatus = "generated" | "finalized" | "superseded";

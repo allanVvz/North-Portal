@@ -18,6 +18,8 @@ import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
 import { inPeriod, previousPeriod } from "@/app/admin/performance/insights";
 import type { WindsorSettings } from "@/lib/windsor";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
+import { creativeRows, mediaOutcome, mediaTotals } from "@/lib/reports/adsInsights";
+import { collectAndStorePreviews } from "./creativeAssets";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
@@ -76,6 +78,17 @@ function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Semanas mostradas na tendência do relatório de anúncios. */
+const TREND_WEEKS = 6;
+/** Criativos com miniatura baixada por relatório. */
+const PREVIEW_CAP = 24;
+
+function shiftDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return isoDay(d);
+}
+
 async function fillReportCard(
   admin: AdminClient,
   actingTask: TaskRecord,
@@ -100,10 +113,22 @@ async function fillReportCard(
   const cadence: RecurringCadence = target.recurrence_cadence ?? "semanal";
   const period = periodForCadence(cadence, today);
   const prevPeriod = previousPeriod(period);
-  const { campaignPosts, adPosts } = await fetchPostsForAccount(account, windsor, meta, prevPeriod.from, period.to);
+  // A janela cobre as últimas semanas para a tendência do relatório; o que entra
+  // no snapshot continua sendo só a semana atual e a anterior.
+  const trendFrom = shiftDays(period.from, -(TREND_WEEKS - 1) * 7);
+  const { campaignPosts, adPosts } = await fetchPostsForAccount(account, windsor, meta, trendFrom < prevPeriod.from ? trendFrom : prevPeriod.from, period.to);
   const currentPosts = campaignPosts.filter((p) => inPeriod(p, period));
   const prevPosts = campaignPosts.filter((p) => inPeriod(p, prevPeriod));
   const currentAdPosts = adPosts.filter((p) => inPeriod(p, period));
+  const prevAdPosts = adPosts.filter((p) => inPeriod(p, prevPeriod));
+
+  // Previews: baixados agora (a URL do Facebook expira) e guardados no storage,
+  // para o relatório de resultados mostrar a mesma imagem. Falha = card sem imagem.
+  const outcome = mediaOutcome(mediaTotals(currentPosts));
+  const creatives = creativeRows(currentAdPosts, outcome).rows.slice(0, PREVIEW_CAP);
+  const { stored: previews, assets } = meta.accessToken && creatives.length
+    ? await collectAndStorePreviews(admin, meta.accessToken, client.slug, period.to, creatives)
+    : { stored: {}, assets: {} };
 
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const pdfBuffer = await renderAdsReportPdf({
@@ -114,6 +139,9 @@ async function fillReportCard(
     posts: currentPosts,
     prevPosts,
     adPosts: currentAdPosts,
+    prevAdPosts,
+    trendPosts: campaignPosts,
+    previews: assets,
     generatedAt: new Date(),
   });
 
@@ -155,7 +183,7 @@ async function fillReportCard(
     occurrenceId,
     period,
     revision,
-    snapshot: { campaignPosts: currentPosts, prevCampaignPosts: prevPosts, adPosts: currentAdPosts },
+    snapshot: { campaignPosts: currentPosts, prevCampaignPosts: prevPosts, adPosts: currentAdPosts, prevAdPosts, previews },
     documentId: (docRows?.[0] as { id: string } | undefined)?.id ?? null,
     finalizedAt: actingTask.reviewer_id ? null : new Date().toISOString(),
   });

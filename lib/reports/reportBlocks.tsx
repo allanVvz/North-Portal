@@ -1,391 +1,489 @@
-// Blocos visuais dos relatórios v2 (modelo "North — relatórios revisados").
+// Blocos visuais dos relatórios v3 (docs/reporting/adaptive-report-plan.md §13).
 //
-// Uma família só para os dois PDFs: fundo branco, verde dessaturado como
-// identidade, números grandes em Fraunces, rótulos pequenos. A diferença entre
-// o relatório de anúncios e o de resultados está na ORDEM e no FOCO, não num
-// vocabulário visual próprio de cada um.
-//
-// Regras que estes componentes impõem por construção:
-// - variação só ganha cor pelo `tone` que a leitura calculou (adsInsights /
-//   conversionFocus) — investimento chega aqui como "neutral";
-// - texto usa sempre tinta de texto, nunca a cor da série;
-// - o funil tem larguras FIXAS decrescentes (legibilidade), e a taxa fica
-//   ENTRE as etapas, dita por extenso.
+// Sistema:
+// - Escala tipográfica de 6 degraus: 6,5 · 7,5 · 9 · 12 · 20 · 30 pt. Nada abaixo
+//   de 6,5 pt.
+// - Números em Inter (a skill dataviz cataloga serif na figura principal como
+//   anti-padrão); Fraunces só no título do relatório.
+// - Ritmo de 4 pt; largura útil A4 ≈ 531 pt.
+// - Cor: uma matiz (teal) em degraus para séries com ordem — o validador de paleta
+//   reprovou o par categórico teal × azul (ΔE 11,6). Texto sempre em tinta de
+//   texto; cor só na marca.
+// - Componentes crescem com o conteúdo; a página flui.
 
-import { Defs, G, Line, LinearGradient, Path, Rect, StyleSheet, Stop, Svg, Text, View } from "@react-pdf/renderer";
-import { REPORT_COLORS as C, REPORT_SERIES, COMPASS_VIEWBOX, compassShapes } from "./reportTheme";
+import { Circle, G, Image, Line, Link, Path, Rect, StyleSheet, Svg, Text, View } from "@react-pdf/renderer";
+import type { ReactNode } from "react";
+import { REPORT_COLORS as C, COMPASS_VIEWBOX, compassShapes } from "./reportTheme";
 import { CompassNode, SvgText } from "./reportComponents";
-import type { Tone } from "./adsInsights";
+import { funnelWidths, type Delta, type Tone } from "./adsInsights";
 
-const SOFT = "#f3f7f5";
-const LINE_SOFT = "#edf1ef";
+export const W = 531; // largura útil
 
-export const toneColor = (tone: Tone | undefined) => (tone === "good" ? C.tealText : tone === "bad" ? C.danger : C.muted);
+/** Degraus da matiz de identidade, do mais escuro ao mais claro (todos ≥ 3:1 no branco). */
+export const TEAL = { d1: "#244f4a", d2: "#2f625d", d3: "#3f7a72", d4: "#5e9c93", soft: "#e6f0ec", wash: "#f3f7f5" } as const;
+const INK = C.ink;
+const SEC = C.sec;
+const MUTED = C.muted;
+const LINE = "#e3e8e5";
 
-export const V = StyleSheet.create({
-  page: { paddingTop: 28, paddingBottom: 40, paddingHorizontal: 32, fontFamily: "Inter", fontSize: 7.2, color: C.ink, backgroundColor: "#ffffff" },
+export const toneColor = (tone: Tone | undefined) => (tone === "good" ? C.tealText : tone === "bad" ? C.danger : MUTED);
 
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: 8 },
+export const T = StyleSheet.create({
+  page: { paddingTop: 32, paddingBottom: 48, paddingHorizontal: 32, fontFamily: "Inter", fontSize: 7.5, color: INK, backgroundColor: "#ffffff" },
+
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: LINE },
   headerLeft: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
-  eyebrow: { fontSize: 6.2, letterSpacing: 1.3, textTransform: "uppercase", fontWeight: 700, color: C.muted },
-  h1: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 19, color: C.ink, marginTop: 2 },
-  sub: { fontSize: 6.8, color: C.muted, marginTop: 2 },
-  pill: { fontSize: 6.4, fontWeight: 600, color: C.sec, borderWidth: 1, borderColor: C.border, backgroundColor: SOFT, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 7 },
+  eyebrow: { fontSize: 6.5, letterSpacing: 1, textTransform: "uppercase", fontWeight: 700, color: MUTED },
+  title: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 20, color: INK, marginTop: 2 },
+  subtitle: { fontSize: 7.5, color: MUTED, marginTop: 2 },
+  pill: { fontSize: 6.5, fontWeight: 600, color: SEC, borderWidth: 1, borderColor: LINE, backgroundColor: TEAL.wash, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 8 },
 
-  section: { marginTop: 11 },
-  sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 5 },
-  sectTitle: { fontSize: 6.4, letterSpacing: 1.1, textTransform: "uppercase", fontWeight: 700, color: C.tealText },
-  micro: { fontSize: 6.2, color: C.muted },
+  section: { marginTop: 16 },
+  sectionTitle: { fontSize: 9, fontWeight: 700, color: INK },
+  sectionAside: { fontSize: 7.5, color: MUTED },
+  sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 8, gap: 12 },
 
-  band: { flexDirection: "row", borderWidth: 1, borderColor: C.border, borderRadius: 9 },
-  kpi: { flex: 1, paddingVertical: 7, paddingHorizontal: 8, borderRightWidth: 1, borderRightColor: C.border },
-  kpiLast: { borderRightWidth: 0 },
-  kpiHero: { backgroundColor: SOFT, flex: 1.25 },
-  lab: { fontSize: 5.8, textTransform: "uppercase", letterSpacing: 0.5, color: C.muted, fontWeight: 700 },
-  val: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 13.5, color: C.ink, marginTop: 3 },
-  valHero: { fontSize: 17 },
-  delta: { fontSize: 6.2, marginTop: 3, fontWeight: 600 },
+  headline: { fontSize: 12, fontWeight: 600, color: INK, lineHeight: 1.3, marginTop: 12 },
 
-  insightRow: { flexDirection: "row", gap: 6, marginTop: 6 },
-  insight: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 7 },
-  insightPrimary: { flex: 1.45, backgroundColor: SOFT },
-  insT: { fontSize: 5.8, textTransform: "uppercase", letterSpacing: 0.5, color: C.muted, fontWeight: 700 },
-  insH: { fontSize: 8, fontWeight: 700, marginTop: 3, lineHeight: 1.25, color: C.ink },
-  insB: { fontSize: 6.4, color: C.muted, marginTop: 3, lineHeight: 1.35 },
+  heroValue: { fontSize: 30, fontWeight: 700, color: INK, lineHeight: 1 },
+  heroLabel: { fontSize: 9, fontWeight: 600, color: SEC, marginTop: 2 },
+  heroCaption: { fontSize: 9, color: SEC, marginTop: 6, lineHeight: 1.35 },
 
-  funnelWrap: { flexDirection: "row", gap: 12, alignItems: "center" },
-  funnelCol: { flex: 1.1, alignItems: "center" },
-  sideStack: { flex: 0.9, gap: 6 },
-  gap: { fontSize: 6.1, color: C.muted, height: 11, textAlign: "center", paddingTop: 2 },
+  figureRow: { flexDirection: "row", borderTopWidth: 1, borderBottomWidth: 1, borderColor: LINE },
+  figure: { flex: 1, paddingVertical: 8, paddingHorizontal: 8, borderRightWidth: 1, borderRightColor: LINE },
+  figureLast: { borderRightWidth: 0 },
+  figureLabel: { fontSize: 6.5, color: MUTED, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 },
+  figureValue: { fontSize: 13, fontWeight: 700, color: INK, marginTop: 3 },
+  figureDelta: { fontSize: 6.5, fontWeight: 600, marginTop: 2 },
 
-  stat: { borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 7 },
-  statSoft: { backgroundColor: SOFT },
-  statVal: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 12.5, marginTop: 2, color: C.ink },
-  statDetail: { fontSize: 6.3, color: C.muted, marginTop: 3, lineHeight: 1.35 },
+  alert: { flexDirection: "row", gap: 8, marginTop: 12, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: "#fbefec", borderRadius: 4 },
+  alertBar: { width: 2.5, borderRadius: 2, backgroundColor: C.danger },
+  alertText: { fontSize: 9, color: INK, flex: 1, lineHeight: 1.35 },
 
-  panels: { flexDirection: "row", gap: 7 },
-  panel: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 8 },
-  panelHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: SOFT, paddingVertical: 5, paddingHorizontal: 7, borderTopLeftRadius: 8, borderTopRightRadius: 8 },
-  panelTitle: { fontSize: 7.6, fontWeight: 700, color: C.ink },
-  panelMeta: { fontSize: 6.1, color: C.muted },
-  slotGrid: { flexDirection: "row", flexWrap: "wrap" },
-  slot: { width: "33.33%", paddingVertical: 5, paddingHorizontal: 7, borderTopWidth: 1, borderTopColor: LINE_SOFT },
-  slotLab: { fontSize: 5.6, color: C.muted, textTransform: "uppercase", letterSpacing: 0.4 },
-  slotVal: { fontSize: 8.6, fontWeight: 700, marginTop: 2, color: C.ink },
-  slotDelta: { fontSize: 5.9, marginTop: 2, fontWeight: 600 },
-  slotNote: { fontSize: 5.6, color: C.muted, marginTop: 2, lineHeight: 1.3 },
+  analysis: { gap: 6 },
+  analysisRow: { flexDirection: "row", gap: 6 },
+  analysisDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: TEAL.d3, marginTop: 4 },
+  analysisText: { fontSize: 9, color: INK, lineHeight: 1.35, flex: 1 },
 
-  cards: { flexDirection: "row", gap: 6 },
-  card: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 7 },
-  cardTag: { fontSize: 5.8, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 },
-  cardName: { fontSize: 7.3, fontWeight: 700, marginTop: 3, lineHeight: 1.2, color: C.ink },
-  cardBig: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 12, marginTop: 3, color: C.ink },
-  cardSmall: { fontSize: 6.2, color: C.muted, marginTop: 2, lineHeight: 1.3 },
+  twoCol: { flexDirection: "row", gap: 16 },
 
-  table: { borderWidth: 1, borderColor: C.border, borderRadius: 8, marginTop: 6 },
-  tr: { flexDirection: "row", borderTopWidth: 1, borderTopColor: LINE_SOFT },
-  thRow: { flexDirection: "row", backgroundColor: SOFT, borderTopLeftRadius: 8, borderTopRightRadius: 8 },
-  th: { paddingVertical: 4, paddingHorizontal: 6, fontSize: 5.7, textTransform: "uppercase", letterSpacing: 0.4, color: C.sec, fontWeight: 700 },
-  td: { paddingVertical: 4, paddingHorizontal: 6, fontSize: 6.6, color: C.ink },
+  table: { borderTopWidth: 1, borderTopColor: LINE },
+  tr: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: LINE, alignItems: "center" },
+  trHighlight: { backgroundColor: TEAL.wash },
+  th: { paddingVertical: 4, paddingHorizontal: 5, fontSize: 6.5, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.1 },
+  td: { paddingVertical: 5, paddingHorizontal: 5, fontSize: 7.5, color: INK },
+  tdStrong: { fontWeight: 700 },
+  tdDelta: { fontSize: 6.5, fontWeight: 600, marginTop: 1 },
   right: { textAlign: "right" },
 
-  split: { flexDirection: "row", gap: 8 },
-  summary: { flex: 1.15, borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 8, backgroundColor: SOFT },
-  summaryHeadline: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 14, marginTop: 2, color: C.ink },
-  summaryCaption: { fontSize: 6.4, color: C.muted, marginTop: 2 },
-  moneyRow: { flexDirection: "row", gap: 6, marginTop: 7 },
-  money: { flex: 1, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 5 },
-  moneyB: { fontSize: 8.6, fontWeight: 700, color: C.ink },
-  moneySpan: { fontSize: 5.6, color: C.muted, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 2 },
-  box: { flex: 0.85, borderWidth: 1, borderColor: C.border, borderRadius: 8, padding: 8 },
-  boxRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3.5, borderBottomWidth: 1, borderBottomColor: LINE_SOFT },
-  boxRowLast: { borderBottomWidth: 0 },
-  boxLeft: { fontSize: 6.7, color: C.sec },
-  boxRight: { fontSize: 6.7, fontWeight: 700, color: C.ink },
-  lowNote: { marginTop: 5, fontSize: 5.8, color: C.muted, lineHeight: 1.35 },
+  cardRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  card: { borderWidth: 1, borderColor: LINE, borderRadius: 6, padding: 8, gap: 8 },
+  cardBadge: { fontSize: 6.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4 },
+  cardName: { fontSize: 9, fontWeight: 700, color: INK, lineHeight: 1.2 },
+  cardMetricValue: { fontSize: 12, fontWeight: 700, color: INK },
+  cardMetricLabel: { fontSize: 6.5, color: MUTED },
+  cardLink: { fontSize: 6.5, color: C.tealText, textDecoration: "none" },
 
-  legendRow: { flexDirection: "row", gap: 10, marginTop: 4 },
-  legendItem: { flexDirection: "row", alignItems: "center", gap: 3 },
-  legendSwatch: { width: 6, height: 6, borderRadius: 1.5 },
-  legendLabel: { fontSize: 6.2, color: C.sec },
+  note: { fontSize: 7.5, color: MUTED, marginTop: 6, lineHeight: 1.35 },
+  legendRow: { flexDirection: "row", gap: 12, marginTop: 6 },
+  legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  legendSwatch: { width: 8, height: 8, borderRadius: 2 },
+  legendLabel: { fontSize: 7.5, color: SEC },
 
-  note: { fontSize: 6.2, color: C.muted, marginTop: 4, lineHeight: 1.35 },
-  footer: { position: "absolute", bottom: 16, left: 32, right: 32, flexDirection: "row", justifyContent: "space-between", gap: 12, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 5 },
-  footerText: { fontSize: 5.8, color: C.muted },
+  footer: { position: "absolute", bottom: 20, left: 32, right: 32, flexDirection: "row", justifyContent: "space-between", gap: 16, borderTopWidth: 1, borderTopColor: LINE, paddingTop: 6 },
+  footerText: { fontSize: 6.5, color: MUTED },
 });
 
-// ---- cabeçalho, seção, rodapé ---------------------------------------------------
+// ---- estrutura --------------------------------------------------------------------------
 
 export function PageHeader({ eyebrow, title, subtitle, pill }: { eyebrow: string; title: string; subtitle: string; pill: string }) {
   return (
-    <View style={V.header}>
-      <View style={V.headerLeft}>
-        <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 22, height: 22, marginTop: 3 }}>
+    <View style={T.header}>
+      <View style={T.headerLeft}>
+        <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 22, height: 22, marginTop: 4 }}>
           {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
         </Svg>
         <View>
-          <Text style={V.eyebrow}>{eyebrow}</Text>
-          <Text style={V.h1}>{title}</Text>
-          <Text style={V.sub}>{subtitle}</Text>
+          <Text style={T.eyebrow}>{eyebrow}</Text>
+          <Text style={T.title}>{title}</Text>
+          <Text style={T.subtitle}>{subtitle}</Text>
         </View>
       </View>
-      <Text style={V.pill}>{pill}</Text>
+      <Text style={T.pill}>{pill}</Text>
     </View>
   );
 }
 
-export function SectionHead({ title, micro }: { title: string; micro?: string }) {
+/** `lead` é o primeiro bloco da seção, preso ao título num bloco que não quebra:
+ *  o título nunca fica sozinho no pé da página (o `minPresenceAhead` do react-pdf
+ *  não segurou quando o bloco seguinte era uma linha de cartões). */
+export function Section({ title, aside, lead, children, wrap = true, breakBefore = false }: { title: string; aside?: string; lead?: ReactNode; children?: ReactNode; wrap?: boolean; breakBefore?: boolean }) {
+  const head = (
+    <View style={T.sectionHead} minPresenceAhead={60}>
+      <Text style={T.sectionTitle}>{title}</Text>
+      {aside ? <Text style={T.sectionAside}>{aside}</Text> : null}
+    </View>
+  );
   return (
-    <View style={V.sectionHead}>
-      <Text style={V.sectTitle}>{title}</Text>
-      {micro ? <Text style={V.micro}>{micro}</Text> : null}
+    <View style={T.section} wrap={wrap} break={breakBefore}>
+      {lead ? <View wrap={false}>{head}{lead}</View> : head}
+      {children}
     </View>
   );
 }
 
-export function FooterNote({ left, right }: { left: string; right: string }) {
+export function Footer({ left, note }: { left: string; note?: string | null }) {
   return (
-    <View style={V.footer} fixed>
-      <Text style={V.footerText}>{left}</Text>
-      <Text style={[V.footerText, { textAlign: "right", maxWidth: 330 }]}>{right}</Text>
+    <View style={T.footer} fixed>
+      <Text style={T.footerText}>{left}</Text>
+      {note ? <Text style={[T.footerText, { textAlign: "right", maxWidth: 360 }]}>{note}</Text> : null}
+      <Text style={T.footerText} render={({ pageNumber, totalPages }) => (totalPages > 1 ? `${pageNumber}/${totalPages}` : "")} />
     </View>
   );
 }
 
-// ---- faixa de KPIs --------------------------------------------------------------
+// ---- figuras ------------------------------------------------------------------------------
 
-export type BandItem = { label: string; value: string; delta?: { text: string; tone: Tone }; hint?: string };
-
-/** `heroIndex` é o indicador principal: fundo suave e número maior. */
-export function KpiBand({ items, heroIndex = 0 }: { items: BandItem[]; heroIndex?: number }) {
-  return (
-    <View style={V.band} wrap={false}>
-      {items.map((item, i) => {
-        const hero = i === heroIndex;
-        return (
-          <View key={item.label} style={[V.kpi, ...(hero ? [V.kpiHero] : []), ...(i === items.length - 1 ? [V.kpiLast] : [])]}>
-            <Text style={V.lab}>{item.label}</Text>
-            <Text style={[V.val, ...(hero ? [V.valHero] : [])]}>{item.value}</Text>
-            {item.delta ? <Text style={[V.delta, { color: toneColor(item.delta.tone) }]}>{item.delta.text}</Text> : null}
-            {item.hint ? <Text style={[V.delta, { color: C.muted, fontWeight: 400 }]}>{item.hint}</Text> : null}
-          </View>
-        );
-      })}
-    </View>
-  );
+export function Headline({ text }: { text: string }) {
+  return <Text style={T.headline}>{text}</Text>;
 }
 
-// ---- leitura em cartões -------------------------------------------------------------
-
-export type InsightItem = { title: string; headline: string; body?: string };
-
-export function InsightRow({ primary, cards }: { primary: InsightItem; cards: InsightItem[] }) {
+export function HeroFigure({ value, label, caption, delta, aside }: { value: string; label: string; caption?: string; delta?: Delta | null; aside?: ReactNode }) {
   return (
-    <View style={V.insightRow} wrap={false}>
-      <View style={[V.insight, V.insightPrimary]}>
-        <Text style={V.insT}>{primary.title}</Text>
-        <Text style={V.insH}>{primary.headline}</Text>
-        {primary.body ? <Text style={V.insB}>{primary.body}</Text> : null}
+    <View style={{ flexDirection: "row", gap: 16, marginTop: 14, alignItems: "flex-end" }} wrap={false}>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
+          <Text style={T.heroValue}>{value}</Text>
+          {delta && delta.pct !== null ? <Text style={[T.figureDelta, { fontSize: 9, color: toneColor(delta.tone), marginBottom: 3 }]}>{delta.text} vs. semana anterior</Text> : null}
+        </View>
+        <Text style={T.heroLabel}>{label}</Text>
+        {caption ? <Text style={T.heroCaption}>{caption}</Text> : null}
       </View>
-      {cards.map((c) => (
-        <View key={c.title} style={V.insight}>
-          <Text style={V.insT}>{c.title}</Text>
-          <Text style={V.insH}>{c.headline}</Text>
-          {c.body ? <Text style={V.insB}>{c.body}</Text> : null}
-        </View>
-      ))}
+      {aside ? <View style={{ width: 200 }}>{aside}</View> : null}
     </View>
   );
 }
 
-// ---- funil ------------------------------------------------------------------------
+export type FigureItem = { label: string; value: string; delta?: Delta | null; hint?: string };
 
-export type FunnelStageView = { label: string; value: string };
-
-const BAND_H = 25;
-
-/** Trapézios de largura FIXA decrescente (100% → 42%): o funil é para ler, não
- *  para medir — proporcional, a última etapa de "23" sumiria perto de "16.409". */
-export function TrapezoidFunnel({ stages, gaps, width = 250 }: { stages: FunnelStageView[]; gaps: string[]; width?: number }) {
-  const n = stages.length;
-  const widthAt = (i: number) => (n <= 1 ? 1 : 1 - (i * 0.58) / (n - 1));
-  return (
-    <View style={{ width, alignItems: "center" }} wrap={false}>
-      {stages.map((stage, i) => {
-        const w = width * widthAt(i);
-        const inset = w * 0.07;
-        return (
-          <View key={stage.label} style={{ alignItems: "center" }}>
-            <View style={{ width: w, height: BAND_H, position: "relative" }}>
-              <Svg viewBox={`0 0 ${w} ${BAND_H}`} style={{ position: "absolute", top: 0, left: 0, width: w, height: BAND_H }}>
-                <Defs>
-                  <LinearGradient id={`band${i}`} x1="0" y1="0" x2="0" y2="1">
-                    <Stop offset="0%" stopColor="#3f7a72" />
-                    <Stop offset="100%" stopColor="#2f625d" />
-                  </LinearGradient>
-                </Defs>
-                <Path d={`M 0 0 L ${w} 0 L ${w - inset} ${BAND_H} L ${inset} ${BAND_H} Z`} fill={`url(#band${i})`} />
-              </Svg>
-              <View style={{ position: "absolute", top: 0, left: 0, width: w, height: BAND_H, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 5 }}>
-                <Text style={{ fontFamily: "Fraunces", fontWeight: 600, fontSize: 11, color: "#ffffff" }}>{stage.value}</Text>
-                <Text style={{ fontSize: 5.4, color: "#ffffff", textTransform: "uppercase", letterSpacing: 0.5 }}>{stage.label}</Text>
-              </View>
-            </View>
-            {i < n - 1 ? <Text style={[V.gap, { width }]}>{gaps[i] ?? ""}</Text> : null}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-// ---- pilha de cartões -------------------------------------------------------------
-
-export type StatItem = { label: string; value: string; detail?: string; tone?: Tone; soft?: boolean };
-
-export function StatStack({ items }: { items: StatItem[] }) {
-  return (
-    <View style={V.sideStack}>
-      {items.map((s) => (
-        <View key={s.label} style={[V.stat, ...(s.soft ? [V.statSoft] : [])]} wrap={false}>
-          <Text style={V.lab}>{s.label}</Text>
-          <Text style={[V.statVal, ...(s.tone === "bad" ? [{ color: C.danger }] : [])]}>{s.value}</Text>
-          {s.detail ? <Text style={V.statDetail}>{s.detail}</Text> : null}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// ---- painéis por objetivo -----------------------------------------------------------
-
-export type PanelSlot = { label: string; value: string; delta?: { text: string; tone: Tone }; note?: string };
-export type PanelView = { title: string; meta: string; slots: PanelSlot[] };
-
-export function ObjectivePanels({ panels }: { panels: PanelView[] }) {
-  return (
-    <View style={V.panels} wrap={false}>
-      {panels.map((p) => (
-        <View key={p.title} style={V.panel}>
-          <View style={V.panelHead}>
-            <Text style={V.panelTitle}>{p.title}</Text>
-            <Text style={V.panelMeta}>{p.meta}</Text>
-          </View>
-          <View style={V.slotGrid}>
-            {p.slots.map((s) => (
-              <View key={s.label} style={[V.slot, { width: panels.length === 1 ? "16.66%" : "33.33%" }]}>
-                <Text style={V.slotLab}>{s.label}</Text>
-                <Text style={[V.slotVal, ...(s.note ? [{ color: C.danger }] : [])]}>{s.value}</Text>
-                {s.delta ? <Text style={[V.slotDelta, { color: toneColor(s.delta.tone) }]}>{s.delta.text}</Text> : null}
-                {s.note ? <Text style={V.slotNote}>{s.note}</Text> : null}
-              </View>
-            ))}
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// ---- criativos ------------------------------------------------------------------------
-
-export type CardView = { tag: string; tone: Tone; name: string; value: string; detail: string };
-
-export function HighlightCards({ items }: { items: CardView[] }) {
+export function FigureRow({ items }: { items: FigureItem[] }) {
   if (!items.length) return null;
   return (
-    <View style={V.cards} wrap={false}>
-      {items.map((c) => (
-        <View key={c.tag + c.name} style={V.card}>
-          <Text style={[V.cardTag, { color: c.tone === "bad" ? C.danger : C.tealText }]}>{c.tag}</Text>
-          <Text style={V.cardName}>{c.name}</Text>
-          <Text style={V.cardBig}>{c.value}</Text>
-          <Text style={V.cardSmall}>{c.detail}</Text>
+    <View style={[T.figureRow, { marginTop: 14 }]} wrap={false}>
+      {items.map((f, i) => (
+        <View key={f.label} style={[T.figure, ...(i === items.length - 1 ? [T.figureLast] : [])]}>
+          <Text style={T.figureLabel}>{f.label}</Text>
+          <Text style={T.figureValue}>{f.value}</Text>
+          {f.delta && f.delta.pct !== null ? <Text style={[T.figureDelta, { color: toneColor(f.delta.tone) }]}>{f.delta.text}</Text> : null}
+          {f.hint ? <Text style={[T.figureDelta, { color: MUTED, fontWeight: 400 }]}>{f.hint}</Text> : null}
         </View>
       ))}
     </View>
   );
 }
 
-export type TableColumn = { key: string; label: string; flex?: number; align?: "right" };
-export type TableRowView = { cells: Record<string, string>; tone?: Record<string, Tone> };
-
-export function DataTable({ columns, rows }: { columns: TableColumn[]; rows: TableRowView[] }) {
+export function AlertLine({ text }: { text: string }) {
   return (
-    <View style={V.table}>
-      <View style={V.thRow}>
-        {columns.map((c) => (
-          <Text key={c.key} style={[V.th, { flex: c.flex ?? 1 }, ...(c.align === "right" ? [V.right] : [])]}>{c.label}</Text>
-        ))}
-      </View>
-      {rows.map((r, i) => (
-        <View key={i} style={V.tr} wrap={false}>
-          {columns.map((c) => (
-            <Text
-              key={c.key}
-              style={[V.td, { flex: c.flex ?? 1 }, ...(c.align === "right" ? [V.right] : []), ...(r.tone?.[c.key] ? [{ color: toneColor(r.tone[c.key]), fontWeight: 700 as const }] : [])]}
-            >
-              {r.cells[c.key] ?? "—"}
-            </Text>
-          ))}
+    <View style={T.alert} wrap={false}>
+      <View style={T.alertBar} />
+      <Text style={T.alertText}>{text}</Text>
+    </View>
+  );
+}
+
+export function AnalysisList({ items }: { items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <View style={T.analysis}>
+      {items.map((t) => (
+        <View key={t} style={T.analysisRow} wrap={false}>
+          <View style={T.analysisDot} />
+          <Text style={T.analysisText}>{t}</Text>
         </View>
       ))}
     </View>
   );
 }
 
-// ---- histórico ----------------------------------------------------------------------
+export function ComparisonFigure({ items }: { items: { label: string; from: string; to: string; change: string; tone: Tone }[] }) {
+  return (
+    <View style={{ flexDirection: "row", gap: 16, flexWrap: "wrap" }} wrap={false}>
+      {items.map((it) => (
+        <View key={it.label} style={{ minWidth: 150 }}>
+          <Text style={T.figureLabel}>{it.label}</Text>
+          <Text style={{ fontSize: 13, fontWeight: 700, color: INK, marginTop: 3 }}>{it.from} → {it.to}</Text>
+          <Text style={[T.figureDelta, { color: toneColor(it.tone), fontSize: 7.5 }]}>{it.change} em relação à semana anterior</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
-/** Colunas agrupadas por semana, UM eixo, cor por série em ordem fixa, valor
- *  escrito em cada coluna (poucas colunas por construção — no máximo 8 semanas).
- *  Valor ausente não vira coluna zero: fica "n/d" na base. */
-export function HistoryBars({ periods, series, width = 250, height = 92 }: { periods: string[]; series: { label: string; values: (number | null)[] }[]; width?: number; height?: number }) {
+// ---- funil ---------------------------------------------------------------------------------
+
+export type FunnelView = { label: string; value: string; numeric: number; base?: boolean };
+
+const STAGE_H = 28;
+const GAP_H = 13;
+
+/** Trapézios proporcionais (escala log) com o número dentro quando cabe e à
+ *  direita quando não; a placa-base (ex.: total do perfil) fecha o funil. */
+export function ProportionalFunnel({ stages, gaps, width = 300 }: { stages: FunnelView[]; gaps: string[]; width?: number }) {
+  const flow = stages.filter((s) => !s.base);
+  const base = stages.find((s) => s.base);
+  const widths = funnelWidths(flow.map((s) => s.numeric));
+  const fills = [TEAL.d1, TEAL.d2, TEAL.d3, TEAL.d3, TEAL.d4, TEAL.d4];
+  return (
+    <View style={{ width, alignItems: "center" }} wrap={false}>
+      {flow.map((stage, i) => {
+        const top = width * widths[i];
+        const bottom = width * (i + 1 < flow.length ? widths[i + 1] : Math.max(0.3, widths[i] - 0.08));
+        const inside = top >= 130;
+        return (
+          <View key={stage.label} style={{ alignItems: "center", width }}>
+            <View style={{ width, height: STAGE_H, position: "relative" }}>
+              <Svg viewBox={`0 0 ${width} ${STAGE_H}`} style={{ position: "absolute", top: 0, left: 0, width, height: STAGE_H }}>
+                <Path
+                  d={`M ${(width - top) / 2} 0 L ${(width + top) / 2} 0 L ${(width + bottom) / 2} ${STAGE_H} L ${(width - bottom) / 2} ${STAGE_H} Z`}
+                  fill={fills[Math.min(i, fills.length - 1)]}
+                />
+              </Svg>
+              {inside ? (
+                <View style={{ position: "absolute", top: 0, left: 0, width, height: STAGE_H, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
+                  <Text style={{ fontSize: 6.5, fontWeight: 600, color: "#ffffff", textTransform: "uppercase", letterSpacing: 0.4 }}>{stage.label}</Text>
+                </View>
+              ) : (
+                <View style={{ position: "absolute", top: 0, left: (width + top) / 2 + 6, height: STAGE_H, justifyContent: "center" }}>
+                  <Text style={{ fontSize: 12, fontWeight: 700, color: INK }}>{stage.value}</Text>
+                  <Text style={{ fontSize: 6.5, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.4 }}>{stage.label}</Text>
+                </View>
+              )}
+            </View>
+            {i < flow.length - 1 || base ? (
+              <Text style={{ fontSize: 7.5, color: MUTED, height: GAP_H, paddingTop: 2, textAlign: "center" }}>{gaps[i] ?? ""}</Text>
+            ) : null}
+          </View>
+        );
+      })}
+      {base ? (
+        <View style={{ width: width * 0.62, borderRadius: 4, backgroundColor: TEAL.soft, paddingVertical: 6, alignItems: "center" }}>
+          <Text style={{ fontSize: 13, fontWeight: 700, color: INK }}>{base.value}</Text>
+          <Text style={{ fontSize: 6.5, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.4 }}>{base.label}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// ---- verba × resultado ----------------------------------------------------------------------
+
+/** Barra pareada por objetivo: parte da verba (tom médio) e parte do resultado
+ *  (tom escuro) na mesma escala de 0–100%. Mostra concentração sem frase. */
+export function ShareBars({ rows, resultLabel }: { rows: { label: string; spend: number; result: number | null }[]; resultLabel: string }) {
+  const labelW = 110;
+  const barW = W - labelW - 40;
+  const bar = (pct: number, fill: string, text: string) => (
+    <View style={{ flexDirection: "row", alignItems: "center", height: 10 }}>
+      <View style={{ width: Math.max(2, (barW * pct) / 100), height: 8, backgroundColor: fill, borderTopRightRadius: 2, borderBottomRightRadius: 2 }} />
+      <Text style={{ fontSize: 7.5, color: INK, marginLeft: 4 }}>{text}</Text>
+    </View>
+  );
+  return (
+    <View wrap={false}>
+      {rows.map((r) => (
+        <View key={r.label} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: LINE }}>
+          <Text style={{ width: labelW, fontSize: 7.5, fontWeight: 600, color: INK }}>{r.label}</Text>
+          <View style={{ gap: 2 }}>
+            {bar(r.spend, TEAL.d4, `${Math.round(r.spend)}%`)}
+            {r.result !== null ? bar(r.result, TEAL.d1, `${Math.round(r.result)}%`) : null}
+          </View>
+        </View>
+      ))}
+      <View style={T.legendRow}>
+        <View style={T.legendItem}><View style={[T.legendSwatch, { backgroundColor: TEAL.d4 }]} /><Text style={T.legendLabel}>Parte da verba</Text></View>
+        <View style={T.legendItem}><View style={[T.legendSwatch, { backgroundColor: TEAL.d1 }]} /><Text style={T.legendLabel}>{resultLabel}</Text></View>
+      </View>
+    </View>
+  );
+}
+
+// ---- tabela ---------------------------------------------------------------------------------
+
+export type Cell = { text: string; delta?: Delta | null; strong?: boolean; tone?: Tone; image?: string | null };
+export type Column = { key: string; label: string; flex?: number; width?: number; align?: "right" };
+
+export function DataTable({ columns, rows, highlight }: { columns: Column[]; rows: Record<string, Cell>[]; highlight?: (i: number) => boolean }) {
+  const colStyle = (c: Column) => (c.width ? { width: c.width } : { flex: c.flex ?? 1 });
+  return (
+    <View style={T.table}>
+      <View style={T.tr} fixed={false} wrap={false}>
+        {columns.map((c) => <Text key={c.key} style={[T.th, colStyle(c), ...(c.align === "right" ? [T.right] : [])]}>{c.label}</Text>)}
+      </View>
+      {rows.map((row, i) => (
+        <View key={i} style={[T.tr, ...(highlight?.(i) ? [T.trHighlight] : [])]} wrap={false}>
+          {columns.map((c) => {
+            const cell = row[c.key] ?? { text: "—" };
+            if (cell.image !== undefined) {
+              return (
+                <View key={c.key} style={[{ paddingVertical: 3, paddingHorizontal: 4 }, colStyle(c)]}>
+                  <Thumb src={cell.image} size={18} />
+                </View>
+              );
+            }
+            return (
+              <View key={c.key} style={[T.td, colStyle(c)]}>
+                <Text style={[...(c.align === "right" ? [T.right] : []), ...(cell.strong ? [T.tdStrong] : []), ...(cell.tone ? [{ color: toneColor(cell.tone), fontWeight: 700 as const }] : [])]}>{cell.text}</Text>
+                {cell.delta && cell.delta.pct !== null ? (
+                  <Text style={[T.tdDelta, { color: toneColor(cell.delta.tone) }, ...(c.align === "right" ? [T.right] : [])]}>{cell.delta.text}</Text>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ---- criativos ------------------------------------------------------------------------------
+
+export function Thumb({ src, size, kind }: { src: string | null | undefined; size: number; kind?: string | null }) {
+  if (src) return <Image src={src} style={{ width: size, height: size, borderRadius: size > 30 ? 4 : 2, objectFit: "cover" }} />;
+  return (
+    <View style={{ width: size, height: size, borderRadius: size > 30 ? 4 : 2, backgroundColor: TEAL.soft, alignItems: "center", justifyContent: "center" }}>
+      {size > 30 ? <Text style={{ fontSize: 6.5, color: SEC, fontWeight: 600 }}>{kind === "VIDEO" ? "VÍDEO" : "ANÚNCIO"}</Text> : null}
+    </View>
+  );
+}
+
+export type CreativeCardView = {
+  name: string;
+  badges: { label: string; tone: Tone; detail: string }[];
+  metrics: { label: string; value: string }[];
+  preview: string | null;
+  objectType: string | null;
+  permalink: string | null;
+};
+
+/** 1 criativo → cartão largo; 2 → metades; 3 → terços; 4 → 2×2. */
+export function CreativeCards({ items }: { items: CreativeCardView[] }) {
+  if (!items.length) return null;
+  const n = items.length;
+  const cols = n === 4 ? 2 : Math.min(n, 3);
+  const cardW = (W - 8 * (cols - 1)) / cols;
+  const wide = n === 1;
+  const img = wide ? 110 : cols === 2 ? 84 : 64;
+  return (
+    <View style={T.cardRow}>
+      {items.map((c) => (
+        <View key={c.name} style={[T.card, { width: cardW, flexDirection: wide || cols === 2 ? "row" : "column" }]} wrap={false}>
+          <Thumb src={c.preview} size={wide || cols === 2 ? img : cardW - 18} kind={c.objectType} />
+          <View style={{ flex: 1, gap: 4 }}>
+            {c.badges.map((b) => (
+              <Text key={b.label} style={[T.cardBadge, { color: b.tone === "bad" ? C.danger : b.tone === "good" ? C.tealText : SEC }]}>{b.label}</Text>
+            ))}
+            <Text style={T.cardName}>{c.name}</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
+              {c.metrics.map((m) => (
+                <View key={m.label}>
+                  <Text style={T.cardMetricValue}>{m.value}</Text>
+                  <Text style={T.cardMetricLabel}>{m.label}</Text>
+                </View>
+              ))}
+            </View>
+            {c.badges[0]?.detail && !c.metrics.some((m) => c.badges[0].detail === `${m.value} ${m.label}`) ? (
+              <Text style={[T.cardMetricLabel, { color: SEC }]}>{c.badges[0].detail}</Text>
+            ) : null}
+            {c.permalink ? <Link src={c.permalink} style={T.cardLink}>ver post</Link> : null}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ---- gráficos -------------------------------------------------------------------------------
+
+/** Linha de tendência: 2 pt, pontos nas extremidades, rótulo só no primeiro e no
+ *  último valor, eixo que não começa em zero (a mudança é a história). */
+export function LineChart({ periods, values, width = W, height = 90, format = (v: number) => v.toLocaleString("pt-BR") }: { periods: string[]; values: (number | null)[]; width?: number; height?: number; format?: (v: number) => string }) {
+  const pts = values.map((v, i) => ({ v, i })).filter((p): p is { v: number; i: number } => p.v !== null);
+  if (pts.length < 2) return null;
+  const top = 14;
+  const bottom = 16;
+  const left = 8;
+  const right = 8;
+  const min = Math.min(...pts.map((p) => p.v));
+  const max = Math.max(...pts.map((p) => p.v));
+  const pad = (max - min) * 0.2 || Math.max(1, max * 0.05);
+  const lo = min - pad;
+  const hi = max + pad;
+  const x = (i: number) => left + ((width - left - right) * i) / Math.max(1, periods.length - 1);
+  const y = (v: number) => top + (height - top - bottom) * (1 - (v - lo) / (hi - lo));
+  const d = pts.map((p, k) => `${k === 0 ? "M" : "L"} ${x(p.i)} ${y(p.v)}`).join(" ");
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  return (
+    <Svg viewBox={`0 0 ${width} ${height}`} style={{ width, height }}>
+      <Line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke={LINE} strokeWidth={1} />
+      <Path d={d} stroke={TEAL.d2} strokeWidth={2} fill="none" />
+      {[first, last].map((p) => (
+        <G key={p.i}>
+          <Circle cx={x(p.i)} cy={y(p.v)} r={5} fill="#ffffff" />
+          <Circle cx={x(p.i)} cy={y(p.v)} r={3.5} fill={TEAL.d2} />
+          <SvgText x={x(p.i)} y={y(p.v) - 7} textAnchor={p === first ? "start" : "end"} fill={INK} fontFamily="Inter" fontWeight={700} fontSize={7.5}>{format(p.v)}</SvgText>
+        </G>
+      ))}
+      {periods.map((label, i) => (
+        <SvgText key={label + i} x={x(i)} y={height - 4} textAnchor={i === 0 ? "start" : i === periods.length - 1 ? "end" : "middle"} fill={MUTED} fontFamily="Inter" fontSize={6.5}>{label}</SvgText>
+      ))}
+    </Svg>
+  );
+}
+
+/** Colunas agrupadas numa matiz, dois tons (série com ordem: agendamento claro,
+ *  venda escuro). Um eixo; valor escrito só na última semana. */
+export function ColumnsChart({ periods, series, width = W, height = 100 }: { periods: string[]; series: { label: string; values: (number | null)[] }[]; width?: number; height?: number }) {
   const top = 12;
-  const bottom = 14;
-  const plotH = height - top - bottom;
+  const bottom = 16;
+  const tones = [TEAL.d4, TEAL.d1];
   const max = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v ?? 0)));
-  const groupW = width / periods.length;
-  const barW = Math.min(18, (groupW * 0.62) / series.length);
-  const barGap = 2;
-  const groupInner = series.length * barW + (series.length - 1) * barGap;
+  const groupW = width / Math.max(1, periods.length);
+  const barW = Math.min(18, (groupW * 0.6) / Math.max(1, series.length));
+  const inner = series.length * barW + (series.length - 1) * 2;
+  const plotH = height - top - bottom;
   return (
     <View wrap={false}>
       <Svg viewBox={`0 0 ${width} ${height}`} style={{ width, height }}>
-        <Line x1={0} y1={top + plotH} x2={width} y2={top + plotH} stroke={C.borderStrong} strokeWidth={0.75} />
-        {periods.map((period, gi) => {
-          const gx = gi * groupW + (groupW - groupInner) / 2;
+        <Line x1={0} y1={top + plotH} x2={width} y2={top + plotH} stroke={LINE} strokeWidth={1} />
+        {periods.map((p, gi) => {
+          const gx = gi * groupW + (groupW - inner) / 2;
           return (
-            <G key={period}>
+            <G key={p + gi}>
               {series.map((s, si) => {
                 const v = s.values[gi];
-                const x = gx + si * (barW + barGap);
-                if (v === null) {
-                  return <SvgText key={s.label} x={x + barW / 2} y={top + plotH - 2} textAnchor="middle" fill={C.muted} fontFamily="Inter" fontSize={5.2}>n/d</SvgText>;
-                }
+                if (v === null) return null;
                 const h = Math.max(1.5, (v / max) * plotH);
+                const bx = gx + si * (barW + 2);
                 return (
                   <G key={s.label}>
-                    <Rect x={x} y={top + plotH - h} width={barW} height={h} rx={1.5} fill={REPORT_SERIES[si % REPORT_SERIES.length]} />
-                    <SvgText x={x + barW / 2} y={top + plotH - h - 2.5} textAnchor="middle" fill={C.ink} fontFamily="Inter" fontWeight={600} fontSize={6}>
-                      {v.toLocaleString("pt-BR")}
-                    </SvgText>
+                    <Rect x={bx} y={top + plotH - h} width={barW} height={h} fill={tones[si % tones.length]} />
+                    {gi === periods.length - 1 ? (
+                      <SvgText x={bx + barW / 2} y={top + plotH - h - 3} textAnchor="middle" fill={INK} fontFamily="Inter" fontWeight={700} fontSize={7}>{v.toLocaleString("pt-BR")}</SvgText>
+                    ) : null}
                   </G>
                 );
               })}
-              <SvgText x={gi * groupW + groupW / 2} y={height - 3} textAnchor="middle" fill={C.muted} fontFamily="Inter" fontSize={5.8}>
-                {period}
-              </SvgText>
+              <SvgText x={gi * groupW + groupW / 2} y={height - 4} textAnchor="middle" fill={MUTED} fontFamily="Inter" fontSize={6.5}>{p}</SvgText>
             </G>
           );
         })}
       </Svg>
       {series.length >= 2 ? (
-        <View style={V.legendRow}>
+        <View style={T.legendRow}>
           {series.map((s, si) => (
-            <View key={s.label} style={V.legendItem}>
-              <View style={[V.legendSwatch, { backgroundColor: REPORT_SERIES[si % REPORT_SERIES.length] }]} />
-              <Text style={V.legendLabel}>{s.label}</Text>
-            </View>
+            <View key={s.label} style={T.legendItem}><View style={[T.legendSwatch, { backgroundColor: tones[si % tones.length] }]} /><Text style={T.legendLabel}>{s.label}</Text></View>
           ))}
         </View>
       ) : null}
@@ -393,40 +491,35 @@ export function HistoryBars({ periods, series, width = 250, height = 92 }: { per
   );
 }
 
-// ---- resumo comercial + caixa lateral ------------------------------------------------
-
-export function SummaryBox({ label, headline, caption, money, flex }: { label: string; headline: string; caption: string; money: { value: string; label: string }[]; flex?: number }) {
+/** Barras horizontais ordenadas (origem das vendas), "sem origem" em cinza no fim. */
+export function RankBars({ rows, width = W }: { rows: { label: string; value: number; text: string; muted?: boolean }[]; width?: number }) {
+  const labelW = 90;
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  const barW = width - labelW - 90;
   return (
-    <View style={[V.summary, ...(flex !== undefined ? [{ flex }] : [])]} wrap={false}>
-      <Text style={V.lab}>{label}</Text>
-      <Text style={V.summaryHeadline}>{headline}</Text>
-      <Text style={V.summaryCaption}>{caption}</Text>
-      {money.length ? (
-        <View style={V.moneyRow}>
-          {money.map((m) => (
-            <View key={m.label} style={V.money}>
-              <Text style={V.moneyB}>{m.value}</Text>
-              <Text style={V.moneySpan}>{m.label}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-export function ListBox({ label, rows, note, children, flex }: { label: string; rows: { left: string; right: string }[]; note?: string; children?: React.ReactNode; flex?: number }) {
-  return (
-    <View style={[V.box, ...(flex !== undefined ? [{ flex }] : [])]} wrap={false}>
-      <Text style={V.lab}>{label}</Text>
-      {rows.map((r, i) => (
-        <View key={r.left} style={[V.boxRow, ...(i === rows.length - 1 ? [V.boxRowLast] : [])]}>
-          <Text style={V.boxLeft}>{r.left}</Text>
-          <Text style={V.boxRight}>{r.right}</Text>
+    <View wrap={false}>
+      {rows.map((r) => (
+        <View key={r.label} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 3 }}>
+          <Text style={{ width: labelW, fontSize: 7.5, fontWeight: 600, color: r.muted ? MUTED : INK }}>{r.label}</Text>
+          <View style={{ width: Math.max(2, (barW * r.value) / max), height: 10, backgroundColor: r.muted ? "#c9d1cc" : TEAL.d2, borderTopRightRadius: 2, borderBottomRightRadius: 2 }} />
+          <Text style={{ fontSize: 7.5, color: INK, marginLeft: 6 }}>{r.text}</Text>
         </View>
       ))}
-      {children}
-      {note ? <Text style={V.lowNote}>{note}</Text> : null}
+    </View>
+  );
+}
+
+/** Três pequenos múltiplos lado a lado, cada um com o próprio eixo — nunca eixo duplo. */
+export function SmallMultiples({ charts }: { charts: { title: string; periods: string[]; values: (number | null)[]; format: (v: number) => string }[] }) {
+  const cw = (W - 16 * (charts.length - 1)) / charts.length;
+  return (
+    <View style={{ flexDirection: "row", gap: 16 }} wrap={false}>
+      {charts.map((c) => (
+        <View key={c.title} style={{ width: cw }}>
+          <Text style={[T.figureLabel, { marginBottom: 2 }]}>{c.title}</Text>
+          <LineChart periods={c.periods} values={c.values} width={cw} height={70} format={c.format} />
+        </View>
+      ))}
     </View>
   );
 }
