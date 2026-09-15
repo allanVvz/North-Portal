@@ -77,6 +77,27 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
     expect(isPdf(buf)).toBe(true);
   });
 
+  // A série de `task_metrics` (period_to) é a fonte preferida do comparativo:
+  // o gestor pode ter relatado "5 vendas" na semana passada sem detalhar linha
+  // a linha, e aí derivar de `prevConversoes` diria 0 e a variação mentiria.
+  it("com prevTotals da série (incl. seguidores) não lança", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      seguidores: 829,
+      prevTotals: { vendas: 5, agendamentos: 9, receita: 6100, seguidores: 812 },
+    });
+    expect(isPdf(buf)).toBe(true);
+    expect(buf.byteLength).toBeGreaterThan(3000);
+  });
+
+  it("prevTotals com campos nulos (semana anterior sem aquela métrica) não lança", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      prevTotals: { vendas: null, agendamentos: null, receita: null, seguidores: null },
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
   it("totais relatados (5 vendas / 9 agend.) com só 2 linhas detalhadas não lança", async () => {
     const buf = await renderSalesReportPdf({
       ...base,

@@ -49,9 +49,24 @@ export type SalesReportInput = {
   receitaTotal?: number | null;
   vendasTotal?: number | null;
   agendamentosTotal?: number | null;
-  /** Seguidores ganhos no período (relatado no comentário). */
+  /** Total de seguidores do perfil ao fim do período (snapshot, não o ganho —
+   *  ver KNOWN_METRIC_TAGS em lib/metricTags.ts). */
   seguidores?: number | null;
+  /** O MESMO conjunto de totais do período anterior deste cliente, lido da
+   *  série em `task_metrics` (period_to). É o que transforma "4 vendas" em "4
+   *  vs. 5 na semana passada" — sem isto cada PDF é uma ilha e o número não
+   *  vira tendência. Preferido sobre derivar de `prevConversoes`: o gestor
+   *  pode ter relatado "5 vendas" sem detalhar linha a linha, e aí a contagem
+   *  das linhas diria 0 e a variação sairia mentindo. */
+  prevTotals?: SalesPrevTotals | null;
   generatedAt: Date;
+};
+
+export type SalesPrevTotals = {
+  vendas: number | null;
+  agendamentos: number | null;
+  receita: number | null;
+  seguidores: number | null;
 };
 
 type SalesTotals = { agendamentos: number; vendas: number; receita: number };
@@ -67,7 +82,7 @@ const SOURCE_ROWS: (AdSourceTag | null)[] = ["1", "2", "3", null];
 const SOURCE_LABEL = (tag: AdSourceTag | null) => (tag ? `Fonte #${tag}` : "Sem tag");
 
 function SalesReportDocument({
-  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, receitaTotal, vendasTotal, agendamentosTotal, seguidores, generatedAt,
+  clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, receitaTotal, vendasTotal, agendamentosTotal, seguidores, prevTotals, generatedAt,
 }: SalesReportInput) {
   const cm = config.prefs.customMetrics;
   const linhasTotals = totalsOf(conversoes);
@@ -80,7 +95,18 @@ function SalesReportDocument({
     agendamentos: Math.max(agendamentosTotal ?? linhasTotals.agendamentos, vendas),
     receita: receitaTotal ?? linhasTotals.receita,
   };
-  const prev = prevConversoes ? totalsOf(prevConversoes) : null;
+  // Mesma precedência do período atual: o total relatado vence a contagem das
+  // linhas. `prevTotals` (da série em task_metrics) primeiro; as linhas da
+  // semana anterior só entram onde o total não veio.
+  const prevLinhas = prevConversoes ? totalsOf(prevConversoes) : null;
+  const prev: { agendamentos: number | null; vendas: number | null; receita: number | null } | null =
+    prevTotals || prevLinhas
+      ? {
+          agendamentos: prevTotals?.agendamentos ?? prevLinhas?.agendamentos ?? null,
+          vendas: prevTotals?.vendas ?? prevLinhas?.vendas ?? null,
+          receita: prevTotals?.receita ?? prevLinhas?.receita ?? null,
+        }
+      : null;
   const spend = totalWhenPresent(campaignPosts, "custo") ?? 0;
   const prevSpend = totalWhenPresent(prevCampaignPosts, "custo") ?? 0;
 
@@ -89,12 +115,15 @@ function SalesReportDocument({
 
   const summaryKpis = [
     kpi("Investimento", spend, prevSpend || null, "money"),
-    kpi("Receita da semana", cur.receita || null, prev ? prev.receita || null : null, "money"),
-    kpi("Agendamentos", cur.agendamentos, prev ? prev.agendamentos : null, "number"),
-    kpi("Vendas fechadas", cur.vendas, prev ? prev.vendas : null, "number"),
-    kpi("Ticket médio", ratio(cur.receita, cur.vendas), prev ? ratio(prev.receita, prev.vendas) : null, "money"),
-    kpi("ROI (ROAS)", ratio(cur.receita, spend), prev ? ratio(prev.receita, prevSpend) : null, "decimal"),
-    ...(seguidores != null && seguidores > 0 ? [kpi("Seguidores ganhos", seguidores, null, "number")] : []),
+    kpi("Receita da semana", cur.receita || null, prev?.receita || null, "money"),
+    kpi("Agendamentos", cur.agendamentos, prev?.agendamentos ?? null, "number"),
+    kpi("Vendas fechadas", cur.vendas, prev?.vendas ?? null, "number"),
+    kpi("Ticket médio", ratio(cur.receita, cur.vendas), prev?.receita != null && prev?.vendas != null ? ratio(prev.receita, prev.vendas) : null, "money"),
+    kpi("ROI (ROAS)", ratio(cur.receita, spend), prev?.receita != null ? ratio(prev.receita, prevSpend) : null, "decimal"),
+    // Seguidores é total do perfil: a comparação com a semana anterior é
+    // justamente onde o número vira leitura ("829, +17"). Sem semana anterior
+    // na série, aparece só o total.
+    ...(seguidores != null && seguidores > 0 ? [kpi("Seguidores", seguidores, prevTotals?.seguidores ?? null, "number")] : []),
   ];
 
   // Uma tabela só: cada FONTE #1/#2/#3 é uma linha, com o OBJETIVO da(s)

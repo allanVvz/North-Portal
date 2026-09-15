@@ -20,10 +20,10 @@ import { commentsOf, type TaskComment } from "@/lib/comments";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { ensureFlowStep, settleTypelessFlow } from "@/lib/flows/advance";
 import { recurrenceStopped } from "@/lib/recurrenceState";
-import { inPeriod, previousPeriod } from "@/app/admin/performance/insights";
+import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
 import { extractMetrics, type ConversionRow, type MetricExtract } from "@/lib/ai/extractMetrics";
 import { CONVERSION_METRICS_DEFAULT, metricTagLabel } from "@/lib/metricTags";
-import { renderSalesReportPdf } from "@/lib/reports/salesReportPdf";
+import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
@@ -111,16 +111,50 @@ async function openOccurrences(admin: AdminClient, moldId: string): Promise<Task
 
 // ---- PDF de vendas ----------------------------------------------------------
 
+/** Totais do período IMEDIATAMENTE anterior deste cliente, pra o PDF poder dizer
+ *  "4 vendas (vs. 5 na semana passada)". Lê `task_metrics` pela coluna de
+ *  período (não por `created_at`): uma re-execução ou um comentário corrigido
+ *  dias depois não pode reordenar a série. Sem linha anterior → null, e o PDF
+ *  simplesmente não mostra comparativo. */
+async function previousPeriodTotals(
+  admin: AdminClient,
+  clientId: string,
+  periodFrom: string,
+): Promise<SalesPrevTotals | null> {
+  const { data, error } = await admin
+    .from("task_metrics")
+    .select("metrics, period_to")
+    .eq("client_id", clientId)
+    .not("period_to", "is", null)
+    .lt("period_to", periodFrom)
+    .order("period_to", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const row = (data ?? [])[0] as { metrics?: Record<string, unknown> } | undefined;
+  if (!row) return null;
+  const num = (key: string): number | null => {
+    const raw = row.metrics?.[key];
+    const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    vendas: num("vendas"),
+    agendamentos: num("agendamentos"),
+    receita: num("receita"),
+    seguidores: num("seguidores"),
+  };
+}
+
 async function generateSalesReport(
   admin: AdminClient,
   config: AutomationConfigRow,
-  mold: TaskRecord,
   occ: TaskRecord,
   card2: TaskRecord,
   ext: MetricExtract,
   windsor: WindsorSettings,
   meta: ServiceMetaSettings,
-  today: string,
+  cadence: RecurringCadence,
+  period: Period,
 ): Promise<void> {
   const clientId = occ.client_id;
   if (!clientId) throw new Error("A ocorrência não pertence a nenhum cliente.");
@@ -129,14 +163,13 @@ async function generateSalesReport(
   const account = adsAccountFor(client.slug, windsor, meta);
   // Sem conta de anúncios não dá pra cruzar com o Meta — o PDF sai só com o que
   // o gestor relatou (sem investimento/ROAS). Não é erro.
-  const cadence: RecurringCadence = mold.recurrence_cadence ?? "semanal";
-  const period = periodForCadence(cadence, occ.due_date ?? today);
   const prevPeriod = previousPeriod(period);
   const { campaignPosts, adPosts } = account
     ? await fetchPostsForAccount(account, windsor, meta, prevPeriod.from, period.to)
     : { campaignPosts: [], adPosts: [] };
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
+  const prevTotals = await previousPeriodTotals(admin, clientId, period.from);
 
   const pdf = await renderSalesReportPdf({
     clientName: client.name,
@@ -151,6 +184,7 @@ async function generateSalesReport(
     vendasTotal: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,
     agendamentosTotal: typeof ext.valores.agendamentos === "number" ? ext.valores.agendamentos : null,
     seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
+    prevTotals,
     generatedAt: new Date(),
   });
 
@@ -236,10 +270,18 @@ async function processOccurrence(
     ? await extractMetrics(human.text, tags)
     : { valores: Object.fromEntries(tags.map((t) => [t, 0])), linhas: [], note: "sem retorno do responsável" };
 
+  // O período REPORTADO (não a data em que a automação rodou) é o eixo da série
+  // temporal em `task_metrics` — é o que deixa "seguidores ao longo do tempo" e
+  // o comparativo com a semana anterior ficarem de pé mesmo quando um
+  // comentário corrigido regera tudo dias depois. Calculado uma vez aqui e
+  // passado adiante pro PDF, em vez de recomputado lá dentro.
+  const cadence: RecurringCadence = mold.recurrence_cadence ?? "semanal";
+  const period = periodForCadence(cadence, occ.due_date ?? today);
+
   // task_metrics — só as tags pedidas, como string.
   const metrics = Object.fromEntries(tags.map((t) => [t, String(ext.valores[t] ?? 0)]));
   const { error: metricsErr } = await admin.from("task_metrics").upsert(
-    { task_id: card2.id, client_id: occ.client_id, metrics, source: "cliente" },
+    { task_id: card2.id, client_id: occ.client_id, metrics, source: "cliente", period_from: period.from, period_to: period.to },
     { onConflict: "task_id" },
   );
   if (metricsErr) throw metricsErr;
@@ -272,7 +314,7 @@ async function processOccurrence(
 
   // O PDF de vendas é anexado à ETAPA `feedback` (aparece nos Anexos dela e na
   // tela Documentos), com o comentário do link.
-  await generateSalesReport(admin, config, mold, occ, card2, ext, windsor, meta, today);
+  await generateSalesReport(admin, config, occ, card2, ext, windsor, meta, cadence, period);
 
   const { error: markErr } = await admin
     .from("tasks")

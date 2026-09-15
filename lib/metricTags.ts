@@ -7,10 +7,16 @@
 export type MetricTagKind = "count" | "money";
 export type MetricTagDef = { key: string; label: string; kind: MetricTagKind };
 
+// `seguidores` é SNAPSHOT (o total do perfil ao fim do período), não o ganho
+// da semana — de dois snapshots dá pra derivar o ganho, do ganho sozinho não
+// dá pra reconstruir o total, e a série temporal (task_metrics.period_to)
+// precisa de uma grandeza só. O rótulo diz "total" para o gestor responder a
+// coisa certa já no comentário. Ver a regra correspondente em
+// lib/ai/extractMetrics.ts.
 export const KNOWN_METRIC_TAGS: MetricTagDef[] = [
   { key: "vendas", label: "Vendas", kind: "count" },
   { key: "agendamentos", label: "Agendamentos", kind: "count" },
-  { key: "seguidores", label: "Seguidores ganhos", kind: "count" },
+  { key: "seguidores", label: "Seguidores (total do perfil)", kind: "count" },
   { key: "receita", label: "Receita", kind: "money" },
 ];
 
