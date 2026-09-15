@@ -78,7 +78,9 @@ export { TASK_KINDS, TASK_KIND_KEYS, kindLabel, kindTone, kindIcon, kindDef, sub
 export const PRIORITY_LABEL: Record<TaskPriority, string> = { baixa: "Baixa", media: "Média", alta: "Alta" };
 export const TONES = ["green", "gold", "blue", "purple", "neutral"] as const;
 
-export const FORMATO_OPTIONS = ["Reels vertical", "Stories", "Post feed", "Carrossel", "Vídeo horizontal", "Flyer"];
+// "Banner" entrou com o NorthAi (lib/northai/formats.ts): a diária de gravação
+// gera banners além de Reels, carrossel e story.
+export const FORMATO_OPTIONS = ["Reels vertical", "Stories", "Post feed", "Carrossel", "Banner", "Vídeo horizontal", "Flyer"];
 export const PLATAFORMA_OPTIONS = ["Instagram", "TikTok", "YouTube", "Facebook", "Google", "WhatsApp"];
 
 // Regra única de iniciais — mora em app/avatar/initials.ts. Reexportada daqui

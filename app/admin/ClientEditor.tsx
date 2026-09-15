@@ -229,6 +229,8 @@ export default function ClientEditor({ slug, detail, scopeTags, adAccounts, adAc
       />
 
       <DriveFoldersSection
+        client={{ name: name.trim() || detail.name, slug }}
+        driveConfigured={driveConfigured}
         folders={detail.driveFolders}
         brandUrl={brandUrl}
         productsUrl={productsUrl}

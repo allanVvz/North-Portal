@@ -83,7 +83,6 @@ export default function NewClientForm({
     templates.filter((t) => t.active && !t.required).map((t) => t.id),
   );
 
-  const [createDrive, setCreateDrive] = useState(true);
   const [driveShareEmail, setDriveShareEmail] = useState("");
   const [adAccountId, setAdAccountId] = useState("");
   const [sendInvite, setSendInvite] = useState(true);
@@ -154,7 +153,7 @@ export default function NewClientForm({
         },
         checkpointTemplateIds: checkpoints,
         routines: routineInputs,
-        createDriveFolder: createDrive && driveConfigured,
+        createDriveFolder: driveConfigured,
         driveShareEmail: driveShareEmail.trim() || null,
         adAccountId: adAccountId || null,
         leadId: lead?.id ?? null,
@@ -325,16 +324,15 @@ export default function NewClientForm({
               <span>Criar briefing de onboarding</span>
               <em className="admin-chiptag">sempre criado</em>
             </label>
+            {/* O GED é da plataforma: todo cliente nasce com a sua árvore
+                (Clientes/<nome> (<slug>)/Marca, Arquivos, Edição, Roteiros…), sem
+                link colado. Com a conta de serviço do Drive, as pastas nascem lá;
+                sem ela, no armazenamento interno. Ver lib/ged. */}
             <label className="admin-toggle">
-              <input
-                type="checkbox"
-                checked={createDrive && driveConfigured}
-                onChange={(e) => setCreateDrive(e.target.checked)}
-                disabled={!driveConfigured}
-              />
+              <input type="checkbox" checked readOnly disabled />
               <span className="sw" />
-              <span>Criar pasta principal no Google Drive</span>
-              {!driveConfigured ? <em className="admin-chiptag">Drive não conectado</em> : null}
+              <span>Criar GED do cliente — Clientes/{name.trim() || "Cliente"} ({effectiveSlug || "slug"})</span>
+              <em className="admin-chiptag">{driveConfigured ? "Drive da plataforma" : "armazenamento interno"}</em>
             </label>
           </ResponsibleSection>
 
@@ -411,7 +409,7 @@ export default function NewClientForm({
             </li>
             <li>
               <span className="ck">✓</span>
-              {createDrive && driveConfigured ? "Pasta no Drive" : "Pasta do Drive manual"}
+              GED do cliente ({driveConfigured ? "Drive da plataforma" : "armazenamento interno"})
             </li>
             <li>
               <span className="ck">{routinesProblem ? "○" : "✓"}</span>

@@ -74,6 +74,11 @@ function b64url(input: string | Buffer): string {
 // Access tokens last an hour; cache so a burst of calls signs once.
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+/** Token da conta de serviço — exportado para o GED (lib/ged) copiar e exportar arquivos. */
+export function googleDriveAccessToken(): Promise<string | null> {
+  return accessToken();
+}
+
 async function accessToken(): Promise<string | null> {
   const sa = serviceAccount();
   if (!sa) return null;

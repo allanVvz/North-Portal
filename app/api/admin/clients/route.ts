@@ -46,8 +46,11 @@ export async function POST(request: Request) {
     // an admin can still provision access later via scripts/create-user.mjs.
     const credentials = await provisionClientAuth({ clientId: client.id, slug: client.slug, email: body.email });
 
+    // GED: todo cliente nasce com a sua árvore. Com a conta de serviço do Drive,
+    // as pastas são criadas lá sem depender de um toggle; sem ela, o GED usa o
+    // armazenamento interno e não há pasta a criar (lib/ged).
     let drive: { ok: boolean; reason?: string } | null = null;
-    if (body.createDriveFolder && isGoogleDriveConfigured()) {
+    if (isGoogleDriveConfigured()) {
       try {
         const folders = await provisionClientDriveFolders({
           name: client.name,

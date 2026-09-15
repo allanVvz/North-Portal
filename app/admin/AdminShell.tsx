@@ -177,7 +177,9 @@ const NAV_ITEMS: { href: string; ico: IconName; label: string }[] = [
   { href: "/admin/aprovacoes", ico: "checkCircle", label: "Aprovações" },
   { href: "/admin/performance", ico: "barChart", label: "Performance" },
   { href: "/admin/documentos", ico: "fileText", label: "Informações" },
-  { href: "/admin/automacoes", ico: "bot", label: "Automações" },
+  // NorthAi: o Estúdio (cria tarefas, planos, rotinas, fluxos e automações) e
+  // a tela de Automações, em abas. /admin/automacoes redireciona para cá.
+  { href: "/admin/northai", ico: "bot", label: "NorthAi" },
 ];
 
 // Every /admin/* section route; used so the "Clientes" (/admin) item does not
