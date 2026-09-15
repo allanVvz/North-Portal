@@ -1433,6 +1433,24 @@ export async function listTasks(clientId: string): Promise<TaskRecord[]> {
   return ((data as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow).filter(visibleOnTaskBoard);
 }
 
+/**
+ * TODOS os cards do cliente, sem o filtro do quadro — planos, entregas e moldes
+ * de rotina incluídos. `listTasks` serve ao quadro e esconde os pais; quem
+ * precisa responder "este cliente tem plano/rotina padrão/automação num molde?"
+ * (o contexto do Estúdio do NorthAi) lia lacunas que não existiam.
+ */
+export async function listClientTasksAll(clientId: string): Promise<TaskRecord[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
+    .eq("client_id", clientId)
+    .order("position")
+    .order("created_at");
+  if (error) fail(error);
+  return ((data as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
+}
+
 // Unassigned board — tasks created without a client ("Outros" filter). client_id
 // IS NULL never satisfies a client-role RLS policy's `client_id = current_client_id()`
 // check, so these rows are naturally invisible to every client session already;
