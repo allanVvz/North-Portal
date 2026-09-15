@@ -76,6 +76,13 @@ export const REPORT_STYLES = StyleSheet.create({
   tableCellFirst: { flex: 2.4 },
   tableMore: { fontSize: 6.4, color: C.muted, marginTop: 2 },
 
+  // A frase de abertura do relatório de vendas — a única leitura em palavras da
+  // semana, então pesa mais que o corpo e menos que o título.
+  headline: { fontFamily: "Inter", fontWeight: 600, fontSize: 8.6, color: C.ink, marginBottom: 7, lineHeight: 1.35 },
+  // Nota curta que qualifica a seção inteira (com o que a comparação é feita,
+  // o que a tabela conta) — evita repetir a ressalva dentro de cada cartão.
+  legend: { fontSize: 6.4, color: C.muted, marginTop: 3 },
+
   empty: { fontSize: 7, color: C.muted, paddingVertical: 3 },
   footer: { position: "absolute", bottom: 10, left: 20, right: 20, fontSize: 6.3, color: C.muted, textAlign: "center" },
 });
@@ -126,33 +133,51 @@ export function CompassNode({ shape, ink }: { shape: CompassShape; ink: string }
   }
 }
 
-export function DeltaText({ current, previous, inverse }: { current: NullableMetric; previous: NullableMetric; inverse: boolean }) {
+/** `suffix` sai do default só onde uma legenda já disse com QUAL período a
+ *  comparação é feita (o resumo do relatório de vendas) — repetir "vs. anterior"
+ *  em cada cartão ali seria a mesma frase vinte vezes na mesma folha. Nas seções
+ *  de mídia e no relatório de anúncios o "anterior" é o período de calendário,
+ *  que não tem legenda própria, então o sufixo continua. */
+export function DeltaText({ current, previous, inverse, suffix = " vs. anterior" }: { current: NullableMetric; previous: NullableMetric; inverse: boolean; suffix?: string }) {
   const value = acquisitionDelta(current, previous);
   if (value === null) return <Text style={[S.delta, S.deltaNeutral]}>Sem comparativo</Text>;
   const good = inverse ? value <= 0 : value >= 0;
   return (
     <Text style={[S.delta, good ? S.deltaGood : S.deltaBad]}>
-      {value >= 0 ? "↑" : "↓"} {formatAcquisitionValue(Math.abs(value), "decimal")}% vs. anterior
+      {value >= 0 ? "↑" : "↓"} {formatAcquisitionValue(Math.abs(value), "decimal")}%{suffix}
     </Text>
   );
 }
 
 export function KpiCard({
-  label, value, previous, kind, inverse, notIntegrated = false, hint,
+  label, value, previous, kind, inverse, notIntegrated = false, hint, unit, deltaText, deltaTone = "neutral", deltaSuffix,
 }: {
   label: string; value: NullableMetric; previous: NullableMetric;
   kind: MetricKind; inverse: boolean; notIntegrated?: boolean; hint?: string;
+  /** Sufixo colado no valor ("×" num ROAS). Um número sem unidade — "18,4" —
+   *  não se explica sozinho para quem não é de mídia. */
+  unit?: string;
+  /** Substitui a variação calculada por um texto próprio, no mesmo lugar e
+   *  estilo. Existe para a métrica cuja leitura é ABSOLUTA e não percentual —
+   *  seguidores, onde "+12 na semana" diz algo e "↑1,45%" não. */
+  deltaText?: string;
+  /** Cor do `deltaText` — quem escreve o texto sabe se aquilo é ganho ou perda. */
+  deltaTone?: "good" | "bad" | "neutral";
+  deltaSuffix?: string;
 }) {
+  const toneStyle = deltaTone === "good" ? S.deltaGood : deltaTone === "bad" ? S.deltaBad : S.deltaNeutral;
   return (
     <View style={notIntegrated ? [S.kpiCard, S.kpiCardGap] : S.kpiCard} wrap={false}>
       <View style={S.kpiAccent} />
       <Text style={S.kpiLabel}>{label.toUpperCase()}</Text>
       <Text style={notIntegrated ? [S.kpiValue, S.kpiValueGap] : S.kpiValue}>
-        {notIntegrated ? "—" : formatAcquisitionValue(value, kind)}
+        {notIntegrated ? "—" : `${formatAcquisitionValue(value, kind)}${unit && value !== null ? unit : ""}`}
       </Text>
       {notIntegrated
         ? <Text style={[S.delta, S.deltaGap]}>Sem integração</Text>
-        : <DeltaText current={value} previous={previous} inverse={inverse} />}
+        : deltaText
+          ? <Text style={[S.delta, toneStyle]}>{deltaText}</Text>
+          : <DeltaText current={value} previous={previous} inverse={inverse} suffix={deltaSuffix} />}
       {hint ? <Text style={S.kpiHint}>{hint}</Text> : null}
     </View>
   );

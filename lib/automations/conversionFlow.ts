@@ -123,14 +123,14 @@ async function previousPeriodTotals(
 ): Promise<SalesPrevTotals | null> {
   const { data, error } = await admin
     .from("task_metrics")
-    .select("metrics, period_to")
+    .select("metrics, period_from, period_to")
     .eq("client_id", clientId)
     .not("period_to", "is", null)
     .lt("period_to", periodFrom)
     .order("period_to", { ascending: false })
     .limit(1);
   if (error) throw error;
-  const row = (data ?? [])[0] as { metrics?: Record<string, unknown> } | undefined;
+  const row = (data ?? [])[0] as { metrics?: Record<string, unknown>; period_from?: string | null; period_to?: string | null } | undefined;
   if (!row) return null;
   const num = (key: string): number | null => {
     const raw = row.metrics?.[key];
@@ -142,6 +142,11 @@ async function previousPeriodTotals(
     agendamentos: num("agendamentos"),
     receita: num("receita"),
     seguidores: num("seguidores"),
+    // O PDF usa isto na legenda "comparado com X a Y" — o período real da linha,
+    // que não é sempre o de calendário anterior (uma semana sem relatório deixa
+    // um buraco na série).
+    from: row.period_from ?? null,
+    to: row.period_to ?? null,
   };
 }
 

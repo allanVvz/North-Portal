@@ -90,6 +90,17 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
     expect(buf.byteLength).toBeGreaterThan(3000);
   });
 
+  // O ganho negativo passa pelo outro ramo de cor do cartão de seguidores e
+  // tira a etapa do funil — vale um caminho de render próprio.
+  it("com perda de seguidores (ganho negativo) não lança", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      seguidores: 805,
+      prevTotals: { vendas: 5, agendamentos: 9, receita: 6100, seguidores: 829, from: "2026-07-25", to: "2026-07-31" },
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
   it("prevTotals com campos nulos (semana anterior sem aquela métrica) não lança", async () => {
     const buf = await renderSalesReportPdf({
       ...base,
