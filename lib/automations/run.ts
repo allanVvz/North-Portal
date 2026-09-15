@@ -20,6 +20,7 @@ import type { WindsorSettings } from "@/lib/windsor";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import { creativeRows, mediaOutcome, mediaTotals } from "@/lib/reports/adsInsights";
 import { collectAndStorePreviews } from "./creativeAssets";
+import { assignResponsibilityHolders } from "./responsibleOwners";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
@@ -244,11 +245,14 @@ async function runOneReportAutomation(
       // ocorrência (flow_parent) é só o contêiner e não aparece em tela. O sinal
       // para a Automação 2 não é mais um marcador no payload: é a linha em
       // traffic_reports e o status dela.
+      // A etapa é de quem cuida do tráfego (Equipe & papéis), não da automação:
+      // é assim que ela entra na Home e na coluna de quem revisa.
+      const owners = await assignResponsibilityHolders(admin, card1.id, "gestor_trafego");
       const { error: c1Error } = await admin
         .from("tasks")
         .update({
           status: "revisao",
-          assignee: AUTOMATION_ASSIGNEE,
+          assignee: owners ?? AUTOMATION_ASSIGNEE,
           payload: appendedCommentPayload(card1.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`),
         })
         .eq("id", card1.id);
@@ -285,9 +289,10 @@ async function runOneReportAutomation(
   try {
     const { fileName, url } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today, null);
     const payload = appendedCommentPayload(actingTask.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`);
+    const owners = await assignResponsibilityHolders(admin, actingTask.id, "gestor_trafego");
     const { error: statusError } = await admin
       .from("tasks")
-      .update({ status: "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
+      .update({ status: "revisao", payload, assignee: owners ?? AUTOMATION_ASSIGNEE })
       .eq("id", actingTask.id);
     if (statusError) throw statusError;
     await notifyFromAutomation(admin, actingTask.id, "task_commented", `Automação comentou em "${actingTask.title}".`);

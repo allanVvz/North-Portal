@@ -6,7 +6,7 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 // e Plano de Ação:
 //   - o menu de ordenação (3 traços) ao lado da engrenagem de atributos;
 //   - a ordem realmente mudando, invertendo e sobrevivendo a um reload;
-//   - o card de Tarefas mostrando prazo, tag "Atrasado", "Sem data", período e
+//   - o card de Tarefas mostrando a situação ("Atrasada"/"No prazo"), prazo, "Sem data", período e
 //     o responsável por extenso (era um avatar de iniciais);
 //   - Plano de Ação abrindo na Lista, com os cards da Estratégica recolhidos.
 // Semeia tudo o que usa e limpa no final.
@@ -69,7 +69,7 @@ test.describe("Ordenação e cards minimizados (e2e contra o backend real)", () 
     sb = serviceClient();
     const clientId = await clientIdBySlug(sb, "karpinski");
     const rows = [
-      // Vencida ontem: tem que renderizar a tag vermelha "Atrasado".
+      // Vencida ontem: tem que renderizar a situação vermelha "Atrasada".
       { client_id: clientId, kind: "operacional", title: ZEBRA, status: "backlog", due_date: spDate(-1), assignee: "Ana Paula Ribeiro" },
       // Sem prazo: tem que cair no fim da ordem por data, nas DUAS direções.
       { client_id: clientId, kind: "operacional", title: ABACAXI, status: "backlog", due_date: null },
@@ -146,14 +146,17 @@ test.describe("Ordenação e cards minimizados (e2e contra o backend real)", () 
     await filterToRun(page);
 
     const atrasada = page.locator(".kb-card", { hasText: "Zebra atrasada" });
-    await expect(atrasada.locator(".kb-state.overdue")).toHaveText("Atrasado");
+    // Situação é a primeira informação do card (ATA 14/09), e o bloco inteiro fica vermelho.
+    await expect(atrasada.locator(".kb-situacao.s-atrasada")).toHaveText("Atrasada");
+    await expect(atrasada).toHaveClass(/is-atrasada/);
     await expect(atrasada.locator(".kb-card-due")).toContainText("ontem");
     // Nome por extenso, não as iniciais "AP".
     await expect(atrasada.locator(".kb-assignee")).toContainText("Ana Paula Ribeiro");
 
     const semData = page.locator(".kb-card", { hasText: "Abacaxi sem data" });
     await expect(semData.locator(".kb-card-due")).toContainText("Sem data");
-    await expect(semData.locator(".kb-state.overdue")).toHaveCount(0);
+    await expect(semData.locator(".kb-situacao.s-atrasada")).toHaveCount(0);
+    await expect(semData.locator(".kb-situacao.s-no_prazo")).toHaveText("No prazo");
 
     const periodo = page.locator(".kb-card", { hasText: "Melancia com periodo" });
     await expect(periodo.locator(".kb-card-period")).toContainText("→");

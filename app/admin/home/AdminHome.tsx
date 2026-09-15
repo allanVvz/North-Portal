@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { AdminHomeSummary } from "@/lib/supabase";
+import type { AdminHomeSummary, HomeFocus } from "@/lib/supabase";
+import { formatShortDate, relativeDue } from "../taskDates";
+import { todayInTimezone } from "../recurringState";
+import { STATUS_LABEL } from "../kanbanShared";
+import { formatCommentTime } from "@/lib/comments";
 import type { TaskRecord } from "@/lib/validation";
 import CardModalLauncher from "../CardModalLauncher";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
@@ -31,8 +35,11 @@ function shortDate(iso: string): { day: string; month: string } {
   };
 }
 
-export default function AdminHome({ summary, userName }: { summary: AdminHomeSummary; userName: string | null }) {
+const CADENCE_LABEL: Record<string, string> = { semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal" };
+
+export default function AdminHome({ summary, focus, userName }: { summary: AdminHomeSummary; focus: HomeFocus; userName: string | null }) {
   const user = useCurrentAdminUser();
+  const todayIso = todayInTimezone("America/Sao_Paulo");
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [weekView, setWeekView] = useState<"lista" | "calendario">("lista");
   // A Home só carrega o resumo do card (id/título/prazo). O modal precisa do
@@ -42,7 +49,7 @@ export default function AdminHome({ summary, userName }: { summary: AdminHomeSum
   const [openingId, setOpeningId] = useState<string | null>(null);
   const router = useRouter();
 
-  const openCard = useCallback(async (item: AdminHomeSummary["weekAhead"][number]) => {
+  const openCard = useCallback(async (item: { id: string; clientName: string; clientSlug: string }) => {
     setOpeningId(item.id);
     try {
       const res = await fetch(`/api/admin/tasks/${item.id}`);
@@ -112,6 +119,84 @@ export default function AdminHome({ summary, userName }: { summary: AdminHomeSum
           <NewTaskButton />
         </div>
       </header>
+
+      {/* O que é MEU e precisa de mim — antes dos números da agência (ATA 14/09). */}
+      {focus.attention.length || focus.mentions.length || focus.routines.length ? (
+        <div className="home-focus">
+          {focus.attention.length ? (
+            <div className="admin-card home-focus-card is-attention">
+              <div className="home-card-head">
+                <p className="admin-card-title">Paradas e atrasadas</p>
+                <span className="kb-situacao s-atrasada">{focus.attention.length}</span>
+              </div>
+              <ul className="home-focus-list">
+                {focus.attention.map((t) => {
+                  const rel = relativeDue(t.dueDate, todayIso);
+                  return (
+                    <li key={t.id}>
+                      <button type="button" className={`home-focus-row is-${t.situation}`} onClick={() => void openCard(t)} disabled={openingId === t.id}>
+                        <span className={`kb-situacao s-${t.situation}`}>{t.situation === "parada" ? "Parada" : "Atrasada"}</span>
+                        <span className="home-focus-main">
+                          <strong>{t.title}</strong>
+                          <em>{t.clientName} · {STATUS_LABEL[t.status]}</em>
+                        </span>
+                        <span className="home-focus-due">{t.dueDate ? `${formatShortDate(t.dueDate)}${rel ? ` · ${rel}` : ""}` : "sem data"}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
+          {focus.mentions.length ? (
+            <div className="admin-card home-focus-card">
+              <div className="home-card-head">
+                <p className="admin-card-title">Aguardando sua resposta</p>
+                <span className="admin-pill on">{focus.mentions.length}</span>
+              </div>
+              <ul className="home-focus-list">
+                {focus.mentions.map((m) => (
+                  <li key={`${m.taskId}-${m.at}`}>
+                    <button type="button" className="home-focus-row" onClick={() => void openCard({ id: m.taskId, clientName: m.clientName, clientSlug: m.clientSlug })} disabled={openingId === m.taskId}>
+                      <span className="home-focus-at" aria-hidden>@</span>
+                      <span className="home-focus-main">
+                        <strong>{m.author} em “{m.title}”</strong>
+                        <em className="home-focus-quote">{m.text.length > 140 ? `${m.text.slice(0, 140)}…` : m.text}</em>
+                      </span>
+                      <span className="home-focus-due">{formatCommentTime(m.at)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {focus.routines.length ? (
+            <div className="admin-card home-focus-card">
+              <div className="home-card-head">
+                <p className="admin-card-title">Suas rotinas desta semana</p>
+                <Link className="admin-btn ghost" href="/admin/operacao">Rotinas →</Link>
+              </div>
+              <ul className="home-focus-list">
+                {focus.routines.map((r) => {
+                  const rel = relativeDue(r.nextDue, todayIso);
+                  return (
+                    <li key={r.id}>
+                      <button type="button" className={`home-focus-row ${r.overdue ? "is-atrasada" : ""}`} onClick={() => void openCard(r)} disabled={openingId === r.id}>
+                        <span className={`kb-situacao ${r.overdue ? "s-atrasada" : "s-no_prazo"}`}>{r.overdue ? "Atrasada" : "↻ " + (CADENCE_LABEL[r.cadence] ?? r.cadence)}</span>
+                        <span className="home-focus-main">
+                          <strong>{r.title}</strong>
+                          <em>{r.clientName}</em>
+                        </span>
+                        <span className="home-focus-due">{formatShortDate(r.nextDue)}{rel ? ` · ${rel}` : ""}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="home-kpis">
         {kpis.map((k) => (

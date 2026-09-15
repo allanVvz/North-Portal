@@ -19,8 +19,12 @@ import type { RecurringTask } from "@/lib/supabase";
 // atraso pertence às tarefas.
 export type RecurringState = "parada" | "ativa" | "concluida" | "sem_agenda";
 
+// Rótulo segue o vocabulário da ATA de 14/09 para TODAS as tarefas: data
+// prevista vencida é "Atrasada". A chave interna continua `parada` (filtros e
+// testes dependem dela); "Parada" como rótulo fica para o molde que foi parado
+// de propósito (status `parada`), decidido no card — ver OperacaoWorkspace.
 export const RECURRING_STATE_LABEL: Record<RecurringState, string> = {
-  parada: "Parada",
+  parada: "Atrasada",
   ativa: "Ativa",
   concluida: "Ciclo concluído",
   sem_agenda: "Sem agenda",

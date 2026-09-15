@@ -35,6 +35,7 @@ import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesR
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
 import { loadStoredPreviews } from "./creativeAssets";
+import { assignResponsibilityHolders } from "./responsibleOwners";
 import { appendedCommentPayload, asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { getClientById } from "./serviceIntegrations";
@@ -440,11 +441,13 @@ async function processOccurrence(
     const resumo = human
       ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.${ext.problemas?.length ? ` Deixei de fora: ${ext.problemas.join("; ")}.` : ""}`
       : `Sem retorno do responsável até o prazo — fechando a semana sem métricas registradas.`;
+    // O feedback da semana é de quem cuida do tráfego — ver responsibleOwners.ts.
+    const owners = await assignResponsibilityHolders(admin, card2.id, "gestor_trafego");
     const { error: c2Err } = await admin
       .from("tasks")
       .update({
         status: "revisao",
-        assignee: AUTOMATION_ASSIGNEE,
+        assignee: owners ?? AUTOMATION_ASSIGNEE,
         payload: {
           ...appendedCommentPayload(card2.payload, resumo),
           metricas: ext.valores,

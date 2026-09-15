@@ -4,7 +4,8 @@ import { createClientWithChildren, linkClientAdAccount, listClients, markLeadCon
 import { requireAdmin } from "@/lib/supabase/auth";
 import { provisionClientAuth } from "@/lib/supabase/clientAuth";
 import { isGoogleDriveConfigured, provisionClientDriveFolders } from "@/lib/googleDriveApi";
-import { adminCreateClientSchema } from "@/lib/validation";
+import { HttpError, adminCreateClientSchema } from "@/lib/validation";
+import { routineScheduleProblem } from "@/lib/clientRoutines";
 
 // GET /api/admin/clients — list all clients (admin only).
 export async function GET() {
@@ -26,6 +27,11 @@ export async function POST(request: Request) {
   try {
     await requireAdmin();
     const body = adminCreateClientSchema.parse(await request.json());
+    // O cadastro só finaliza com as rotinas padrão preenchidas (ATA 14/09).
+    // Recusado ANTES de criar qualquer coisa: um cliente pela metade, sem as
+    // rotinas, é exatamente o que a regra existe para impedir.
+    const routinesProblem = routineScheduleProblem(body.routines);
+    if (routinesProblem) throw new HttpError(400, routinesProblem);
     const client = await createClientWithChildren({
       slug: body.slug,
       name: body.name,
@@ -33,6 +39,7 @@ export async function POST(request: Request) {
       companyInfo: body.companyInfo,
       contract: body.contract,
       checkpointTemplateIds: body.checkpointTemplateIds,
+      routines: body.routines,
     });
     // Every client gets a real login automatically. If this fails, the client
     // row already exists — surface the error but don't roll back the client;

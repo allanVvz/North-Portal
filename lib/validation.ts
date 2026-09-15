@@ -72,6 +72,14 @@ export const adminCreateClientSchema = z.object({
   // (the pre-existing behaviour). Templates flagged required are always added
   // server-side regardless of what arrives here.
   checkpointTemplateIds: z.array(z.string().uuid()).max(50).optional(),
+  // Rotinas padrão (lib/clientRoutines.ts) — etapa final obrigatória do cadastro.
+  // O formato é aberto aqui; a completude (data e responsável de todas) é
+  // decidida por routineScheduleProblem na rota, com a mensagem que nomeia o
+  // que falta.
+  routines: z
+    .array(z.object({ key: z.string().min(1).max(60), date: z.string().max(10), assigneeId: z.string().max(60) }))
+    .max(20)
+    .optional(),
   // Drive automation. Ignored when the integration is not configured.
   createDriveFolder: z.boolean().optional(),
   driveShareEmail: z.string().email().max(200).nullable().optional(),
@@ -198,6 +206,8 @@ export const taskPayloadSchema = z.object({
   completed_cycles: z.unknown().optional(),
   last_completed_at: z.unknown().optional(),
   cycle_completed: z.unknown().optional(),
+  // Checks da recorrência — quem concluiu cada ciclo e quando (lib/cycleLog.ts)
+  cycle_log: z.unknown().optional(),
   // Recorrência — execução
   recurrence_parent_id: z.unknown().optional(),
   occurrence_date: z.unknown().optional(),

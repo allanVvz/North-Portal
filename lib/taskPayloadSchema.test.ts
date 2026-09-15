@@ -19,6 +19,7 @@ const CHAVES_GRAVADAS = [
   "comments",
   "completed_cycles",
   "cycle_completed",
+  "cycle_log",
   "deferred_until_accessed",
   "explicit_date_group_id",
   "explicit_occurrence_dates",

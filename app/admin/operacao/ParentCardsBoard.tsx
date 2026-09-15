@@ -15,6 +15,8 @@ import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
 import { subtypeLabel } from "@/lib/taskCatalog";
 import { partsLabel, pendingLabel } from "../parentCounts";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
+import { DEADLINE_LABEL, deadlineStateOf } from "../deadlineState";
+import { todayInTimezone } from "../recurringState";
 import type { ParentCard } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -80,10 +82,13 @@ export default function ParentCardsBoard({
   const [openId, setOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingTarget | null>(null);
   const { sort, setSort } = useSortPref(sortScope);
+  const today = useMemo(() => todayInTimezone("America/Sao_Paulo"), []);
 
   const parents = useMemo(() => {
     const needle = q.trim();
-    const matching = needle ? initial.filter((d) => parentMatches(d, needle)) : initial;
+    const found = needle ? initial.filter((d) => parentMatches(d, needle)) : initial;
+    // Mesma regra do quadro: ordenar por data esconde o que já foi concluído.
+    const matching = sort.key === "data" ? found.filter((d) => !d.completed_at) : found;
     return sortItems(matching, sort.key, sort.dir, (d) => ({
       title: d.title,
       updatedAt: d.updated_at,
@@ -92,6 +97,18 @@ export default function ParentCardsBoard({
       position: d.position,
     }));
   }, [initial, q, sort]);
+
+  // A situação do pai é a da etapa corrente (espelho) numa entrega; num plano,
+  // atrasado se qualquer atividade aberta estiver atrasada.
+  function parentState(d: ParentCard) {
+    if (d.completed_at) return "concluida" as const;
+    const current = showStepCount ? currentFlowStepOf(d.activities) : null;
+    if (current) return deadlineStateOf(current, today);
+    const states = d.activities.map((a) => deadlineStateOf(a, today));
+    if (states.includes("parada")) return "parada" as const;
+    if (states.includes("atrasada")) return "atrasada" as const;
+    return deadlineStateOf(d, today);
+  }
 
   const asTask = (d: ParentCard): TaskRecord => {
     const { clientName: _c, clientSlug: _s, typeLabel: _t, progress: _p, activities: _a, ...task } = d;
@@ -137,8 +154,9 @@ export default function ParentCardsBoard({
             // duas telas nunca discordarem sobre onde a entrega está.
             const current = currentFlowStepOf(d.activities);
             const faltam = pendingLabel(d);
+            const state = parentState(d);
             return (
-              <div className={`plan-acc-item ${open ? "open" : ""}`} key={d.id}>
+              <div className={`plan-acc-item is-${state} ${open ? "open" : ""}`} key={d.id}>
                 <div className="plan-acc-head">
                   <button
                     type="button"
@@ -150,6 +168,7 @@ export default function ParentCardsBoard({
                   </button>
                   <button type="button" className="plan-acc-title" onClick={() => openParent(d)}>
                     <span className="plan-card-titleline">
+                      <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span>
                       <TaskKindIcon kind={d.kind} size="lg" /><strong>{d.title}</strong>
                     </span>
                     <em>
@@ -175,16 +194,22 @@ export default function ParentCardsBoard({
                 {open ? (
                   <div className="plan-acc-body">
                     <ul className="plan-acc-list">
-                      {d.activities.map((a) => (
-                        <li key={a.id}>
-                          <button type="button" className="plan-acc-actrow" onClick={() => openChild(d, a.id)}>
-                            <TaskKindIcon kind={a.kind} />
-                            <span className="plan-acc-actitle">{subtypeLabel(a.subtype) || a.title}</span>
-                            <span className="plan-acc-status">{STATUS_LABEL[a.status]}</span>
-                            <span className="plan-acc-actpct">{a.progress}%</span>
-                          </button>
-                        </li>
-                      ))}
+                      {d.activities.map((a) => {
+                        const activityState = deadlineStateOf(a, today);
+                        return (
+                          <li key={a.id}>
+                            <button type="button" className={`plan-acc-actrow is-${activityState}`} onClick={() => openChild(d, a.id)}>
+                              <span className={`kb-situacao s-${activityState}`}>{DEADLINE_LABEL[activityState]}</span>
+                              <TaskKindIcon kind={a.kind} />
+                              <span className="plan-acc-actitle">{subtypeLabel(a.subtype) || a.title}</span>
+                              <span className="plan-acc-status">{STATUS_LABEL[a.status]}</span>
+                              <span className="plan-acc-status">{a.due_date ? a.due_date.split("-").reverse().slice(0, 2).join("/") : "sem data"}</span>
+                              <span className="plan-acc-status">{a.assignee ?? "sem responsável"}</span>
+                              <span className="plan-acc-actpct">{a.progress}%</span>
+                            </button>
+                          </li>
+                        );
+                      })}
                     </ul>
                     {/* As etapas que faltam não são linhas do banco — só o
                         contador do tipo revela que elas existem. */}

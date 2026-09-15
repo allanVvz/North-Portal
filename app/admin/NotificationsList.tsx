@@ -21,6 +21,7 @@ const TYPE_ICON: Record<NotificationType, string> = {
   task_updated: "✎",
   task_due_changed: "⏱",
   task_status_changed: "⇄",
+  task_mentioned: "@",
 };
 
 export default function NotificationsList({

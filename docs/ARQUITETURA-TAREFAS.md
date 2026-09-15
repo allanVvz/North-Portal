@@ -183,6 +183,7 @@ Desativar a recorrência mantém `payload.recurrence_group` quando há filhos (p
 | `recurrence_group: true` | template recorrente | marca o pai |
 | `recurrence_cycle`, `recurrence_revision` | template | contador de ciclo + revisão da agenda (concorrência otimista) |
 | `recurrence_last_cadence`, `completed_cycles`, `last_completed_at`, `cycle_completed` | template | estado do ciclo |
+| `cycle_log` | template | checks da recorrência: `{cycle, due_date, completed_at, by, by_id}` por ciclo concluído (`lib/cycleLog.ts`, desde 15/09/2026) |
 | `recurrence_parent_id` | execução recorrente | id do template (redundante com `plan_id`; usado por `recurrenceParentIdOf`) |
 | `deferred_until_accessed: true` | execução futura | some do quadro até o primeiro clique |
 | `occurrence_date`, `accessed_at` | execução | data da ocorrência / quando foi aberta |

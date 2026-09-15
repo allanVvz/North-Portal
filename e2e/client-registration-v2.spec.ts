@@ -79,7 +79,16 @@ test.describe("Cadastro de cliente v2", () => {
     await expect(kickoff).toHaveAttribute("aria-pressed", "false");
 
     await page.getByPlaceholder("cliente@empresa.com").first().fill(CLIENT_EMAIL);
-    await page.getByRole("button", { name: /Criar cliente/ }).click();
+
+    // Etapa final (ATA 14/09): sem data e responsável de cada rotina padrão o
+    // botão não libera.
+    const criar = page.getByRole("button", { name: /Criar cliente/ });
+    await expect(criar).toBeDisabled();
+    for (const routine of ["Assinatura de contrato", "Reunião de kickoff", "Onboarding", "Acompanhamento semanal", "Reunião mensal"]) {
+      await page.getByLabel(`Data de ${routine}`).fill("2026-09-21");
+      await page.getByLabel(`Responsável por ${routine}`).selectOption({ index: 1 });
+    }
+    await criar.click();
     await expect(page.getByRole("heading", { name: "Cliente criado" })).toBeVisible({ timeout: 20_000 });
 
     // ---- assert against the real database ----
@@ -121,16 +130,22 @@ test.describe("Cadastro de cliente v2", () => {
     expect(titles.length).toBeGreaterThan(0);
     expect(titles).not.toContain("Kickoff e onboarding");
 
-    // The kickoff card is the "card no Kanban" half of the AO CRIAR checklist.
-    const { data: kickoffCard } = await sb
+    // As rotinas padrão viram cards com data e responsável; as periódicas nascem
+    // recorrentes (molde + primeira execução, mesmo título). O card genérico de
+    // kickoff não nasce mais — a Reunião de kickoff o substitui.
+    const { data: routineCards } = await sb
       .from("tasks")
-      .select("title,kind,subtype,client_visible")
+      .select("title,due_date,assignee,recurrence_cadence,subtype,client_visible")
       .eq("client_id", clientId)
-      .eq("kind", "operacional")
-      .single();
-    // Sem subtipo: o kickoff era `planejamento/briefing`, e os dois deixaram de
-    // existir — Tarefa não tem subtipo.
-    expect(kickoffCard).toMatchObject({ subtype: null, client_visible: false });
+      .eq("kind", "operacional");
+    const routineTitles = new Set((routineCards ?? []).map((c) => c.title as string));
+    for (const title of ["Assinatura de contrato", "Reunião de kickoff", "Onboarding", "Acompanhamento semanal", "Reunião mensal"]) {
+      expect(routineTitles.has(title), `rotina "${title}" não virou card`).toBe(true);
+    }
+    expect(routineTitles.has("Kickoff — revisar onboarding do cliente")).toBe(false);
+    expect((routineCards ?? []).every((c) => c.subtype === null && c.client_visible === false && c.assignee)).toBe(true);
+    expect((routineCards ?? []).some((c) => c.title === "Acompanhamento semanal" && c.recurrence_cadence === "semanal")).toBe(true);
+    expect((routineCards ?? []).some((c) => c.title === "Reunião mensal" && c.recurrence_cadence === "mensal")).toBe(true);
   });
 
   test("mostra os novos campos já preenchidos na edição", async ({ page }) => {

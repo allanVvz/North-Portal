@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { requireCronSecret } from "@/lib/cron";
 import { runAutomations } from "@/lib/automations/run";
+import { remindUpcomingRoutines } from "@/lib/automations/routineReminders";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { reconcileFlows } from "@/lib/flows/reconcile";
 
 // Node runtime required by @react-pdf/renderer (lib/reports/adsReportPdf.tsx).
@@ -20,7 +22,13 @@ export async function POST(request: Request) {
     // escrita que os contorne cai aqui. Idempotente por id determinístico, então
     // rodar todo dia sobre etapas já cascateadas não escreve nada.
     const flows = await reconcileFlows();
-    return NextResponse.json({ ...summary, flows });
+    // Aviso de rotina chegando (lib/automations/routineReminders.ts). Falhar aqui
+    // não pode derrubar a resposta das automações, que já rodaram.
+    const routineReminders = await remindUpcomingRoutines(createAdminClient()).catch((error) => {
+      console.error("routine reminders failed", error);
+      return 0;
+    });
+    return NextResponse.json({ ...summary, flows, routineReminders });
   } catch (error) {
     return apiError(error);
   }

@@ -24,7 +24,7 @@ export const SEM_RESPONSAVEL = "Sem responsável";
 const SEM_AGENDA = "Sem agenda";
 
 const PRAZO_BUCKETS = [
-  { key: "paradas", label: "Paradas" },
+  { key: "paradas", label: "Atrasadas" },
   { key: "semana", label: "Esta semana" },
   { key: "mes", label: "Este mês" },
   { key: "depois", label: "Depois" },

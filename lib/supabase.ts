@@ -12,6 +12,9 @@ import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, re
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
 import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
+import { commentsOf, type TaskComment } from "./comments";
+import { appendCycleLog } from "./cycleLog";
+import { CLIENT_STANDARD_ROUTINES, type ClientRoutineInput } from "./clientRoutines";
 import {
   HttpError,
   normalizeInsights,
@@ -832,6 +835,141 @@ export async function listAdminHomeSummary(): Promise<AdminHomeSummary> {
   };
 }
 
+// ---- Home: o que é MEU e precisa de mim (ATA 14/09) -----------------------------
+//
+// A Home era a mesma para todo mundo: KPIs da agência e a semana inteira. A
+// reunião pediu que cada pessoa abra a plataforma e veja primeiro onde ELA está
+// devendo: tarefas paradas e atrasadas sob a responsabilidade dela, menções que
+// esperam resposta, e as rotinas que vencem na semana.
+
+export type HomeFocusTask = {
+  id: string; title: string; clientName: string; clientSlug: string;
+  dueDate: string | null; status: TaskStatus; situation: "atrasada" | "parada";
+};
+export type HomeMention = {
+  taskId: string; title: string; clientName: string; clientSlug: string;
+  author: string; text: string; at: string;
+};
+export type HomeRoutine = {
+  id: string; title: string; clientName: string; clientSlug: string;
+  nextDue: string; cadence: RecurringCadence; overdue: boolean;
+};
+export type HomeFocus = { attention: HomeFocusTask[]; mentions: HomeMention[]; routines: HomeRoutine[] };
+
+function agencyTodayIso(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+}
+
+function plusDaysIso(iso: string, days: number): string {
+  const date = new Date(`${iso}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** O nome como aparece numa menção, sem os caracteres que quebrariam o filtro
+ *  `or()`/`ilike` do PostgREST. */
+function mentionName(name: string): string {
+  return name.replace(/[,()*%\\]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** A menção vale só quando o nome termina ali — "@Ana" não casa "@Anabela". */
+export function mentionsName(text: string, name: string): boolean {
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`@${escaped}(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
+/** A última menção a `userId` em cada card ainda sem resposta DELE depois dela. */
+export function pendingMentionOf(
+  comments: readonly TaskComment[],
+  userId: string,
+  name: string,
+): TaskComment | null {
+  let lastIndex = -1;
+  comments.forEach((comment, index) => {
+    if (comment.author_id !== userId && mentionsName(comment.text, name)) lastIndex = index;
+  });
+  if (lastIndex < 0) return null;
+  const answered = comments.slice(lastIndex + 1).some((comment) => comment.author_id === userId);
+  return answered ? null : comments[lastIndex];
+}
+
+export async function listMyHomeFocus(userId: string): Promise<HomeFocus> {
+  const supabase = await createClient();
+  const today = agencyTodayIso();
+  const name = mentionName((await getProfileName(userId)) ?? "");
+
+  const { data: links, error: linksError } = await supabase.from("task_assignees").select("task_id").eq("profile_id", userId);
+  if (linksError) fail(linksError);
+  const assignedIds = (links ?? []).map((row) => (row as { task_id: string }).task_id);
+
+  type JoinedName = { name: string; slug: string };
+  type FocusRow = {
+    id: string; title: string; due_date: string | null; status: TaskStatus; kind: string;
+    recurrence_cadence: RecurringCadence | null; payload: Record<string, unknown>;
+    clients: JoinedName | JoinedName[] | null;
+  };
+  const COLUMNS = "id,title,due_date,status,kind,recurrence_cadence,payload,clients(name,slug)";
+  const clientOf = (row: FocusRow) => (Array.isArray(row.clients) ? row.clients[0] : row.clients);
+
+  // Responsável = vínculo por perfil (task_assignees) OU o nome no texto
+  // congelado `assignee`, que é como boa parte dos cards antigos e das
+  // automações registra quem cuida.
+  const orParts = [
+    ...(assignedIds.length ? [`id.in.(${assignedIds.join(",")})`] : []),
+    ...(name ? [`assignee.ilike.*${name}*`] : []),
+  ];
+  let mine: FocusRow[] = [];
+  if (orParts.length) {
+    const { data, error } = await supabase.from("tasks").select(COLUMNS).neq("status", "aprovado").or(orParts.join(","));
+    if (error) fail(error);
+    mine = (data as unknown as FocusRow[] | null) ?? [];
+  }
+  let mentioned: FocusRow[] = [];
+  if (name) {
+    const { data, error } = await supabase
+      .from("tasks")
+      .select(COLUMNS)
+      .ilike("payload->>comments", `%@${name}%`)
+      .order("updated_at", { ascending: false })
+      .limit(80);
+    if (error) fail(error);
+    mentioned = (data as unknown as FocusRow[] | null) ?? [];
+  }
+
+  const attention: HomeFocusTask[] = mine
+    .filter((row) => belongsToTaskScreen(row))
+    .flatMap((row) => {
+      const situation: HomeFocusTask["situation"] | null =
+        row.status === "parada" ? "parada" : row.due_date && row.due_date < today ? "atrasada" : null;
+      if (!situation) return [];
+      const client = clientOf(row);
+      return [{ id: row.id, title: row.title, clientName: client?.name ?? "Sem cliente", clientSlug: client?.slug ?? "", dueDate: row.due_date, status: row.status, situation }];
+    })
+    // Parada primeiro (travou, precisa destravar), depois o atraso mais antigo.
+    .sort((a, b) => (a.situation === b.situation ? (a.dueDate ?? "").localeCompare(b.dueDate ?? "") : a.situation === "parada" ? -1 : 1));
+
+  const routines: HomeRoutine[] = mine
+    .filter((row) => row.recurrence_cadence && row.payload?.recurrence_group === true && !recurrenceStopped(row.status) && row.due_date && row.due_date <= plusDaysIso(today, 7))
+    .map((row) => {
+      const client = clientOf(row);
+      return { id: row.id, title: row.title, clientName: client?.name ?? "Sem cliente", clientSlug: client?.slug ?? "", nextDue: row.due_date as string, cadence: row.recurrence_cadence as RecurringCadence, overdue: (row.due_date as string) < today };
+    })
+    .sort((a, b) => a.nextDue.localeCompare(b.nextDue));
+
+  const mentions: HomeMention[] = mentioned
+    .flatMap((row) => {
+      const pending = pendingMentionOf(commentsOf(row.payload), userId, name);
+      if (!pending) return [];
+      const client = clientOf(row);
+      return [{ taskId: row.id, title: row.title, clientName: client?.name ?? "Sem cliente", clientSlug: client?.slug ?? "", author: pending.author, text: pending.text, at: pending.at }];
+    })
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, 12);
+
+  return { attention: attention.slice(0, 30), mentions, routines: routines.slice(0, 20) };
+}
+
 export type AdminClientDetail = {
   slug: string;
   name: string;
@@ -949,6 +1087,7 @@ export async function createClientWithChildren(input: {
   companyInfo?: CompanyInfo;
   contract?: ContractInfo;
   checkpointTemplateIds?: string[];
+  routines?: ClientRoutineInput[];
 }): Promise<ClientRow> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -976,7 +1115,10 @@ export async function createClientWithChildren(input: {
   if (ci.error) fail(ci.error);
   if (ct.error) fail(ct.error);
   await provisionCheckpointsForClient(client.id, input.checkpointTemplateIds);
-  await provisionKickoffTask(client.id);
+  // Com as rotinas padrão, a Reunião de kickoff já nasce com data e responsável
+  // — o card genérico de kickoff ficaria duplicado ao lado dela.
+  if (input.routines?.length) await provisionClientRoutines(client.id, input.routines);
+  else await provisionKickoffTask(client.id);
   return client;
 }
 
@@ -984,6 +1126,45 @@ export async function createClientWithChildren(input: {
 // planejamento/briefing vocabulary from lib/taskCatalog.ts — no new kind.
 // Internal by design (client_visible false): it's the North team's own
 // reminder to review what the client filled in.
+// Rotinas padrão do cadastro (lib/clientRoutines.ts, ATA 14/09): cada uma nasce
+// com a data e o responsável escolhidos na etapa final do cadastro. As
+// periódicas nascem como demanda recorrente — molde sempre aberto + a primeira
+// execução —, e o responsável vai para os dois cards.
+export async function provisionClientRoutines(clientId: string, routines: readonly ClientRoutineInput[]): Promise<void> {
+  const team = new Map((await listTeamMembers()).map((member) => [member.id, member.name]));
+  for (const def of CLIENT_STANDARD_ROUTINES) {
+    const input = routines.find((routine) => routine.key === def.key);
+    if (!input) continue;
+    const weekday = new Date(`${input.date}T12:00:00Z`).getUTCDay();
+    const base: Record<string, unknown> = {
+      kind: "operacional",
+      subtype: null,
+      title: def.title,
+      description: def.description,
+      status: "backlog" as TaskStatus,
+      priority: "media",
+      client_visible: false,
+      due_date: input.date,
+      start_date: input.date,
+      end_date: input.date,
+      assignee: team.get(input.assigneeId) ?? null,
+    };
+    const created = def.cadence
+      ? await createRecurringTaskGroup(clientId, {
+          ...base,
+          recurrence_cadence: def.cadence,
+          recurrence_weekdays: [weekday],
+          recurrence_day_of_month: def.cadence === "mensal" ? Number(input.date.slice(8, 10)) : null,
+        })
+      : await createTask(clientId, base);
+    const ids = new Set([created.id]);
+    if (created.plan_id) ids.add(created.plan_id);
+    if (team.has(input.assigneeId)) {
+      for (const id of ids) await setTaskAssigneeProfiles(id, [input.assigneeId]);
+    }
+  }
+}
+
 export async function provisionKickoffTask(clientId: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("tasks").insert({
@@ -2028,6 +2209,7 @@ async function completeTaskCycleForRequest(
   expectedCycle: number | undefined,
   expectedRevision: number | undefined,
   expectedDueDate: string | null,
+  actor: { id: string; name: string } | null = null,
 ): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
   const supabase = await createClient();
   const parent = await getTaskById(id);
@@ -2061,16 +2243,31 @@ async function completeTaskCycleForRequest(
   }
 
   const nextCycle = currentCycle + 1;
-  const nextDue = nextRecurringDueDate(parent.due_date, {
+  const rule = {
     cadence: parent.recurrence_cadence,
     weekdays: parent.recurrence_weekdays,
     dayOfMonth: parent.recurrence_day_of_month,
     startDate: parent.start_date ?? parent.due_date,
-  });
+  };
+  // A demanda recorrente fica sempre aberta e SEMPRE com uma data futura (ATA
+  // 14/09). Concluir um ciclo com semanas de atraso não pode fazer a próxima
+  // entrega já nascer vencida: avança até a primeira data depois de hoje.
+  const today = agencyTodayIso();
+  let nextDue = nextRecurringDueDate(parent.due_date, rule);
+  for (let guard = 0; nextDue <= today && guard < 400; guard += 1) nextDue = nextRecurringDueDate(nextDue, rule);
+  const completedAt = new Date().toISOString();
   const nextPayload = recurrenceParentPayload({
     ...(parent.payload ?? {}),
     completed_cycles: nextCycle,
-    last_completed_at: new Date().toISOString(),
+    last_completed_at: completedAt,
+    // O check desta entrega: data do ciclo, quando e quem (ver lib/cycleLog.ts).
+    cycle_log: appendCycleLog(parent.payload, {
+      cycle: currentCycle,
+      due_date: parent.due_date,
+      completed_at: completedAt,
+      by: actor?.name ?? null,
+      by_id: actor?.id ?? null,
+    }),
   }, nextCycle, currentRevision);
   const { data: advanced, error: updateError } = await supabase.from("tasks").update({
     due_date: nextDue,
@@ -2122,8 +2319,9 @@ export async function completeTaskCycle(
   expectedCycle: number | undefined,
   expectedRevision: number | undefined,
   expectedDueDate: string | null,
+  actor: { id: string; name: string } | null = null,
 ): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
-  return completeTaskCycleForRequest(id, expectedCycle, expectedRevision, expectedDueDate);
+  return completeTaskCycleForRequest(id, expectedCycle, expectedRevision, expectedDueDate, actor);
 }
 
 export async function detachTaskRelation(taskId: string, parentId: string): Promise<TaskRecord> {
@@ -3410,6 +3608,16 @@ export async function listAssigneeOptions(): Promise<string[]> {
 }
 
 /** Candidates for the internal Revisão stage — admin accounts only. */
+/** A equipe North (perfis admin com nome) — quem pode ser @mencionado. */
+export async function listTeamMembers(): Promise<{ id: string; name: string }[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("profiles").select("id,full_name").eq("role", "admin").order("full_name");
+  if (error) fail(error);
+  return ((data as { id: string; full_name: string | null }[] | null) ?? [])
+    .filter((p) => p.full_name?.trim())
+    .map((p) => ({ id: p.id, name: (p.full_name as string).trim() }));
+}
+
 export async function listAdminReviewers(): Promise<ReviewerCandidate[]> {
   const supabase = await createClient();
   const { data, error } = await supabase

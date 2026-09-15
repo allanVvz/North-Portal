@@ -65,6 +65,10 @@ function RecurrenceCard({
 }) {
   const state = recurringState(task, today);
   const tone = RECURRING_STATE_TONE[state];
+  // Situação no vocabulário da ATA 14/09: molde parado de propósito é "Parada";
+  // próxima execução vencida é "Atrasada"; ciclo fechado é "Concluída".
+  const halted = task.status === "parada";
+  const situation = halted ? "parada" : state === "parada" ? "atrasada" : state === "concluida" ? "concluida" : "no_prazo";
   const relative = relativeDue(task.next_due_date, today);
   // Numa rotina, start_date é a âncora e end_date o limite da agenda: mostrar
   // as duas é "a informação completa" de uma data que na verdade é um período,
@@ -75,7 +79,7 @@ function RecurrenceCard({
 
   return (
     <article
-      className={`rec-card ${compact ? "compact" : ""} ${dragging ? "dragging" : ""}`}
+      className={`rec-card is-${situation} ${compact ? "compact" : ""} ${dragging ? "dragging" : ""}`}
       draggable={Boolean(onDragStart)}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -85,7 +89,7 @@ function RecurrenceCard({
       <button type="button" className="rec-card-open" onClick={onOpen} aria-label={`Abrir rotina ${task.title}`}>
       {coverCandidates.length ? <CardCover candidates={coverCandidates} title={task.title} className="rec-card-cover" /> : null}
       <span className="rec-card-topline">
-        <span className={`rec-state ${tone}`}>{RECURRING_STATE_LABEL[state]}</span>
+        <span className={`rec-state ${halted ? "paused" : tone}`}>{halted ? "Parada" : RECURRING_STATE_LABEL[state]}</span>
       </span>
       <span className="rec-card-titleline"><TaskKindIcon kind={task.kind} /><strong>{task.title}</strong></span>
       {/* In the calendar the meta row is hidden, so without this two clients
@@ -401,7 +405,7 @@ export default function OperacaoWorkspace({
                 <strong>{stats.ativas}</strong><span>Ativas</span>
               </button>
               <button type="button" className={`rec-stat-btn attention ${stateFilter === "parada" ? "on" : ""}`} onClick={() => toggleStateFilter("parada")} aria-pressed={stateFilter === "parada"}>
-                <strong>{stats.paradas}</strong><span>Paradas</span>
+                <strong>{stats.paradas}</strong><span>Atrasadas</span>
               </button>
             </div>
           ) : null}

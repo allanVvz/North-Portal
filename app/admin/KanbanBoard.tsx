@@ -17,17 +17,19 @@ import { useSidebarEnabledPref } from "./kanbanPrefs";
 import SortMenu from "./SortMenu";
 import { sortItems } from "./taskSort";
 import { useSortPref } from "./taskSortPrefs";
-import { formatPeriod, formatShortDate, isOverdue, relativeDue } from "./taskDates";
+import { formatPeriod, formatShortDate, relativeDue } from "./taskDates";
 import { todayInTimezone } from "./recurringState";
-import { COLUMNS, PRIORITY_LABEL, commentsOf, taskTone, visibleColumnsFor } from "./kanbanShared";
+import { COLUMNS, PRIORITY_LABEL, STATUS_LABEL, commentsOf, taskTone, visibleColumnsFor } from "./kanbanShared";
+import { DEADLINE_LABEL, deadlineStateOf } from "./deadlineState";
 import { formatRelativeAge } from "@/lib/comments";
 import { FLOW_STEP_COUNT_KEY, kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
 import { belongsToTaskScreen, childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
-import type { ResponsibilityAssignment } from "@/lib/supabase";
+import type { RecurringTask, ResponsibilityAssignment } from "@/lib/supabase";
 import { calendarMonthDates } from "./calendarUtils";
+import { recurringOccurrences } from "./recurringOccurrences";
 
 type ClientLite = { slug: string; name: string };
 type View = "quadro" | "tabela" | "calendario";
@@ -111,6 +113,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const router = useRouter();
   const deepLinkHandledRef = useRef(false);
   const [tasks, setTasks] = useState<BoardRow[]>([]);
+  // Demandas recorrentes (moldes) — não entram no quadro, mas são guia no
+  // calendário: cada data futura da regra aparece no dia (ATA 14/09).
+  const [routines, setRoutines] = useState<RecurringTask[]>([]);
   const [adminReviewers, setAdminReviewers] = useState<ReviewerCandidate[]>([]);
   const [flowFlags, setFlowFlags] = useState<ClientFlowFlags | null>(null);
   const [clientReviewers, setClientReviewers] = useState<ReviewerCandidate[]>([]);
@@ -135,7 +140,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const [calOpenDay, setCalOpenDay] = useState<string | null>(null);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const { map: attrMap, save: saveAttrMap, visible } = useAttrVisibility();
-  const tableColCount = 3 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
+  const tableColCount = 4 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
   const { sidebarEnabled, setSidebarEnabled } = useSidebarEnabledPref();
   const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
   // Whether ANY client currently has Revisão/Aprovação admin-enabled — drives
@@ -166,10 +171,17 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/admin/tasks", { cache: "no-store" });
+      const [res, routinesRes] = await Promise.all([
+        fetch("/api/admin/tasks", { cache: "no-store" }),
+        fetch("/api/admin/routines", { cache: "no-store" }).catch(() => null),
+      ]);
       if (!res.ok) throw new Error();
       const data = await res.json();
       setTasks(data.tasks ?? []);
+      if (routinesRes?.ok) {
+        const routineData = await routinesRes.json().catch(() => null) as { tasks?: RecurringTask[] } | null;
+        setRoutines(routineData?.tasks ?? []);
+      }
     } catch {
       setError("Não foi possível carregar o quadro.");
     }
@@ -213,8 +225,12 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const taskScreenTasks = useMemo(() => tasks.filter(belongsToTaskScreen), [tasks]);
   const filtered = useMemo(() => {
     const matching = taskScreenTasks.filter((t) => {
-      if (!taskMatchesFilters(t, activeFilters)) return false;
+      if (!taskMatchesFilters(t, activeFilters, todayIso)) return false;
       if (!taskMatchesQuery(t, q, { clientName: t.clientName ?? "" })) return false;
+      // Ordenar por data é para ver o que vence e o que já venceu (ATA 14/09):
+      // o que está concluído sai da lista em vez de disputar posição com o
+      // atraso. As outras ordens continuam mostrando tudo.
+      if (sort.key === "data" && t.status === "aprovado") return false;
       return true;
     });
     // Ordenar aqui alcança Quadro (ambos os modos) e Tabela de uma vez; o
@@ -226,7 +242,21 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
       completedAt: t.completed_at,
       position: t.position,
     }));
-  }, [taskScreenTasks, activeFilters, q, sort]);
+  }, [taskScreenTasks, activeFilters, q, sort, todayIso]);
+
+  // Atalho para a busca de demandas atrasadas — o mesmo filtro "Situação" da
+  // barra, a um clique, com a contagem à vista.
+  const overdueCount = useMemo(
+    () => taskScreenTasks.filter((t) => deadlineStateOf(t, todayIso) === "atrasada").length,
+    [taskScreenTasks, todayIso],
+  );
+  const overdueFilterOn = activeFilters.some((f) => f.attr === "situacao" && f.value === "atrasada");
+  function toggleOverdueFilter() {
+    setActiveFilters((current) => {
+      const others = current.filter((f) => f.attr !== "situacao");
+      return overdueFilterOn ? others : [...others, { attr: "situacao", value: "atrasada", label: DEADLINE_LABEL.atrasada }];
+    });
+  }
 
   // Igualdade de status, sem exceção. A projeção visual que existia aqui era
   // do "Publicado" dentro de Concluído, e some com o estágio.
@@ -357,6 +387,34 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     }),
     [calDays, planCards],
   );
+  // As datas FUTURAS de cada rotina dentro do período visível do calendário,
+  // respeitando os mesmos filtros e a mesma busca do quadro.
+  const routinesByDay = useMemo(() => {
+    const map = new Map<string, RecurringTask[]>();
+    if (view !== "calendario" || !routines.length) return map;
+    const first = calMode === "mes" ? calDays[0] : weekStart;
+    const last = calMode === "mes" ? calDays[calDays.length - 1] : addDays(weekStart, 6);
+    const visible = routines.filter((routine) =>
+      taskMatchesFilters(routine, activeFilters, todayIso) && taskMatchesQuery(routine, q, { clientName: routine.clientName }));
+    for (const routine of visible) {
+      for (const iso of recurringOccurrences(routine, isoDate(first), isoDate(last))) {
+        if (iso < todayIso) continue;
+        const [y, m, d] = iso.split("-").map(Number);
+        const key = dayKey(new Date(y, m - 1, d));
+        const list = map.get(key);
+        if (list) list.push(routine); else map.set(key, [routine]);
+      }
+    }
+    return map;
+  }, [routines, view, calMode, calDays, weekStart, activeFilters, q, todayIso]);
+
+  function openRoutine(routine: RecurringTask) {
+    // O molde não está no feed do quadro — entra no estado só para o modal achá-lo
+    // (belongsToTaskScreen continua o mantendo fora das colunas).
+    setTasks((rows) => (rows.some((row) => row.id === routine.id) ? rows : [...rows, routine]));
+    openTask(routine.id);
+  }
+
   const stepMonth = (dir: -1 | 1) => setCal((c) => {
     const d = new Date(c.y, c.m + dir, 1);
     return { y: d.getFullYear(), m: d.getMonth() };
@@ -568,14 +626,17 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     const plataforma = payloadStr(t, "plataforma");
     const showFormato = visible("formato") && Boolean(formato);
     const showPlataforma = visible("plataforma") && Boolean(plataforma);
-    const overdue = isOverdue(t.due_date, todayIso, t.status);
-    const dueRelative = relativeDue(t.due_date, todayIso);
+    // A situação é a PRIMEIRA informação do card (ATA 14/09): status | data de
+    // entrega | responsável | cliente. O bloco inteiro ganha a cor da situação —
+    // verde concluída, vermelho atrasada, âmbar parada.
+    const state = deadlineStateOf(t, todayIso);
+    const dueRelative = state === "concluida" ? null : relativeDue(t.due_date, todayIso);
     const period = formatPeriod(t.start_date, t.end_date);
     const coverCandidates = taskCoverCandidates(t);
     const flowBadge = visible("flow_step") ? flowBadges.get(t.id) ?? null : null;
     return (
       <article
-        className={`kb-card ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
+        className={`kb-card is-${state} ${selectedId === t.id ? "sel" : ""} ${dragId === t.id ? "dragging" : ""}`}
         key={t.id}
         draggable
         onDragStart={(e) => onCardDragStart(e, t.id)}
@@ -585,11 +646,15 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         onClick={() => openTask(t.id)}
       >
         {coverCandidates.length ? <CardCover candidates={coverCandidates} title={t.title} className="kb-card-cover" /> : null}
-        <div className="kb-card-top">
-          {t.clientName ? <span className="kb-card-client">{t.clientName}</span> : null}
-          {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
-          {visible("plan_link") && parentIdsOf(t).length ? <span className="kb-plan-link" title="Vinculado a um pai (plano ou entrega)">◆</span> : null}
-          {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
+        <div className="kb-card-statusline">
+          <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span>
+          {/* No Kanban a coluna já diz a etapa; agrupado por pessoa, não. */}
+          {boardMode === "responsavel" ? <span className="kb-card-stage">{STATUS_LABEL[t.status]}</span> : null}
+          <span className="kb-card-marks">
+            {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
+            {visible("plan_link") && parentIdsOf(t).length ? <span className="kb-plan-link" title="Vinculado a um pai (plano ou entrega)">◆</span> : null}
+            {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
+          </span>
         </div>
         <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} /><p className="kb-card-title">{t.title}</p></div>
         {flowBadge ? (
@@ -605,9 +670,12 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
             {showPlataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
           </div>
         ) : null}
-        <div className="kb-card-dates">
-          {overdue ? <span className="kb-state overdue">Atrasado</span> : null}
-          <span className="kb-card-due">◷ {formatShortDate(t.due_date)}{dueRelative ? ` · ${dueRelative}` : ""}</span>
+        <div className="kb-card-facts">
+          <span className="kb-card-due" title="Data de entrega">◷ {formatShortDate(t.due_date)}{dueRelative ? ` · ${dueRelative}` : ""}</span>
+          {t.assignee
+            ? <span className="kb-assignee" title={`Responsável: ${t.assignee}`}>● {t.assignee}</span>
+            : <span className="kb-assignee is-empty" title="Sem responsável">● Sem responsável</span>}
+          {t.clientName ? <span className="kb-card-client" title="Cliente">{t.clientName}</span> : null}
         </div>
         {period ? <div className="kb-card-periodrow"><span className="kb-card-period">▦ {period}</span></div> : null}
         {visible("progress") ? (
@@ -617,7 +685,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           </div>
         ) : null}
         <div className="kb-card-foot">
-          {t.assignee ? <span className="kb-assignee" title={t.assignee}>● {t.assignee}</span> : <span />}
+          <span />
           <span className="kb-card-foot-right">
             <span className="kb-updated" title="Última atualização">{formatRelativeAge(t.updated_at)}</span>
             {commentsOf(t).length > 0 ? (
@@ -647,6 +715,15 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           tasks={taskScreenTasks}
           onPickTask={openTask}
         />
+        <button
+          type="button"
+          className={`kb-overdue-quick ${overdueFilterOn ? "on" : ""} ${overdueCount ? "has" : ""}`}
+          onClick={toggleOverdueFilter}
+          aria-pressed={overdueFilterOn}
+          title={overdueFilterOn ? "Mostrar todas as tarefas" : "Mostrar só as tarefas atrasadas"}
+        >
+          Atrasadas <b>{overdueCount}</b>
+        </button>
         <span className={`kb-loadspin ${loading ? "on" : ""}`} role="status" aria-label={loading ? "Carregando" : undefined} aria-hidden={!loading} />
         {view === "quadro" ? (
           <div className="kb-modetoggle">
@@ -753,7 +830,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                                 <div className="kb-cal-items">
                                   {(calOpenDay === key ? items : items.slice(0, CAL_DAY_LIMIT)).map((t) => (
                                     <button
-                                      className={`kb-cal-pill tone-${taskTone(t)} ${dragId === t.id ? "dragging" : ""}`}
+                                      className={`kb-cal-pill tone-${taskTone(t)} is-${deadlineStateOf(t, todayIso)} ${dragId === t.id ? "dragging" : ""}`}
                                       key={t.id}
                                       draggable
                                       onDragStart={(e) => onCardDragStart(e, t.id)}
@@ -762,6 +839,17 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                                       title={t.title}
                                     >
                                       <TaskKindIcon kind={t.kind} size="sm" />{t.title}
+                                    </button>
+                                  ))}
+                                  {(routinesByDay.get(key) ?? []).map((routine) => (
+                                    <button
+                                      type="button"
+                                      className="kb-cal-pill is-routine"
+                                      key={`routine-${routine.id}`}
+                                      onClick={() => openRoutine(routine)}
+                                      title={`Rotina · ${routine.title} · ${routine.clientName}`}
+                                    >
+                                      <span aria-hidden>↻</span> {routine.title}
                                     </button>
                                   ))}
                                   {items.length > CAL_DAY_LIMIT ? (
@@ -820,7 +908,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                       >
                         {weekEventsByDay[i].map((t) => (
                           <button
-                            className={`kb-week-event tone-${taskTone(t)} ${dragId === t.id ? "dragging" : ""}`}
+                            className={`kb-week-event tone-${taskTone(t)} is-${deadlineStateOf(t, todayIso)} ${dragId === t.id ? "dragging" : ""}`}
                             key={t.id}
                             draggable
                             onDragStart={(e) => onCardDragStart(e, t.id)}
@@ -831,7 +919,18 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                             <TaskKindIcon kind={t.kind} size="sm" />{horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
                           </button>
                         ))}
-                        {weekEventsByDay[i].length === 0 ? <span className="kb-week-empty">—</span> : null}
+                        {(routinesByDay.get(dayKey(d)) ?? []).map((routine) => (
+                          <button
+                            type="button"
+                            className="kb-week-event is-routine"
+                            key={`routine-${routine.id}`}
+                            onClick={() => openRoutine(routine)}
+                            title={`Rotina · ${routine.title} · ${routine.clientName}`}
+                          >
+                            <span aria-hidden>↻</span> {routine.title}
+                          </button>
+                        ))}
+                        {weekEventsByDay[i].length === 0 && !(routinesByDay.get(dayKey(d)) ?? []).length ? <span className="kb-week-empty">—</span> : null}
                       </div>
                     ))}
                   </div>
@@ -857,7 +956,11 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                     </div>
                     <div className="kb-col-body">
                       {columnTasks.map((t) => renderCard(t, () => void dropInColumn(col.status, t.id)))}
-                      {columnTasks.length === 0 ? <p className="kb-empty">Arraste um card aqui</p> : null}
+                      {columnTasks.length === 0 ? (
+                        <p className="kb-empty">
+                          {col.status === "aprovado" && sort.key === "data" ? "Concluídas ficam ocultas na ordenação por data" : "Arraste um card aqui"}
+                        </p>
+                      ) : null}
                     </div>
                     <NewTaskButton
                       label="+ Adicionar tarefa"
@@ -899,6 +1002,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
               <table className="kb-table">
                 <thead>
                   <tr>
+                    <th>Situação</th>
                     <th>Tarefa</th>
                     <th>Tipo</th>
                     {visible("status") ? <th>Etapa</th> : null}
@@ -910,8 +1014,12 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((t) => (
-                    <tr key={t.id} className={selectedId === t.id ? "sel" : ""} onClick={() => openTask(t.id)}>
+                  {filtered.map((t) => {
+                    const state = deadlineStateOf(t, todayIso);
+                    const dueRelative = state === "concluida" ? null : relativeDue(t.due_date, todayIso);
+                    return (
+                    <tr key={t.id} className={`is-${state} ${selectedId === t.id ? "sel" : ""}`} onClick={() => openTask(t.id)}>
+                      <td><span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span></td>
                       <td>
                         {t.title}
                         {t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
@@ -920,7 +1028,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                       <td><TaskKindIcon kind={t.kind} /></td>
                       {visible("status") ? <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td> : null}
                       {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>● {t.assignee}</span> : "—"}</td> : null}
-                      <td>{fmtDue(t.due_date)}</td>
+                      <td>{fmtDue(t.due_date)}{dueRelative ? <small className="kb-table-rel"> · {dueRelative}</small> : null}</td>
                       {visible("progress") ? (
                         <td>
                           <div className="kb-card-progress" style={{ margin: 0 }}>
@@ -932,7 +1040,8 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                       {visible("priority") ? <td><span className={`kb-prio p-${t.priority}`}>{PRIORITY_LABEL[t.priority]}</span></td> : null}
                       {visible("client_visible") ? <td>{t.client_visible ? "◉ visível" : "—"}</td> : null}
                     </tr>
-                  ))}
+                    );
+                  })}
                   {filtered.length === 0 && !loading ? (
                     <tr><td colSpan={tableColCount} className="kb-empty">Nenhuma tarefa encontrada.</td></tr>
                   ) : null}

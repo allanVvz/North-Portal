@@ -6,6 +6,13 @@ import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
 import FlowStepsBox from "./FlowStepsBox";
+import MentionTextarea from "./MentionTextarea";
+import StepRow, { type StepPatch } from "./StepRow";
+import { cycleLogOf } from "@/lib/cycleLog";
+import { formatShortDate } from "./taskDates";
+import ContentPlanComposer from "./ContentPlanComposer";
+import { addDaysIso } from "./contentPlan";
+import { todayInTimezone } from "./recurringState";
 import CardParentBox from "./CardParentBox";
 import VisibleToggleField from "./VisibleToggleField";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
@@ -86,7 +93,7 @@ type PendingMember =
   // que faltava, o que fazia o mesmo composer criar Entrega quando o plano já
   // existia e Tarefa quando não existia (o sintoma "o mesmo botão dá resultado
   // diferente conforme a tela").
-  | { key: string; kind: "new"; taskKind: string; title: string; assignee: string; due_date: string };
+  | { key: string; kind: "new"; taskKind: string; title: string; assignee: string; due_date: string; description?: string };
 
 function draftFrom(
   task: TaskRecord | null,
@@ -964,12 +971,13 @@ export default function TaskModal({
   // etapa nenhuma). A porta é a mesma do NewTaskButton — POST
   // /api/admin/tasks?scope=task — então um tipo `behavior:'entrega'` já
   // cascateia sozinho (createFlowDelivery), sem lógica nova aqui.
-  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string; kind: string }) {
+  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string; kind: string; description?: string }) {
     if (!liveTask) return;
     setBusy(true);
     setError("");
     const body: Record<string, unknown> = {
       title: data.title,
+      description: data.description ?? null,
       kind: data.kind,
       assignee: data.assignee || null,
       due_date: data.due_date || null,
@@ -1017,6 +1025,39 @@ export default function TaskModal({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [liveTask?.id]);
+
+  // Edição na linha de uma etapa/atividade (StepRow): o PATCH é no card DELA,
+  // o mesmo de abrir e editar — cascata e notificações valem igual. Concluir a
+  // etapa pode criar a próxima; ela volta junto e entra no estado da tela.
+  async function patchRelatedCard(card: TaskRecord, patch: StepPatch) {
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${card.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+      });
+      const body = await res.json().catch(() => null) as (TaskRecord & { flow_next_task?: TaskRecord; error?: string }) | null;
+      if (!res.ok || !body) throw new Error(body?.error ?? "Não foi possível atualizar a etapa.");
+      const { flow_next_task: next, ...updated } = body;
+      onTaskPatched?.(updated as TaskRecord);
+      if (next) onTaskPatched?.(next);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível atualizar a etapa.");
+    }
+  }
+
+  async function commentRelatedCard(card: TaskRecord, text: string) {
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${card.id}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error();
+      onTaskPatched?.(await res.json() as TaskRecord);
+    } catch {
+      setError("Não foi possível comentar na etapa.");
+      throw new Error("comment failed");
+    }
+  }
 
   async function openRelatedTask(member: TaskRecord) {
     if (!onOpenRelatedTask) return;
@@ -1251,6 +1292,7 @@ export default function TaskModal({
           // onde a regra "uma porta só de criação" ainda não valia.
           const memberBody: Record<string, unknown> = {
             title: member.title,
+            description: member.description ?? null,
             kind: member.taskKind,
             assignee: member.assignee || null,
             due_date: member.due_date || null,
@@ -1718,11 +1760,44 @@ export default function TaskModal({
                 candidatesFor={chainCandidates}
                 busy={busy}
                 canOpen={Boolean(onOpenRelatedTask)}
+                team={adminReviewers}
                 onOpenStep={(card) => void openRelatedTask(card)}
                 onUnlinkStep={(card) => void unlinkMember(card.id, liveTask.id)}
                 onLinkStep={(card, slot) => void linkStepCard(card, slot)}
+                onPatchStep={patchRelatedCard}
+                onCommentStep={commentRelatedCard}
               />
             ) : null}
+
+            {/* Checks da recorrência (ATA 14/09): cada entrega concluída com a data
+                do check e quem deu, no card que fica sempre aberto. Numa execução,
+                mostra os do molde. */}
+            {liveTask && (isRecurringParent || recurrenceParent) ? (() => {
+              const template = isRecurringParent ? liveTask : recurrenceParent;
+              const log = cycleLogOf(template?.payload).slice().reverse();
+              return (
+                <div className="tm-box tm-cyclelog">
+                  <p className="tm-box-label">Checks da recorrência ({log.length})</p>
+                  {template?.due_date && template.recurrence_cadence && !recurrenceStopped(template.status) ? (
+                    <p className="tm-cyclelog-next">Próxima entrega: <b>{formatShortDate(template.due_date)}</b></p>
+                  ) : null}
+                  {log.length ? (
+                    <ul className="tm-cyclelog-list">
+                      {log.map((entry) => (
+                        <li key={`${entry.cycle}-${entry.completed_at}`}>
+                          <span className="tm-cyclelog-check" aria-hidden>✓</span>
+                          <span className="tm-cyclelog-when">{formatAbsoluteTime(entry.completed_at)}</span>
+                          <span className="tm-cyclelog-cycle">ciclo de {formatShortDate(entry.due_date)}</span>
+                          <b className="tm-cyclelog-by">{entry.by ?? "—"}</b>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="admin-sub" style={{ margin: 0 }}>Nenhum check registrado ainda. “✓ Concluir ciclo” registra a entrega com data e responsável.</p>
+                  )}
+                </div>
+              );
+            })() : null}
 
             {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
               <div className="tm-box tm-planmembers">
@@ -1732,22 +1807,19 @@ export default function TaskModal({
                 <div className="tm-member-list">
                   {liveTask ? (
                     planMembers.map((m) => (
-                      <div className="tm-member" key={m.id}>
-                        <button
-                          type="button"
-                          className="tm-member-unlink"
-                          title={isRecurringParent ? "Remover ligação com esta execução" : "Desvincular do plano"}
-                          aria-label={isRecurringParent ? `Remover ligação com ${m.title}` : `Desvincular ${m.title} do plano`}
-                          onClick={() => void unlinkMember(m.id, liveTask.id)}
-                          disabled={busy}
-                        >✕</button>
-                        <button type="button" className="tm-member-open" onClick={() => void openRelatedTask(m)} disabled={!onOpenRelatedTask || busy}>
-                          <TaskKindIcon kind={m.kind} size="sm" />
-                          <span className="tm-member-title">{m.title}</span>
-                          <span className="tm-member-status">{isDeferredTask(m) ? "Futura · abrir tarefa" : STATUS_LABEL[m.status]}</span>
-                          <span className="tm-member-arrow" aria-hidden>↗</span>
-                        </button>
-                      </div>
+                      <StepRow
+                        key={m.id}
+                        card={m}
+                        label={isDeferredTask(m) ? `${m.title} · futura` : m.title}
+                        team={adminReviewers}
+                        busy={busy}
+                        canOpen={Boolean(onOpenRelatedTask)}
+                        onOpen={() => void openRelatedTask(m)}
+                        onUnlink={() => void unlinkMember(m.id, liveTask.id)}
+                        unlinkTitle={isRecurringParent ? `Remover ligação com ${m.title}` : `Desvincular ${m.title} do plano`}
+                        onPatch={patchRelatedCard}
+                        onComment={commentRelatedCard}
+                      />
                     ))
                   ) : (
                     pendingMembers.map((m) => (
@@ -1772,6 +1844,34 @@ export default function TaskModal({
                     </p>
                   ) : null}
                 </div>
+                {!isRecurringParent ? (
+                  <ContentPlanComposer
+                    busy={busy}
+                    onGenerate={(steps) => {
+                      const base = draft.start_date || draft.due_date || todayInTimezone("America/Sao_Paulo");
+                      if (liveTask) {
+                        void (async () => {
+                          for (const step of steps) {
+                            await createLinkedActivity({ title: step.title, description: step.description, assignee: draft.assignee, due_date: addDaysIso(base, step.offsetDays), kind: "operacional" });
+                          }
+                        })();
+                        return;
+                      }
+                      setPendingMembers((current) => [
+                        ...current,
+                        ...steps.map((step, index) => ({
+                          key: `cp-${Date.now()}-${index}`,
+                          kind: "new" as const,
+                          taskKind: "operacional",
+                          title: step.title,
+                          description: step.description,
+                          assignee: draft.assignee,
+                          due_date: addDaysIso(base, step.offsetDays),
+                        })),
+                      ]);
+                    }}
+                  />
+                ) : null}
                 {!isRecurringParent ? (
                   <PlanMemberComposer
                     candidates={liveTask ? linkableCandidates : newPlanCandidates}
@@ -1975,14 +2075,11 @@ export default function TaskModal({
                       ))
                     )}
                   </HeadDropdown>
-                  <AutoGrowTextarea
-                    rows={1}
+                  <MentionTextarea
                     value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendComment(); }
-                    }}
-                    placeholder="Escrever comentário…"
+                    onChange={setComment}
+                    onSubmit={() => void sendComment()}
+                    placeholder="Escrever comentário… use @ para chamar alguém"
                   />
                   <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim()}>Enviar</button>
                 </div>

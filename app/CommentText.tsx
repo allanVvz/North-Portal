@@ -22,11 +22,29 @@ import GoogleDrivePreview from "@/app/GoogleDrivePreview";
 // arquivo, e quem resolve essa ambiguidade é o GoogleDrivePreview.
 // Off by default so call sites outside the task card (client portal,
 // TaskDetailPanel, ...) render exactly as before.
+
+// "@Nome" ou "@Nome Sobrenome" (até três palavras com inicial maiúscula) — é o
+// que o campo de menção escreve (app/admin/MentionTextarea.tsx). Grifado para
+// quem lê o card saber de relance quem foi chamado.
+const MENTION_SPLIT = /(@[\p{Lu}][\p{L}\p{N}]*(?: [\p{Lu}][\p{L}\p{N}]*){0,2})/u;
+
+function withMentions(text: string, key: number) {
+  const parts = text.split(MENTION_SPLIT);
+  if (parts.length === 1) return <span key={key}>{text}</span>;
+  return (
+    <Fragment key={key}>
+      {parts.map((part, index) =>
+        index % 2 === 1 ? <mark key={index} className="cm-mention">{part}</mark> : <span key={index}>{part}</span>,
+      )}
+    </Fragment>
+  );
+}
+
 export default function CommentText({ text, onLinkClick, showLinkPreview = false }: { text: string; onLinkClick?: (url: string) => boolean; showLinkPreview?: boolean }) {
   return (
     <>
       {splitCommentText(text).map((part, i) => {
-        if (!("url" in part)) return <span key={i}>{part.text}</span>;
+        if (!("url" in part)) return withMentions(part.text, i);
         const drive = showLinkPreview ? parseGoogleDriveUrl(part.url) : null;
         return (
           <Fragment key={i}>

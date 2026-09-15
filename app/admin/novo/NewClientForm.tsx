@@ -16,6 +16,7 @@ import {
   type CompanyInfoState,
   type ContractState,
 } from "../ClientFormSections";
+import { CLIENT_STANDARD_ROUTINES, routineScheduleProblem } from "@/lib/clientRoutines";
 
 function slugify(value: string): string {
   return value
@@ -49,12 +50,15 @@ export default function NewClientForm({
   templates,
   scopeTags,
   adAccounts,
+  team,
   driveConfigured,
   lead = null,
 }: {
   templates: CheckpointTemplate[];
   scopeTags: ScopeTag[];
   adAccounts: AdAccountOption[];
+  /** A equipe North — quem pode ser responsável por uma rotina padrão. */
+  team: { id: string; name: string }[];
   driveConfigured: boolean;
   lead?: LeadRecord | null;
 }) {
@@ -83,6 +87,18 @@ export default function NewClientForm({
   const [driveShareEmail, setDriveShareEmail] = useState("");
   const [adAccountId, setAdAccountId] = useState("");
   const [sendInvite, setSendInvite] = useState(true);
+
+  // Rotinas padrão — etapa final obrigatória (ATA 14/09).
+  const [routines, setRoutines] = useState<Record<string, { date: string; assigneeId: string }>>({});
+  const routineInputs = CLIENT_STANDARD_ROUTINES.map((routine) => ({
+    key: routine.key,
+    date: routines[routine.key]?.date ?? "",
+    assigneeId: routines[routine.key]?.assigneeId ?? "",
+  }));
+  const routinesProblem = routineScheduleProblem(routineInputs);
+  const routinesDone = routineInputs.filter((input) => input.date && input.assigneeId).length;
+  const setRoutine = (key: string, patch: Partial<{ date: string; assigneeId: string }>) =>
+    setRoutines((current) => ({ ...current, [key]: { ...(current[key] ?? { date: "", assigneeId: "" }), ...patch } }));
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -137,6 +153,7 @@ export default function NewClientForm({
           responsavelWhatsapp: contract.responsavelWhatsapp.trim() || null,
         },
         checkpointTemplateIds: checkpoints,
+        routines: routineInputs,
         createDriveFolder: createDrive && driveConfigured,
         driveShareEmail: driveShareEmail.trim() || null,
         adAccountId: adAccountId || null,
@@ -330,6 +347,53 @@ export default function NewClientForm({
             onAdAccountId={setAdAccountId}
           />
 
+          {/* Etapa final do cadastro (ATA 14/09): sem data e responsável de cada
+              rotina padrão, o cliente não é criado. */}
+          <fieldset className="admin-group client-routines">
+            <legend>Rotinas padrão — etapa final</legend>
+            <p className="admin-hint">
+              O cadastro só é finalizado com <b>data</b> e <b>responsável</b> de cada rotina. As periódicas viram demandas
+              recorrentes: ficam sempre abertas, com a próxima data no futuro e cada entrega registrada no card.
+            </p>
+            <div className="client-routines-list">
+              {CLIENT_STANDARD_ROUTINES.map((routine) => {
+                const value = routines[routine.key] ?? { date: "", assigneeId: "" };
+                const done = Boolean(value.date && value.assigneeId);
+                return (
+                  <div className={`client-routine-row${done ? " is-done" : ""}`} key={routine.key}>
+                    <div className="client-routine-name">
+                      <strong>{done ? "✓ " : ""}{routine.title}</strong>
+                      <em>{routine.cadence === "semanal" ? "↻ Semanal" : routine.cadence === "mensal" ? "↻ Mensal" : "Única"}</em>
+                      <span>{routine.description}</span>
+                    </div>
+                    <label className="admin-field">
+                      <span>{routine.cadence ? "Primeira data" : "Data"}</span>
+                      <input
+                        type="date"
+                        value={value.date}
+                        onChange={(e) => setRoutine(routine.key, { date: e.target.value })}
+                        required
+                        aria-label={`Data de ${routine.title}`}
+                      />
+                    </label>
+                    <label className="admin-field">
+                      <span>Responsável</span>
+                      <select
+                        value={value.assigneeId}
+                        onChange={(e) => setRoutine(routine.key, { assigneeId: e.target.value })}
+                        required
+                        aria-label={`Responsável por ${routine.title}`}
+                      >
+                        <option value="">Escolher…</option>
+                        {team.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
+
           {error ? <p className="admin-error">{error}</p> : null}
         </div>
 
@@ -347,7 +411,11 @@ export default function NewClientForm({
             </li>
             <li>
               <span className="ck">✓</span>
-              {createDrive && driveConfigured ? "Pasta no Drive" : "Pasta do Drive manual"} + kickoff no Kanban
+              {createDrive && driveConfigured ? "Pasta no Drive" : "Pasta do Drive manual"}
+            </li>
+            <li>
+              <span className="ck">{routinesProblem ? "○" : "✓"}</span>
+              Rotinas padrão com data e responsável ({routinesDone}/{CLIENT_STANDARD_ROUTINES.length})
             </li>
           </ul>
 
@@ -373,9 +441,15 @@ export default function NewClientForm({
             </li>
           </ul>
           <p className="admin-hint">Os campos ficam editáveis depois da criação, em Clientes › Editar.</p>
+          {routinesProblem ? <p className="admin-hint client-routines-missing">{routinesProblem}</p> : null}
 
           <div className="admin-form-actions">
-            <button className="admin-btn primary" type="submit" disabled={busy || !name.trim() || !email.trim()}>
+            <button
+              className="admin-btn primary"
+              type="submit"
+              disabled={busy || !name.trim() || !email.trim() || Boolean(routinesProblem)}
+              title={routinesProblem ?? undefined}
+            >
               {busy ? "Criando..." : "Criar cliente"}
             </button>
             <Link href="/admin/clientes" className="admin-btn">

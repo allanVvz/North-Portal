@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import TaskKindIcon from "./TaskKindIcon";
+import StepRow, { type StepPatch } from "./StepRow";
 import { STATUS_LABEL } from "./kanbanShared";
 import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "./FloatingPopover";
 import { flowStepKeyOf } from "@/lib/taskRelations";
 import { taskMatchesQuery } from "@/lib/taskSearch";
+import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import type { TaskSubtypeDef, TaskTypeDef } from "@/lib/taskTypes";
-import type { TaskRecord } from "@/lib/validation";
+import type { ReviewerCandidate, TaskRecord } from "@/lib/validation";
 
 // A corrente de uma entrega, com o botão de corrente nas etapas vazias.
 //
@@ -17,6 +19,10 @@ import type { TaskRecord } from "@/lib/validation";
 //
 // A lista vem do TIPO, não dos cards — numa cascata as etapas seguintes ainda
 // não existem, e mostrar só o que já nasceu esconderia justamente o que falta.
+//
+// Cada etapa que já existe é editável na linha (StepRow): check de concluir,
+// status, data prevista, responsável e os comentários dela — sem abrir o card.
+// A "etapa atual" é marcada, e é ela que o card pai espelha.
 
 function ChainPicker({
   step,
@@ -94,9 +100,12 @@ export default function FlowStepsBox({
   candidatesFor,
   busy,
   canOpen,
+  team,
   onOpenStep,
   onUnlinkStep,
   onLinkStep,
+  onPatchStep,
+  onCommentStep,
 }: {
   /** O tipo-entrega, que é quem declara as etapas e a ordem delas. */
   type: TaskTypeDef | null;
@@ -107,13 +116,19 @@ export default function FlowStepsBox({
   candidatesFor: (slot: string) => TaskRecord[];
   busy: boolean;
   canOpen: boolean;
+  /** Quem pode ser responsável por uma etapa (a equipe). */
+  team: ReviewerCandidate[];
   onOpenStep: (task: TaskRecord) => void;
   onUnlinkStep: (task: TaskRecord) => void;
   onLinkStep: (task: TaskRecord, slot: string) => void;
+  onPatchStep: (task: TaskRecord, patch: StepPatch) => Promise<void>;
+  onCommentStep: (task: TaskRecord, text: string) => Promise<void>;
 }) {
+  const current = currentFlowStepOf(steps);
+
   // Fluxo DINÂMICO (tipo existe mas não tem subtipos — ex.: ocorrência
   // `operacional` promovida a pai de fluxo): não há sequência pré-definida, só
-  // as etapas que existem. Lista simples, clicável, sem ChainPicker.
+  // as etapas que existem.
   const dynamic = type !== null && type.subtypes.length === 0;
   if (dynamic) {
     if (!steps.length) return null;
@@ -121,24 +136,21 @@ export default function FlowStepsBox({
       <div className="tm-box tm-planmembers">
         <p className="tm-box-label">Etapas ({steps.length})</p>
         <div className="tm-member-list">
-          {steps.map((card) => {
-            const isCurrent = card.id === currentTaskId;
-            return (
-              <div className={`tm-member ${isCurrent ? "tm-member-current" : ""}`} key={card.id}>
-                <button
-                  type="button"
-                  className="tm-member-open"
-                  onClick={() => onOpenStep(card)}
-                  disabled={!canOpen || busy || isCurrent}
-                >
-                  <TaskKindIcon kind={card.kind} size="sm" />
-                  <span className="tm-member-title">{card.title}</span>
-                  <span className="tm-member-status">{isCurrent ? "você está aqui" : STATUS_LABEL[card.status]}</span>
-                  {isCurrent ? null : <span className="tm-member-arrow" aria-hidden>↗</span>}
-                </button>
-              </div>
-            );
-          })}
+          {steps.map((card) => (
+            <StepRow
+              key={card.id}
+              card={card}
+              label={card.title}
+              isCurrent={current?.id === card.id}
+              isOpenCard={card.id === currentTaskId}
+              team={team}
+              busy={busy}
+              canOpen={canOpen}
+              onOpen={() => onOpenStep(card)}
+              onPatch={onPatchStep}
+              onComment={onCommentStep}
+            />
+          ))}
         </div>
       </div>
     );
@@ -152,49 +164,43 @@ export default function FlowStepsBox({
       <div className="tm-member-list">
         {(type?.subtypes ?? []).map((step) => {
           const card = steps.find((t) => flowStepKeyOf(t) === step.key) ?? null;
-          const isCurrent = card?.id === currentTaskId;
+          if (card) {
+            return (
+              <StepRow
+                key={step.key}
+                card={card}
+                label={step.label}
+                isCurrent={current?.id === card.id}
+                isOpenCard={card.id === currentTaskId}
+                team={team}
+                busy={busy}
+                canOpen={canOpen}
+                onOpen={() => onOpenStep(card)}
+                onUnlink={() => onUnlinkStep(card)}
+                unlinkTitle={`Desligar ${card.title} da entrega`}
+                onPatch={onPatchStep}
+                onComment={onCommentStep}
+              />
+            );
+          }
           return (
-            <div className={`tm-member ${isCurrent ? "tm-member-current" : ""}`} key={step.key}>
-              {card ? (
-                <>
-                  <button
-                    type="button"
-                    className="tm-member-unlink"
-                    title="Desligar este card da entrega"
-                    aria-label={`Desligar ${card.title} da entrega`}
-                    onClick={() => onUnlinkStep(card)}
-                    disabled={busy}
-                  >✕</button>
-                  <button
-                    type="button"
-                    className="tm-member-open"
-                    onClick={() => onOpenStep(card)}
-                    disabled={!canOpen || busy || isCurrent}
-                  >
-                    <TaskKindIcon kind={card.kind} size="sm" />
-                    <span className="tm-member-title">{step.label}</span>
-                    <span className="tm-member-status">{isCurrent ? "você está aqui" : STATUS_LABEL[card.status]}</span>
-                    {isCurrent ? null : <span className="tm-member-arrow" aria-hidden>↗</span>}
-                  </button>
-                </>
-              ) : (
-                <>
-                  {/* Ligar compartilha, não copia: é assim que o mesmo roteiro
-                      serve três peças e uma diária de gravação serve vários
-                      criativos. */}
-                  <ChainPicker
-                    step={step}
-                    candidates={candidatesFor(step.key)}
-                    busy={busy}
-                    onPick={(task) => onLinkStep(task, step.key)}
-                  />
-                  <span className="tm-member-open tm-member-pending">
-                    <TaskKindIcon kind={type?.key ?? "operacional"} size="sm" />
-                    <span className="tm-member-title">{step.label}</span>
-                    <span className="tm-member-status">Aguardando a etapa anterior</span>
-                  </span>
-                </>
-              )}
+            <div className="tm-member tm-step-pending" key={step.key}>
+              {/* Ligar compartilha, não copia: é assim que o mesmo roteiro
+                  serve três peças e uma diária de gravação serve vários
+                  criativos. */}
+              <ChainPicker
+                step={step}
+                candidates={candidatesFor(step.key)}
+                busy={busy}
+                onPick={(task) => onLinkStep(task, step.key)}
+              />
+              <span className="tm-member-open tm-member-pending">
+                <TaskKindIcon kind={type?.key ?? "operacional"} size="sm" />
+                <span className="tm-member-title">{step.label}</span>
+                <span className="tm-member-status">
+                  Nasce quando a anterior for concluída{step.lead_days ? ` · prazo de ${step.lead_days} dia${step.lead_days === 1 ? "" : "s"}` : ""}
+                </span>
+              </span>
             </div>
           );
         })}

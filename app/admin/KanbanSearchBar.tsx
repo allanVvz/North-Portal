@@ -6,13 +6,18 @@ import { taskMatchesQuery } from "@/lib/taskSearch";
 import { TASK_KIND_KEYS, kindLabel } from "@/lib/taskCatalog";
 import type { TaskRecord } from "@/lib/validation";
 import TaskKindIcon from "./TaskKindIcon";
+import { DEADLINE_LABEL, DEADLINE_ORDER, deadlineStateOf, type DeadlineState } from "./deadlineState";
+import { todayInTimezone } from "./recurringState";
 
 type Row = TaskRecord & { clientName?: string };
 
-export type FilterAttr = "cliente" | "tipo" | "prioridade" | "responsavel";
+export type FilterAttr = "situacao" | "cliente" | "tipo" | "prioridade" | "responsavel";
 export type ActiveFilter = { attr: FilterAttr; value: string; label: string };
 
 const ATTR_DEFS: { key: FilterAttr; label: string; icon: string }[] = [
+  // Primeiro da lista: "o que está atrasado?" é a busca que a operação faz
+  // todo dia (ATA 14/09).
+  { key: "situacao", label: "Situação", icon: "◉" },
   { key: "cliente", label: "Cliente", icon: "◔" },
   { key: "tipo", label: "Tipo", icon: "◧" },
   { key: "prioridade", label: "Prioridade", icon: "⚑" },
@@ -20,8 +25,9 @@ const ATTR_DEFS: { key: FilterAttr; label: string; icon: string }[] = [
 ];
 const ATTR_LABEL: Record<FilterAttr, string> = Object.fromEntries(ATTR_DEFS.map((a) => [a.key, a.label])) as Record<FilterAttr, string>;
 
-export function taskMatchesFilters(t: Row, filters: ActiveFilter[]): boolean {
+export function taskMatchesFilters(t: Row, filters: ActiveFilter[], today: string = todayInTimezone("America/Sao_Paulo")): boolean {
   return filters.every((f) => {
+    if (f.attr === "situacao") return deadlineStateOf(t, today) === f.value;
     if (f.attr === "cliente") return (t.clientName ?? "Outros") === f.value;
     if (f.attr === "tipo") return t.kind === f.value;
     if (f.attr === "prioridade") return t.priority === f.value;
@@ -73,6 +79,7 @@ export default function KanbanSearchBar({
 
   const valueOptions = useMemo(() => {
     if (!pendingAttr) return [];
+    if (pendingAttr === "situacao") return DEADLINE_ORDER.map((state) => DEADLINE_LABEL[state]);
     if (pendingAttr === "cliente") {
       return Array.from(new Set(tasks.map((t) => t.clientName ?? "Outros"))).sort((a, b) => (a === "Outros" ? 1 : b === "Outros" ? -1 : a.localeCompare(b)));
     }
@@ -85,6 +92,7 @@ export default function KanbanSearchBar({
   // else is already the display value — this maps a picked label back to the
   // value actually compared against tasks.
   function valueKeyFor(attr: FilterAttr, label: string): string {
+    if (attr === "situacao") return (Object.entries(DEADLINE_LABEL) as [DeadlineState, string][]).find(([, l]) => l === label)?.[0] ?? label;
     if (attr === "tipo") return TASK_KIND_KEYS.find((k) => kindLabel(k) === label) ?? label;
     if (attr === "prioridade") {
       return (Object.entries(PRIORITY_LABEL).find(([, l]) => l === label)?.[0] ?? label);
@@ -125,7 +133,7 @@ export default function KanbanSearchBar({
           value={q}
           onChange={(e) => { onQChange(e.target.value); setPendingAttr(null); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder={filters.length ? "Buscar por título…" : "Filtrar por cliente, tipo, prioridade, responsável ou buscar por título…"}
+          placeholder={filters.length ? "Buscar por título…" : "Filtrar por situação, cliente, tipo, prioridade, responsável ou buscar por título…"}
         />
       </div>
       {open ? (

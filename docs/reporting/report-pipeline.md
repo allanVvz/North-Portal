@@ -176,6 +176,19 @@ Vercel. Custo de IA por execução ainda **não** é emitido — ver `comment-pa
   ciclo atual, a primeira semana em modo fluxo reaproveitava a ocorrência que o modo normal
   criou na semana anterior.
 
+## Responsável das etapas
+
+As etapas de relatório (`trafego`, `feedback`) nascem com quem está marcado na frente
+`gestor_trafego` em Configurações › Equipe & papéis — hoje Allan e Luiza —, e não com o
+autor de automação "North ai" (`lib/automations/responsibleOwners.ts`). É o que coloca o
+card na Home, na coluna e no atraso de quem executa. Sem ninguém marcado, fica o autor de
+automação.
+
+Rotina da Luiza na segunda: a etapa "Relatório de anúncios" chega em Revisão com o PDF e o
+pedido de feedback → ela confere e aprova → pede os números ao cliente e comenta no modelo
+→ a etapa "Feedback da semana" nasce com o relatório de resultados, prazo quarta → ela
+revisa, envia e aprova. As duas aprovadas fecham a ocorrência.
+
 ## Fluxo de exemplo
 
 Molde com `payload.report_example = true` roda o fluxo completo, mas **não grava

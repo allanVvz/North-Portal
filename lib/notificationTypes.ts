@@ -30,6 +30,9 @@ export const NOTIFICATION_TYPES = [
   // para ligar e desligar sozinho, e a mensagem já traz a data nova.
   "task_due_changed",
   "task_status_changed",
+  // @Nome num comentário (ATA 14/09). Endereçado só a quem foi citado (ver
+  // notifyProfiles) — é o que alimenta "Aguardando sua resposta" na Home.
+  "task_mentioned",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -52,4 +55,5 @@ export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {
   task_updated: "Edição",
   task_due_changed: "Prazo alterado",
   task_status_changed: "Status",
+  task_mentioned: "Menção",
 };
