@@ -33,6 +33,13 @@ export type AutomationDef = {
   // Whether the admin must pick which metric keys the card asks the client for
   // (automation_configs.collect_metric_keys).
   requiresMetricKeys?: boolean;
+  /** De onde vêm os dados. Mostrado na tela para que as duas pipelines de
+   *  relatório não pareçam configurações irmãs. */
+  source: string;
+  /** Automação da qual esta depende no MESMO card. Resolvida e gravada como
+   *  `automation_configs.depends_on_config_id` ao salvar — a cascata é um
+   *  atributo, não uma dedução por co-locação. */
+  dependsOn?: AutomationKey;
 };
 
 export const AUTOMATION_DEFINITIONS: Record<AutomationKey, AutomationDef> = {
@@ -42,6 +49,7 @@ export const AUTOMATION_DEFINITIONS: Record<AutomationKey, AutomationDef> = {
     eligibility: "ads_account",
     requiresPerformanceTemplate: true,
     requiresTemplateTask: false,
+    source: "API de mídia (Meta / Windsor)",
   },
   provisionar_card_metricas: {
     label: "Provisionar card por cliente",
@@ -49,6 +57,7 @@ export const AUTOMATION_DEFINITIONS: Record<AutomationKey, AutomationDef> = {
     eligibility: "task_metrics",
     requiresPerformanceTemplate: false,
     requiresTemplateTask: true,
+    source: "Clientes com métricas registradas",
   },
   // Conversões (agendamento, orçamento fechado, venda no balcão) quase nunca
   // chegam pela API de anúncios: dependem do Pixel/CAPI do cliente e muitas
@@ -61,17 +70,19 @@ export const AUTOMATION_DEFINITIONS: Record<AutomationKey, AutomationDef> = {
     requiresPerformanceTemplate: false,
     requiresTemplateTask: true,
     requiresMetricKeys: true,
+    source: "Resposta do cliente no portal",
   },
-  // Fecha o fluxo relatorio_conversao: quando a etapa de tráfego está
-  // concluída E o responsável lançou as conversões num comentário (lidas com
-  // IA), gera o PDF de vendas e regera o de anúncios com a atribuição por
-  // fonte. O alvo é o molde de entrega recorrente relatorio_conversao.
+  // Segunda pipeline da cascata: só roda sobre a revisão FINAL do relatório de
+  // anúncios da mesma ocorrência (traffic_reports), lê o feedback da semana num
+  // comentário e gera o relatório de vendas. Ver docs/reporting/report-pipeline.md.
   relatorio_vendas: {
     label: "Relatório de vendas",
-    description: "Lê os agendamentos e vendas do comentário (com IA) e gera o relatório de vendas ao fim do fluxo de conversão.",
+    description: "Depois que o relatório de anúncios é finalizado, lê o feedback da semana no comentário e gera o relatório de vendas.",
     eligibility: "ads_account",
     requiresPerformanceTemplate: true,
     requiresTemplateTask: true,
+    source: "Comentário do Feedback da semana",
+    dependsOn: "relatorio_trafego_semanal",
   },
 };
 

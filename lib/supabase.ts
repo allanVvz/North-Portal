@@ -1,5 +1,6 @@
 import { createClient } from "./supabase/server";
 import { TASK_COLUMNS } from "./taskColumns";
+import { AUTOMATION_DEFINITIONS, isAutomationKey } from "./automationCatalog";
 import {
   currentRecurringExecutionFields,
   explicitDateExecutionFields,
@@ -3460,6 +3461,9 @@ export type AutomationConfig = {
   lastRunDate: string | null;
   /** Métricas (tags) que a automação pede/lê — `coleta_metrica_cliente` e `relatorio_vendas`. */
   collectMetricKeys: string[] | null;
+  /** A automação da qual esta depende (`relatorio_vendas` → a de anúncios do
+   *  mesmo card). Resolvida no servidor ao salvar, nunca escolhida na tela. */
+  dependsOnConfigId: string | null;
   // Resolved directly here (not left to the frontend to cross-reference
   // against GET /api/admin/tasks) because a recurring target card that has
   // already advanced past its first cycle gets payload.recurrence_group=true
@@ -3483,6 +3487,7 @@ function mapAutomationConfigRow(row: AutomationConfigJoinRow): AutomationConfig 
     active: Boolean(row.active),
     lastRunDate: (row.last_run_date as string | null) ?? null,
     collectMetricKeys: (row.collect_metric_keys as string[] | null) ?? null,
+    dependsOnConfigId: (row.depends_on_config_id as string | null) ?? null,
     targetTask: task ? {
       id: row.target_task_id as string,
       title: task.title,
@@ -3504,11 +3509,40 @@ export async function listAutomationConfigs(): Promise<AutomationConfig[]> {
   return ((data ?? []) as AutomationConfigJoinRow[]).map(mapAutomationConfigRow);
 }
 
+/**
+ * A dependência de uma automação, resolvida a partir do catálogo: se a chave
+ * declara `dependsOn`, procura a automação daquele tipo no MESMO card. Sem ela,
+ * recusa salvar — uma automação que depende de outra e não a tem não roda, e é
+ * melhor dizer isso na hora de salvar do que descobrir no cron.
+ */
+async function resolveDependsOn(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  automationKey: string,
+  targetTaskId: string,
+): Promise<string | null> {
+  const needed = isAutomationKey(automationKey) ? AUTOMATION_DEFINITIONS[automationKey].dependsOn : undefined;
+  if (!needed) return null;
+  const { data, error } = await supabase
+    .from("automation_configs")
+    .select("id")
+    .eq("automation_key", needed)
+    .eq("target_task_id", targetTaskId)
+    .limit(1);
+  if (error) fail(error);
+  const id = (data?.[0] as { id: string } | undefined)?.id;
+  if (!id) {
+    const self = AUTOMATION_DEFINITIONS[automationKey as keyof typeof AUTOMATION_DEFINITIONS].label;
+    throw new HttpError(400, `${self} depende de "${AUTOMATION_DEFINITIONS[needed].label}" neste mesmo card — registre essa automação antes.`);
+  }
+  return id;
+}
+
 export async function createAutomationConfig(
   input: { automationKey: string; targetTaskId: string; performanceTemplateId?: string | null; active?: boolean; collectMetricKeys?: string[] | null },
   createdBy: string,
 ): Promise<AutomationConfig> {
   const supabase = await createClient();
+  const dependsOn = await resolveDependsOn(supabase, input.automationKey, input.targetTaskId);
   const { data, error } = await supabase
     .from("automation_configs")
     .insert({
@@ -3517,6 +3551,7 @@ export async function createAutomationConfig(
       performance_template_id: input.performanceTemplateId ?? null,
       active: input.active ?? true,
       collect_metric_keys: input.collectMetricKeys ?? null,
+      depends_on_config_id: dependsOn,
       created_by: createdBy,
     })
     .select("*")
@@ -3531,7 +3566,14 @@ export async function updateAutomationConfig(
 ): Promise<AutomationConfig> {
   const supabase = await createClient();
   const fields: Record<string, unknown> = {};
-  if (patch.targetTaskId !== undefined) fields.target_task_id = patch.targetTaskId;
+  if (patch.targetTaskId !== undefined) {
+    fields.target_task_id = patch.targetTaskId;
+    // Trocar o card troca a dependência: ela é "a automação daquele tipo NESTE card".
+    const { data: current, error: currentError } = await supabase.from("automation_configs").select("automation_key").eq("id", id).limit(1);
+    if (currentError) fail(currentError);
+    const key = (current?.[0] as { automation_key: string } | undefined)?.automation_key;
+    if (key) fields.depends_on_config_id = await resolveDependsOn(supabase, key, patch.targetTaskId);
+  }
   if (patch.performanceTemplateId !== undefined) fields.performance_template_id = patch.performanceTemplateId;
   if (patch.active !== undefined) fields.active = patch.active;
   if (patch.collectMetricKeys !== undefined) fields.collect_metric_keys = patch.collectMetricKeys;

@@ -22,6 +22,8 @@ import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
 import { conversionAiReady, runConversionFlow } from "./conversionFlow";
+import { nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
+import { logReportRun } from "./reportLog";
 import { ensureFlowStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
@@ -44,18 +46,23 @@ export type AutomationConfigRow = {
   last_run_date: string | null;
   /** Métricas (tags) que `relatorio_vendas` lê do comentário. */
   collect_metric_keys: string[] | null;
+  /** A automação da qual esta depende (a de anúncios, para `relatorio_vendas`). */
+  depends_on_config_id: string | null;
 };
 
-/** Uma tarefa recorrente vira PAI de um fluxo de feedback quando tem uma
- *  automação `relatorio_vendas` ativa apontando pra ela. */
-async function hasConversionFlow(admin: AdminClient, targetTaskId: string): Promise<boolean> {
-  const { data } = await admin
+/** Uma tarefa recorrente vira PAI de um fluxo de feedback quando alguma
+ *  automação `relatorio_vendas` ativa DECLARA depender desta automação de
+ *  anúncios. Antes era deduzido de "as duas apontam pro mesmo card"
+ *  (docs/audits/report-automation-flow.md, A6). */
+async function hasDependentConversion(admin: AdminClient, trafficConfigId: string): Promise<boolean> {
+  const { data, error } = await admin
     .from("automation_configs")
     .select("id")
-    .eq("target_task_id", targetTaskId)
+    .eq("depends_on_config_id", trafficConfigId)
     .eq("automation_key", "relatorio_vendas")
     .eq("active", true)
     .limit(1);
+  if (error) throw error;
   return Boolean(data?.length);
 }
 
@@ -77,7 +84,9 @@ async function fillReportCard(
   windsor: WindsorSettings,
   meta: ServiceMetaSettings,
   today: string,
-): Promise<{ fileName: string; url: string }> {
+  occurrenceId: string | null,
+): Promise<{ fileName: string; url: string; report: TrafficReportRow }> {
+  const startedAt = Date.now();
   const clientId = target.client_id;
   if (!clientId) throw new Error("O card não pertence a nenhum cliente.");
   const client = await getClientById(clientId);
@@ -108,7 +117,11 @@ async function fillReportCard(
     generatedAt: new Date(),
   });
 
-  const fileName = `relatorio-trafego-${period.to}.pdf`;
+  // Revisão no nome e pasta única por geração: regerar a mesma semana (retry
+  // depois de falha parcial, nova revisão) não colide mais no storage — antes o
+  // nome fixo com upsert:false falhava e marcava o card `parada` (A2).
+  const revision = await nextTrafficRevision(admin, actingTask.id);
+  const fileName = trafficReportFileName(period.to, revision);
   const path = documentStoragePath(client.slug, fileName);
   const { error: uploadError } = await admin.storage.from(DOCUMENT_BUCKET).upload(path, pdfBuffer, {
     contentType: "application/pdf",
@@ -117,7 +130,7 @@ async function fillReportCard(
   if (uploadError) throw uploadError;
   const { data: urlData } = admin.storage.from(DOCUMENT_BUCKET).getPublicUrl(path);
 
-  const { error: docError } = await admin.from("documents").insert({
+  const { data: docRows, error: docError } = await admin.from("documents").insert({
     client_id: clientId,
     task_id: actingTask.id,
     name: fileName,
@@ -129,10 +142,36 @@ async function fillReportCard(
     mime_type: "application/pdf",
     size_bytes: pdfBuffer.byteLength,
     doc_date: period.to,
-  });
+  }).select("id").limit(1);
   if (docError) throw docError;
 
-  return { fileName, url: urlData.publicUrl };
+  // O registro estruturado: os posts EXATAMENTE como entraram no PDF. É daqui que
+  // a Automação 2 lê a mídia da semana, em vez de refazer a busca (A3). Sem
+  // revisor não há revisão humana a esperar — a geração já é a versão final.
+  // Com revisor, finaliza quando a etapa for aprovada (conversionFlow.ts).
+  const report = await recordTrafficReport(admin, {
+    clientId,
+    taskId: actingTask.id,
+    occurrenceId,
+    period,
+    revision,
+    snapshot: { campaignPosts: currentPosts, prevCampaignPosts: prevPosts, adPosts: currentAdPosts },
+    documentId: (docRows?.[0] as { id: string } | undefined)?.id ?? null,
+    finalizedAt: actingTask.reviewer_id ? null : new Date().toISOString(),
+  });
+
+  logReportRun({
+    report_type: "traffic",
+    automation_id: config.id,
+    client_id: clientId,
+    task_id: actingTask.id,
+    period: `${period.from}..${period.to}`,
+    revision,
+    status: report.status,
+    duration_ms: Date.now() - startedAt,
+  });
+
+  return { fileName, url: urlData.publicUrl, report };
 }
 
 export type RunOutcome = "not_due" | "ran" | { error: string };
@@ -157,7 +196,7 @@ async function runOneReportAutomation(
   // ocorrência + a etapa `trafego`, preenche essa etapa com o PDF do Meta e a
   // deixa em REVISÃO (um humano confere). O pedido de feedback e a etapa 2 são
   // da Automação 2. Sem molde de task_type — o fluxo é dinâmico.
-  const flowMode = aiReady && Boolean(target.recurrence_cadence) && (await hasConversionFlow(admin, target.id));
+  const flowMode = aiReady && Boolean(target.recurrence_cadence) && (await hasDependentConversion(admin, config.id));
 
   if (flowMode) {
     let card1: TaskRecord;
@@ -171,18 +210,17 @@ async function runOneReportAutomation(
       return { error: message };
     }
     try {
-      const { fileName, url } = await fillReportCard(admin, card1, target, config, windsor, meta, today);
+      const { fileName, url } = await fillReportCard(admin, card1, target, config, windsor, meta, today, occ.id);
       // Tudo o que o gestor vê vai na ETAPA `trafego` (visível no quadro); a
-      // ocorrência (flow_parent) é só o contêiner e não aparece em tela.
+      // ocorrência (flow_parent) é só o contêiner e não aparece em tela. O sinal
+      // para a Automação 2 não é mais um marcador no payload: é a linha em
+      // traffic_reports e o status dela.
       const { error: c1Error } = await admin
         .from("tasks")
         .update({
           status: "revisao",
           assignee: AUTOMATION_ASSIGNEE,
-          payload: {
-            ...appendedCommentPayload(card1.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`),
-            trafego_report_at: new Date().toISOString(),
-          },
+          payload: appendedCommentPayload(card1.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`),
         })
         .eq("id", card1.id);
       if (c1Error) throw c1Error;
@@ -216,7 +254,7 @@ async function runOneReportAutomation(
   }
 
   try {
-    const { fileName, url } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today);
+    const { fileName, url } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today, null);
     const payload = appendedCommentPayload(actingTask.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`);
     const { error: statusError } = await admin
       .from("tasks")
@@ -247,10 +285,11 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
     .in("automation_key", RUN_KEYS as unknown as string[])
     .eq("active", true);
   if (configError) throw configError;
-  // `relatorio_trafego_semanal` antes de `relatorio_vendas`: quando as duas
-  // apontam pro mesmo card, a etapa `trafego` tem que existir antes.
+  // Quem declara dependência roda depois de quem é dependido: a etapa `trafego`
+  // e o registro em traffic_reports têm que existir antes da Automação 2
+  // procurá-los no mesmo tique.
   const configs = ((configRows ?? []) as AutomationConfigRow[]).sort((a, b) =>
-    a.automation_key === b.automation_key ? 0 : a.automation_key === "relatorio_trafego_semanal" ? -1 : 1,
+    Number(Boolean(a.depends_on_config_id)) - Number(Boolean(b.depends_on_config_id)),
   );
   if (!configs.length) return summary;
 
@@ -271,7 +310,7 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
     let outcome: RunOutcome;
     try {
       outcome = config.automation_key === "relatorio_vendas"
-        ? await runConversionFlow(admin, config, windsor, meta, today)
+        ? await runConversionFlow(admin, config, today)
         : await runOneReportAutomation(admin, config, windsor, meta, today, aiReady);
     } catch (error) {
       outcome = { error: errorMessage(error) };

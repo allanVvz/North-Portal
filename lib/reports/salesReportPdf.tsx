@@ -31,6 +31,7 @@ import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportThem
 import { CompassNode, FunnelSvg, KpiCard, REPORT_STYLES as S, ResultPanel } from "./reportComponents";
 import { blockResolver } from "./campaignBlockKpis";
 import { salesHeadline } from "./salesHeadline";
+import { attributionOf } from "./conversionMode";
 
 registerReportFonts();
 
@@ -133,15 +134,6 @@ function SalesReportDocument({
     ? seguidores - prevTotals.seguidores
     : null;
 
-  // MODO do relatório — derivado do que o gestor DE FATO informou, não da
-  // configuração. Os chips de `collect_metric_keys` dizem o que TENTAR ler; o
-  // modo é o que voltou. É o que faz um motor só atender o cliente que responde
-  // quatro métricas e o que só conta seguidores, sem automação por combinação.
-  const temComercial = cur.vendas !== null || cur.agendamentos !== null || cur.receita !== null;
-  const temAtribuicao = conversoes.some((c) => c.fonte !== null);
-  const mode: "followers_only" | "sales_segmented" | "sales_summary" =
-    !temComercial ? "followers_only" : temAtribuicao ? "sales_segmented" : "sales_summary";
-
   // Uma métrica derivada só existe quando numerador E denominador existem.
   // `ratio` já devolve null para denominador 0, mas não sabe distinguir
   // "não informado" de zero — por isso a guarda vem antes.
@@ -223,13 +215,13 @@ function SalesReportDocument({
   const relatadas = Math.max(cur.vendas ?? 0, cur.agendamentos ?? 0);
   const parcialmenteDetalhado = detalhe.length > 0 && descritas < relatadas;
 
-  // COBERTURA DE ATRIBUIÇÃO — quantas das vendas relatadas têm origem
-  // identificada. Sem isto, "nenhuma linha na tabela de fontes" é ambíguo: pode
-  // ser que não houve venda, ou que houve e ninguém marcou a origem. São coisas
-  // muito diferentes para quem lê.
-  const comOrigem = conversoes.filter((c) => c.fonte !== null).length;
-  const cobertura = cur.vendas !== null && cur.vendas > 0
-    ? { informadas: cur.vendas, comOrigem, pct: Math.round((comOrigem / cur.vendas) * 100) }
+  // COBERTURA DE ATRIBUIÇÃO — a mesma conta que vai para
+  // `conversion_reports.attribution` (lib/reports/conversionMode.ts). Sem ela,
+  // "nenhuma linha na tabela de fontes" é ambíguo: não houve venda, ou houve e
+  // ninguém marcou a origem?
+  const atribuicao = attributionOf(cur.vendas, conversoes);
+  const cobertura = atribuicao.coberturaPct !== null && atribuicao.informadas !== null
+    ? { informadas: atribuicao.informadas, comOrigem: atribuicao.comOrigem, pct: atribuicao.coberturaPct }
     : null;
 
   // FUNIL COMERCIAL — conversa → agendamento → venda. Aquisição (alcance,

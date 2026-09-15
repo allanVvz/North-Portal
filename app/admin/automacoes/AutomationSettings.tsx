@@ -31,6 +31,7 @@ type AutomationConfig = {
   active: boolean;
   lastRunDate: string | null;
   collectMetricKeys: string[] | null;
+  dependsOnConfigId: string | null;
   // Resolved server-side (lib/supabase.ts listAutomationConfigs) — never
   // cross-referenced against GET /api/admin/tasks here, because a recurring
   // target card that already advanced past its first cycle gets
@@ -61,6 +62,7 @@ type Slot = {
   performanceTemplateId: string;
   active: boolean;
   collectMetricKeys: string[];
+  dependsOnConfigId: string | null;
 };
 
 function slotFromConfig(config: AutomationConfig): Slot {
@@ -79,11 +81,12 @@ function slotFromConfig(config: AutomationConfig): Slot {
     performanceTemplateId: config.performanceTemplateId ?? "",
     active: config.active,
     collectMetricKeys: config.collectMetricKeys ?? [],
+    dependsOnConfigId: config.dependsOnConfigId ?? null,
   };
 }
 
 function blankSlot(): Slot {
-  return { key: crypto.randomUUID(), id: null, automationKey: "", targetTask: null, performanceTemplateId: "", active: true, collectMetricKeys: [] };
+  return { key: crypto.randomUUID(), id: null, automationKey: "", targetTask: null, performanceTemplateId: "", active: true, collectMetricKeys: [], dependsOnConfigId: null };
 }
 
 // Automações (promovida de uma aba de Configurações para tela própria no menu
@@ -132,8 +135,8 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
     }
     removeSlotLocally(slot.key);
   }
-  async function saveSlot(slot: Slot) {
-    if (!slot.automationKey || !slot.targetTask) return;
+  async function saveSlot(slot: Slot): Promise<{ ok: boolean; message?: string }> {
+    if (!slot.automationKey || !slot.targetTask) return { ok: false };
     const body = {
       automationKey: slot.automationKey,
       targetTaskId: slot.targetTask.id,
@@ -148,10 +151,15 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
     const res = slot.id
       ? await fetch(`/api/admin/automations/${slot.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       : await fetch("/api/admin/automations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      // A regra de dependência mora no servidor: "registre antes o Relatório de
+      // anúncios neste card" tem que chegar a quem salvou, não virar "Erro".
+      const data = await res.json().catch(() => null);
+      return { ok: false, message: data?.error };
+    }
     const saved: AutomationConfig = await res.json();
-    updateSlot(slot.key, { id: saved.id });
-    return true;
+    updateSlot(slot.key, { id: saved.id, dependsOnConfigId: saved.dependsOnConfigId ?? null });
+    return { ok: true };
   }
 
   if (loading) {
@@ -215,7 +223,7 @@ function AutomationConfigCard({
   tasks: Row[];
   templates: PerformanceTemplateLite[];
   onChange: (patch: Partial<Slot>) => void;
-  onSave: () => Promise<boolean | undefined>;
+  onSave: () => Promise<{ ok: boolean; message?: string }>;
   onRemove: () => void;
   onCreateCard: () => void;
 }) {
@@ -231,8 +239,8 @@ function AutomationConfigCard({
   async function save() {
     setBusy(true);
     setMsg("");
-    const ok = await onSave();
-    setMsg(ok ? "Salvo ✓" : "Erro ao salvar");
+    const result = await onSave();
+    setMsg(result.ok ? "Salvo ✓" : result.message ?? "Erro ao salvar");
     setBusy(false);
   }
 
@@ -300,6 +308,24 @@ function AutomationConfigCard({
             <span aria-hidden>{AUTOMATION_ICON[slot.automationKey as AutomationKey]}</span>
             {def?.label}
           </button>
+
+          {/* De onde vêm os dados e de quem esta automação depende — é o que faz
+              "Relatório de anúncios" e "Relatório de vendas" deixarem de parecer
+              configurações irmãs. Rótulo, não mais uma caixa. */}
+          {def ? (
+            <dl className="auto-meta">
+              <div><dt>Fonte</dt><dd>{def.source}</dd></div>
+              {def.dependsOn ? (
+                <div>
+                  <dt>Depende de</dt>
+                  <dd>
+                    {AUTOMATION_DEFINITIONS[def.dependsOn].label}
+                    {slot.id && !slot.dependsOnConfigId ? <span className="auto-meta-warn"> · não registrado neste card</span> : null}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
 
           {slot.targetTask ? (
             <button type="button" className="auto-chip auto-chip-card" onClick={() => onChange({ targetTask: null })}>

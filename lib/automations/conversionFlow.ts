@@ -8,10 +8,17 @@
 // `task_metrics`, gera o PDF de vendas e põe a etapa `feedback` + o pai em
 // REVISÃO. Sem retorno até o prazo → a etapa nasce com zeros e fecha assim mesmo.
 //
-// Não filtra por due_date — reage ao comentário em qualquer dia. Idempotência
-// por marcadores em payload (feedback_prompt_at / feedback_source_at /
-// sales_report_generated_at). Também é chamada pontualmente pelo hook de
-// comentário (processConversionFeedback), fora do cron.
+// Não filtra por due_date — reage ao comentário em qualquer dia, mas SÓ depois
+// que o relatório de anúncios da mesma ocorrência está na revisão final
+// (`traffic_reports`), e só lê comentários posteriores a ela. A mídia vem do
+// snapshot daquela revisão, nunca de uma segunda busca na API.
+//
+// Idempotência em duas camadas: marcadores no payload (feedback_prompt_at /
+// feedback_source_at / sales_report_generated_at) decidem se há algo novo; a
+// reivindicação em `conversion_reports` (chave única por etapa + revisão do
+// tráfego + comentário) impede duas execuções simultâneas de gerarem dois PDFs.
+// Também é chamada pontualmente pelo hook de comentário
+// (processConversionFeedback), fora do cron. Ver docs/reporting/report-pipeline.md.
 
 import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
@@ -20,7 +27,7 @@ import { commentsOf, type TaskComment } from "@/lib/comments";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { ensureFlowStep, settleTypelessFlow } from "@/lib/flows/advance";
 import { recurrenceStopped } from "@/lib/recurrenceState";
-import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
+import type { Period } from "@/app/admin/performance/insights";
 import { extractMetrics, type ConversionRow, type MetricExtract } from "@/lib/ai/extractMetrics";
 import { CONVERSION_METRICS_DEFAULT, metricTagLabel } from "@/lib/metricTags";
 import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
@@ -28,9 +35,22 @@ import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
-import { adsAccountFor, getClientById, type ServiceMetaSettings } from "./serviceIntegrations";
-import type { WindsorSettings } from "@/lib/windsor";
-import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
+import { getClientById } from "./serviceIntegrations";
+import { periodForCadence, resolveTemplateConfig } from "./reportData";
+import { attributionOf, conversionModeOf } from "@/lib/reports/conversionMode";
+import {
+  attachConversionDocument,
+  claimConversionReport,
+  currentTrafficReport,
+  finalizationMoment,
+  finalizeTrafficReport,
+  isAfter,
+  laterOf,
+  releaseConversionReport,
+  trafficReportIsFinal,
+  type TrafficReportRow,
+} from "./reportEntities";
+import { logReportRun } from "./reportLog";
 import type { AutomationConfigRow, RunOutcome } from "./run";
 
 const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
@@ -107,11 +127,13 @@ function metricsParaBanco(valores: Record<string, number | null>, tags: string[]
 }
 
 /** O comentário humano mais recente, em qualquer um dos cards, mais novo que `since`. */
-function latestHumanComment(cards: TaskRecord[], since: string | undefined): (TaskComment & { taskId: string }) | null {
+function latestHumanComment(cards: TaskRecord[], since: string | null): (TaskComment & { taskId: string }) | null {
   const all = cards.flatMap((c) => commentsOf(c.payload).map((cm) => ({ ...cm, taskId: c.id })));
+  // Instantes, não strings: `at` vem em dois formatos (RPC e JS) e comparar
+  // como texto ordena errado entre eles.
   const human = all
-    .filter((c) => !AUTOMATION_AUTHORS.has(c.author) && (!since || c.at > since))
-    .sort((a, b) => a.at.localeCompare(b.at));
+    .filter((c) => !AUTOMATION_AUTHORS.has(c.author) && isAfter(c.at, since))
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
   return human.length ? human[human.length - 1] : null;
 }
 
@@ -172,22 +194,20 @@ async function generateSalesReport(
   occ: TaskRecord,
   card2: TaskRecord,
   ext: MetricExtract,
-  windsor: WindsorSettings,
-  meta: ServiceMetaSettings,
+  traffic: TrafficReportRow,
   cadence: RecurringCadence,
   period: Period,
-): Promise<void> {
+): Promise<string | null> {
   const clientId = occ.client_id;
   if (!clientId) throw new Error("A ocorrência não pertence a nenhum cliente.");
   const client = await getClientById(clientId);
   if (!client) throw new Error("Cliente da ocorrência não encontrado.");
-  const account = adsAccountFor(client.slug, windsor, meta);
-  // Sem conta de anúncios não dá pra cruzar com o Meta — o PDF sai só com o que
-  // o gestor relatou (sem investimento/ROAS). Não é erro.
-  const prevPeriod = previousPeriod(period);
-  const { campaignPosts, adPosts } = account
-    ? await fetchPostsForAccount(account, windsor, meta, prevPeriod.from, period.to)
-    : { campaignPosts: [], adPosts: [] };
+  // A mídia vem do SNAPSHOT da revisão final do relatório de anúncios, não de
+  // uma segunda busca na API: os dois PDFs da mesma semana mostram os mesmos
+  // números (auditoria, A3), e esta pipeline não depende da API estar no ar.
+  // Snapshot vazio (cliente sem conta de anúncios) = PDF só com o que o gestor
+  // relatou, sem investimento/ROAS. Não é erro.
+  const { campaignPosts = [], prevCampaignPosts = [], adPosts = [] } = traffic.snapshot ?? {};
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
   const prevTotals = await previousPeriodTotals(admin, clientId, period.from);
@@ -197,9 +217,9 @@ async function generateSalesReport(
     period,
     cadenceLabel: RECURRENCE_CADENCE_LABEL[cadence] ?? cadence,
     config: templateConfig,
-    campaignPosts: campaignPosts.filter((p) => inPeriod(p, period)),
-    prevCampaignPosts: campaignPosts.filter((p) => inPeriod(p, prevPeriod)),
-    adPosts: adPosts.filter((p) => inPeriod(p, period)),
+    campaignPosts,
+    prevCampaignPosts,
+    adPosts,
     conversoes,
     receitaTotal: typeof ext.valores.receita === "number" ? ext.valores.receita : null,
     vendasTotal: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,
@@ -219,7 +239,7 @@ async function generateSalesReport(
   if (uploadError) throw uploadError;
   const { data: urlData } = admin.storage.from(DOCUMENT_BUCKET).getPublicUrl(path);
 
-  const { error: docError } = await admin.from("documents").insert({
+  const { data: docRows, error: docError } = await admin.from("documents").insert({
     client_id: clientId,
     task_id: card2.id,
     name: fileName,
@@ -231,7 +251,7 @@ async function generateSalesReport(
     mime_type: "application/pdf",
     size_bytes: pdf.byteLength,
     doc_date: period.to,
-  });
+  }).select("id").limit(1);
   if (docError) throw docError;
 
   const fresh = (await getAdminTask(admin, card2.id))?.payload ?? card2.payload;
@@ -240,6 +260,7 @@ async function generateSalesReport(
     .update({ payload: appendedCommentPayload(fresh, `Relatório de vendas gerado e anexado: [${fileName}](${urlData.publicUrl})`) })
     .eq("id", card2.id);
   if (updErr) throw updErr;
+  return (docRows?.[0] as { id: string } | undefined)?.id ?? null;
 }
 
 // ---- Orquestrador ---------------------------------------------------------
@@ -249,15 +270,25 @@ async function processOccurrence(
   config: AutomationConfigRow,
   mold: TaskRecord,
   occ: TaskRecord,
-  windsor: WindsorSettings,
-  meta: ServiceMetaSettings,
   today: string,
 ): Promise<boolean> {
+  const startedAt = Date.now();
   const tags = tagsOf(config);
   let occPayload = (occ.payload ?? {}) as OccPayload;
 
   let card1 = await getAdminTask(admin, flowStepTaskId(occ.id, "trafego"));
-  if (!card1 || !(card1.payload as Record<string, unknown>)?.trafego_report_at) return false; // espera a Autom. 1
+  if (!card1) return false; // espera a Automação 1
+
+  // GATE DA CASCATA: esta pipeline só trabalha sobre a revisão FINAL do
+  // relatório de anúncios. Antes bastava o PDF existir, e um comentário feito
+  // enquanto o humano ainda revisava o tráfego já disparava o relatório de
+  // vendas (auditoria, A1). Sem revisor configurado a geração já nasce final,
+  // então o ritmo de quem não usa revisão não muda.
+  let traffic = await currentTrafficReport(admin, card1.id);
+  if (!traffic || !trafficReportIsFinal(traffic, card1)) return false;
+  if (traffic.status !== "finalized") {
+    traffic = await finalizeTrafficReport(admin, traffic, finalizationMoment(traffic, card1));
+  }
 
   // Pedido único — na ETAPA `trafego` (visível no quadro; a ocorrência é só o
   // contêiner e não aparece em tela). O marcador de dedupe fica na ocorrência.
@@ -275,8 +306,12 @@ async function processOccurrence(
   }
 
   let card2 = await getAdminTask(admin, flowStepTaskId(occ.id, "feedback"));
-  // O gestor comenta os números na etapa `trafego` (ou na `feedback` se já existe).
-  const human = latestHumanComment([card1, ...(card2 ? [card2] : [])], occPayload.feedback_source_at);
+  // O gestor comenta os números na etapa `trafego` (ou na `feedback` se já
+  // existe) — mas só conta o que foi dito DEPOIS da revisão final: com revisor,
+  // o que se comenta na etapa de tráfego antes da aprovação é revisão do
+  // relatório, não o feedback da semana.
+  const since = laterOf(traffic.finalized_at, occPayload.feedback_source_at);
+  const human = latestHumanComment([card1, ...(card2 ? [card2] : [])], since);
 
   const agendDue = addDays(occ.due_date ?? today, FEEDBACK_LEAD_DAYS);
   const overdue = today >= addDays(agendDue, TOLERANCIA_DIAS);
@@ -301,49 +336,98 @@ async function processOccurrence(
   const cadence: RecurringCadence = mold.recurrence_cadence ?? "semanal";
   const period = periodForCadence(cadence, occ.due_date ?? today);
 
-  // task_metrics — só as tags que o gestor realmente informou (ver metricsParaBanco).
+  // O que o feedback trouxe, contado num lugar só (lib/reports/conversionMode.ts)
+  // — o mesmo modo e a mesma cobertura de atribuição que o PDF desenha.
   const metrics = metricsParaBanco(ext.valores, tags);
-  const { error: metricsErr } = await admin.from("task_metrics").upsert(
-    { task_id: card2.id, client_id: occ.client_id, metrics, source: "cliente", period_from: period.from, period_to: period.to },
-    { onConflict: "task_id" },
-  );
-  if (metricsErr) throw metricsErr;
+  const informed = {
+    vendas: ext.valores.vendas ?? null,
+    agendamentos: ext.valores.agendamentos ?? null,
+    receita: ext.valores.receita ?? null,
+    seguidores: ext.valores.seguidores ?? null,
+  };
+  const mode = conversionModeOf(informed, ext.linhas);
+  const sourceCommentAt = human?.at ?? null;
 
-  const sourceAt = human?.at ?? nowIso();
-  const resumo = human
-    ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.`
-    : `Sem retorno do responsável até o prazo — fechando a semana sem métricas registradas.`;
-  const { error: c2Err } = await admin
-    .from("tasks")
-    .update({
-      status: "revisao",
-      assignee: AUTOMATION_ASSIGNEE,
-      payload: {
-        ...appendedCommentPayload(card2.payload, resumo),
-        metricas: ext.valores,
-        linhas: ext.linhas,
-        feedback_source_at: sourceAt,
-      },
-    })
-    .eq("id", card2.id);
-  if (c2Err) throw c2Err;
-  card2 = (await getAdminTask(admin, card2.id)) ?? card2;
+  // Reivindica ANTES de qualquer escrita, com chave única por (etapa de
+  // feedback, revisão do tráfego, comentário): retry de worker, cron em dobro ou
+  // o hook de comentário correndo junto com o cron batem aqui em vez de anexar
+  // um segundo PDF.
+  const claim = await claimConversionReport(admin, {
+    trafficReportId: traffic.id,
+    feedbackTaskId: card2.id,
+    sourceCommentAt,
+    mode,
+    metrics,
+    attribution: attributionOf(informed.vendas, ext.linhas),
+    parser: ext.note,
+  });
+  if (!claim) return false;
 
-  // Pai: só o estado + os marcadores estruturais (sem comentário — invisível).
-  occPayload = { ...occPayload, feedback_source_at: sourceAt };
-  const { error: occErr } = await admin.from("tasks").update({ payload: occPayload, status: "revisao" }).eq("id", occ.id);
-  if (occErr) throw occErr;
-  occ = { ...occ, payload: occPayload };
+  try {
+    // task_metrics — só as tags que o gestor realmente informou (ver metricsParaBanco).
+    const { error: metricsErr } = await admin.from("task_metrics").upsert(
+      { task_id: card2.id, client_id: occ.client_id, metrics, source: "cliente", period_from: period.from, period_to: period.to },
+      { onConflict: "task_id" },
+    );
+    if (metricsErr) throw metricsErr;
 
-  // O PDF de vendas é anexado à ETAPA `feedback` (aparece nos Anexos dela e na
-  // tela Documentos), com o comentário do link.
-  await generateSalesReport(admin, config, occ, card2, ext, windsor, meta, cadence, period);
+    const sourceAt = sourceCommentAt ?? nowIso();
+    const resumo = human
+      ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.`
+      : `Sem retorno do responsável até o prazo — fechando a semana sem métricas registradas.`;
+    const { error: c2Err } = await admin
+      .from("tasks")
+      .update({
+        status: "revisao",
+        assignee: AUTOMATION_ASSIGNEE,
+        payload: {
+          ...appendedCommentPayload(card2.payload, resumo),
+          metricas: ext.valores,
+          linhas: ext.linhas,
+          feedback_source_at: sourceAt,
+        },
+      })
+      .eq("id", card2.id);
+    if (c2Err) throw c2Err;
+    card2 = (await getAdminTask(admin, card2.id)) ?? card2;
 
-  const { error: markErr } = await admin
-    .from("tasks")
-    .update({ payload: { ...((await getAdminTask(admin, occ.id))?.payload ?? {}), sales_report_generated_at: nowIso() } })
-    .eq("id", occ.id);
-  if (markErr) throw markErr;
+    // Pai: só o estado + os marcadores estruturais (sem comentário — invisível).
+    occPayload = { ...occPayload, feedback_source_at: sourceAt };
+    const { error: occErr } = await admin.from("tasks").update({ payload: occPayload, status: "revisao" }).eq("id", occ.id);
+    if (occErr) throw occErr;
+    occ = { ...occ, payload: occPayload };
+
+    // O PDF de vendas é anexado à ETAPA `feedback` (aparece nos Anexos dela e na
+    // tela Documentos), com o comentário do link.
+    const documentId = await generateSalesReport(admin, config, occ, card2, ext, traffic, cadence, period);
+    await attachConversionDocument(admin, claim.id, documentId);
+
+    const { error: markErr } = await admin
+      .from("tasks")
+      .update({ payload: { ...((await getAdminTask(admin, occ.id))?.payload ?? {}), sales_report_generated_at: nowIso() } })
+      .eq("id", occ.id);
+    if (markErr) throw markErr;
+  } catch (error) {
+    // Sem isto a reivindicação ficaria órfã e bloquearia o retry do mesmo
+    // comentário para sempre.
+    await releaseConversionReport(admin, claim.id);
+    throw error;
+  }
+
+  logReportRun({
+    report_type: "conversion",
+    automation_id: config.id,
+    client_id: occ.client_id,
+    task_id: card2.id,
+    period: `${period.from}..${period.to}`,
+    revision: traffic.revision,
+    mode,
+    parser: ext.note,
+    llm_used: ext.note === "llm",
+    source_comment_at: sourceCommentAt,
+    status: "generated",
+    duration_ms: Date.now() - startedAt,
+  });
 
   await notifyFromAutomation(admin, card2.id, "task_commented", `Automação anexou o relatório de vendas em "${card2.title}".`);
   await notifyResponsibilityHolders(admin, card2.id, "gestor_trafego", "task_commented", `Relatório de vendas pronto em "${card2.title}".`);
@@ -353,10 +437,14 @@ async function processOccurrence(
 export async function runConversionFlow(
   admin: AdminClient,
   config: AutomationConfigRow,
-  windsor: WindsorSettings,
-  meta: ServiceMetaSettings,
   today: string,
 ): Promise<RunOutcome> {
+  // A dependência é declarada, não deduzida. Sem ela esta automação não sabe de
+  // qual relatório de anúncios ela é a continuação — e diz isso, em vez de rodar
+  // em silêncio sobre o que achar no card.
+  if (!config.depends_on_config_id) {
+    return { error: "Relatório de vendas sem dependência declarada: registre o Relatório de anúncios no mesmo card e salve de novo." };
+  }
   const mold = await getAdminTask(admin, config.target_task_id);
   if (!mold || !mold.recurrence_cadence || recurrenceStopped(mold.status)) return "not_due";
 
@@ -365,7 +453,7 @@ export async function runConversionFlow(
 
   for (const occ of occs) {
     try {
-      if (await processOccurrence(admin, config, mold, occ, windsor, meta, today)) didSomething = true;
+      if (await processOccurrence(admin, config, mold, occ, today)) didSomething = true;
     } catch (error) {
       const message = errorMessage(error);
       await markTaskParada(admin, occ.id, `Falha ao processar o feedback da semana: ${message}`);
@@ -409,15 +497,13 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
     .eq("active", true)
     .limit(1);
   const config = data?.[0] as AutomationConfigRow | undefined;
-  if (!config) return;
+  if (!config?.depends_on_config_id) return;
   const mold = await getAdminTask(admin, moldId);
   if (!mold) return;
 
-  const { getMetaSettingsService, getWindsorSettingsService } = await import("./serviceIntegrations");
-  const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
   const today = new Date().toISOString().slice(0, 10);
   try {
-    await processOccurrence(admin, config, mold, occ, windsor, meta, today);
+    await processOccurrence(admin, config, mold, occ, today);
     await settleTypelessFlow(admin, occId).catch(() => {});
   } catch (error) {
     await markTaskParada(admin, occId, `Falha ao processar o feedback da semana: ${errorMessage(error)}`);

@@ -2845,6 +2845,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .auto-msg { font-size: 12px; color: var(--a-teal-text); }
 .auto-field { display: flex; flex-direction: column; gap: 5px; }
 .auto-field > span { font-size: 11.5px; font-weight: 600; color: var(--a-sec); }
+/* Fonte / Depende de — metadado da automação, não campo editável. */
+.auto-meta { display: grid; gap: 3px; margin: 0; font-size: 11.5px; line-height: 1.35; }
+.auto-meta > div { display: flex; gap: 8px; }
+.auto-meta dt { min-width: 74px; color: var(--a-muted); font-weight: 600; }
+.auto-meta dd { margin: 0; color: var(--a-sec); }
+.auto-meta-warn { color: var(--a-danger, #b4533c); font-weight: 600; }
 
 .tagchips { display: flex; flex-direction: column; gap: 6px; }
 .tagchips-box { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); min-height: 38px; }
