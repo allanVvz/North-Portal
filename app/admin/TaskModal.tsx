@@ -1393,7 +1393,7 @@ export default function TaskModal({
   return (
     <>
     <div className="kb-modal-backdrop" onClick={() => { if (!busy) void closeAfterSave(); }}>
-      <div className={`tm tm-tone-${tone} tm-lg`} onClick={(e) => e.stopPropagation()}>
+      <div className={`tm tm-tone-${tone} tm-lg${mode === "new" ? " tm-new" : ""}`} onClick={(e) => e.stopPropagation()}>
         {coverCandidates.length ? <CardCover candidates={coverCandidates} title={draft.title || "card"} className="tm-cover" /> : null}
         {mode === "edit" ? (
           <div className={`tm-head tm-head-tone-${tone}`}>

@@ -81,6 +81,22 @@ As etapas de relatório nascem com quem cuida do tráfego (Equipe & papéis: All
 com "North ai" — entram na Home, no quadro e no atraso de quem executa. Fluxo e prazos em
 `docs/reporting/report-pipeline.md` → Responsável das etapas.
 
+## Jornada do admin conferida em produção (15/09)
+
+Prints tirados em `northportal.vercel.app` depois do deploy, sem salvar nada:
+
+- **Home**: os três blocos novos aparecem (7 paradas/atrasadas, 2 menções aguardando
+  resposta, rotinas da semana). Os títulos saíam cortados ("FLU…") com três colunas
+  estreitas — corrigido para duas colunas de no mínimo 420px e título em até duas linhas.
+- **Quadro**: situação como primeira informação, bloco vermelho nas atrasadas, atalho
+  "Atrasadas 79" e as concluídas ocultas na ordenação por data, com o aviso na coluna.
+- **Nova tarefa**: o modal de criação herdava a altura fixa do card aberto (três campos no
+  topo de uma tela vazia) e o ✕ ficava solto no meio do cabeçalho — corrigido: o modal de
+  criação acompanha o conteúdo e o ✕ vai para o canto.
+- O restante da jornada (troca de tipo, plano de conteúdo, etapas na linha) não foi
+  fotografado: o Chrome travou três vezes ao capturar com o modal aberto, por falta de
+  memória na máquina. Validado por testes e typecheck, não por print.
+
 ## Fora desta rodada
 
 - As etapas do plano de conteúdo são atividades de Plano de Ação, não uma cascata: a próxima não

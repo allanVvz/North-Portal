@@ -4066,6 +4066,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    top-left corner instead of sitting inline in a header row. */
 .tm-back-floating { position: absolute; top: 16px; left: 16px; z-index: 5; box-shadow: 0 4px 14px rgba(12,44,44,.16); }
 .docprev-tm:has(.tm-back-floating) .tm-head { padding-left: 62px; }
+/* Modal de CRIAÇÃO: conferido em produção (15/09) — herdava a altura fixa de
+   880px do card aberto e mostrava três campos no topo de uma tela vazia, com o
+   ✕ solto no meio do cabeçalho. Criar é curto: o modal acompanha o conteúdo,
+   fica mais estreito e o ✕ vai para o canto. */
+.tm-lg.tm-new { height: auto; width: min(1080px, calc(((100vw / var(--ui-scale)) - 24px) / var(--tm-scale))); }
+.tm-lg.tm-new .tm-main { min-height: 0; }
+.tm-lg.tm-new .tm-head.tm-head-plain { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.tm-lg.tm-new .tm-head.tm-head-plain .kb-modal-close { flex: 0 0 auto; margin-left: auto; font-size: 18px; }
 .tm-new-headline { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .tm-new-headline h2 { flex: 0 0 auto; margin: 0; white-space: nowrap; }
 .tm-new-kind { min-width: 0; }
@@ -5266,7 +5274,9 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .cm-mention { padding: 0 3px; border-radius: 4px; background: var(--a-teal-soft); color: var(--a-teal-text); font-weight: 650; }
 
 /* Home — o que é meu e precisa de mim. */
-.home-focus { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 18px; align-items: start; }
+/* 420px mínimo: com três colunas de 320px os títulos viravam "FLU…" (conferido em
+   produção, 15/09). Duas por linha dão espaço para o título ser lido. */
+.home-focus { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; margin-bottom: 18px; align-items: start; }
 .home-focus-card.is-attention { border-color: color-mix(in srgb, var(--a-danger) 45%, var(--a-border)); }
 .home-focus-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow: auto; }
 .home-focus-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); color: var(--a-ink); font: inherit; text-align: left; cursor: pointer; }
@@ -5274,7 +5284,7 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .home-focus-row.is-atrasada { background: color-mix(in srgb, var(--a-danger) 10%, var(--a-surface)); box-shadow: inset 3px 0 0 var(--a-danger); }
 .home-focus-row.is-parada { background: color-mix(in srgb, var(--a-warn) 12%, var(--a-surface)); box-shadow: inset 3px 0 0 var(--a-warn); }
 .home-focus-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
-.home-focus-main strong { font-size: 13px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-focus-main strong { font-size: 13px; font-weight: 650; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .home-focus-main em { font-style: normal; font-size: 11.5px; color: var(--a-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-focus-quote { white-space: normal !important; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .home-focus-due { font-size: 11.5px; color: var(--a-sec); white-space: nowrap; }
