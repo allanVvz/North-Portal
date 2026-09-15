@@ -147,7 +147,10 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
   ];
 
   const table = objectiveTable(objectives, outcome);
-  const technicalNotes = objectives.filter((o) => o.technical?.critical).map((o) => `${o.label}: ${o.technical!.explanation.charAt(0).toLowerCase()}${o.technical!.explanation.slice(1)}`);
+  // A nota técnica (CPE, CPC) só aparece quando o custo do RESULTADO do objetivo
+  // também piorou. "Cada engajamento custou 305% mais" ao lado de "menor custo por
+  // conversa" confundia: o cliente compra conversa, não engajamento.
+  const technicalNotes = objectives.filter((o) => o.technical?.critical && o.costDelta.pct !== null && o.costDelta.pct >= 10).map((o) => `${o.label}: ${o.technical!.explanation.charAt(0).toLowerCase()}${o.technical!.explanation.slice(1)}`);
   const objectivesTitle = objectives.length >= 2 && table.best
     ? `${table.best.label} teve o menor custo por ${Wd.unit}`
     : "Objetivos";

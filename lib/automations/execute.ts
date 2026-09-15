@@ -80,7 +80,12 @@ export async function materializeOccurrenceForReport(admin: AdminClient, parent:
 // task_type. Modelo LAZY — id determinístico por ciclo; o avanço do molde fica
 // em `advanceFlowMold`, chamado só depois do fill dar certo.
 export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord, today: string): Promise<TaskRecord> {
-  const cycle = recurrenceCycleOf(mold);
+  // Ciclo SEGUINTE ao do molde — a mesma convenção de materializeOccurrenceForReport.
+  // Com o ciclo atual, o primeiro tique em modo fluxo achava a ocorrência que o
+  // modo normal já tinha criado na semana anterior (mesmo id) e reaproveitava
+  // aquele card velho como pai do fluxo desta semana. advanceFlowMold leva o
+  // molde a este mesmo ciclo, então um retry no mesmo dia acha a ocorrência.
+  const cycle = recurrenceCycleOf(mold) + 1;
   const occId = recurringExecutionId(mold.id, cycle);
 
   const found = await getAdminTask(admin, occId);

@@ -120,7 +120,8 @@ async function seed() {
     }
   }
 
-  const occId = recurringExecutionId(mold.id, 0);
+  // A ocorrência do fluxo usa o ciclo SEGUINTE ao do molde (ensureFlowOccurrence).
+  const occId = recurringExecutionId(mold.id, Number(mold.payload?.recurrence_cycle ?? 0) + 1);
   console.log(JSON.stringify({
     client: client.slug, moldId: mold.id, occId,
     card1_trafego: flowStepTaskId(occId, "trafego"),
@@ -132,7 +133,8 @@ async function inspect() {
   const client = await resolveClient();
   const mold = await findMold(client.id);
   if (!mold) return console.log("sem molde — rode `seed` primeiro");
-  const occId = recurringExecutionId(mold.id, 0);
+  // Depois do tique o molde já avançou para o ciclo da ocorrência.
+  const occId = recurringExecutionId(mold.id, Number(mold.payload?.recurrence_cycle ?? 0));
   const card1 = flowStepTaskId(occId, "trafego");
   const card2 = flowStepTaskId(occId, "feedback");
 
@@ -189,7 +191,7 @@ async function overdue() {
   if (!mold) return console.log("sem molde");
   const dias = Number(argv.find((a) => /^\d+$/.test(a))) || 6;
   const past = iso(new Date(Date.now() - dias * 86400000));
-  const occId = recurringExecutionId(mold.id, 0);
+  const occId = recurringExecutionId(mold.id, Number(mold.payload?.recurrence_cycle ?? 0));
   const card2 = flowStepTaskId(occId, "feedback");
   await db.from("tasks").update({ due_date: past }).eq("id", occId);
   await db.from("tasks").update({ due_date: past }).eq("id", card2);

@@ -8,8 +8,9 @@ anúncios.
 |---|---|---|
 | Pergunta | Como a mídia performou? | O que a mídia virou em resultado para o negócio? |
 | Fonte | API de mídia (Meta / Windsor) | Comentário do Feedback da semana |
-| Gatilho | `due_date` do molde recorrente = hoje (cron diário) | Revisão final do relatório de anúncios + comentário humano (cron **ou** hook de comentário) |
-| IA | Nenhuma | Só para ler o comentário (`extractMetrics`) |
+| Gatilho | `due_date` do molde recorrente = hoje (cron diário às 12:00 UTC, 9h em Brasília; moldes às segundas) | Revisão final do relatório de anúncios + comentário humano (cron **ou** hook de comentário) |
+| Período | Segunda a domingo anteriores à execução (`reportPeriodFor`) | O mesmo da ocorrência |
+| IA | Nenhuma | Nenhuma por padrão: parser do modelo de comentário; IA só com `COMMENT_AI_FALLBACK=1` |
 | Registro | `traffic_reports` | `conversion_reports` |
 | PDF | `lib/reports/adsReportPdf.tsx` | `lib/reports/salesReportPdf.tsx` |
 
@@ -97,7 +98,7 @@ dispara imediatamente pelo hook.
 | `mode` | `followers_only` · `sales_summary` · `sales_segmented` · `no_data` |
 | `conversion_metrics` | só as métricas informadas — chave ausente = não informado |
 | `attribution` | `{ informadas, comOrigem, coberturaPct, porFonte }` |
-| `parser` | `regex` · `llm` · `IA indisponível: …` |
+| `parser` | `parser` · `formato não reconhecido` · `comentário ambíguo` · `llm` (só com fallback) |
 
 Nenhuma das duas substitui `documents` (o artefato) nem `task_metrics` (a série por
 card, também lida pela tela de Performance).
@@ -160,3 +161,53 @@ Vercel. Custo de IA por execução ainda **não** é emitido — ver `comment-pa
 - MÉDIA — comentário editado reprocessar.
 - MÉDIA — custo por execução no log (gatilho do parser determinístico).
 - BAIXA — frase de diagnóstico determinística no relatório de anúncios.
+
+---
+
+## Agendamento
+
+- Job `automations-run-daily` (pg_cron) às **12:00 UTC = 9h em Brasília**, todo dia
+  (migração `20260915130000`). Continua diário: a Automação 2 precisa do tique para fechar a
+  semana de quem não respondeu.
+- Os moldes de relatório vencem **na segunda** (`recurrence_weekdays = [1]`). A Automação 1 só
+  gera no dia em que o molde vence; o período é segunda a domingo anteriores
+  (`reportPeriodFor`: termina na véspera, o dia da execução nunca entra pela metade).
+- A ocorrência do fluxo usa o ciclo **seguinte** ao do molde (`ensureFlowOccurrence`). Com o
+  ciclo atual, a primeira semana em modo fluxo reaproveitava a ocorrência que o modo normal
+  criou na semana anterior.
+
+## Fluxo de exemplo
+
+Molde com `payload.report_example = true` roda o fluxo completo, mas **não grava
+`task_metrics`**: os números do feedback são ilustrativos e apareceriam como resultado real na
+tela de Performance e no comparativo da semana seguinte.
+
+## Custo por geração
+
+Medido em 15/09 com a CRIS CAR CARE (semana 07–13/09, 258 linhas de campanha, 422 de anúncio,
+7 criativos), sem IA:
+
+| Etapa | Tempo | CPU | Chamadas externas |
+|---|---|---|---|
+| Automação 1 · busca no Meta (6 semanas + criativos) | 13,4 s | 0,70 s | 12 |
+| Automação 1 · miniaturas (311 KB) | 1,1 s | 0,13 s | 14 |
+| Automação 1 · PDF de anúncios (370 KB) | 0,9 s | 1,39 s | — |
+| Automação 2 · leitura do comentário (parser) | 0,01 s | 0,02 s | 0 |
+| Automação 2 · PDF de resultados (137 KB) | 0,3 s | 0,33 s | — |
+
+Em preço de lista da Vercel (Fluid compute: CPU ativa US$ 0,128/h, memória provisionada
+US$ 0,0106/GB-h com 2 GB, invocação US$ 0,60/milhão):
+
+| | Por geração |
+|---|---|
+| Relatório de anúncios (~15 s de parede, ~2,2 s de CPU) | ≈ US$ 0,00017 |
+| Relatório de resultados (~2 s de parede, ~0,5 s de CPU) | ≈ US$ 0,00003 |
+| Par da semana | **≈ US$ 0,0002 ≈ R$ 0,001** |
+| Storage (~0,8 MB por semana por cliente, US$ 0,021/GB-mês) | desprezível |
+| API do Meta | sem custo |
+| IA, só com `COMMENT_AI_FALLBACK=1` (gpt-5-mini: ~800 tokens de entrada, até 1.500 de saída) | até US$ 0,0032 ≈ R$ 0,017 por comentário |
+
+Contra o orçamento de R$ 10 para mais de 60 relatórios: sem IA, R$ 10 cobrem ~9.000 pares;
+com a IA lendo todo comentário, ~550. No plano Hobby, a franquia mensal da Vercel cobre o
+volume atual e o custo efetivo é zero. O tempo é dominado pela latência da API do Meta, não
+pela renderização.

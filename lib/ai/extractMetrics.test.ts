@@ -89,23 +89,25 @@ describe("extractMetrics", () => {
     expect(r).toEqual({ valores: { vendas: null, agendamentos: null, seguidores: null, receita: null }, linhas: [], note: "comentário vazio" });
   });
 
-  it("'12 agendamentos' → regex, sem IA", async () => {
+  it("'12 agendamentos' → parser, sem IA", async () => {
     const r = await extractMetrics("fechamos 12 agendamentos", TAGS);
     expect(r.valores.agendamentos).toBe(12);
-    expect(r.note).toBe("regex");
+    expect(r.note).toBe("parser");
   });
 
-  it("degrada graciosamente sem provedor de IA (nem AI_CLI)", async () => {
-    // Sem AI_CLI e sem credencial 'ai' no banco de teste, aiComplete lança e
-    // extractMetrics devolve tudo null com note — IA fora do ar é "não sabemos",
-    // nunca "a semana foi zero".
-    const r = await extractMetrics("semana boa, umas 3 vendas e 45 seguidores", TAGS);
-    if (r.note.startsWith("IA indisponível")) {
-      expect(Object.values(r.valores).every((v) => v === null)).toBe(true);
-    } else {
-      // Se AI_CLI estiver ligado no ambiente, a extração real deve pegar algo.
-      expect(r.valores.seguidores).toBeGreaterThan(0);
-    }
+  it.skipIf(process.env.AI_CLI === "1" || process.env.COMMENT_AI_FALLBACK === "1")("o modelo do pedido é lido pelo parser", async () => {
+    const r = await extractMetrics("Vendas: 5\nAgendamentos: 8\nReceita: R$ 4.100\nSeguidores: 841\n#1 PPF frontal R$ 1.200", TAGS);
+    expect(r.note).toBe("parser");
+    expect(r.valores).toEqual({ vendas: 5, agendamentos: 8, seguidores: 841, receita: 4100 });
+    expect(r.linhas).toHaveLength(1);
+  });
+
+  it.skipIf(process.env.AI_CLI === "1" || process.env.COMMENT_AI_FALLBACK === "1")("fora do modelo e sem fallback: não chama IA, tudo null", async () => {
+    // "Não sabemos" nunca vira "a semana foi zero"; o fluxo responde ao gestor
+    // pedindo o modelo em vez de fechar a semana.
+    const r = await extractMetrics("semana foi boa, cliente gostou bastante", TAGS);
+    expect(r.note).toBe("formato não reconhecido");
+    expect(Object.values(r.valores).every((v) => v === null)).toBe(true);
   });
 
   it.skipIf(process.env.AI_CLI !== "1")("extração real pela CLI claude", async () => {

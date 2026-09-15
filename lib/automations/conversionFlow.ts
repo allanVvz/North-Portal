@@ -29,7 +29,8 @@ import { ensureFlowStep, settleTypelessFlow } from "@/lib/flows/advance";
 import { recurrenceStopped } from "@/lib/recurrenceState";
 import type { Period } from "@/app/admin/performance/insights";
 import { extractMetrics, type ConversionRow, type MetricExtract } from "@/lib/ai/extractMetrics";
-import { CONVERSION_METRICS_DEFAULT, metricTagLabel } from "@/lib/metricTags";
+import { feedbackTemplate } from "@/lib/ai/commentParser";
+import { CONVERSION_METRICS_DEFAULT, metricTagLabel, needsRichExtraction } from "@/lib/metricTags";
 import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
@@ -37,7 +38,7 @@ import { loadStoredPreviews } from "./creativeAssets";
 import { appendedCommentPayload, asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { getClientById } from "./serviceIntegrations";
-import { periodForCadence, resolveTemplateConfig } from "./reportData";
+import { reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { attributionOf, conversionModeOf } from "@/lib/reports/conversionMode";
 import type { HistoryPoint } from "@/lib/reports/conversionFocus";
 import {
@@ -57,30 +58,11 @@ import type { AutomationConfigRow, RunOutcome } from "./run";
 
 const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 
-/** O fluxo de conversão (Automação 2) só funciona com um backend de IA para ler
- *  o comentário do gestor em linguagem natural. Sem ele, `extractMetrics`
- *  devolveria tudo zero e o relatório de vendas fecharia a semana com dados
- *  errados — então a Automação 2 fica DORMENTE (a config existe, não roda) até
- *  um provedor de IA suportado estar cadastrado (Configurações › Integrações
- *  › Provedor de IA). `AI_CLI=1` (dev/e2e) conta como backend.
- *
- *  "Suportado" consulta `isAiVendorSupported` (lib/ai/complete.ts) em vez de
- *  checar o vendor aqui de novo — é a mesma pergunta que `aiComplete` faz na
- *  hora de completar de verdade, e as duas checagens já quase divergiram uma
- *  vez (esta função só reconhecia Anthropic enquanto o vendor configurado
- *  virou ChatGPT, 2026-09-14). */
-export async function conversionAiReady(): Promise<boolean> {
-  if (process.env.AI_CLI === "1") return true;
-  try {
-    const { getAiProviderSettingsService } = await import("@/lib/ai/provider");
-    const { isAiVendorSupported } = await import("@/lib/ai/complete");
-    const settings = await getAiProviderSettingsService();
-    if (!settings?.apiKey) return false;
-    return isAiVendorSupported(settings.vendor);
-  } catch {
-    return false;
-  }
-}
+// A Automação 2 não depende mais de um provedor de IA: o pedido de feedback traz
+// um modelo, lido pelo parser determinístico (lib/ai/commentParser.ts). Antes ela
+// ficava dormente sem IA — e, com a chave da OpenAI cadastrada mas a organização
+// não verificada, acordava para chamar um modelo que devolvia 404. A IA virou um
+// fallback opcional (`COMMENT_AI_FALLBACK=1`, ver extractMetrics.ts).
 const FEEDBACK_LEAD_DAYS = 2;   // prazo do card de feedback = vencimento da ocorrência + 2
 const TOLERANCIA_DIAS = 3;      // dias após o prazo antes de fechar com zeros
 
@@ -88,6 +70,8 @@ type OccPayload = Record<string, unknown> & {
   feedback_prompt_at?: string;
   feedback_source_at?: string;
   sales_report_generated_at?: string;
+  /** `at` do comentário fora do modelo que já recebeu o pedido de correção. */
+  feedback_format_warned_for?: string;
 };
 
 function nowIso() {
@@ -103,9 +87,31 @@ function tagsOf(config: AutomationConfigRow): string[] {
   return config.collect_metric_keys?.length ? config.collect_metric_keys : CONVERSION_METRICS_DEFAULT;
 }
 
+/** O pedido de feedback mostra o comentário CORRETO: o modelo que o parser lê sem
+ *  IA. Uma informação por linha; linha ausente = não informado. */
 function pedidoDe(tags: string[]): string {
-  const lista = tags.map(metricTagLabel).join(", ");
-  return `Informe num comentário aqui como foi a semana — ${lista}. Pode ser em texto corrido; a automação entende os números.`;
+  const regras = [
+    'Deixe de fora a linha do que não souber: linha ausente fica como "não informado", e 0 é só quando foi zero.',
+    ...(tags.includes("seguidores") ? ["Seguidores é o total do perfil no fim da semana, não o ganho."] : []),
+    ...(needsRichExtraction(tags) ? ["As linhas com #1, #2 ou #3 são opcionais: uma por venda, com a origem do anúncio, o serviço e o valor."] : []),
+  ];
+  return [
+    "Como foi a semana? Responda com um comentário neste card no modelo abaixo, trocando os números pelos da semana:",
+    "",
+    feedbackTemplate(tags),
+    "",
+    regras.join(" "),
+  ].join("\n");
+}
+
+/** Resposta a um comentário que o parser não conseguiu ler. */
+function pedidoDeCorrecao(tags: string[], ext: MetricExtract): string {
+  const motivo = ext.problemas?.length ? ` (${ext.problemas.join("; ")})` : "";
+  return [
+    `Não consegui ler os números deste comentário${motivo}. Pode reenviar no modelo? Uma informação por linha:`,
+    "",
+    feedbackTemplate(tags),
+  ].join("\n");
 }
 
 /** Só as métricas que o gestor de fato informou. Listar "Vendas: 0" para quem
@@ -351,15 +357,35 @@ async function processOccurrence(
   if (!human && !overdue) return true; // ainda dentro do prazo, esperando
   if (occPayload.sales_report_generated_at && !human) return false; // já fechado, sem novidade
 
-  if (!card2) {
-    card2 = await ensureFlowStep(admin, occ, "feedback", { title: "Feedback da semana", leadDays: FEEDBACK_LEAD_DAYS, clientVisible: true, position: 20 }, today);
-  }
-
   const ext: MetricExtract = human
     ? await extractMetrics(human.text, tags)
     // Sem retorno é o caso mais claro de "não informado": ninguém disse que a
     // semana foi zero — ninguém disse nada.
     : { valores: Object.fromEntries(tags.map((t) => [t, null])), linhas: [], note: "sem retorno do responsável" };
+
+  // O gestor respondeu, mas fora do modelo, e o parser não leu: responde no mesmo
+  // card com o modelo (uma vez por comentário) e segue esperando. Fechar a semana
+  // como "não informado" diria que ninguém respondeu. Passado o prazo e a
+  // tolerância, fecha como antes.
+  if (human && !overdue && (ext.note === "formato não reconhecido" || ext.note === "comentário ambíguo")) {
+    if (occPayload.feedback_format_warned_for === human.at) return false;
+    const commented = await getAdminTask(admin, human.taskId);
+    if (commented) {
+      const { error: warnErr } = await admin
+        .from("tasks")
+        .update({ payload: appendedCommentPayload(commented.payload, pedidoDeCorrecao(tags, ext)) })
+        .eq("id", commented.id);
+      if (warnErr) throw warnErr;
+    }
+    occPayload = { ...occPayload, feedback_format_warned_for: human.at };
+    const { error: occWarnErr } = await admin.from("tasks").update({ payload: occPayload }).eq("id", occ.id);
+    if (occWarnErr) throw occWarnErr;
+    return true;
+  }
+
+  if (!card2) {
+    card2 = await ensureFlowStep(admin, occ, "feedback", { title: "Feedback da semana", leadDays: FEEDBACK_LEAD_DAYS, clientVisible: true, position: 20 }, today);
+  }
 
   // O período REPORTADO (não a data em que a automação rodou) é o eixo da série
   // temporal em `task_metrics` — é o que deixa "seguidores ao longo do tempo" e
@@ -367,7 +393,7 @@ async function processOccurrence(
   // comentário corrigido regera tudo dias depois. Calculado uma vez aqui e
   // passado adiante pro PDF, em vez de recomputado lá dentro.
   const cadence: RecurringCadence = mold.recurrence_cadence ?? "semanal";
-  const period = periodForCadence(cadence, occ.due_date ?? today);
+  const period = reportPeriodFor(cadence, occ.due_date ?? today);
 
   // O que o feedback trouxe, contado num lugar só (lib/reports/conversionMode.ts)
   // — o mesmo modo e a mesma cobertura de atribuição que o PDF desenha.
@@ -398,15 +424,21 @@ async function processOccurrence(
 
   try {
     // task_metrics — só as tags que o gestor realmente informou (ver metricsParaBanco).
-    const { error: metricsErr } = await admin.from("task_metrics").upsert(
-      { task_id: card2.id, client_id: occ.client_id, metrics, source: "cliente", period_from: period.from, period_to: period.to },
-      { onConflict: "task_id" },
-    );
-    if (metricsErr) throw metricsErr;
+    // Fluxo de EXEMPLO (molde com payload.report_example) não entra na série: os
+    // números dele são ilustrativos e apareceriam como resultado real do cliente
+    // na tela de Performance e no comparativo da semana seguinte.
+    const isExample = (mold.payload as Record<string, unknown> | null)?.report_example === true;
+    if (!isExample) {
+      const { error: metricsErr } = await admin.from("task_metrics").upsert(
+        { task_id: card2.id, client_id: occ.client_id, metrics, source: "cliente", period_from: period.from, period_to: period.to },
+        { onConflict: "task_id" },
+      );
+      if (metricsErr) throw metricsErr;
+    }
 
     const sourceAt = sourceCommentAt ?? nowIso();
     const resumo = human
-      ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.`
+      ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.${ext.problemas?.length ? ` Deixei de fora: ${ext.problemas.join("; ")}.` : ""}`
       : `Sem retorno do responsável até o prazo — fechando a semana sem métricas registradas.`;
     const { error: c2Err } = await admin
       .from("tasks")
@@ -506,7 +538,6 @@ export async function runConversionFlow(
  */
 export async function handleConversionComment(admin: AdminClient, commentedTaskId: string): Promise<void> {
   try {
-    if (!(await conversionAiReady())) return; // Automação 2 dormente sem IA
     const candidates = new Set<string>([commentedTaskId]);
     const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", commentedTaskId);
     for (const l of links ?? []) candidates.add((l as { parent_id: string }).parent_id);

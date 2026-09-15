@@ -21,9 +21,9 @@ import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import { creativeRows, mediaOutcome, mediaTotals } from "@/lib/reports/adsInsights";
 import { collectAndStorePreviews } from "./creativeAssets";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
-import { fetchPostsForAccount, periodForCadence, resolveTemplateConfig } from "./reportData";
+import { fetchPostsForAccount, reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
-import { conversionAiReady, runConversionFlow } from "./conversionFlow";
+import { runConversionFlow } from "./conversionFlow";
 import { nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
 import { logReportRun } from "./reportLog";
 import { ensureFlowStep } from "@/lib/flows/advance";
@@ -108,10 +108,10 @@ async function fillReportCard(
   const account = adsAccountFor(client.slug, windsor, meta);
   if (!account) throw new Error(`Cliente "${client.name}" não tem conta de anúncios (Windsor ou Meta) vinculada em Integrações.`);
 
-  // Task comum sem recorrência: janela padrão de 7 dias terminando na data
-  // que disparou a execução (ver plan/AUTOMACOES-RELATORIO-TRAFEGO.md).
+  // Task comum sem recorrência: janela padrão de 7 dias. O período termina na
+  // véspera da execução — na segunda às 9h, cobre segunda a domingo anteriores.
   const cadence: RecurringCadence = target.recurrence_cadence ?? "semanal";
-  const period = periodForCadence(cadence, today);
+  const period = reportPeriodFor(cadence, today);
   const prevPeriod = previousPeriod(period);
   // A janela cobre as últimas semanas para a tendência do relatório; o que entra
   // no snapshot continua sendo só a semana atual e a anterior.
@@ -210,7 +210,6 @@ async function runOneReportAutomation(
   windsor: WindsorSettings,
   meta: ServiceMetaSettings,
   today: string,
-  aiReady: boolean,
 ): Promise<RunOutcome> {
   const target = await getAdminTask(admin, config.target_task_id);
   if (!target || target.due_date !== today) return "not_due";
@@ -224,7 +223,9 @@ async function runOneReportAutomation(
   // ocorrência + a etapa `trafego`, preenche essa etapa com o PDF do Meta e a
   // deixa em REVISÃO (um humano confere). O pedido de feedback e a etapa 2 são
   // da Automação 2. Sem molde de task_type — o fluxo é dinâmico.
-  const flowMode = aiReady && Boolean(target.recurrence_cadence) && (await hasDependentConversion(admin, config.id));
+  // Não depende mais de IA: o comentário é lido pelo parser determinístico
+  // (lib/ai/commentParser.ts), e a IA é só um fallback opcional.
+  const flowMode = Boolean(target.recurrence_cadence) && (await hasDependentConversion(admin, config.id));
 
   if (flowMode) {
     let card1: TaskRecord;
@@ -302,16 +303,26 @@ async function runOneReportAutomation(
 // coleta_metrica_cliente fica de fora (roadmap R6.11 — ainda é só stub).
 const RUN_KEYS = ["relatorio_trafego_semanal", "relatorio_vendas"] as const;
 
-export async function runAutomations(): Promise<AutomationRunSummary> {
+export type RunOptions = {
+  /** Dia da execução (ISO). Padrão: hoje em UTC — o cron roda às 12:00 UTC (9h
+   *  em Brasília), então o dia UTC e o de Brasília são o mesmo. */
+  today?: string;
+  /** Restringe a estas automações (reexecução manual, fluxo de exemplo). */
+  configIds?: string[];
+};
+
+export async function runAutomations(options: RunOptions = {}): Promise<AutomationRunSummary> {
   const admin = createAdminClient();
   const summary: AutomationRunSummary = { processed: 0, succeeded: 0, errors: [] };
-  const today = isoDay(new Date());
+  const today = options.today ?? isoDay(new Date());
 
-  const { data: configRows, error: configError } = await admin
+  let query = admin
     .from("automation_configs")
     .select("*")
     .in("automation_key", RUN_KEYS as unknown as string[])
     .eq("active", true);
+  if (options.configIds?.length) query = query.in("id", options.configIds);
+  const { data: configRows, error: configError } = await query;
   if (configError) throw configError;
   // Quem declara dependência roda depois de quem é dependido: a etapa `trafego`
   // e o registro em traffic_reports têm que existir antes da Automação 2
@@ -321,25 +332,19 @@ export async function runAutomations(): Promise<AutomationRunSummary> {
   );
   if (!configs.length) return summary;
 
-  const [windsor, meta, aiReady] = await Promise.all([
-    getWindsorSettingsService(),
-    getMetaSettingsService(),
-    conversionAiReady(),
-  ]);
+  const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
 
   for (const config of configs) {
     // last_run_date guarda a Automação 1 (uma vez por dia). A Automação 2 reage
     // ao comentário do responsável em qualquer dia — a idempotência dela vem de
     // marcadores em payload — mas ainda gravamos a data para observabilidade.
     if (config.automation_key === "relatorio_trafego_semanal" && config.last_run_date === today) continue;
-    // Automação 2 dormente sem backend de IA (ver conversionAiReady).
-    if (config.automation_key === "relatorio_vendas" && !aiReady) continue;
 
     let outcome: RunOutcome;
     try {
       outcome = config.automation_key === "relatorio_vendas"
         ? await runConversionFlow(admin, config, today)
-        : await runOneReportAutomation(admin, config, windsor, meta, today, aiReady);
+        : await runOneReportAutomation(admin, config, windsor, meta, today);
     } catch (error) {
       outcome = { error: errorMessage(error) };
     }

@@ -27,6 +27,17 @@ export function periodForCadence(cadence: RecurringCadence, endIso: string): Per
   return { from: isoDay(from), to: isoDay(to) };
 }
 
+/** Período de um relatório que roda em `runDay`: termina na VÉSPERA. Rodando na
+ *  segunda às 9h, cobre de segunda a domingo anteriores — o dia da execução ainda
+ *  está em andamento e entraria pela metade (antes o período terminava no próprio
+ *  dia do cron). As duas automações usam esta mesma conta, então os dois PDFs da
+ *  semana e a série de `task_metrics` falam do mesmo intervalo. */
+export function reportPeriodFor(cadence: RecurringCadence, runDay: string): Period {
+  const end = new Date(`${runDay}T12:00:00Z`);
+  end.setUTCDate(end.getUTCDate() - 1);
+  return periodForCadence(cadence, isoDay(end));
+}
+
 // performance_template_id é TEXT (aceita "builtin-*"), mas
 // performance_templates.id é UUID. Consultar um id de builtin ali faz o Postgres
 // devolver "invalid input syntax for type uuid" e derruba a execução inteira da

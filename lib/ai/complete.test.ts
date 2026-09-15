@@ -3,9 +3,7 @@ import { isAiVendorSupported, SUPPORTED_AI_VENDORS } from "./complete";
 
 // Só a função pura (`isAiVendorSupported`) — `aiComplete` em si depende de
 // rede + do provedor gravado no banco (getAiProviderSettingsService), fora
-// do escopo de um teste unitário. `conversionAiReady()`
-// (lib/automations/conversionFlow.ts) chama esta MESMA função — não há uma
-// segunda definição pra testar em separado.
+// do escopo de um teste unitário.
 describe("isAiVendorSupported", () => {
   it("Anthropic e ChatGPT têm um caminho implementado", () => {
     expect(isAiVendorSupported("anthropic")).toBe(true);

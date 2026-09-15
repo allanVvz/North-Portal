@@ -6,10 +6,9 @@
 // Integrações › Provedor de IA (`getAiProviderSettingsService`) — nunca
 // hardcoded. `SUPPORTED_AI_VENDORS`/`isAiVendorSupported` (abaixo) são a
 // ÚNICA fonte de verdade sobre quais vendors têm um caminho de fato
-// implementado; `conversionAiReady()` (lib/automations/conversionFlow.ts)
-// consulta esta mesma lista em vez de reimplementar a checagem — as duas já
-// quase divergiram uma vez (Anthropic-only vs. o vendor que o usuário
-// realmente configurou), e reaproveitar evita repetir isso.
+// implementado. A leitura do comentário de feedback não passa mais por aqui por
+// padrão: usa o parser determinístico e só chama a IA com o fallback ligado
+// (lib/ai/extractMetrics.ts → aiFallbackEnabled).
 
 import { getAiProviderSettingsService } from "./provider";
 import type { AiVendor } from "@/lib/aiProviders";

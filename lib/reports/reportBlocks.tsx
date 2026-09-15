@@ -26,6 +26,10 @@ const SEC = C.sec;
 const MUTED = C.muted;
 const LINE = "#e3e8e5";
 
+/** Frase gerada que começa pelo nome do anúncio ("ad promos agosto liderou…")
+ *  sai com maiúscula inicial; o nome em si não é alterado no meio da frase. */
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 export const toneColor = (tone: Tone | undefined) => (tone === "good" ? C.tealText : tone === "bad" ? C.danger : MUTED);
 
 export const T = StyleSheet.create({
@@ -120,7 +124,7 @@ export function PageHeader({ eyebrow, title, subtitle, pill }: { eyebrow: string
 export function Section({ title, aside, lead, children, wrap = true, breakBefore = false }: { title: string; aside?: string; lead?: ReactNode; children?: ReactNode; wrap?: boolean; breakBefore?: boolean }) {
   const head = (
     <View style={T.sectionHead} minPresenceAhead={60}>
-      <Text style={T.sectionTitle}>{title}</Text>
+      <Text style={T.sectionTitle}>{cap(title)}</Text>
       {aside ? <Text style={T.sectionAside}>{aside}</Text> : null}
     </View>
   );
@@ -198,7 +202,7 @@ export function AnalysisList({ items }: { items: string[] }) {
       {items.map((t) => (
         <View key={t} style={T.analysisRow} wrap={false}>
           <View style={T.analysisDot} />
-          <Text style={T.analysisText}>{t}</Text>
+          <Text style={T.analysisText}>{cap(t)}</Text>
         </View>
       ))}
     </View>
@@ -379,7 +383,9 @@ export function CreativeCards({ items }: { items: CreativeCardView[] }) {
       {items.map((c) => (
         <View key={c.name} style={[T.card, { width: cardW, flexDirection: wide || cols === 2 ? "row" : "column" }]} wrap={false}>
           <Thumb src={c.preview} size={wide || cols === 2 ? img : cardW - 18} kind={c.objectType} />
-          <View style={{ flex: 1, gap: 4 }}>
+          {/* Em linha o texto ocupa o resto da largura; em coluna (3 cartões) `flex: 1`
+              sem altura no pai encolhia o bloco a zero e sumia com nome e números. */}
+          <View style={wide || cols === 2 ? { flex: 1, gap: 4 } : { gap: 4 }}>
             {c.badges.map((b) => (
               <Text key={b.label} style={[T.cardBadge, { color: b.tone === "bad" ? C.danger : b.tone === "good" ? C.tealText : SEC }]}>{b.label}</Text>
             ))}
@@ -416,8 +422,10 @@ export function LineChart({ periods, values, width = W, height = 90, format = (v
   const right = 8;
   const min = Math.min(...pts.map((p) => p.v));
   const max = Math.max(...pts.map((p) => p.v));
+  // Folga maior embaixo: o ponto mais baixo nunca encosta na base, e o número dele
+  // cabe abaixo do ponto em vez de cruzar a linha que sobe.
   const pad = (max - min) * 0.2 || Math.max(1, max * 0.05);
-  const lo = min - pad;
+  const lo = min - pad * 3;
   const hi = max + pad;
   const x = (i: number) => left + ((width - left - right) * i) / Math.max(1, periods.length - 1);
   const y = (v: number) => top + (height - top - bottom) * (1 - (v - lo) / (hi - lo));
@@ -428,13 +436,20 @@ export function LineChart({ periods, values, width = W, height = 90, format = (v
     <Svg viewBox={`0 0 ${width} ${height}`} style={{ width, height }}>
       <Line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke={LINE} strokeWidth={1} />
       <Path d={d} stroke={TEAL.d2} strokeWidth={2} fill="none" />
-      {[first, last].map((p) => (
-        <G key={p.i}>
-          <Circle cx={x(p.i)} cy={y(p.v)} r={5} fill="#ffffff" />
-          <Circle cx={x(p.i)} cy={y(p.v)} r={3.5} fill={TEAL.d2} />
-          <SvgText x={x(p.i)} y={y(p.v) - 7} textAnchor={p === first ? "start" : "end"} fill={INK} fontFamily="Inter" fontWeight={700} fontSize={7.5}>{format(p.v)}</SvgText>
-        </G>
-      ))}
+      {[first, last].map((p) => {
+        // O número vai para o lado oposto ao da linha: se ela chega de cima, fica
+        // embaixo do ponto (antes "R$ 185,40" cruzava a linha que descia até ele).
+        const neighbor = p === first ? pts[1] : pts[pts.length - 2];
+        const py = y(p.v);
+        const below = neighbor.v > p.v && py + 12 <= height - bottom;
+        return (
+          <G key={p.i}>
+            <Circle cx={x(p.i)} cy={py} r={5} fill="#ffffff" />
+            <Circle cx={x(p.i)} cy={py} r={3.5} fill={TEAL.d2} />
+            <SvgText x={x(p.i)} y={below ? py + 12 : py - 7} textAnchor={p === first ? "start" : "end"} fill={INK} fontFamily="Inter" fontWeight={700} fontSize={7.5}>{format(p.v)}</SvgText>
+          </G>
+        );
+      })}
       {periods.map((label, i) => (
         <SvgText key={label + i} x={x(i)} y={height - 4} textAnchor={i === 0 ? "start" : i === periods.length - 1 ? "end" : "middle"} fill={MUTED} fontFamily="Inter" fontSize={6.5}>{label}</SvgText>
       ))}
