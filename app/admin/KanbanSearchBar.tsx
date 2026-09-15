@@ -141,7 +141,10 @@ export default function KanbanSearchBar({
           value={q}
           onChange={(e) => { onQChange(e.target.value); setPendingAttr(null); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder={filters.length ? "Buscar por título…" : "Filtrar por situação, cliente, tipo, prioridade, responsável ou buscar por título…"}
+          // Curto de propósito: o atalho "Atrasadas N" divide a caixa e cortava
+          // o texto longo no meio ("…ou buscar por t").
+          placeholder={filters.length ? "Buscar por título…" : "Filtrar ou buscar tarefas…"}
+          title="Filtre por situação, cliente, tipo, prioridade ou responsável, ou busque pelo título"
         />
         {onToggleOverdue && overdueCount !== undefined && !overdueOn ? (
           <button

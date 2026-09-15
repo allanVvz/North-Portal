@@ -40,7 +40,8 @@ async function filterToRun(page: Page) {
   // O feed é buscado no cliente depois do primeiro render: filtrar antes de ele
   // chegar deixaria o quadro vazio e a contagem abaixo seria uma corrida.
   await expect(page.locator(".kb-card").first()).toBeVisible({ timeout: 20_000 });
-  await page.getByPlaceholder(/Filtrar por cliente, tipo/).fill(TAG);
+  // Pela classe, não pelo placeholder: o texto da caixa já mudou duas vezes.
+  await page.locator(".kb-searchbar-input").fill(TAG);
   await expect(page.locator(".kb-card")).toHaveCount(3, { timeout: 10_000 });
 }
 

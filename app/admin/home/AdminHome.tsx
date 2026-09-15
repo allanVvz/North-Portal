@@ -277,8 +277,10 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
       </div>
 
       <div className="home-cols">
-        {/* The week grid needs the full content width; the list fits a column. */}
-        <div className={`admin-card${weekView === "calendario" ? " home-card-wide" : ""}`}>
+        {/* O calendário precisa da largura toda; a lista cabe numa coluna, mas
+            só divide a linha quando o painel de notificações existe — sem ele,
+            a metade direita ficava vazia. */}
+        <div className={`admin-card${weekView === "calendario" || unread === 0 ? " home-card-wide" : ""}`}>
           <div className="home-card-head">
             <p className="admin-card-title">Esta semana na agência · {summary.weekAheadCount}</p>
             <button
