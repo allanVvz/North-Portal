@@ -8,8 +8,11 @@
 .clients-section-tabs a:hover { color: var(--a-ink); }
 .clients-section-tabs a.on { color: var(--a-teal-text); border-bottom-color: var(--a-teal-strong); }
 
-.nai-studio { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: 100dvh; background: var(--a-bg); }
-.nai-col { display: flex; flex-direction: column; min-width: 0; height: 100dvh; }
+/* O admin roda com `html { zoom: var(--ui-scale) }` (0.8): sob zoom, 100dvh rende
+   só 80% da janela e o composer "fixo" flutuava no meio. Dividir pela escala
+   devolve a altura real — mesmo acerto do modal (.tm-lg.tm-new). */
+.nai-studio { --nai-vh: calc(100dvh / var(--ui-scale, 1)); display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: var(--nai-vh); background: var(--a-bg); }
+.nai-col { display: flex; flex-direction: column; min-width: 0; height: var(--nai-vh); }
 .nai-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .nai-scroll-inner { width: min(860px, 100%); margin: 0 auto; padding: 20px 24px 28px; }
 
@@ -123,7 +126,7 @@
 .nai-composer-foot { margin-top: 6px; color: var(--a-muted); font-size: 11px; text-align: center; }
 
 /* Contexto e conversas */
-.nai-side { height: 100dvh; overflow-y: auto; border-left: 1px solid var(--a-border); background: var(--a-surface); }
+.nai-side { height: var(--nai-vh); overflow-y: auto; border-left: 1px solid var(--a-border); background: var(--a-surface); }
 .nai-context, .nai-history { display: grid; align-content: start; gap: 14px; padding: 20px 18px 28px; }
 .nai-context-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .nai-context-head strong { font-size: 15px; color: var(--a-ink); }
