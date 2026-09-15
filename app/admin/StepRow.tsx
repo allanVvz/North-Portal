@@ -14,8 +14,13 @@ import type { ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation
 // Uma etapa (ou atividade) minimizada, editável na própria linha — ATA 14/09,
 // "referência do Monday": cada tarefa lista as etapas no mesmo card com STATUS,
 // DATA PREVISTA e RESPONSÁVEL, um check para concluir sem abrir o card, e o
-// ícone de comentário da etapa (os comentários de roteiro ficam no roteiro, os
-// de edição na edição).
+// ícone de comentário da etapa.
+//
+// Uma linha só (15/09): os rótulos em caixa-alta em cima de cada campo dobravam
+// a altura de toda lista de etapas sem dizer nada que o próprio valor não diga.
+// Eles viraram aria-label/title. O selo de situação só aparece quando pede ação
+// (atrasada/parada) — "No prazo" em toda linha era ruído, e concluída já está
+// no check e no fundo da linha.
 //
 // Cada mudança é um PATCH no card da ETAPA — o mesmo que abrir e editar —, então
 // a cascata, as notificações e o autosave do servidor valem igual.
@@ -28,6 +33,14 @@ export type StepPatch = {
   assignee?: string | null;
   assignee_profile_ids?: string[];
 };
+
+function CommentIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden focusable="false">
+      <path d="M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 11.5H7l-3.5 2.5v-2.5H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5Z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export default function StepRow({
   card,
@@ -66,6 +79,7 @@ export default function StepRow({
   const done = card.status === "aprovado";
   const assigneeId = card.assignee_profile_ids?.[0] ?? team.find((member) => member.label === card.assignee)?.id ?? "";
   const disabled = busy || saving || isOpenCard;
+  const showState = state === "atrasada" || state === "parada";
 
   async function run(patch: StepPatch) {
     setSaving(true);
@@ -91,7 +105,7 @@ export default function StepRow({
   return (
     <div className={`tm-member tm-step-row is-${state}${isCurrent ? " is-current" : ""}${isOpenCard ? " tm-member-current" : ""}`}>
       {/* Não usar .tm-step-line: é o traço absoluto de 2px do stepper, e a
-          linha inteira (check, título, 💬) sumia atrás do conteúdo. */}
+          linha inteira (check, título, comentários) sumia atrás do conteúdo. */}
       <div className="tm-steprow-head">
         <input
           type="checkbox"
@@ -102,38 +116,30 @@ export default function StepRow({
           title={done ? "Reabrir" : "Concluir sem abrir o card"}
           aria-label={done ? `Reabrir ${label}` : `Concluir ${label}`}
         />
-        <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span>
-        <button type="button" className="tm-member-open" onClick={onOpen} disabled={!canOpen || busy || isOpenCard}>
+        {showState ? <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span> : null}
+        <button type="button" className="tm-member-open" onClick={onOpen} disabled={!canOpen || busy || isOpenCard} title={`Abrir ${label}`}>
           <TaskKindIcon kind={card.kind} size="sm" />
           <span className="tm-member-title">{label}</span>
           {isCurrent ? <span className="tm-step-current">etapa atual</span> : null}
           {isOpenCard ? <span className="tm-member-status">você está aqui</span> : <span className="tm-member-arrow" aria-hidden>↗</span>}
         </button>
-        <button
-          type="button"
-          className={`tm-step-comments${commentsOpen ? " on" : ""}${comments.length ? " has" : ""}`}
-          onClick={() => setCommentsOpen((open) => !open)}
-          aria-expanded={commentsOpen}
-          title={`Comentários de ${label}`}
-        >
-          💬 {comments.length}
-        </button>
-        {onUnlink ? (
-          <button type="button" className="tm-member-unlink" title={unlinkTitle} aria-label={unlinkTitle} onClick={onUnlink} disabled={busy}>✕</button>
-        ) : null}
-      </div>
 
-      <div className="tm-step-fields">
-        <label className="tm-step-field">
-          <span>Status</span>
-          <select value={card.status} disabled={disabled} onChange={(event) => void run({ status: event.target.value as TaskStatus })}>
+        <div className="tm-step-fields">
+          <select
+            className="tm-step-status"
+            aria-label={`Status de ${label}`}
+            title="Status"
+            value={card.status}
+            disabled={disabled}
+            onChange={(event) => void run({ status: event.target.value as TaskStatus })}
+          >
             {COLUMNS.map((column) => <option key={column.status} value={column.status}>{column.label}</option>)}
           </select>
-        </label>
-        <label className="tm-step-field">
-          <span>Data prevista</span>
           <input
             type="date"
+            className="tm-step-date"
+            aria-label={`Data prevista de ${label}`}
+            title="Data prevista"
             value={card.due_date ?? ""}
             disabled={disabled}
             onChange={(event) => {
@@ -141,10 +147,10 @@ export default function StepRow({
               void run({ due_date: value, start_date: value, end_date: value });
             }}
           />
-        </label>
-        <label className="tm-step-field">
-          <span>Responsável</span>
           <select
+            className="tm-step-assignee"
+            aria-label={`Responsável por ${label}`}
+            title="Responsável"
             value={assigneeId}
             disabled={disabled}
             onChange={(event) => {
@@ -152,10 +158,24 @@ export default function StepRow({
               void run(member ? { assignee: member.label, assignee_profile_ids: [member.id] } : { assignee: null, assignee_profile_ids: [] });
             }}
           >
-            <option value="">{card.assignee && !assigneeId ? card.assignee : "— Sem responsável —"}</option>
+            <option value="">{card.assignee && !assigneeId ? card.assignee : "Sem responsável"}</option>
             {team.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}
           </select>
-        </label>
+        </div>
+
+        <button
+          type="button"
+          className={`tm-step-comments${commentsOpen ? " on" : ""}${comments.length ? " has" : ""}`}
+          onClick={() => setCommentsOpen((open) => !open)}
+          aria-expanded={commentsOpen}
+          aria-label={`Comentários de ${label} (${comments.length})`}
+          title={`Comentários de ${label}`}
+        >
+          <CommentIcon /> {comments.length}
+        </button>
+        {onUnlink ? (
+          <button type="button" className="tm-member-unlink" title={unlinkTitle} aria-label={unlinkTitle} onClick={onUnlink} disabled={busy}>✕</button>
+        ) : null}
       </div>
 
       {commentsOpen ? (

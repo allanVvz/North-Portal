@@ -3766,30 +3766,9 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-parentbox-sub { font-size: 11.5px; color: var(--a-muted); }
 .tm-parentbox-pct { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--a-sec); }
 
-/* Search-or-create composer for plan activities */
-.tm-member-search { position: relative; margin-top: 4px; }
-.tm-member-search-input {
-  width: 100%; border: 1px dashed var(--a-border-strong); border-radius: 10px; background: var(--a-surface);
-  padding: 9px 12px; font: inherit; font-size: 13px; color: var(--a-ink);
-}
-.tm-member-search-input:focus { outline: none; border-style: solid; border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
-.tm-member-search-input::placeholder { color: var(--a-muted); }
-.tm-member-search-dropdown {
-  position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0; max-height: 240px; overflow-y: auto;
-  background: var(--a-surface); border: 1px solid var(--a-border); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.18);
-  padding: 6px; display: flex; flex-direction: column; gap: 1px;
-}
-.tm-member-search-option {
-  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none;
-  cursor: pointer; font: inherit; font-size: 13px; color: var(--a-ink); padding: 8px 9px; border-radius: 8px;
-}
-.tm-member-search-option:hover { background: var(--a-hover); }
-.tm-member-search-create { color: var(--a-teal-text); font-weight: 600; border-top: 1px solid var(--a-border); margin-top: 2px; padding-top: 9px; border-radius: 0 0 8px 8px; }
+/* O compositor de atividades do plano virou .pac (PlanAddCombobox, mais abaixo).
+   Só a mensagem de lista vazia continua em uso, no seletor de anexos. */
 .tm-member-search-empty { margin: 4px 6px; font-size: 12px; color: var(--a-muted); }
-
-.tm-member-createform { margin-top: 4px; padding: 12px 14px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface); }
-.tm-member-createform-title { margin: 0 0 10px; font-size: 13px; color: var(--a-sec); }
-.tm-member-createform-actions { margin-top: 12px; }
 
 /* Calendar: month/week toggle + week view (plan bars + timed events) */
 
@@ -5205,27 +5184,33 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .plan-card-titleline .kb-situacao { margin-right: 4px; }
 
 /* Etapa/atividade editável na linha (StepRow) — referência do Monday. */
-.tm-step-row { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 10px; border: 1px solid var(--a-border); }
+.tm-step-row { flex-direction: column; align-items: stretch; gap: 6px; padding: 5px 6px 5px 10px; border: 1px solid var(--a-border); }
 .tm-step-row:hover { background: inherit; }
 .tm-step-row.is-current { border-color: var(--a-teal); box-shadow: 0 0 0 1px var(--a-teal) inset; }
-.tm-steprow-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.tm-steprow-head .tm-member-open { padding: 2px 4px; }
+/* Uma linha só: check · situação · título · status · data · responsável · comentários. */
+.tm-steprow-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.tm-steprow-head .tm-member-open { flex: 1 1 160px; padding: 2px 4px; }
 .tm-step-check { width: 18px; height: 18px; accent-color: var(--a-teal-strong); cursor: pointer; flex: 0 0 auto; }
 .tm-step-current { padding: 2px 7px; border-radius: 999px; background: var(--a-teal); color: var(--a-inverse); font-size: 10px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
 .tm-step-comments { flex: 0 0 auto; padding: 4px 8px; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface); color: var(--a-muted); font: inherit; font-size: 11.5px; cursor: pointer; }
 .tm-step-comments.has { color: var(--a-ink); }
 .tm-step-comments.on, .tm-step-comments:hover { border-color: var(--a-teal); color: var(--a-teal-text); }
-.tm-step-fields { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) minmax(140px, 1.2fr); gap: 8px; padding-left: 26px; }
-.tm-step-field { display: grid; gap: 2px; min-width: 0; }
-.tm-step-field > span { font-size: 9.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
-.tm-step-field select, .tm-step-field input { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--a-border); border-radius: 8px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 12.5px; }
-.tm-step-row.is-atrasada .tm-step-field input[type="date"] { border-color: var(--a-danger); color: var(--a-danger); font-weight: 650; }
+.tm-step-fields { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; margin-left: auto; min-width: 0; }
+.tm-step-fields select, .tm-step-fields input { min-width: 0; height: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: 8px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 12.5px; }
+.tm-step-fields select:hover:not(:disabled), .tm-step-fields input:hover:not(:disabled) { border-color: var(--a-border); }
+.tm-step-fields select:focus-visible, .tm-step-fields input:focus-visible { outline: none; border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
+.tm-step-status { width: 120px; }
+.tm-step-date { width: 126px; }
+.tm-step-assignee { width: 142px; }
+.tm-step-row.is-atrasada .tm-step-date { border-color: var(--a-danger); color: var(--a-danger); font-weight: 650; }
+.tm-step-comments { display: inline-flex; align-items: center; gap: 4px; }
 .tm-step-thread { display: grid; gap: 8px; margin: 2px 0 0 26px; padding: 10px; border-radius: 10px; background: var(--a-surface); border: 1px solid var(--a-border); }
 .tm-step-comment { display: flex; gap: 8px; }
 .tm-step-comment-input { display: flex; gap: 8px; align-items: flex-end; }
 .tm-step-comment-input textarea { min-height: 34px; padding: 7px 9px; border: 1px solid var(--a-border); border-radius: 8px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 13px; }
 .tm-step-pending { opacity: .9; }
-@media (max-width: 720px) { .tm-step-fields { grid-template-columns: 1fr; padding-left: 0; } .tm-step-thread { margin-left: 0; } }
+@media (max-width: 900px) { .tm-step-fields { flex: 1 1 100%; margin-left: 26px; } .tm-step-fields > * { flex: 1 1 0; width: auto; } }
+@media (max-width: 720px) { .tm-step-fields { margin-left: 0; flex-wrap: wrap; } .tm-step-thread { margin-left: 0; } }
 
 /* Cadastro de cliente — rotinas padrão obrigatórias. */
 .client-routines-list { display: grid; gap: 10px; }
@@ -5239,20 +5224,60 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 @media (max-width: 820px) { .client-routine-row { grid-template-columns: 1fr; } }
 
 /* Plano de conteúdo por volume. */
-.cp-box { display: grid; gap: 8px; margin: 4px 0 10px; padding: 12px; border: 1px dashed color-mix(in srgb, var(--a-teal) 55%, var(--a-border)); border-radius: 12px; background: color-mix(in srgb, var(--a-teal) 6%, var(--a-surface)); }
-.cp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
-.cp-title { margin: 0; font-size: 13px; font-weight: 750; color: var(--a-ink); }
-.cp-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
-.cp-field { display: grid; gap: 3px; }
-.cp-field > span { font-size: 9.5px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; color: var(--a-muted); }
-.cp-field input { width: 84px; height: 32px; padding: 0 8px; border: 1px solid var(--a-border); border-radius: 8px; background: var(--a-surface); color: var(--a-ink); font: inherit; }
-.cp-generate { height: 32px; }
-.cp-preview { margin: 0; font-size: 12px; color: var(--a-sec); line-height: 1.45; }
-.cp-preview.is-hint { color: var(--a-muted); }
+/* Adicionar ao plano (15/09): uma caixa só para vincular, criar e gerar em lote,
+   com as opções e a quantidade abrindo ao clicar. O painel é estático (empurra o
+   conteúdo) em vez de flutuar: dentro do modal com rolagem, um absoluto alto era
+   cortado no fim da coluna. */
+.pac { margin-top: 6px; }
+.pac-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 42px; padding: 5px 6px 5px 12px; border: 1px dashed var(--a-border-strong); border-radius: 12px; background: var(--a-surface); cursor: text; }
+.pac.is-open .pac-box, .pac-box:focus-within { border-style: solid; border-color: var(--a-teal); box-shadow: 0 0 0 3px var(--a-teal-soft); }
+.pac-plus { color: var(--a-teal-text); font-weight: 700; }
+.pac-input { flex: 1 1 200px; min-width: 120px; height: 30px; border: 0; background: transparent; color: var(--a-ink); font: inherit; font-size: 13px; outline: none; }
+.pac-input::placeholder { color: var(--a-muted); }
+.pac-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 3px 2px 9px; border-radius: 999px; background: var(--a-teal-soft); color: var(--a-teal-text); font-size: 12px; font-weight: 650; white-space: nowrap; }
+.pac-chip button { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: 10px; cursor: pointer; }
+.pac-chip button:hover { background: color-mix(in srgb, var(--a-teal) 25%, transparent); }
+.pac-create { height: 32px; margin-left: auto; }
+.pac-panel { display: grid; gap: 2px; margin-top: 8px; padding: 6px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface); }
+.pac-section { display: grid; gap: 2px; padding: 4px 0; }
+.pac-section + .pac-section { border-top: 1px solid var(--a-border); padding-top: 8px; }
+.pac-section-title { margin: 0 8px 4px; font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--a-muted); }
+.pac-section-title span { margin-left: 8px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.pac-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 2px; border-radius: 9px; }
+.pac-row:hover, .pac-row.on { background: var(--a-hover); }
+.pac-row-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: 36px; padding: 0 8px; border: 0; background: transparent; color: var(--a-ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.pac-row.on .pac-row-label { font-weight: 650; }
+.pac-row-hint { color: var(--a-muted); font-size: 11.5px; }
+.pac-qty { display: inline-flex; align-items: center; flex: 0 0 auto; border: 1px solid var(--a-border); border-radius: 9px; overflow: hidden; background: var(--a-inset); }
+.pac-row.on .pac-qty { border-color: var(--a-teal); }
+.pac-qty button { width: 32px; height: 32px; border: 0; background: transparent; color: var(--a-sec); font: inherit; font-size: 15px; cursor: pointer; }
+.pac-qty button:hover:not(:disabled) { background: var(--a-hover); color: var(--a-ink); }
+.pac-qty button:disabled { opacity: .35; cursor: default; }
+.pac-qty input { width: 36px; height: 32px; border: 0; background: transparent; color: var(--a-ink); font: inherit; font-size: 13px; font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; }
+.pac-qty input::-webkit-outer-spin-button, .pac-qty input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pac-link { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--a-ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.pac-link span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pac-link:hover { background: var(--a-hover); }
+.pac-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 2px 8px 2px; padding-top: 8px; border-top: 1px solid var(--a-border); font-size: 12px; line-height: 1.45; color: var(--a-sec); }
+.pac-foot-context { color: var(--a-muted); }
+
+/* Caixa com cabeçalho de ação (ciclos da rotina, atividades do plano). */
+.tm-box-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 10px; }
+.tm-box-head .tm-box-label { margin: 0; }
+.tm-box-label-sub { font-weight: 500; color: var(--a-muted); }
+.tm-cycles-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12.5px; color: var(--a-sec); }
+.tm-cycles-action b { color: var(--a-ink); }
+.tm-cycles-stopped { font-size: 12px; color: var(--a-muted); }
+.tm-cycles-log { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--a-border); }
+.tm-cycles-subtitle { margin: 0 0 6px; font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--a-muted); }
+.tm-cycles-empty { margin: 0; font-size: 12.5px; color: var(--a-muted); }
+.tm-cycles-more { margin-top: 6px; padding: 2px 0; border: 0; background: none; color: var(--a-teal-text); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.tm-desc-add { display: block; width: fit-content; margin: 14px 30px 0; padding: 6px 12px; border: 1px dashed var(--a-border-strong); border-radius: 9px; background: transparent; color: var(--a-sec); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tm-desc-add:hover { border-color: var(--a-teal); color: var(--a-teal-text); }
 
 /* Checks da recorrência. */
 .tm-cyclelog-next { margin: 0 0 8px; font-size: 12.5px; color: var(--a-sec); }
-.tm-cyclelog-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 220px; overflow: auto; }
+.tm-cyclelog-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .tm-cyclelog-list li { display: grid; grid-template-columns: 22px auto 1fr auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--a-teal) 10%, var(--a-surface)); font-size: 12.5px; }
 .tm-cyclelog-check { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--a-teal-strong); color: var(--a-inverse); font-size: 11px; font-weight: 800; }
 .tm-cyclelog-when { color: var(--a-ink); font-weight: 600; }

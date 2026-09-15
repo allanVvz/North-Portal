@@ -10,7 +10,8 @@ import MentionTextarea from "./MentionTextarea";
 import StepRow, { type StepPatch } from "./StepRow";
 import { cycleLogOf } from "@/lib/cycleLog";
 import { formatShortDate } from "./taskDates";
-import ContentPlanComposer from "./ContentPlanComposer";
+import PlanAddCombobox from "./PlanAddCombobox";
+import CycleChecks from "./CycleChecks";
 import { addDaysIso } from "./contentPlan";
 import { todayInTimezone } from "./recurringState";
 import CardParentBox from "./CardParentBox";
@@ -28,7 +29,6 @@ import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
-import { normalizeSearchText } from "@/lib/taskSearch";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
@@ -226,138 +226,6 @@ function HeadDropdown({
       {open ? (
         <div className="tm-headpick-panel" role="listbox" onClick={() => setOpen(false)}>
           {children}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// Search-or-create field for plan activities — types filter existing
-// unlinked candidates from the same client; no exact match reveals a small
-// inline form (responsável + data) so a brand-new activity can be queued
-// without leaving the plan modal.
-function PlanMemberComposer({
-  candidates,
-  assignees,
-  defaultAssignee,
-  defaultDueDate,
-  // Vocabulário real de tipos (mesma fonte que /api/admin/task-types serve ao
-  // NewTaskButton) — sem isto o composer só sabia criar "Tarefa" (ver P0-B: uma
-  // Entrega criada por dentro de um Plano nascia operacional e pelada). Só um
-  // tipo na lista esconde o seletor: é o caso do Plano ainda não salvo, onde o
-  // fluxo de criação de membro não é este (ver comentário em createLinkedActivity).
-  types,
-  defaultType,
-  busy,
-  onLinkExisting,
-  onCreateNew,
-}: {
-  candidates: { id: string; title: string; kind: string }[];
-  assignees: string[];
-  defaultAssignee: string;
-  defaultDueDate: string;
-  types: { key: string; label: string }[];
-  defaultType: string;
-  busy: boolean;
-  onLinkExisting: (candidate: { id: string; title: string }) => void;
-  onCreateNew: (data: { title: string; assignee: string; due_date: string; kind: string }) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [formAssignee, setFormAssignee] = useState(defaultAssignee);
-  const [formDate, setFormDate] = useState(defaultDueDate);
-  const [formKind, setFormKind] = useState(defaultType);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
-  // Só título aqui de propósito: `candidates` chega como um shape reduzido
-  // ({ id, title, kind }) para este picker. Ainda assim normaliza acento nos
-  // dois lados, como o resto da busca. Alargar a prop para TaskRecord[] e usar
-  // taskMatchesQuery é um follow-up.
-  const needle = normalizeSearchText(query.trim());
-  const matches = needle ? candidates.filter((c) => normalizeSearchText(c.title).includes(needle)).slice(0, 6) : [];
-  const exact = needle ? candidates.some((c) => normalizeSearchText(c.title) === needle) : false;
-
-  function startCreate() {
-    setFormAssignee(defaultAssignee);
-    setFormDate(defaultDueDate);
-    setFormKind(defaultType);
-    setCreating(true);
-    setOpen(false);
-  }
-
-  function submitCreate() {
-    const title = query.trim();
-    if (!title) return;
-    onCreateNew({ title, assignee: formAssignee, due_date: formDate, kind: formKind });
-    setQuery("");
-    setCreating(false);
-  }
-
-  if (creating) {
-    return (
-      <div className="tm-member-createform">
-        <p className="tm-member-createform-title">Nova atividade: “{query.trim()}”</p>
-        <div className="kb-modal-row">
-          {types.length > 1 ? (
-            <label className="admin-field"><span>Tipo</span>
-              <select value={formKind} onChange={(e) => setFormKind(e.target.value)}>
-                {types.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-              </select>
-            </label>
-          ) : null}
-          <label className="admin-field"><span>Responsável</span>
-            <select value={formAssignee} onChange={(e) => setFormAssignee(e.target.value)}>
-              <option value="">— Sem responsável —</option>
-              {assignees.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </label>
-          <label className="admin-field"><span>Data</span>
-            <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
-          </label>
-        </div>
-        <div className="kb-modal-actions-right tm-member-createform-actions">
-          <button type="button" className="admin-btn ghost" onClick={() => setCreating(false)}>Cancelar</button>
-          <button type="button" className="admin-btn primary" onClick={submitCreate} disabled={busy || !query.trim()}>+ Adicionar</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="tm-member-search" ref={ref}>
-      <input
-        className="tm-member-search-input"
-        value={query}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => query.trim() && setOpen(true)}
-        placeholder="+ Buscar ou criar atividade…"
-        disabled={busy}
-      />
-      {open && needle ? (
-        <div className="tm-member-search-dropdown">
-          {matches.map((c) => (
-            <button type="button" key={c.id} className="tm-member-search-option" onClick={() => { onLinkExisting(c); setQuery(""); setOpen(false); }}>
-              <TaskKindIcon kind={c.kind} size="sm" />
-              <span>{c.title}</span>
-            </button>
-          ))}
-          {!exact ? (
-            <button type="button" className="tm-member-search-option tm-member-search-create" onClick={startCreate}>
-              + Criar atividade “{query.trim()}”
-            </button>
-          ) : matches.length === 0 ? (
-            <p className="tm-member-search-empty">Essa atividade já existe.</p>
-          ) : null}
         </div>
       ) : null}
     </div>
@@ -951,10 +819,6 @@ export default function TaskModal({
     : [];
   function addPendingExisting(candidate: { id: string; title: string }) {
     setPendingMembers((current) => [...current, { key: `e-${candidate.id}`, kind: "existing", taskId: candidate.id, title: candidate.title }]);
-  }
-  function addPendingNew(data: { title: string; assignee: string; due_date: string; kind: string }) {
-    const { kind: taskKind, ...rest } = data;
-    setPendingMembers((current) => [...current, { key: `n-${Date.now()}-${current.length}`, kind: "new", taskKind, ...rest }]);
   }
   function removePendingMember(key: string) {
     setPendingMembers((current) => current.filter((m) => m.key !== key));
@@ -1769,41 +1633,42 @@ export default function TaskModal({
               />
             ) : null}
 
-            {/* Checks da recorrência (ATA 14/09): cada entrega concluída com a data
-                do check e quem deu, no card que fica sempre aberto. Numa execução,
-                mostra os do molde. */}
-            {liveTask && (isRecurringParent || recurrenceParent) ? (() => {
-              const template = isRecurringParent ? liveTask : recurrenceParent;
-              const log = cycleLogOf(template?.payload).slice().reverse();
-              return (
-                <div className="tm-box tm-cyclelog">
-                  <p className="tm-box-label">Checks da recorrência ({log.length})</p>
-                  {template?.due_date && template.recurrence_cadence && !recurrenceStopped(template.status) ? (
-                    <p className="tm-cyclelog-next">Próxima entrega: <b>{formatShortDate(template.due_date)}</b></p>
-                  ) : null}
-                  {log.length ? (
-                    <ul className="tm-cyclelog-list">
-                      {log.map((entry) => (
-                        <li key={`${entry.cycle}-${entry.completed_at}`}>
-                          <span className="tm-cyclelog-check" aria-hidden>✓</span>
-                          <span className="tm-cyclelog-when">{formatAbsoluteTime(entry.completed_at)}</span>
-                          <span className="tm-cyclelog-cycle">ciclo de {formatShortDate(entry.due_date)}</span>
-                          <b className="tm-cyclelog-by">{entry.by ?? "—"}</b>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="admin-sub" style={{ margin: 0 }}>Nenhum check registrado ainda. “✓ Concluir ciclo” registra a entrega com data e responsável.</p>
-                  )}
-                </div>
-              );
-            })() : null}
+            {/* Numa EXECUÇÃO da recorrência, os checks do molde, só leitura. No
+                MOLDE eles moram na caixa de ciclos abaixo, junto da ação de
+                concluir — antes eram duas caixas ("Checks" e "Execuções") para a
+                mesma pergunta, e a ação ficava escondida no rodapé. */}
+            {liveTask && !isRecurringParent && recurrenceParent ? (
+              <div className="tm-box tm-cyclelog">
+                <p className="tm-box-label">Checks da recorrência ({cycleLogOf(recurrenceParent.payload).length})</p>
+                {recurrenceParent.due_date && recurrenceParent.recurrence_cadence && !recurrenceStopped(recurrenceParent.status) ? (
+                  <p className="tm-cyclelog-next">Próxima entrega: <b>{formatShortDate(recurrenceParent.due_date)}</b></p>
+                ) : null}
+                <CycleChecks log={cycleLogOf(recurrenceParent.payload)} />
+              </div>
+            ) : null}
 
             {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
-              <div className="tm-box tm-planmembers">
-                <p className="tm-box-label">
-                  {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
-                </p>
+              <div className={`tm-box tm-planmembers${isRecurringParent ? " tm-cycles" : ""}`}>
+                <div className="tm-box-head">
+                  <p className="tm-box-label">
+                    {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
+                    {!isRecurringParent && liveTask && planMembers.length ? (
+                      <span className="tm-box-label-sub"> · {planMembers.filter((m) => m.status === "aprovado").length} concluídas</span>
+                    ) : null}
+                  </p>
+                  {isRecurringParent && liveTask ? (
+                    recurrenceStopped(liveTask.status) ? (
+                      <span className="tm-cycles-stopped" title="Mova o card para fora de Aprovado/Parada para retomar">Recorrência encerrada</span>
+                    ) : (
+                      <div className="tm-cycles-action">
+                        {liveTask.due_date ? <span>Próxima entrega <b>{formatShortDate(liveTask.due_date)}</b></span> : null}
+                        <button type="button" className={`admin-btn primary tm-btn-${tone} rec-complete`} onClick={() => void completeCycle()} disabled={busy || !liveTask.due_date}>
+                          ✓ Concluir ciclo
+                        </button>
+                      </div>
+                    )
+                  ) : null}
+                </div>
                 <div className="tm-member-list">
                   {liveTask ? (
                     planMembers.map((m) => (
@@ -1844,53 +1709,49 @@ export default function TaskModal({
                     </p>
                   ) : null}
                 </div>
-                {!isRecurringParent ? (
-                  <ContentPlanComposer
+                {isRecurringParent && liveTask ? (
+                  <div className="tm-cycles-log">
+                    <p className="tm-cycles-subtitle">Checks ({cycleLogOf(liveTask.payload).length})</p>
+                    <CycleChecks log={cycleLogOf(liveTask.payload)} />
+                  </div>
+                ) : (
+                  <PlanAddCombobox
+                    candidates={liveTask ? linkableCandidates : newPlanCandidates}
+                    // O MESMO vocabulário nos dois casos — plano já salvo ou
+                    // ainda não. Com o plano salvo o card nasce na hora
+                    // (createLinkedActivity); sem ele o membro fica numa fila
+                    // local e nasce em `save()`, pela mesma rota e com o mesmo
+                    // `kind`.
+                    types={taskTypes.filter((t) => t.creatable && t.behavior !== "plano")}
+                    defaultType={taskTypes.find((t) => t.key === "operacional")?.key ?? taskTypes[0]?.key ?? "operacional"}
                     busy={busy}
-                    onGenerate={(steps) => {
+                    contextHint={[
+                      draft.assignee ? `Nascem com ${draft.assignee}` : "Nascem sem responsável",
+                      `prazo a partir de ${formatShortDate(draft.start_date || draft.due_date || todayInTimezone("America/Sao_Paulo"))}`,
+                    ].join(" · ")}
+                    onLinkExisting={(c) => { if (liveTask) void linkMember(c.id, liveTask.id); else addPendingExisting(c); }}
+                    onCreate={(items) => {
                       const base = draft.start_date || draft.due_date || todayInTimezone("America/Sao_Paulo");
+                      const rows = items.map((item) => ({
+                        title: item.title,
+                        description: item.description,
+                        kind: item.kind,
+                        assignee: draft.assignee,
+                        due_date: item.offsetDays !== undefined ? addDaysIso(base, item.offsetDays) : draft.start_date || draft.due_date || "",
+                      }));
                       if (liveTask) {
                         void (async () => {
-                          for (const step of steps) {
-                            await createLinkedActivity({ title: step.title, description: step.description, assignee: draft.assignee, due_date: addDaysIso(base, step.offsetDays), kind: "operacional" });
-                          }
+                          for (const row of rows) await createLinkedActivity(row);
                         })();
                         return;
                       }
                       setPendingMembers((current) => [
                         ...current,
-                        ...steps.map((step, index) => ({
-                          key: `cp-${Date.now()}-${index}`,
-                          kind: "new" as const,
-                          taskKind: "operacional",
-                          title: step.title,
-                          description: step.description,
-                          assignee: draft.assignee,
-                          due_date: addDaysIso(base, step.offsetDays),
-                        })),
+                        ...rows.map(({ kind, ...row }, index) => ({ key: `n-${Date.now()}-${index}`, kind: "new" as const, taskKind: kind, ...row })),
                       ]);
                     }}
                   />
-                ) : null}
-                {!isRecurringParent ? (
-                  <PlanMemberComposer
-                    candidates={liveTask ? linkableCandidates : newPlanCandidates}
-                    assignees={assignees}
-                    defaultAssignee={draft.assignee}
-                    defaultDueDate={draft.start_date || draft.due_date}
-                    // O MESMO vocabulário nos dois casos — plano já salvo ou
-                    // ainda não. Com o plano salvo o card nasce na hora
-                    // (createLinkedActivity); sem ele o membro fica numa fila
-                    // local e nasce em `save()`, pela mesma rota e com o mesmo
-                    // `kind`. Ter dois vocabulários aqui era o próprio bug que
-                    // este ticket veio corrigir, só que um nível abaixo.
-                    types={taskTypes.filter((t) => t.creatable && t.behavior !== "plano")}
-                    defaultType={taskTypes.find((t) => t.key === "operacional")?.key ?? taskTypes[0]?.key ?? "operacional"}
-                    busy={busy}
-                    onLinkExisting={(c) => { if (liveTask) void linkMember(c.id, liveTask.id); else addPendingExisting(c); }}
-                    onCreateNew={(data) => { if (liveTask) void createLinkedActivity(data); else addPendingNew(data); }}
-                  />
-                ) : null}
+                )}
               </div>
             ) : null}
 
@@ -1931,7 +1792,12 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {mode === "edit" ? (
+            {/* Descrição vazia não ocupa uma caixa inteira com um texto de
+                instrução: vira um link que abre o campo. */}
+            {mode === "edit" && !draft.description && !editingDescription ? (
+              <button type="button" className="tm-desc-add" onClick={() => setEditingDescription(true)}>+ Adicionar descrição</button>
+            ) : null}
+            {mode === "edit" && (draft.description || editingDescription) ? (
               <div className="tm-box">
                 <p className="tm-box-label">Descrição do card</p>
                 {editingDescription ? (
@@ -2097,11 +1963,6 @@ export default function TaskModal({
             {liveTask ? <button type="button" className="admin-btn ghost tm-copylink" onClick={copyCardLink} title="Copiar link direto para este card">
               {linkCopied ? "Link copiado" : "🔗 Copiar link"}
             </button> : null}
-            {liveTask?.recurrence_cadence && recurrenceStopped(liveTask.status)
-              ? <span className="tm-autosave" title="Mova o card para fora de Aprovado/Parada para retomar">Recorrência encerrada</span>
-              : liveTask?.recurrence_cadence
-                ? <button className="admin-btn ghost rec-complete" onClick={() => void completeCycle()} disabled={busy || !liveTask?.due_date}>✓ Concluir ciclo</button>
-                : null}
             {mode === "new" ? <button className="admin-btn ghost" onClick={() => void closeAfterSave()} disabled={busy}>Cancelar</button> : null}
             {mode === "new" ? <button className={`admin-btn primary tm-btn-${tone}`} onClick={save} disabled={busy || !draft.title.trim()}>
               {busy ? "Salvando…" : currentType?.behavior === "entrega" ? "Criar entrega" : "Criar card"}
