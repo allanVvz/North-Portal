@@ -82,6 +82,9 @@ export const REPORT_STYLES = StyleSheet.create({
   // Nota curta que qualifica a seção inteira (com o que a comparação é feita,
   // o que a tabela conta) — evita repetir a ressalva dentro de cada cartão.
   legend: { fontSize: 6.4, color: C.muted, marginTop: 3 },
+  // Uma linha de números em texto, quando a informação não merece um cartão
+  // (contexto de mídia, cobertura de atribuição) mas precisa ser legível.
+  contextLine: { fontFamily: "Inter", fontWeight: 600, fontSize: 8, color: C.ink },
 
   empty: { fontSize: 7, color: C.muted, paddingVertical: 3 },
   footer: { position: "absolute", bottom: 10, left: 20, right: 20, fontSize: 6.3, color: C.muted, textAlign: "center" },

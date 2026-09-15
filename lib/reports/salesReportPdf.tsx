@@ -22,14 +22,14 @@ import {
 } from "@/app/admin/performance/acquisitionInsights";
 import type { Period } from "@/app/admin/performance/insights";
 import { metricValue } from "@/app/admin/performance/performanceLabels";
-import { CAMPAIGN_BLOCK_LABEL, type CampaignBlock, type PerformanceTemplateConfig, type AdSourceTag } from "@/lib/performanceTemplates";
+import { CAMPAIGN_BLOCK_LABEL, type PerformanceTemplateConfig, type AdSourceTag } from "@/lib/performanceTemplates";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { MetaPost } from "@/lib/windsor";
 import { funnelStageCount } from "./funnelGeometry";
 import { registerReportFonts } from "./reportFonts";
 import { COMPASS_VIEWBOX, REPORT_COLORS as C, compassShapes } from "./reportTheme";
 import { CompassNode, FunnelSvg, KpiCard, REPORT_STYLES as S, ResultPanel } from "./reportComponents";
-import { CampaignBlocksSection, blockResolver } from "./campaignBlockKpis";
+import { blockResolver } from "./campaignBlockKpis";
 import { salesHeadline } from "./salesHeadline";
 
 registerReportFonts();
@@ -93,15 +93,21 @@ function SalesReportDocument({
   clientName, period, cadenceLabel, config, campaignPosts, adPosts, prevCampaignPosts, conversoes, prevConversoes, receitaTotal, vendasTotal, agendamentosTotal, seguidores, prevTotals, generatedAt,
 }: SalesReportInput) {
   const cm = config.prefs.customMetrics;
+  const temLinhas = conversoes.length > 0;
   const linhasTotals = totalsOf(conversoes);
-  // O total exibido é o relatado no comentário quando existe; senão, a contagem
-  // / soma das linhas detalhadas. Agendamentos nunca fica abaixo de vendas — uma
-  // venda fechada passou por um agendamento, e o funil não pode alargar.
-  const vendas = vendasTotal ?? linhasTotals.vendas;
-  const cur = {
+  // NÃO INFORMADO É `null`, NUNCA 0. O total exibido é o relatado no comentário
+  // quando existe; senão, a contagem das linhas detalhadas — mas só quando há
+  // linhas. Sem nenhum dos dois o número não existe, e o relatório diz isso em
+  // vez de afirmar que a semana foi zero.
+  const vendas = vendasTotal ?? (temLinhas ? linhasTotals.vendas : null);
+  const agendados = agendamentosTotal ?? (temLinhas ? linhasTotals.agendamentos : null);
+  const cur: { vendas: number | null; agendamentos: number | null; receita: number | null } = {
     vendas,
-    agendamentos: Math.max(agendamentosTotal ?? linhasTotals.agendamentos, vendas),
-    receita: receitaTotal ?? linhasTotals.receita,
+    // Agendamentos nunca fica abaixo de vendas — uma venda fechada passou por um
+    // agendamento. Mas só quando os dois existem: derivar agendamento de venda
+    // seria inventar uma etapa que ninguém relatou.
+    agendamentos: agendados !== null && vendas !== null ? Math.max(agendados, vendas) : agendados,
+    receita: receitaTotal ?? (temLinhas && linhasTotals.receita > 0 ? linhasTotals.receita : null),
   };
   // Mesma precedência do período atual: o total relatado vence a contagem das
   // linhas. `prevTotals` (da série em task_metrics) primeiro; as linhas da
@@ -127,26 +133,55 @@ function SalesReportDocument({
     ? seguidores - prevTotals.seguidores
     : null;
 
-  // Ordem = ordem de leitura do dono do negócio: o que entrou primeiro, o custo
-  // por último. Investimento saiu daqui de propósito — aparece por bloco na
-  // seção de mídia e como base do ROAS logo abaixo; abrir o relatório pelo
-  // quanto se gastou enterra o resultado. São 6 cartões: duas linhas cheias no
-  // grid de 3, sem órfão na terceira.
+  // MODO do relatório — derivado do que o gestor DE FATO informou, não da
+  // configuração. Os chips de `collect_metric_keys` dizem o que TENTAR ler; o
+  // modo é o que voltou. É o que faz um motor só atender o cliente que responde
+  // quatro métricas e o que só conta seguidores, sem automação por combinação.
+  const temComercial = cur.vendas !== null || cur.agendamentos !== null || cur.receita !== null;
+  const temAtribuicao = conversoes.some((c) => c.fonte !== null);
+  const mode: "followers_only" | "sales_segmented" | "sales_summary" =
+    !temComercial ? "followers_only" : temAtribuicao ? "sales_segmented" : "sales_summary";
+
+  // Uma métrica derivada só existe quando numerador E denominador existem.
+  // `ratio` já devolve null para denominador 0, mas não sabe distinguir
+  // "não informado" de zero — por isso a guarda vem antes.
+  const derivado = (num: number | null, den: number | null): NullableMetric =>
+    num === null || den === null ? null : ratio(num, den);
+
+  // Ordem = ordem de leitura do dono do negócio. Investimento saiu daqui de
+  // propósito — é contexto de mídia, e abrir o relatório pelo quanto se gastou
+  // enterra o resultado. Cada cartão só entra se a métrica foi informada: o
+  // layout se recompõe em vez de reservar espaço para buraco.
   const summaryKpis = [
-    kpi("Receita da semana", cur.receita || null, prev?.receita || null, "money"),
-    kpi("Vendas fechadas", cur.vendas, prev?.vendas ?? null, "number"),
-    kpi("Agendamentos", cur.agendamentos, prev?.agendamentos ?? null, "number"),
-    kpi("Ticket médio", ratio(cur.receita, cur.vendas), prev?.receita != null && prev?.vendas != null ? ratio(prev.receita, prev.vendas) : null, "money"),
-    { ...kpi("Retorno sobre o anúncio", ratio(cur.receita, spend), prev?.receita != null ? ratio(prev.receita, prevSpend) : null, "decimal"),
-      unit: "×",
-      hint: spend > 0 ? `sobre ${formatAcquisitionValue(spend, "money")} investidos` : undefined },
+    ...(cur.receita !== null ? [kpi("Receita da semana", cur.receita, prev?.receita ?? null, "money")] : []),
+    ...(cur.vendas !== null ? [kpi("Vendas fechadas", cur.vendas, prev?.vendas ?? null, "number")] : []),
+    ...(cur.agendamentos !== null ? [kpi("Agendamentos", cur.agendamentos, prev?.agendamentos ?? null, "number")] : []),
+    ...(cur.receita !== null && cur.vendas !== null
+      ? [kpi("Ticket médio", derivado(cur.receita, cur.vendas), derivado(prev?.receita ?? null, prev?.vendas ?? null), "money")]
+      : []),
+    // ROAS precisa de receita informada E de investimento real. Sem os dois não
+    // vira "0,00" — simplesmente não aparece.
+    ...(cur.receita !== null && spend > 0
+      ? [{ ...kpi("Retorno sobre o anúncio", ratio(cur.receita, spend), prev?.receita != null && prevSpend > 0 ? ratio(prev.receita, prevSpend) : null, "decimal"),
+          unit: "×",
+          hint: `sobre ${formatAcquisitionValue(spend, "money")} investidos` }]
+      : []),
     // Seguidores: o total é o valor, o GANHO é a leitura. A variação percentual
     // numa base de centenas ("↑1,45%") não diz nada que "+12" não diga melhor.
-    ...(seguidores != null && seguidores > 0
+    ...(seguidores != null
       ? [{ ...kpi("Seguidores", seguidores, null, "number"),
-          deltaText: seguidoresGanho === null ? undefined : `${seguidoresGanho >= 0 ? "+" : "−"}${Math.abs(seguidoresGanho)} na semana`,
+          deltaText: seguidoresGanho === null ? "sem semana anterior" : `${seguidoresGanho >= 0 ? "+" : "−"}${Math.abs(seguidoresGanho)} na semana`,
           deltaTone: (seguidoresGanho === null ? "neutral" : seguidoresGanho >= 0 ? "good" : "bad") as "good" | "bad" | "neutral" }]
       : []),
+  ];
+
+  // As métricas que o gestor não informou, nomeadas — uma nota discreta vale
+  // mais que um cartão vazio, e deixa claro que o relatório não "perdeu" o dado.
+  const naoInformadas = [
+    ...(cur.receita === null ? ["receita"] : []),
+    ...(cur.vendas === null ? ["vendas"] : []),
+    ...(cur.agendamentos === null ? ["agendamentos"] : []),
+    ...(seguidores == null ? ["seguidores"] : []),
   ];
 
   // Uma tabela só: cada FONTE #1/#2/#3 é uma linha, com o OBJETIVO da(s)
@@ -169,39 +204,12 @@ function SalesReportDocument({
       agendamentos: t.agendamentos,
       vendas: t.vendas,
       receita: t.receita,
-      roas: ratio(t.receita, custo),
+      // ROAS por origem só com receita POR ORIGEM. Sem ela o número não é 0,00 —
+      // ele não existe, e receita total nunca é distribuída entre fontes.
+      roas: t.receita > 0 ? ratio(t.receita, custo) : null,
       hasData: conv.length > 0 || ads.length > 0,
     };
   }).filter((r) => r.hasData);
-
-  // Conversão atribuída a cada OBJETIVO: cada venda/agendamento com fonte
-  // #1/#2/#3 cai no bloco do anúncio taggeado com essa fonte. Criativo sem tag
-  // fica de fora, e o bloco simplesmente não mostra vendas — o aviso de como
-  // ligar a tag é assunto de operação (tela de template), não do PDF que vai
-  // pro cliente. O relatório de anúncios não recebe isto.
-  const blockOfFonte = (fonte: ConversionRow["fonte"]): CampaignBlock | null => {
-    if (!fonte) return null;
-    const ad = adPosts.find((p) => (config.adSourceTags[p.adId ?? ""] ?? null) === fonte);
-    return ad ? postBlock(ad) : null;
-  };
-  const convByBlock = new Map<CampaignBlock, ConversionRow[]>();
-  for (const c of conversoes) {
-    const b = blockOfFonte(c.fonte);
-    if (b) convByBlock.set(b, [...(convByBlock.get(b) ?? []), c]);
-  }
-
-  const objetivoExtraKpis = (block: CampaignBlock, blockPosts: MetaPost[]) => {
-    const conv = convByBlock.get(block) ?? [];
-    if (!conv.length) return [];
-    const t = totalsOf(conv);
-    const custoBloco = totalWhenPresent(blockPosts, "custo") ?? 0;
-    return [
-      kpi("Agendamentos", t.agendamentos, null, "number"),
-      kpi("Vendas", t.vendas, null, "number"),
-      kpi("Receita", t.receita || null, null, "money"),
-      kpi("ROAS", ratio(t.receita, custoBloco), null, "decimal"),
-    ];
-  };
 
   // Detalhe linha a linha do que o gestor descreveu (serviço/valor/fonte/status).
   // Uma folha só: no máximo 12 linhas, priorizando as de maior valor.
@@ -212,33 +220,29 @@ function SalesReportDocument({
   // Quantas das vendas/agendamentos relatados foram descritos linha a linha — o
   // gestor pode dizer "5 vendas" e detalhar só 2. Nota só quando difere.
   const descritas = conversoesOrdenadas.length;
-  const relatadas = Math.max(cur.vendas, cur.agendamentos);
+  const relatadas = Math.max(cur.vendas ?? 0, cur.agendamentos ?? 0);
   const parcialmenteDetalhado = detalhe.length > 0 && descritas < relatadas;
 
-  // Funil agregado — cauda sem dado sai (funnelStageCount). A etapa de
-  // seguidores usa o GANHO da semana, nunca o total do perfil: o total é um
-  // snapshot de centenas (841) e entraria no meio do funil maior que as etapas
-  // à esquerda, sugerindo que aqueles seguidores vieram do anúncio. Mesmo o
-  // ganho só entra se couber na ordem decrescente — um funil que alarga no
-  // meio é pior que um funil com uma etapa a menos.
+  // COBERTURA DE ATRIBUIÇÃO — quantas das vendas relatadas têm origem
+  // identificada. Sem isto, "nenhuma linha na tabela de fontes" é ambíguo: pode
+  // ser que não houve venda, ou que houve e ninguém marcou a origem. São coisas
+  // muito diferentes para quem lê.
+  const comOrigem = conversoes.filter((c) => c.fonte !== null).length;
+  const cobertura = cur.vendas !== null && cur.vendas > 0
+    ? { informadas: cur.vendas, comOrigem, pct: Math.round((comOrigem / cur.vendas) * 100) }
+    : null;
+
+  // FUNIL COMERCIAL — conversa → agendamento → venda. Aquisição (alcance,
+  // cliques) é assunto do relatório de anúncios: refazer aqui atravessa as duas
+  // pipelines e sugere uma atribuição ponta a ponta que o dado não sustenta.
+  // Etapa não informada simplesmente não é desenhada.
+  const conversas = resolveAcquisitionMetric(campaignPosts, "contatos", cm);
   const funnelRaw: { label: string; value: NullableMetric }[] = [
-    { label: "Alcance", value: resolveAcquisitionMetric(campaignPosts, "alcance", cm) },
-    { label: "Cliques", value: resolveAcquisitionMetric(campaignPosts, "cliquesLink", cm) },
-    ...(seguidoresGanho !== null && seguidoresGanho > 0 ? [{ label: "Seguidores novos", value: seguidoresGanho as NullableMetric }] : []),
-    { label: "Conversas", value: resolveAcquisitionMetric(campaignPosts, "contatos", cm) ?? 0 },
+    { label: "Conversas", value: conversas },
     { label: "Agendamentos", value: cur.agendamentos },
     { label: "Vendas", value: cur.vendas },
   ];
-  // Etapa sem dado nenhum (`null`) sai do funil em qualquer posição — não vira
-  // faixa tracejada vazia. Cauda `0` ainda é aparada pelo funnelStageCount.
-  const funnelStages = funnelRaw
-    .filter((s) => s.value !== null)
-    .filter((s, i, arr) => {
-      if (s.label !== "Seguidores novos") return true;
-      const antes = arr[i - 1]?.value ?? null;
-      const depois = arr[i + 1]?.value ?? null;
-      return (antes === null || s.value! <= antes) && (depois === null || s.value! >= depois);
-    });
+  const funnelStages = funnelRaw.filter((s) => s.value !== null);
   const values = funnelStages.map((s) => s.value);
   const keepN = funnelStageCount(values);
   const funnelLabels = funnelStages.slice(0, keepN).map((s) => s.label);
@@ -253,6 +257,7 @@ function SalesReportDocument({
     receita: cur.receita,
     vendas: cur.vendas,
     agendamentos: cur.agendamentos,
+    seguidoresGanho,
     prev: prev ? { receita: prev.receita, vendas: prev.vendas } : null,
   });
   // Legenda única do comparativo: dita uma vez sob o resumo, em vez de "vs.
@@ -289,9 +294,13 @@ function SalesReportDocument({
           <Text style={S.legend}>{comparadoCom}</Text>
         </View>
 
+        {naoInformadas.length ? (
+          <Text style={S.legend}>Não informado no feedback da semana: {naoInformadas.join(", ")}.</Text>
+        ) : null}
+
         {funnelValues.length >= 2 ? (
           <View style={S.section} wrap={false}>
-            <Text style={S.kicker}>Do anúncio à venda</Text>
+            <Text style={S.kicker}>Da conversa à venda</Text>
             <View style={S.funnelRow}>
               <FunnelSvg labels={funnelLabels} values={funnelValues} />
               <ResultPanel
@@ -305,13 +314,42 @@ function SalesReportDocument({
           </View>
         ) : null}
 
-        <CampaignBlocksSection
-          config={config}
-          posts={campaignPosts}
-          prevPosts={prevCampaignPosts}
-          kicker="Como a mídia performou"
-          extraKpis={objetivoExtraKpis}
-        />
+        {/* CONTEXTO da mídia, não a seção de mídia. Quem quiser saber como a
+            mídia performou tem o relatório de anúncios da mesma semana — repetir
+            aqui os doze cartões por objetivo fazia deste documento "o relatório
+            de anúncios com vendas no topo". Aqui ficam só os dois números que
+            sustentam a leitura comercial: o que foi investido e quantas
+            conversas aquilo gerou. */}
+        {spend > 0 || conversas !== null ? (
+          <View style={S.section}>
+            <Text style={S.kicker}>Contexto da mídia</Text>
+            <Text style={S.contextLine}>
+              {[
+                spend > 0 ? `${formatAcquisitionValue(spend, "money")} investidos` : null,
+                conversas !== null ? `${formatAcquisitionValue(conversas)} conversas` : null,
+                cobertura ? `${cobertura.informadas} ${cobertura.informadas === 1 ? "venda relatada" : "vendas relatadas"}` : null,
+              ].filter(Boolean).join("  ·  ")}
+            </Text>
+            <Text style={S.legend}>Como a mídia performou por campanha e criativo está no relatório de anúncios desta mesma semana.</Text>
+          </View>
+        ) : null}
+
+        {/* Cobertura de atribuição: "5 vendas, nenhuma com origem" é MUITO
+            diferente de "nenhuma venda", e sem esta linha as duas leem igual
+            (tabela vazia). Nunca vira ROAS por origem sem receita por origem. */}
+        {cobertura && cobertura.comOrigem < cobertura.informadas ? (
+          <View style={S.section}>
+            <Text style={S.kicker}>Cobertura de atribuição</Text>
+            <Text style={S.contextLine}>
+              {cobertura.comOrigem} de {cobertura.informadas} com origem identificada  ·  {cobertura.pct}%
+            </Text>
+            <Text style={S.legend}>
+              {cobertura.comOrigem === 0
+                ? "As vendas foram informadas, mas nenhuma tem origem identificada — não dá para atribuir receita a fonte de anúncio nesta semana."
+                : "As demais vendas foram informadas sem origem — a tabela por fonte cobre só as identificadas."}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={S.section}>
           <Text style={S.kicker}>Fonte de tráfego e objetivo</Text>

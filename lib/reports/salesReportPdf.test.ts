@@ -45,6 +45,44 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
     expect(buf.byteLength).toBeGreaterThan(3000);
   });
 
+  // --- modos: o layout se recompõe pelo que foi informado ------------------
+  it("followers_only: só seguidores, sem vendas/receita/ROAS zerados", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      conversoes: [],
+      vendasTotal: null,
+      agendamentosTotal: null,
+      receitaTotal: null,
+      seguidores: 841,
+      prevTotals: { vendas: null, agendamentos: null, receita: null, seguidores: 829, from: "2026-07-25", to: "2026-07-31" },
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
+  it("sales_summary sem receita: não calcula ticket nem ROAS", async () => {
+    const buf = await renderSalesReportPdf({ ...base, conversoes: [], vendasTotal: 5, agendamentosTotal: 8, receitaTotal: null });
+    expect(isPdf(buf)).toBe(true);
+  });
+
+  it("cobertura de atribuição parcial (5 relatadas, 3 com origem)", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      vendasTotal: 5,
+      receitaTotal: 4100,
+      conversoes: [
+        { servico: null, valor: 1200, fonte: "1", status: "fechado" },
+        { servico: null, valor: 800, fonte: "1", status: "fechado" },
+        { servico: null, valor: 900, fonte: "2", status: "fechado" },
+      ],
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
+  it("vendas sem nenhuma origem: cobertura 0% não lança", async () => {
+    const buf = await renderSalesReportPdf({ ...base, conversoes: [], vendasTotal: 5, receitaTotal: 4100 });
+    expect(isPdf(buf)).toBe(true);
+  });
+
   it("sem conversões não lança (funil trunca em Conversas)", async () => {
     const buf = await renderSalesReportPdf({ ...base, conversoes: [] });
     expect(isPdf(buf)).toBe(true);

@@ -86,8 +86,24 @@ function pedidoDe(tags: string[]): string {
   return `Informe num comentário aqui como foi a semana — ${lista}. Pode ser em texto corrido; a automação entende os números.`;
 }
 
-function resumoDe(valores: Record<string, number>, tags: string[]): string {
-  return tags.map((t) => `${metricTagLabel(t)}: ${valores[t] ?? 0}`).join(" · ");
+/** Só as métricas que o gestor de fato informou. Listar "Vendas: 0" para quem
+ *  não falou de vendas é a automação afirmando um resultado que ninguém deu —
+ *  e o gestor lê isso como erro do sistema. */
+function resumoDe(valores: Record<string, number | null>, tags: string[]): string {
+  const ditas = tags.filter((t) => valores[t] !== null && valores[t] !== undefined);
+  if (!ditas.length) return "nenhuma métrica identificada no comentário";
+  return ditas.map((t) => `${metricTagLabel(t)}: ${valores[t]}`).join(" · ");
+}
+
+/** O que vai para `task_metrics`: a chave da métrica NÃO informada simplesmente
+ *  não existe na linha. Mantém o jsonb como `Record<string,string>` (a tela de
+ *  Performance lê esse mesmo formato em `listPublishedTasks`) e faz a série
+ *  temporal distinguir "não informou" de "foi zero" — `previousPeriodTotals` já
+ *  devolve `null` para chave ausente. */
+function metricsParaBanco(valores: Record<string, number | null>, tags: string[]): Record<string, string> {
+  return Object.fromEntries(
+    tags.filter((t) => valores[t] !== null && valores[t] !== undefined).map((t) => [t, String(valores[t])]),
+  );
 }
 
 /** O comentário humano mais recente, em qualquer um dos cards, mais novo que `since`. */
@@ -273,7 +289,9 @@ async function processOccurrence(
 
   const ext: MetricExtract = human
     ? await extractMetrics(human.text, tags)
-    : { valores: Object.fromEntries(tags.map((t) => [t, 0])), linhas: [], note: "sem retorno do responsável" };
+    // Sem retorno é o caso mais claro de "não informado": ninguém disse que a
+    // semana foi zero — ninguém disse nada.
+    : { valores: Object.fromEntries(tags.map((t) => [t, null])), linhas: [], note: "sem retorno do responsável" };
 
   // O período REPORTADO (não a data em que a automação rodou) é o eixo da série
   // temporal em `task_metrics` — é o que deixa "seguidores ao longo do tempo" e
@@ -283,8 +301,8 @@ async function processOccurrence(
   const cadence: RecurringCadence = mold.recurrence_cadence ?? "semanal";
   const period = periodForCadence(cadence, occ.due_date ?? today);
 
-  // task_metrics — só as tags pedidas, como string.
-  const metrics = Object.fromEntries(tags.map((t) => [t, String(ext.valores[t] ?? 0)]));
+  // task_metrics — só as tags que o gestor realmente informou (ver metricsParaBanco).
+  const metrics = metricsParaBanco(ext.valores, tags);
   const { error: metricsErr } = await admin.from("task_metrics").upsert(
     { task_id: card2.id, client_id: occ.client_id, metrics, source: "cliente", period_from: period.from, period_to: period.to },
     { onConflict: "task_id" },

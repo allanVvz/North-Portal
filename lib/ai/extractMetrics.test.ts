@@ -4,11 +4,20 @@ import { extractMetrics, parseMetricJson } from "./extractMetrics";
 const TAGS = ["vendas", "agendamentos", "seguidores", "receita"];
 
 describe("parseMetricJson", () => {
-  it("lê um número por tag e zera as ausentes", () => {
+  // A regra central do módulo: `null` é "o gestor não falou disso"; `0` é "ele
+  // falou e foi zero". Confundir os dois faz o relatório afirmar um resultado
+  // ruim que ninguém relatou, e — desde que task_metrics virou série — envenena
+  // a comparação da semana seguinte.
+  it("tag ausente vira null, não 0", () => {
     const r = parseMetricJson('{"valores":{"vendas":3,"receita":1400},"linhas":[]}', TAGS);
-    // agendamentos ausente → 0, mas sobe para 3 (nunca abaixo de vendas)
-    expect(r.valores).toEqual({ vendas: 3, agendamentos: 3, seguidores: 0, receita: 1400 });
+    expect(r.valores).toEqual({ vendas: 3, agendamentos: null, seguidores: null, receita: 1400 });
     expect(r.note).toBe("llm");
+  });
+
+  it("zero DITO é preservado como 0", () => {
+    const r = parseMetricJson('{"valores":{"vendas":0,"agendamentos":4},"linhas":[]}', TAGS);
+    expect(r.valores.vendas).toBe(0);
+    expect(r.valores.agendamentos).toBe(4);
   });
 
   it("lê as linhas ricas quando presentes", () => {
@@ -19,10 +28,15 @@ describe("parseMetricJson", () => {
     expect(r.linhas).toEqual([{ servico: "Vitrificação", valor: 1400, fonte: "2", status: "fechado" }]);
   });
 
-  it("resposta sem número → nada identificado, tudo zero", () => {
-    const r = parseMetricJson('{"valores":{"vendas":0,"agendamentos":0,"seguidores":0,"receita":0},"linhas":[]}', TAGS);
-    expect(Object.values(r.valores).every((v) => v === 0)).toBe(true);
+  it("resposta sem nenhuma chave → nada identificado, tudo null", () => {
+    const r = parseMetricJson('{"valores":{},"linhas":[]}', TAGS);
+    expect(Object.values(r.valores).every((v) => v === null)).toBe(true);
     expect(r.note).toBe("nada identificado");
+  });
+
+  it("zeros ditos contam como informação identificada", () => {
+    const r = parseMetricJson('{"valores":{"vendas":0,"agendamentos":0},"linhas":[]}', TAGS);
+    expect(r.note).toBe("llm");
   });
 
   it("JSON ilegível → zeros + note", () => {
@@ -39,12 +53,17 @@ describe("parseMetricJson", () => {
     expect(r.valores.receita).toBeCloseTo(1400.5);
   });
 
-  it("receita 0 mas linhas detalhadas → soma das linhas vira o total", () => {
+  it("receita não informada mas linhas detalhadas → soma das linhas vira o total", () => {
     const r = parseMetricJson(
-      '{"valores":{"vendas":5,"agendamentos":9,"seguidores":35,"receita":0},"linhas":[{"servico":null,"valor":2400,"fonte":"1","status":"fechado"},{"servico":null,"valor":1800,"fonte":"3","status":"fechado"}]}',
+      '{"valores":{"vendas":5,"agendamentos":9,"seguidores":35},"linhas":[{"servico":null,"valor":2400,"fonte":"1","status":"fechado"},{"servico":null,"valor":1800,"fonte":"3","status":"fechado"}]}',
       TAGS,
     );
     expect(r.valores.receita).toBe(4200);
+  });
+
+  it("vendas sem agendamentos informados: não inventa agendamento", () => {
+    const r = parseMetricJson('{"valores":{"vendas":5}}', TAGS);
+    expect(r.valores.agendamentos).toBeNull();
   });
 
   it("agendamentos nunca fica abaixo de vendas", () => {
@@ -65,9 +84,9 @@ describe("parseMetricJson", () => {
 });
 
 describe("extractMetrics", () => {
-  it("texto vazio → zeros, não chama a IA", async () => {
+  it("texto vazio → tudo null, não chama a IA", async () => {
     const r = await extractMetrics("   ", TAGS);
-    expect(r).toEqual({ valores: { vendas: 0, agendamentos: 0, seguidores: 0, receita: 0 }, linhas: [], note: "comentário vazio" });
+    expect(r).toEqual({ valores: { vendas: null, agendamentos: null, seguidores: null, receita: null }, linhas: [], note: "comentário vazio" });
   });
 
   it("'12 agendamentos' → regex, sem IA", async () => {
@@ -78,10 +97,11 @@ describe("extractMetrics", () => {
 
   it("degrada graciosamente sem provedor de IA (nem AI_CLI)", async () => {
     // Sem AI_CLI e sem credencial 'ai' no banco de teste, aiComplete lança e
-    // extractMetrics devolve zeros com note.
+    // extractMetrics devolve tudo null com note — IA fora do ar é "não sabemos",
+    // nunca "a semana foi zero".
     const r = await extractMetrics("semana boa, umas 3 vendas e 45 seguidores", TAGS);
     if (r.note.startsWith("IA indisponível")) {
-      expect(Object.values(r.valores).every((v) => v === 0)).toBe(true);
+      expect(Object.values(r.valores).every((v) => v === null)).toBe(true);
     } else {
       // Se AI_CLI estiver ligado no ambiente, a extração real deve pegar algo.
       expect(r.valores.seguidores).toBeGreaterThan(0);
