@@ -854,7 +854,15 @@ export type HomeRoutine = {
   id: string; title: string; clientName: string; clientSlug: string;
   nextDue: string; cadence: RecurringCadence; overdue: boolean;
 };
-export type HomeFocus = { attention: HomeFocusTask[]; mentions: HomeMention[]; routines: HomeRoutine[] };
+export type HomeFocus = {
+  attention: HomeFocusTask[];
+  mentions: HomeMention[];
+  /** Menções sem resposta no total — `mentions` vem truncado. */
+  mentionsTotal: number;
+  routines: HomeRoutine[];
+  /** Os números dos KPIs pessoais, contados antes de truncar as listas. */
+  counts: { atrasadas: number; paradas: number; week: number; today: number };
+};
 
 function agencyTodayIso(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
@@ -964,10 +972,23 @@ export async function listMyHomeFocus(userId: string): Promise<HomeFocus> {
       const client = clientOf(row);
       return [{ taskId: row.id, title: row.title, clientName: client?.name ?? "Sem cliente", clientSlug: client?.slug ?? "", author: pending.author, text: pending.text, at: pending.at }];
     })
-    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-    .slice(0, 12);
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
-  return { attention: attention.slice(0, 30), mentions, routines: routines.slice(0, 20) };
+  const weekEnd = plusDaysIso(today, 7);
+  const myWeek = mine.filter((row) => belongsToTaskScreen(row) && row.due_date && row.due_date >= today && row.due_date <= weekEnd);
+
+  return {
+    attention: attention.slice(0, 30),
+    mentions: mentions.slice(0, 12),
+    mentionsTotal: mentions.length,
+    routines: routines.slice(0, 20),
+    counts: {
+      atrasadas: attention.filter((item) => item.situation === "atrasada").length,
+      paradas: attention.filter((item) => item.situation === "parada").length,
+      week: myWeek.length,
+      today: myWeek.filter((row) => row.due_date === today).length,
+    },
+  };
 }
 
 export type AdminClientDetail = {

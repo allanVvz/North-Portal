@@ -28,12 +28,12 @@ test.describe("Home do admin", () => {
 
   // O teste "mostra KPIs reais e leva para a tela que os resolve" morava aqui.
   // Ele afirmava cinco KPIs — "Clientes ativos", "Em revisão", "Aguardando
-  // aprovação" — que não existem em AdminHome.tsx e, pelo histórico, nunca
-  // existiram nele: a Home tem três ("Tarefas desta semana", "Tarefas
-  // atrasadas", "Progresso dos planos"), e três está certo. Ele também clicava
-  // em "Em revisão" para navegar a /admin/revisoes, aba que hoje está
-  // desligada em Configurações. Um teste que descreve uma tela que não existe
-  // não protege nada; só ensina a ignorar vermelho.
+  // aprovação" — que nunca existiram em AdminHome.tsx. Desde 15/09 a Home tem
+  // quatro KPIs PESSOAIS ("Minhas atrasadas", "Minhas paradas", "Aguardando
+  // minha resposta", "Minhas entregas na semana") e os números da agência numa
+  // linha de contexto — ver docs/audits/2026-09-15-dashboards-home-operacao.md.
+  // Um teste que descreve uma tela que não existe não protege nada; só ensina a
+  // ignorar vermelho.
 
   test("abre o TaskModal em modo de criação pelo atalho do header", async ({ page }) => {
     await login(page);

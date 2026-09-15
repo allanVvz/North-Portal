@@ -5195,11 +5195,6 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 
 .kb-cal-pill.is-routine, .kb-week-event.is-routine { background: color-mix(in srgb, var(--a-purple-text) 11%, var(--a-surface)); color: var(--a-ink); outline: 1px dashed color-mix(in srgb, var(--a-purple-text) 45%, transparent); outline-offset: -1px; }
 
-.kb-overdue-quick { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface); color: var(--a-sec); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-.kb-overdue-quick b { min-width: 20px; padding: 1px 6px; border-radius: 999px; background: var(--a-surface2); color: var(--a-sec); font-size: 11px; text-align: center; }
-.kb-overdue-quick.has b { background: var(--a-danger); color: #fff; }
-.kb-overdue-quick:hover { border-color: var(--a-danger); }
-.kb-overdue-quick.on { border-color: var(--a-danger); color: var(--a-danger); background: color-mix(in srgb, var(--a-danger) 10%, var(--a-surface)); }
 
 .rec-card.is-concluida { background: color-mix(in srgb, var(--a-teal) 16%, var(--a-surface)); border-color: color-mix(in srgb, var(--a-teal) 55%, var(--a-border)); }
 .rec-card.is-atrasada { background: color-mix(in srgb, var(--a-danger) 11%, var(--a-surface)); border-color: color-mix(in srgb, var(--a-danger) 60%, var(--a-border)); box-shadow: inset 4px 0 0 var(--a-danger); }
@@ -5213,8 +5208,8 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .tm-step-row { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 10px; border: 1px solid var(--a-border); }
 .tm-step-row:hover { background: inherit; }
 .tm-step-row.is-current { border-color: var(--a-teal); box-shadow: 0 0 0 1px var(--a-teal) inset; }
-.tm-step-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.tm-step-line .tm-member-open { padding: 2px 4px; }
+.tm-steprow-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tm-steprow-head .tm-member-open { padding: 2px 4px; }
 .tm-step-check { width: 18px; height: 18px; accent-color: var(--a-teal-strong); cursor: pointer; flex: 0 0 auto; }
 .tm-step-current { padding: 2px 7px; border-radius: 999px; background: var(--a-teal); color: var(--a-inverse); font-size: 10px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
 .tm-step-comments { flex: 0 0 auto; padding: 4px 8px; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface); color: var(--a-muted); font: inherit; font-size: 11.5px; cursor: pointer; }
@@ -5264,6 +5259,31 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .tm-cyclelog-cycle { color: var(--a-muted); }
 .tm-cyclelog-by { color: var(--a-teal-text); }
 
+/* Home como painel operacional pessoal (dashboard-designer, 15/09). */
+.home-headline { font-weight: 650; color: var(--a-ink); }
+.home-kpis.home-kpis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.home-kpi.is-red { border-color: color-mix(in srgb, var(--a-danger) 45%, var(--a-border)); }
+.home-kpi.is-gold { border-color: color-mix(in srgb, var(--a-warn) 50%, var(--a-border)); }
+.home-kpi-value.t-gold { color: var(--a-gold-text); }
+.home-kpi-value.t-teal { color: var(--a-teal-text); }
+.home-agency { margin: 10px 2px 18px; font-size: 12.5px; color: var(--a-muted); }
+.home-agency b { color: var(--a-sec); font-weight: 650; }
+.home-agency a { color: var(--a-teal-text); }
+.home-main { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 16px; }
+.home-side { display: grid; gap: 16px; min-width: 0; }
+.home-card-more { display: inline-block; margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--a-teal-text); text-decoration: none; }
+.home-card-more.is-static { color: var(--a-muted); font-weight: 500; }
+.home-card-more:not(.is-static):hover { text-decoration: underline; }
+.home-updated { margin: 18px 2px 0; font-size: 11.5px; color: var(--a-muted); }
+.home-resolve .home-focus-row { align-items: center; }
+@media (max-width: 980px) { .home-main { grid-template-columns: 1fr; } .home-kpis.home-kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Atalho de atrasadas dentro da caixa de busca da Operação. */
+.kb-searchbar-quick { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 3px 4px 3px 9px; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface); color: var(--a-sec); font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer; white-space: nowrap; }
+.kb-searchbar-quick b { min-width: 18px; padding: 1px 6px; border-radius: 999px; background: var(--a-surface2); color: var(--a-sec); font-size: 10.5px; text-align: center; }
+.kb-searchbar-quick.has b { background: var(--a-danger); color: #fff; }
+.kb-searchbar-quick:hover { border-color: var(--a-danger); color: var(--a-danger); }
+
 /* @menção nos comentários. */
 .mention-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
 .mention-wrap > textarea { flex: 1; min-width: 0; width: 100%; resize: none; }
@@ -5278,7 +5298,9 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
    produção, 15/09). Duas por linha dão espaço para o título ser lido. */
 .home-focus { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; margin-bottom: 18px; align-items: start; }
 .home-focus-card.is-attention { border-color: color-mix(in srgb, var(--a-danger) 45%, var(--a-border)); }
-.home-focus-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow: auto; }
+/* Sem rolagem interna: cada lista mostra os primeiros e leva ao quadro filtrado
+   para o resto (a barra de rolagem dentro do card era o "slider feio"). */
+.home-focus-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .home-focus-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); color: var(--a-ink); font: inherit; text-align: left; cursor: pointer; }
 .home-focus-row:hover { border-color: var(--a-teal); }
 .home-focus-row.is-atrasada { background: color-mix(in srgb, var(--a-danger) 10%, var(--a-surface)); box-shadow: inset 3px 0 0 var(--a-danger); }

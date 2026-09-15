@@ -48,6 +48,9 @@ export default function KanbanSearchBar({
   onFiltersChange,
   tasks,
   onPickTask,
+  overdueCount,
+  overdueOn = false,
+  onToggleOverdue,
 }: {
   q: string;
   onQChange: (value: string) => void;
@@ -55,6 +58,11 @@ export default function KanbanSearchBar({
   onFiltersChange: (next: ActiveFilter[]) => void;
   tasks: Row[];
   onPickTask: (id: string) => void;
+  /** Atalho de atrasadas DENTRO da caixa de busca — quando ligado, vira o chip
+   *  "Situação: Atrasada" como qualquer outro filtro. */
+  overdueCount?: number;
+  overdueOn?: boolean;
+  onToggleOverdue?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [pendingAttr, setPendingAttr] = useState<FilterAttr | null>(null);
@@ -135,6 +143,16 @@ export default function KanbanSearchBar({
           onFocus={() => setOpen(true)}
           placeholder={filters.length ? "Buscar por título…" : "Filtrar por situação, cliente, tipo, prioridade, responsável ou buscar por título…"}
         />
+        {onToggleOverdue && overdueCount !== undefined && !overdueOn ? (
+          <button
+            type="button"
+            className={`kb-searchbar-quick${overdueCount ? " has" : ""}`}
+            onClick={(e) => { e.stopPropagation(); onToggleOverdue(); }}
+            title="Mostrar só as tarefas atrasadas"
+          >
+            Atrasadas <b>{overdueCount}</b>
+          </button>
+        ) : null}
       </div>
       {open ? (
         <div className="kb-searchbar-panel">

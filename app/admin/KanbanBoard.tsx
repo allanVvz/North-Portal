@@ -20,7 +20,7 @@ import { useSortPref } from "./taskSortPrefs";
 import { formatPeriod, formatShortDate, relativeDue } from "./taskDates";
 import { todayInTimezone } from "./recurringState";
 import { COLUMNS, PRIORITY_LABEL, STATUS_LABEL, commentsOf, taskTone, visibleColumnsFor } from "./kanbanShared";
-import { DEADLINE_LABEL, deadlineStateOf } from "./deadlineState";
+import { DEADLINE_LABEL, deadlineStateOf, type DeadlineState } from "./deadlineState";
 import { formatRelativeAge } from "@/lib/comments";
 import { FLOW_STEP_COUNT_KEY, kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
@@ -601,6 +601,15 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  // `?situacao=atrasada` (ou parada/no_prazo/concluida) chega da Home: o quadro
+  // abre já filtrado, com o chip na caixa de busca para a pessoa tirar.
+  useEffect(() => {
+    const situacao = searchParams.get("situacao");
+    if (!situacao || !(situacao in DEADLINE_LABEL)) return;
+    const label = DEADLINE_LABEL[situacao as DeadlineState];
+    setActiveFilters((current) => [...current.filter((f) => f.attr !== "situacao"), { attr: "situacao", value: situacao, label }]);
+  }, [searchParams]);
+
   function applyChanged(updated: TaskRecord) {
     setTasks((rows) => {
       if (rows.some((r) => r.id === updated.id)) return rows.map((r) => (r.id === updated.id ? { ...r, ...updated } : r));
@@ -714,16 +723,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           onFiltersChange={setActiveFilters}
           tasks={taskScreenTasks}
           onPickTask={openTask}
+          overdueCount={overdueCount}
+          overdueOn={overdueFilterOn}
+          onToggleOverdue={toggleOverdueFilter}
         />
-        <button
-          type="button"
-          className={`kb-overdue-quick ${overdueFilterOn ? "on" : ""} ${overdueCount ? "has" : ""}`}
-          onClick={toggleOverdueFilter}
-          aria-pressed={overdueFilterOn}
-          title={overdueFilterOn ? "Mostrar todas as tarefas" : "Mostrar só as tarefas atrasadas"}
-        >
-          Atrasadas <b>{overdueCount}</b>
-        </button>
         <span className={`kb-loadspin ${loading ? "on" : ""}`} role="status" aria-label={loading ? "Carregando" : undefined} aria-hidden={!loading} />
         {view === "quadro" ? (
           <div className="kb-modetoggle">

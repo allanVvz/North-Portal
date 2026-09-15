@@ -90,7 +90,9 @@ export default function StepRow({
 
   return (
     <div className={`tm-member tm-step-row is-${state}${isCurrent ? " is-current" : ""}${isOpenCard ? " tm-member-current" : ""}`}>
-      <div className="tm-step-line">
+      {/* Não usar .tm-step-line: é o traço absoluto de 2px do stepper, e a
+          linha inteira (check, título, 💬) sumia atrás do conteúdo. */}
+      <div className="tm-steprow-head">
         <input
           type="checkbox"
           className="tm-step-check"
