@@ -111,15 +111,16 @@ export async function upsertDueSoonNotifications(profileId: string, today: Date 
   const due = ((tasks ?? []) as AssignedTaskRow[]).filter((t) => isDueSoon(t.due_date, today));
   if (!due.length) return;
 
-  const rows = due.map((t) => ({
-    profile_id: profileId,
-    task_id: t.id,
-    type: "task_due_soon" as const,
-    message: dueSoonMessage(t.title, t.due_date as string),
-  }));
-  const { error: upsertError } = await supabase
-    .from("notifications")
-    .upsert(rows, { onConflict: "profile_id,task_id,type" });
+  // `.upsert()` genérico não serve mais: 20260826090200 trocou o índice único
+  // de (profile_id, task_id, type) por um PARCIAL (só task_due_soon), e o
+  // PostgREST não sabe expressar esse predicado no ON CONFLICT que gera —
+  // toda chamada com algo pra gravar batia em 42P10 e derrubava a rota
+  // inteira com 503 (ver migração 20260916180000). A RPC faz o upsert certo.
+  const { error: upsertError } = await supabase.rpc("upsert_due_soon_notifications", {
+    p_profile_id: profileId,
+    p_task_ids: due.map((t) => t.id),
+    p_messages: due.map((t) => dueSoonMessage(t.title, t.due_date as string)),
+  });
   if (upsertError) fail("due-soon upsert", upsertError);
 }
 
