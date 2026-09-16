@@ -23,7 +23,7 @@ import { collectAndStorePreviews } from "./creativeAssets";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
-import { runConversionFlow } from "./conversionFlow";
+import { ensureFeedbackCard, runConversionFlow } from "./conversionFlow";
 import { nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
 import { logReportRun } from "./reportLog";
 import { ensureFlowStep } from "@/lib/flows/advance";
@@ -252,11 +252,18 @@ async function runOneReportAutomation(
         .update({
           status: "revisao",
           assignee: AUTOMATION_ASSIGNEE,
-          payload: appendedCommentPayload(card1.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`),
+          payload: appendedCommentPayload(
+            card1.payload,
+            `Relatório de anúncios gerado e anexado: [${fileName}](${url})\n\nComente aqui caso queira algum ajuste neste relatório de anúncios.`,
+          ),
         })
         .eq("id", card1.id);
       if (c1Error) throw c1Error;
       await advanceFlowMold(admin, target, today);
+      // O Feedback nasce junto com o Tráfego — não espera revisão de ninguém.
+      // ensureFeedbackCard é idempotente (processOccurrence chama de novo
+      // como reforço, se este caminho não tiver rodado por algum motivo).
+      await ensureFeedbackCard(admin, occ, today);
       await notifyFromAutomation(admin, card1.id, "task_commented", `Automação comentou em "${card1.title}".`);
       // Relatório de tráfego é assunto de quem gerencia tráfego, esteja ou não
       // no card — a frente do grid de Equipe & papéis é quem responde isso.
@@ -399,7 +406,6 @@ export async function handleTrafficRevisionComment(admin: AdminClient, taskId: s
   // O relatório de conversão depende do snapshot de tráfego; uma revisão nova
   // torna a coleta e a conversão anteriores obsoletas e pede novo feedback.
   const nextPayload = { ...(occ.payload ?? {}) } as Record<string, unknown>;
-  delete nextPayload.feedback_prompt_at;
   delete nextPayload.feedback_source_at;
   delete nextPayload.sales_report_generated_at;
   await admin.from("tasks").update({ payload: nextPayload, status: "em_producao" }).eq("id", occ.id);

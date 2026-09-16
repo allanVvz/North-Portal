@@ -10,12 +10,14 @@
 // Sem ninguém marcado na frente, devolve null e o chamador mantém o
 // responsável de automação — o card continua existindo, só sem dono.
 
+import { formatAssignees } from "@/lib/assignees";
+import type { ResponsibilityKey } from "@/lib/validation";
 import type { AdminClient } from "./taskAccess";
 
 export async function assignResponsibilityHolders(
   admin: AdminClient,
   taskId: string,
-  responsibility: "gestor_trafego",
+  responsibility: ResponsibilityKey,
 ): Promise<string | null> {
   try {
     const { data: links, error: linksError } = await admin
@@ -37,7 +39,7 @@ export async function assignResponsibilityHolders(
       .from("task_assignees")
       .insert(holders.map((holder) => ({ task_id: taskId, profile_id: holder.id })));
     if (insertError) return null;
-    return holders.map((holder) => (holder.full_name as string).trim()).join(", ");
+    return formatAssignees(holders.map((holder) => (holder.full_name as string).trim()));
   } catch {
     return null;
   }

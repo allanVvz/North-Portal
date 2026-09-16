@@ -18,7 +18,9 @@ import type { TaskRecord } from "@/lib/validation";
 import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "@/lib/recurrence";
 import { recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import { DEFERRED_TASK_FLAG, REPORT_CONVERSION_FLOW } from "@/lib/taskRelations";
+import { mergeAssigneeDisplay } from "@/lib/assignees";
 import { clonePlan } from "./provision";
+import { assignResponsibilityHolders } from "./responsibleOwners";
 import { asTaskRecord, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 
 // Advances the recurring parent forward (due_date → next occurrence, cycle+1)
@@ -113,16 +115,20 @@ export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord,
 
   const { data, error } = await admin
     .from("tasks")
-    .insert({ ...fields, kind: flowKind, subtype: null, payload, status: "em_producao", assignee: "Northia, Luiza" })
+    .insert({ ...fields, kind: flowKind, subtype: null, payload, status: "em_producao", assignee: AUTOMATION_ASSIGNEE })
     .select(TASK_COLUMNS)
     .limit(1);
   if (error && (error as { code?: string }).code !== "23505") throw error;
   const occurrence = data?.[0] ? asTaskRecord(data[0]) : await getAdminTask(admin, occId);
   if (!occurrence) throw new Error("Não foi possível materializar a ocorrência do fluxo de relatório.");
-  // Northia é ator de sistema e Luiza é o vínculo humano do pai. O texto deixa
-  // os dois visíveis sem criar uma conta artificial para a IA.
-  if (mold.reviewer_id) {
-    await admin.from("task_assignees").upsert({ task_id: occurrence.id, profile_id: mold.reviewer_id }, { onConflict: "task_id,profile_id" });
+  // Quem "é dono" do relatório é quem está marcado como gestor de tráfego em
+  // Configurações › Equipe & papéis (hoje Allan e Luiza) — não um nome
+  // craveado no código. AUTOMATION_ASSIGNEE (o rótulo de sistema) continua
+  // visível junto, mesclado, porque não existe uma conta "automação" para
+  // virar task_assignees de verdade.
+  const holderNames = await assignResponsibilityHolders(admin, occurrence.id, "gestor_trafego");
+  if (holderNames) {
+    await admin.from("tasks").update({ assignee: mergeAssigneeDisplay(AUTOMATION_ASSIGNEE, [holderNames]) }).eq("id", occurrence.id);
   }
   return occurrence;
 }

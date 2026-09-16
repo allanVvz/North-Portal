@@ -177,7 +177,7 @@ export async function ensureFlowStep(
   admin: AdminClient,
   parent: TaskRecord,
   slot: string,
-  fields: { title: string; leadDays?: number; clientVisible?: boolean; assignee?: string | null; position?: number },
+  fields: { title: string; leadDays?: number; clientVisible?: boolean; assignee?: string | null; position?: number; description?: string },
   today = todayIso(),
   actorId: string | null = null,
 ): Promise<TaskRecord> {
@@ -207,6 +207,7 @@ export async function ensureFlowStep(
   // mesmo tipo do pai" — o pai pode ser qualquer recorrente. `operacional/<slot>`
   // existe no vocabulário só para a trava (migração 20260902000000).
   step.kind = "operacional";
+  if (fields.description) step.description = fields.description;
   const { data, error } = await admin.from("tasks").insert(step).select(TASK_COLUMNS).limit(1);
   if (error && !isDuplicate(error)) throw error;
   await linkStep(admin, parent.id, id, slot, fields.position ?? 0);
