@@ -118,6 +118,28 @@ describe("taskProgress — plan rollup", () => {
   });
 });
 
+describe("taskProgress — membro que também é rollup parent (bug da 'rotina travada')", () => {
+  // Uma execução de recorrência cujo molde é um Plano de Ação (ex.: "REUNIÃO
+  // ROTINA - ALLAN") herda kind: plano_acao — isRollupParent(execução) também
+  // é true. rollupProgress recursa nela via progressOf, mas só enxerga os
+  // FILHOS DELA se `membersByParent` for passado; sem isso, a execução conta
+  // sempre 0% na média do molde, travando o progresso perto de 0 pra sempre.
+  const molde = { kind: "plano_acao", status: "backlog" as const, progress_weight: 1, recurrence_cadence: "semanal" as const };
+  const execucao = { id: "exec-1", kind: "plano_acao", status: "backlog" as const, progress_weight: 1 };
+
+  it("sem membersByParent, a execução conta 0% mesmo tendo trabalho concluído dentro dela", () => {
+    expect(taskProgress(molde, [execucao])).toBe(0);
+  });
+
+  it("com membersByParent, a execução usa o rollup real das próprias atividades", () => {
+    const atividadeConcluida = { id: "a1", kind: "criativo", status: "aprovado" as const, progress_weight: 1 };
+    const atividadeAberta = { id: "a2", kind: "criativo", status: "backlog" as const, progress_weight: 1 };
+    const membersByParent = new Map([["exec-1", [atividadeConcluida, atividadeAberta]]]);
+    // A execução sozinha vale (100+0)/2 = 50 — é isso que o molde devia refletir.
+    expect(taskProgress(molde, [execucao], membersByParent)).toBe(50);
+  });
+});
+
 describe("checkpointsProgress — onboarding % from checkpoint_comercial cards", () => {
   it("is 0 for an empty list (no checkpoints provisioned yet)", () => {
     expect(checkpointsProgress([])).toBe(0);

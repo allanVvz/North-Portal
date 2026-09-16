@@ -30,7 +30,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus } from "@/lib/flows/parentStatus";
@@ -655,13 +655,20 @@ export default function TaskModal({
     ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
   const flowSteps = liveTask && isDelivery ? flowStepsOf(liveTask.id, clientTasks) : [];
+  // Sem isto, um membro que é ele mesmo um pai (a ocorrência de uma
+  // recorrência de Plano, ex. "REUNIÃO ROTINA - ALLAN" — herda o `kind`
+  // plano_acao do molde) tinha o PRÓPRIO progresso calculado com uma lista
+  // de filhos vazia e sempre voltava 0%, travando a média do molde inteiro
+  // perto de 0 não importa quanto trabalho fosse concluído dentro dele.
+  // `app/admin/KanbanBoard.tsx` já monta e passa este mapa; faltava aqui.
+  const membersByParent = useMemo(() => childrenByParent(clientTasks), [clientTasks]);
   // Unsaved status changes are the task's current UI truth. Reading liveTask
   // here left the percentage frozen until Save, even while the stepper moved.
   const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: draft.status } : null;
   const headerPct = progressTask
     ? (isDelivery
-        ? taskProgress(progressTask, flowSteps)
-        : kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers) : taskProgress(progressTask))
+        ? taskProgress(progressTask, flowSteps, membersByParent)
+        : kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers, membersByParent) : taskProgress(progressTask))
     : 0;
   const linkableCandidates = liveTask
     // Ter uma entrega como pai não impede entrar num plano, e já pertencer a
@@ -717,14 +724,14 @@ export default function TaskModal({
         id: flowDeliveryId,
         parent: flowDelivery,
         subtitle: flowStepIndex >= 0 && total ? `Etapa ${flowStepIndex + 1} de ${total} · ${stepLabel}` : stepLabel,
-        progress: flowDelivery ? taskProgress(flowDelivery, chainSteps) : 0,
+        progress: flowDelivery ? taskProgress(flowDelivery, chainSteps, membersByParent) : 0,
       };
     }
     return {
       id: recurrenceParentId,
       parent: recurrenceParent,
       subtitle: "Execução da recorrência",
-      progress: recurrenceParent ? taskProgress(recurrenceParent, recurrenceExecutionsOf(recurrenceParent.id, clientTasks)) : 0,
+      progress: recurrenceParent ? taskProgress(recurrenceParent, recurrenceExecutionsOf(recurrenceParent.id, clientTasks), membersByParent) : 0,
     };
   };
   const hasPlanKind = parentRelationKinds.includes("plano");
@@ -734,7 +741,7 @@ export default function TaskModal({
     ? planParents.map((plan) => ({
         parent: plan,
         subtitle: "Atividade do plano",
-        progress: taskProgress(plan, actionPlanMembersOf(plan.id, clientTasks)),
+        progress: taskProgress(plan, actionPlanMembersOf(plan.id, clientTasks), membersByParent),
       }))
     : [];
   // Ordem preservada: entrega, depois um por plano, depois recorrência —
