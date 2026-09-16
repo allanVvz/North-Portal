@@ -96,6 +96,7 @@ function ChainPicker({
 export default function FlowStepsBox({
   type,
   steps,
+  isReportFlow,
   currentTaskId,
   candidatesFor,
   busy,
@@ -111,6 +112,12 @@ export default function FlowStepsBox({
   type: TaskTypeDef | null;
   /** Os cards que já ocupam alguma etapa desta entrega. */
   steps: TaskRecord[];
+  /** Fluxo de relatório (Tráfego/Feedback/Conversão): as etapas são criadas
+   * pela automação, nunca pelo vocabulário declarado do `kind` ("criativo",
+   * que tem sua própria corrente de Roteiro/Captação/Edição/Publicação).
+   * Sem isto, `type` chega com subtipos DECLARADOS de verdade (não nulo/vazio
+   * como no fluxo dinâmico antigo) e a caixa renderiza a corrente errada. */
+  isReportFlow: boolean;
   /** Card aberto no momento, para destacar "você está aqui". */
   currentTaskId: string | null;
   candidatesFor: (slot: string) => TaskRecord[];
@@ -130,9 +137,13 @@ export default function FlowStepsBox({
   // `operacional` promovida a pai de fluxo): não há sequência pré-definida, só
   // as etapas que existem.
   // Uma Entrega de relatório tem etapas criadas pela automação, não pelo
-  // vocabulário estático. Quando o tipo não chegou (ou é legado inativo), os
-  // filhos ligados ainda são a fonte de verdade e nunca devem parecer loading.
-  const dynamic = (type !== null && type.subtypes.length === 0) || (type === null && steps.length > 0);
+  // vocabulário estático — mesmo quando `kind` é um tipo declarado de verdade
+  // (ex.: "criativo", com sua própria corrente de Roteiro/Captação/Edição/
+  // Publicação), por isso `isReportFlow` entra OR'd aqui, não só o fallback
+  // de tipo nulo/sem subtipos. Quando o tipo não chegou (ou é legado
+  // inativo), os filhos ligados ainda são a fonte de verdade e nunca devem
+  // parecer loading.
+  const dynamic = isReportFlow || (type !== null && type.subtypes.length === 0) || (type === null && steps.length > 0);
   if (dynamic) {
     if (!steps.length) return null;
     return (

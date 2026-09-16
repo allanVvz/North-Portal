@@ -304,6 +304,13 @@ export default function TaskModal({
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
   const isReportFlow = Boolean(liveTask && isReportConversionFlow(liveTask));
   const [flowDelivery, setFlowDelivery] = useState<TaskRecord | null>(null);
+  // A entrega de verdade por trás do card aberto — ela mesma quando o card
+  // aberto É a entrega, o pai buscado à parte quando o card aberto é uma
+  // etapa. `isReportFlow` não serve para decidir "esta corrente é de
+  // relatório?" fora do card da própria entrega: uma etapa (trafego/feedback/
+  // conversao) não carrega `payload.automation_flow`, só o pai carrega.
+  const chainDelivery = isDelivery ? liveTask : flowDelivery;
+  const isReportFlowChain = Boolean(chainDelivery && isReportConversionFlow(chainDelivery));
   // Os Planos de Ação a que este card pertence (pode ser mais de um) — não
   // aparecem no quadro, então quase sempre precisam ser buscados por id
   // (igual a `flowDelivery`).
@@ -323,9 +330,10 @@ export default function TaskModal({
     : "task";
   const deliveryType = taskTypes.find((t) => t.key === (flowDelivery?.kind ?? (isDelivery ? liveTask?.kind : null))) ?? null;
   // Índice 1-based da etapa dentro do tipo, para o "2/4". -1 enquanto o
-  // vocabulário não chegou, ou se o subtipo saiu do tipo depois de o card já
-  // existir — nesse caso o card segue válido, só não numera.
-  const flowStepIndex = deliveryType && liveTask ? deliveryType.subtypes.findIndex((sub) => sub.key === liveTask.subtype) : -1;
+  // vocabulário não chegou, se o subtipo saiu do tipo depois de o card já
+  // existir, ou se a entrega é um fluxo de relatório — aí a corrente é da
+  // automação, não do vocabulário declarado (ver isReportFlowChain).
+  const flowStepIndex = deliveryType && liveTask && !isReportFlowChain ? deliveryType.subtypes.findIndex((sub) => sub.key === liveTask.subtype) : -1;
   const [comment, setComment] = useState("");
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
@@ -697,14 +705,10 @@ export default function TaskModal({
   const recurrenceLinkCandidates = liveTask && isRecurringParent
     ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id)
     : [];
-  /** A entrega a que a caixa de etapas se refere: o próprio card quando ele é a
-   * entrega, ou o pai quando estamos olhando uma etapa (usado só para calcular o
-   * progresso do pai na caixa "Faz parte de" — o stepper editável agora só
-   * aparece do lado da entrega). */
-  const chainDelivery = isDelivery ? liveTask : flowDelivery;
-
   // As etapas da corrente a que este card pertence — as do próprio card quando
-  // ele é a entrega, as do pai quando ele é uma etapa.
+  // ele é a entrega, as do pai quando ele é uma etapa. `chainDelivery` (a
+  // entrega a que a caixa de etapas se refere) já foi calculado mais acima,
+  // junto de `isReportFlowChain`.
   const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
 
   // As caixas "Faz parte de": uma linha enxuta por card pai (entrega, plano,
@@ -728,7 +732,9 @@ export default function TaskModal({
   // caixa por Plano, montada direto de `planParents` logo abaixo.
   const parentSlotOf = (kind: Exclude<ParentRelationKind, "plano">): { id: string | null; parent: TaskRecord | null; subtitle: string; progress: number } => {
     if (kind === "entrega") {
-      const total = deliveryType?.subtypes.length ?? 0;
+      // Fluxo de relatório: a contagem declarada de "criativo" não descreve
+      // esta corrente (ver isReportFlowChain / flowStepIndex acima).
+      const total = isReportFlowChain ? 0 : (deliveryType?.subtypes.length ?? 0);
       const stepLabel = liveTask ? subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo" : "";
       return {
         id: flowDeliveryId,
@@ -1697,6 +1703,7 @@ export default function TaskModal({
               <FlowStepsBox
                 type={deliveryType}
                 steps={chainSteps}
+                isReportFlow={isReportFlow}
                 currentTaskId={liveTask.id}
                 candidatesFor={chainCandidates}
                 busy={busy}
