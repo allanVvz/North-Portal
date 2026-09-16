@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { assigneeOptions, formatAssignees, parseAssignees } from "@/lib/assignees";
+import { assigneeOptions, formatAssignees, freeTextNames } from "@/lib/assignees";
 
 export type AssigneeAccountOption = { id: string; label: string };
 
@@ -38,11 +38,15 @@ export default function AssigneePicker({
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const freeNames = useMemo(() => parseAssignees(assignee), [assignee]);
   const linkedChips = useMemo(
     () => assigneeProfileIds.map((id) => accountOptions.find((a) => a.id === id)).filter((a): a is AssigneeAccountOption => Boolean(a)),
     [assigneeProfileIds, accountOptions],
   );
+  // `assignee` pode já vir com os nomes das contas vinculadas embutidos —
+  // mergeAssigneeDisplay (lib/supabase.ts) funde os dois para quem só lê
+  // texto simples. Sem subtrair aqui, cada pessoa com conta aparecia demais:
+  // uma vez como chip vinculado, outra como "sem conta" (bug reportado).
+  const freeNames = useMemo(() => freeTextNames(assignee, linkedChips.map((a) => a.label)), [assignee, linkedChips]);
   const availableAccounts = accountOptions.filter((a) => !assigneeProfileIds.includes(a.id));
   const accountLabelsLower = useMemo(() => new Set(accountOptions.map((a) => a.label.toLocaleLowerCase("pt-BR"))), [accountOptions]);
   const availableFreeText = assigneeOptions(freeTextOptions)
@@ -67,7 +71,11 @@ export default function AssigneePicker({
   }, [editing, open]);
 
   function addAccount(id: string) {
-    onChange({ assignee, assigneeProfileIds: [...assigneeProfileIds, id] });
+    // Se essa pessoa já estava escrita como nome sem conta, a conta nova
+    // passa a representá-la — tira o nome solto para não sobrar duplicado.
+    const label = accountOptions.find((a) => a.id === id)?.label;
+    const next = label ? formatAssignees(freeNames.filter((name) => name.toLocaleLowerCase("pt-BR") !== label.toLocaleLowerCase("pt-BR"))) : formatAssignees(freeNames);
+    onChange({ assignee: next || null, assigneeProfileIds: [...assigneeProfileIds, id] });
     setOpen(false);
   }
 
@@ -85,7 +93,12 @@ export default function AssigneePicker({
   }
 
   function removeAccount(id: string) {
-    onChange({ assignee, assigneeProfileIds: assigneeProfileIds.filter((item) => item !== id) });
+    // "Remover" desvincula a conta E tira o nome — não vira "sem conta" de
+    // novo (o próprio "×" nunca dava pra isso: era assignee cru, com o nome
+    // dela ainda embutido pelo merge do servidor).
+    const label = linkedChips.find((a) => a.id === id)?.label;
+    const next = label ? formatAssignees(freeNames.filter((name) => name.toLocaleLowerCase("pt-BR") !== label.toLocaleLowerCase("pt-BR"))) : formatAssignees(freeNames);
+    onChange({ assignee: next || null, assigneeProfileIds: assigneeProfileIds.filter((item) => item !== id) });
   }
 
   function removeFreeText(name: string) {

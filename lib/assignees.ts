@@ -40,3 +40,22 @@ export function mergeAssigneeDisplay(
   const merged = formatAssignees([...parseAssignees(freeText), ...linked]);
   return merged || null;
 }
+
+/**
+ * The inverse of `mergeAssigneeDisplay`: given `TaskRecord.assignee` (which
+ * may already have linked-account names folded into it — that's the point of
+ * the merge above) and the names of the accounts CURRENTLY linked, returns
+ * only the names that are NOT one of those accounts.
+ *
+ * Exists because an editor (AssigneePicker) needs to tell "a name with no
+ * account" apart from "a name that already has an account, shown twice by
+ * accident" — reading `assignee` as if it were pure free text, without this
+ * subtraction, renders every linked person a second time as a free-text chip.
+ * That duplicate is purely a display bug: `mergeAssigneeDisplay` itself
+ * already dedupes at the string level (see its own tests) — nothing at rest
+ * is doubled, but naively re-parsing its OUTPUT as free text un-does that.
+ */
+export function freeTextNames(merged: string | null | undefined, linkedNames: readonly (string | null | undefined)[]): string[] {
+  const linkedKeys = new Set(linkedNames.filter((name): name is string => Boolean(name?.trim())).map((name) => name.toLocaleLowerCase("pt-BR")));
+  return parseAssignees(merged).filter((name) => !linkedKeys.has(name.toLocaleLowerCase("pt-BR")));
+}
