@@ -12,6 +12,7 @@ import { cycleLogOf } from "@/lib/cycleLog";
 import { formatShortDate } from "./taskDates";
 import PlanAddCombobox from "./PlanAddCombobox";
 import CycleChecks from "./CycleChecks";
+import RecurrenceExecutionCombobox from "./RecurrenceExecutionCombobox";
 import { addDaysIso } from "./contentPlan";
 import { agencyToday } from "./recurringState";
 import CardParentBox from "./CardParentBox";
@@ -671,6 +672,14 @@ export default function TaskModal({
     // que já é membro DESTE plano especificamente.
     ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && t.client_id === liveTask.client_id)
     : [];
+  // Candidatos a "vincular como execução" de um molde de recorrência: mesmo
+  // cliente, não pode ser molde de OUTRA recorrência nem já ser execução de
+  // outra — mas pode já pertencer a um Plano (mecanismo independente) e pode
+  // ser de um `kind` diferente do molde (a UI só ordena o mesmo tipo primeiro,
+  // não trava — pedido explícito: precisa aceitar vincular uma Entrega).
+  const recurrenceLinkCandidates = liveTask && isRecurringParent
+    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && (recurrenceParentIdOf(t) === null || recurrenceParentIdOf(t) === liveTask.id) && t.client_id === liveTask.client_id)
+    : [];
   /** A entrega a que a caixa de etapas se refere: o próprio card quando ele é a
    * entrega, ou o pai quando estamos olhando uma etapa (usado só para calcular o
    * progresso do pai na caixa "Faz parte de" — o stepper editável agora só
@@ -795,6 +804,25 @@ export default function TaskModal({
       });
       if (res.ok) onTaskPatched?.(await res.json());
     } catch { /* leave as-is; user can retry */ }
+  }
+
+  async function linkRecurrenceExecution(taskId: string) {
+    if (!liveTask) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/recurrence-executions`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ child_id: taskId }),
+      });
+      const body = await res.json().catch(() => null) as (TaskRecord & { error?: string }) | null;
+      if (!res.ok) throw new Error(body?.error ?? "Não foi possível vincular esta execução.");
+      onTaskPatched?.(body as TaskRecord);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível vincular esta execução.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function unlinkMember(taskId: string, parentId: string) {
@@ -1737,10 +1765,20 @@ export default function TaskModal({
                   ) : null}
                 </div>
                 {isRecurringParent && liveTask ? (
-                  <div className="tm-cycles-log">
-                    <p className="tm-cycles-subtitle">Checks ({cycleLogOf(liveTask.payload).length})</p>
-                    <CycleChecks log={cycleLogOf(liveTask.payload)} />
-                  </div>
+                  <>
+                    {!recurrenceStopped(liveTask.status) ? (
+                      <RecurrenceExecutionCombobox
+                        candidates={recurrenceLinkCandidates}
+                        templateKind={liveTask.kind}
+                        busy={busy}
+                        onLink={(c) => void linkRecurrenceExecution(c.id)}
+                      />
+                    ) : null}
+                    <div className="tm-cycles-log">
+                      <p className="tm-cycles-subtitle">Checks ({cycleLogOf(liveTask.payload).length})</p>
+                      <CycleChecks log={cycleLogOf(liveTask.payload)} />
+                    </div>
+                  </>
                 ) : (
                   <PlanAddCombobox
                     candidates={liveTask ? linkableCandidates : newPlanCandidates}

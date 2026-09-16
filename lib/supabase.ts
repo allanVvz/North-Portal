@@ -46,7 +46,7 @@ import {
   type TaskParentLink,
 } from "./validation";
 import { createAdminClient } from "./supabase/admin";
-import { materializeFirstStep } from "./flows/advance";
+import { justCompleted, materializeFirstStep } from "./flows/advance";
 import { defaultContent, type PortalContent, type Tone } from "@/app/[slug]/portalData";
 import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type WindsorSettings } from "./windsor";
 import { AI_PROVIDER_SETTINGS_DEFAULT, type AiProviderSettings, type AiVendor } from "./aiProviders";
@@ -2242,6 +2242,11 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   // e nulo, e sem ele quem concluiu a etapa recebia de volta o aviso de que a
   // etapa seguinte nasceu — aviso da propria acao.
   await advanceFlowAfterUpdate(current, updated, actorId);
+  // Mesmo raciocínio, para recorrência: concluir a EXECUÇÃO avança o ciclo
+  // sozinho, no mesmo ponto único que a cascata de fluxo usa — sem isto, só o
+  // botão manual "Concluir ciclo" no molde avançava, desacoplado do status
+  // real do card de execução.
+  await advanceRecurrenceAfterUpdate(current, updated, actorId);
   // Toda rota interna de `routeTaskGroupUpdate` termina num `updateTask` cru
   // (`select(TASK_COLUMNS)`, sem os joins de `mergeTaskAssigneeRow`) — só a
   // rota admin (`app/api/admin/tasks/[id]/route.ts`) sabia disso e refazia o
@@ -2253,44 +2258,61 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   return rehydrateOrRaw(updated.id, updated);
 }
 
-async function completeTaskCycleForRequest(
-  id: string,
-  expectedCycle: number | undefined,
-  expectedRevision: number | undefined,
-  expectedDueDate: string | null,
-  actor: { id: string; name: string } | null = null,
-): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
-  const supabase = await createClient();
-  const parent = await getTaskById(id);
-  if (!parent) throw new HttpError(404, "Tarefa recorrente não encontrada.");
-  if (!parent.recurrence_cadence || !parent.due_date) throw new HttpError(409, "Esta tarefa não está recorrente.");
-  // Não há data-limite: a recorrência avança em toda conclusão manual e só
-  // encerra quando o molde é movido para aprovado ou parada. Encerrada, o ciclo
-  // atual não avança e nenhuma ocorrência nova nasce.
-  if (recurrenceStopped(parent.status)) {
-    throw new HttpError(409, "Esta recorrência foi encerrada — o card-pai está aprovado ou parado.", { code: "recurrence_ended", parent });
+type RecurrenceDbClient = Awaited<ReturnType<typeof createClient>> | ReturnType<typeof createAdminClient>;
+
+/** A execução (se houver) já ligada a este molde para este ciclo — por
+ * `payload.recurrence_cycle`, não pelo id determinístico, porque um card
+ * VINCULADO à mão (ver `linkExistingRecurrenceExecution`) ocupa o ciclo com o
+ * seu próprio id, nunca com o hash de `recurringExecutionId`. Consultar por
+ * este campo em vez de só tentar o id é o que evita duas execuções nascendo
+ * para o mesmo ciclo — uma automática e uma vinculada à mão. */
+async function findRecurrenceExecutionByCycle(supabase: RecurrenceDbClient, templateId: string, cycle: number): Promise<TaskRecord | null> {
+  const { data, error } = await supabase.from("tasks").select(TASK_COLUMNS)
+    .eq("plan_id", templateId).contains("payload", { [RECURRENCE_CYCLE_KEY]: cycle }).limit(1);
+  if (error) fail(error);
+  return (data?.[0] as TaskRecord | undefined) ?? null;
+}
+
+/** Materializa a execução de um ciclo, OU reaproveita a que já estiver lá
+ * (vinculada à mão) em vez de criar uma segunda. Só quem chama decide se uma
+ * criação de verdade precisa da primeira etapa de fluxo — ver `created`. */
+async function materializeOrReuseExecution(
+  supabase: RecurrenceDbClient,
+  parent: TaskRecord,
+  cycle: number,
+  occurrenceDate: string,
+): Promise<{ task: TaskRecord; created: boolean }> {
+  const reused = await findRecurrenceExecutionByCycle(supabase, parent.id, cycle);
+  if (reused) return { task: reused, created: false };
+  const executionId = recurringExecutionId(parent.id, cycle);
+  const { data, error } = await supabase.from("tasks")
+    .insert(recurringExecutionFields(parent, executionId, occurrenceDate, cycle))
+    .select(TASK_COLUMNS).limit(1);
+  if (error && error.code !== "23505") fail(error);
+  let task = data?.[0] as TaskRecord | undefined;
+  if (!task) {
+    const { data: existing, error: readError } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", executionId).limit(1);
+    if (readError) fail(readError);
+    task = existing?.[0] as TaskRecord | undefined;
   }
+  if (!task) throw new HttpError(503, "Não foi possível materializar a execução.");
+  return { task, created: Boolean(data?.length) };
+}
+
+/** O núcleo de "um ciclo terminou": avança `recurrence_cycle`/`due_date` do
+ * molde e garante a execução do próximo ciclo (nova ou já vinculada à mão).
+ * Compartilhado pelo botão manual (`completeTaskCycleForRequest`) e pela
+ * conclusão automática (`advanceRecurrenceAfterUpdate`) — as duas única
+ * diferença entre elas é QUEM valida se este é o momento certo de chamar
+ * isto; o avanço em si é o mesmo para as duas. */
+async function advanceRecurrenceParent(
+  supabase: RecurrenceDbClient,
+  parent: TaskRecord,
+  actor: { id: string; name: string } | null,
+): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
+  if (!parent.recurrence_cadence || !parent.due_date) throw new HttpError(409, "Esta tarefa não está recorrente.");
   const currentCycle = recurrenceCycleOf(parent);
   const currentRevision = recurrenceRevisionOf(parent);
-  const requestedCycle = expectedCycle ?? (expectedDueDate === parent.due_date ? currentCycle : undefined);
-  const requestedRevision = expectedRevision ?? currentRevision;
-  if (requestedCycle === undefined || requestedRevision !== currentRevision || requestedCycle > currentCycle) {
-    throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent });
-  }
-  if (requestedCycle < currentCycle) {
-    const repeatedId = recurringExecutionId(id, requestedCycle + 1);
-    let repeated = await getTaskById(repeatedId);
-    if (!repeated && requestedCycle + 1 === currentCycle) {
-      const { data, error } = await supabase.from("tasks")
-        .insert(recurringExecutionFields(parent, repeatedId, parent.due_date, currentCycle))
-        .select(TASK_COLUMNS).limit(1);
-      if (error && error.code !== "23505") fail(error);
-      repeated = (data?.[0] as TaskRecord | undefined) ?? await getTaskById(repeatedId);
-    }
-    if (!repeated) throw new HttpError(503, "Não foi possível localizar a execução já criada.");
-    return { parent, task: repeated, created: false };
-  }
-
   const nextCycle = currentCycle + 1;
   const rule = {
     cadence: parent.recurrence_cadence,
@@ -2322,45 +2344,76 @@ async function completeTaskCycleForRequest(
     due_date: nextDue,
     end_date: !parent.end_date || nextDue > parent.end_date ? nextDue : parent.end_date,
     payload: nextPayload,
-  }).eq("id", id).contains("payload", {
+  }).eq("id", parent.id).contains("payload", {
     [RECURRENCE_CYCLE_KEY]: currentCycle,
     [RECURRENCE_REVISION_KEY]: currentRevision,
   }).select(TASK_COLUMNS).limit(1);
   if (updateError) fail(updateError);
   let updatedParent = advanced?.[0] as TaskRecord | undefined;
   if (!updatedParent) {
-    const refreshed = await getTaskById(id);
+    // Outra chamada (o botão manual e a conclusão automática podem disparar
+    // quase juntos) já avançou este ciclo entre a leitura e a escrita —
+    // reaproveita o resultado dela em vez de tentar avançar de novo.
+    const { data: refreshedRows, error: refreshError } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", parent.id).limit(1);
+    if (refreshError) fail(refreshError);
+    const refreshed = refreshedRows?.[0] as TaskRecord | undefined;
     if (!refreshed) throw new HttpError(404, "Tarefa recorrente não encontrada.");
-    if (recurrenceRevisionOf(refreshed) !== currentRevision) {
-      throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent: refreshed });
-    }
-    if (recurrenceCycleOf(refreshed) !== nextCycle) {
-      throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent: refreshed });
-    }
-    updatedParent = refreshed;
+    const existing = await findRecurrenceExecutionByCycle(supabase, parent.id, recurrenceCycleOf(refreshed));
+    if (!existing) throw new HttpError(503, "Não foi possível localizar a execução já criada.");
+    return { parent: refreshed, task: existing, created: false };
   }
 
-  const executionId = recurringExecutionId(id, nextCycle);
-  const { data: inserted, error: insertError } = await supabase.from("tasks")
-    .insert(recurringExecutionFields(parent, executionId, nextDue, nextCycle))
-    .select(TASK_COLUMNS).limit(1);
-  if (insertError && insertError.code !== "23505") fail(insertError);
-  let task = inserted?.[0] as TaskRecord | undefined;
-  if (!task) {
-    const { data: existing, error } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", executionId).limit(1);
-    if (error) fail(error);
-    task = existing?.[0] as TaskRecord | undefined;
+  const { task, created } = await materializeOrReuseExecution(supabase, parent, nextCycle, nextDue);
+  if (created) {
+    // Ocorrência de uma ENTREGA recorrente nasce como entrega própria (herda as
+    // marcas de fluxo do template) mas nasce vazia. Criar a primeira etapa aqui é
+    // o que faz a pessoa ver o trabalho na hora; `reconcileFlows` repete a
+    // checagem por estado como rede. Best-effort: falhar aqui não pode desfazer
+    // o ciclo que acabou de ser concluído. Só roda quando a execução É NOVA —
+    // uma vinculada à mão já é o card que a pessoa escolheu, do jeito que ela
+    // escolheu.
+    await materializeFirstStep(createAdminClient(), task).catch((error) => {
+      console.error("materializeFirstStep falhou", { taskId: task.id, error });
+    });
   }
-  if (!task) throw new HttpError(503, "Não foi possível materializar a execução.");
-  // Ocorrência de uma ENTREGA recorrente nasce como entrega própria (herda as
-  // marcas de fluxo do template) mas nasce vazia. Criar a primeira etapa aqui é
-  // o que faz a pessoa ver o trabalho na hora; `reconcileFlows` repete a
-  // checagem por estado como rede. Best-effort: falhar aqui não pode desfazer
-  // o ciclo que acabou de ser concluído.
-  await materializeFirstStep(createAdminClient(), task).catch((error) => {
-    console.error("materializeFirstStep falhou", { taskId: task!.id, error });
-  });
-  return { parent: updatedParent, task, created: Boolean(inserted?.length) };
+  return { parent: updatedParent, task, created };
+}
+
+async function completeTaskCycleForRequest(
+  id: string,
+  expectedCycle: number | undefined,
+  expectedRevision: number | undefined,
+  expectedDueDate: string | null,
+  actor: { id: string; name: string } | null = null,
+): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
+  const supabase = await createClient();
+  const parent = await getTaskById(id);
+  if (!parent) throw new HttpError(404, "Tarefa recorrente não encontrada.");
+  if (!parent.recurrence_cadence || !parent.due_date) throw new HttpError(409, "Esta tarefa não está recorrente.");
+  // Não há data-limite: a recorrência avança em toda conclusão manual e só
+  // encerra quando o molde é movido para aprovado ou parada. Encerrada, o ciclo
+  // atual não avança e nenhuma ocorrência nova nasce.
+  if (recurrenceStopped(parent.status)) {
+    throw new HttpError(409, "Esta recorrência foi encerrada — o card-pai está aprovado ou parado.", { code: "recurrence_ended", parent });
+  }
+  const currentCycle = recurrenceCycleOf(parent);
+  const currentRevision = recurrenceRevisionOf(parent);
+  const requestedCycle = expectedCycle ?? (expectedDueDate === parent.due_date ? currentCycle : undefined);
+  const requestedRevision = expectedRevision ?? currentRevision;
+  if (requestedCycle === undefined || requestedRevision !== currentRevision || requestedCycle > currentCycle) {
+    throw new HttpError(409, "A agenda da recorrência mudou.", { code: "recurrence_schedule_changed", parent });
+  }
+  if (requestedCycle < currentCycle) {
+    const targetCycle = requestedCycle + 1;
+    let repeated = await findRecurrenceExecutionByCycle(supabase, id, targetCycle);
+    if (!repeated && targetCycle === currentCycle) {
+      ({ task: repeated } = await materializeOrReuseExecution(supabase, parent, targetCycle, parent.due_date));
+    }
+    if (!repeated) throw new HttpError(503, "Não foi possível localizar a execução já criada.");
+    return { parent, task: repeated, created: false };
+  }
+
+  return advanceRecurrenceParent(supabase, parent, actor);
 }
 
 export async function completeTaskCycle(
@@ -2371,6 +2424,76 @@ export async function completeTaskCycle(
   actor: { id: string; name: string } | null = null,
 ): Promise<{ parent: TaskRecord; task: TaskRecord; created: boolean }> {
   return completeTaskCycleForRequest(id, expectedCycle, expectedRevision, expectedDueDate, actor);
+}
+
+/** Concluir a EXECUÇÃO de uma recorrência avança o ciclo sozinho — o mesmo
+ * padrão do fluxo (concluir a etapa avança a entrega, `advanceFlowAfterUpdate`
+ * ao lado). Só age quando a execução concluída é a do ciclo CORRENTE do molde
+ * — reabrir/fechar de novo uma execução antiga (já superada) não pode
+ * reavançar nada — e quando o molde não está encerrado. Roda com o client
+ * admin porque este gancho é chamado de `updateTaskGroup`, compartilhado com
+ * a aprovação do cliente no portal (mesmo motivo do fluxo). O botão manual
+ * "Concluir ciclo" continua existindo para backfill (ciclo pulado sem
+ * execução nenhuma para concluir). */
+export async function advanceRecurrenceAfterUpdate(before: TaskRecord, after: TaskRecord, actorId: string | null): Promise<void> {
+  if (!justCompleted(before, after)) return;
+  const templateId = recurrenceParentIdOf(after);
+  if (!templateId) return;
+  const admin = createAdminClient();
+  try {
+    const { data, error } = await admin.from("tasks").select(TASK_COLUMNS).eq("id", templateId).limit(1);
+    if (error) fail(error);
+    const parent = data?.[0] as TaskRecord | undefined;
+    if (!parent || !parent.recurrence_cadence || recurrenceStopped(parent.status)) return;
+    if (recurrenceCycleOf(after) !== recurrenceCycleOf(parent)) return;
+    const actor = actorId ? { id: actorId, name: (await getProfileName(actorId)) ?? "Alguém" } : null;
+    await advanceRecurrenceParent(admin, parent, actor);
+  } catch (error) {
+    console.error("advanceRecurrenceAfterUpdate falhou", { taskId: after.id, error });
+  }
+}
+
+/** Vincula um card JÁ EXISTENTE como execução de um ciclo da recorrência — o
+ * mesmo padrão de "vincular existente" que o Plano de Ação já tem
+ * (`setTaskPlanLink`/`PlanAddCombobox`), mas para o elo 1:1 de recorrência
+ * (`plan_id`), que não passa por `task_links`. Ao contrário de uma execução
+ * auto-criada (que CLONA campos do molde), o card vinculado mantém tudo que
+ * já é seu — título, `kind`/`subtype`, responsável — só ganha a marcação de
+ * relação. Se já houver uma execução pendente para o mesmo ciclo, ela é
+ * desvinculada primeiro (nunca apagada — mesma regra de sempre) para o card
+ * escolhido ocupar o lugar dela, e não disputar o ciclo com ela. */
+export async function linkExistingRecurrenceExecution(templateId: string, taskId: string): Promise<TaskRecord> {
+  if (taskId === templateId) throw new HttpError(400, "Um card não pode ser execução de si mesmo.");
+  const [template, task] = await Promise.all([getTaskById(templateId), getTaskById(taskId)]);
+  if (!template) throw new HttpError(404, "Recorrência não encontrada.");
+  if (!task) throw new HttpError(404, "Card não encontrado.");
+  if (!template.recurrence_cadence) throw new HttpError(409, "Este card não é uma recorrência.");
+  if (recurrenceStopped(template.status)) throw new HttpError(409, "Esta recorrência foi encerrada.");
+  if (task.recurrence_cadence) throw new HttpError(400, "Este card já é o molde de outra recorrência.");
+
+  const cycle = recurrenceCycleOf(template);
+  const supabase = await createClient();
+  const occupying = await findRecurrenceExecutionByCycle(supabase, templateId, cycle);
+  if (occupying && occupying.id !== taskId) {
+    const detachPatch = detachedRecurrencePatch(occupying, templateId);
+    if (detachPatch) await updateTask(occupying.id, detachPatch);
+  }
+  const previousTemplateId = recurrenceParentIdOf(task);
+  if (previousTemplateId && previousTemplateId !== templateId) {
+    const detachPrevious = detachedRecurrencePatch(task, previousTemplateId);
+    if (detachPrevious) await updateTask(task.id, detachPrevious);
+  }
+
+  const payload = { ...(task.payload ?? {}) };
+  payload.recurrence_parent_id = templateId;
+  payload.occurrence_date = task.due_date ?? template.due_date;
+  payload[RECURRENCE_CYCLE_KEY] = cycle;
+  delete payload[RECURRENCE_GROUP_KEY];
+  delete payload[RECURRENCE_REVISION_KEY];
+  await updateTask(taskId, { plan_id: templateId, payload });
+  const refreshed = await getTaskById(taskId);
+  if (!refreshed) throw new HttpError(404, "Card não encontrado.");
+  return refreshed;
 }
 
 export async function detachTaskRelation(taskId: string, parentId: string): Promise<TaskRecord> {
