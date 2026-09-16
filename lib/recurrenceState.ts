@@ -16,6 +16,20 @@ export function recurrenceStopped(status: TaskStatus): boolean {
   return RECURRENCE_STOP_STATUSES.includes(status);
 }
 
+/** Este card é o MOLDE de uma recorrência — não uma execução dele.
+ *
+ * Extraída porque a mesma checagem (`recurrence_cadence` OU
+ * `payload.recurrence_group`) estava repetida, cada uma a seu jeito, em
+ * `app/admin/TaskModal.tsx` e `lib/comments.ts` — e foi exatamente essa
+ * duplicação que deixou o merge de comentários (`lib/comments.ts`) e o
+ * cálculo de progresso divergirem para um molde que também é Plano de Ação
+ * (ex. "REUNIÃO ROTINA - ALLAN"): um checava `isPlan` antes de recorrência,
+ * o outro não. Uma função só, usada nos dois lugares, torna essa divergência
+ * impossível de acontecer de novo. */
+export function isRecurrenceTemplate(task: { recurrence_cadence?: TaskRecord["recurrence_cadence"]; payload?: TaskRecord["payload"] }): boolean {
+  return Boolean(task.recurrence_cadence || task.payload?.[RECURRENCE_GROUP_KEY] === true);
+}
+
 export function recurrenceCycleOf(task: Pick<TaskRecord, "payload">): number {
   const value = task.payload?.[RECURRENCE_CYCLE_KEY];
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;

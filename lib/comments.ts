@@ -3,6 +3,7 @@
 // (Feedbacks page) alike, so both read the exact same shape.
 
 import { kindDef } from "./taskCatalog";
+import { isRecurrenceTemplate } from "./recurrenceState";
 import { actionPlanMembersOf, flowStepsOf, isFlowDelivery, recurrenceExecutionsOf, recurrenceParentIdOf } from "./taskRelations";
 import type { TaskRecord } from "./validation";
 
@@ -66,7 +67,7 @@ type FamilyMember = Pick<TaskRecord, "id" | "kind" | "payload" | "parents"> & {
 
 /** O molde de recorrência a que o card pertence (ele mesmo, se for o molde). */
 function recurrenceTemplateIdOf(task: Pick<FamilyMember, "id" | "payload" | "recurrence_cadence">): string | null {
-  if (task.recurrence_cadence || task.payload?.recurrence_group === true) return task.id;
+  if (isRecurrenceTemplate(task)) return task.id;
   return recurrenceParentIdOf(task);
 }
 
@@ -92,20 +93,31 @@ export function isFamilyParent(task: Pick<FamilyMember, "id" | "kind" | "payload
 /** Os cards cujo thread aparece junto neste: ele mesmo e a família. Sempre
  *  começa pelo próprio card, e nunca repete um id.
  *
- *  Ordem de prioridade, de propósito: entrega antes de recorrência (ver
- *  comentário de isFamilyParent) — depois, RECORRÊNCIA antes de Plano. Um
- *  molde de recorrência que também é um Plano de Ação (ex. "REUNIÃO ROTINA -
- *  ALLAN") tem como família de verdade as suas EXECUÇÕES (`plan_id`), não os
- *  membros de `task_links` que `actionPlanMembersOf` acharia — isPlan vinha
- *  primeiro antes, então vincular uma nova execução nunca aparecia no thread
- *  do molde, não importa quantas fossem linkadas: o merge nem olhava pra lá. */
+ *  Ordem de prioridade, de propósito, um card só cai numa categoria:
+ *  1. O card É O MOLDE de uma recorrência (`isRecurrenceTemplate`) → os
+ *     ciclos, sempre — mesmo quando o molde também carrega marcas herdadas
+ *     de fluxo (entrega recorrente) ou é ele mesmo um Plano de Ação (ex.
+ *     "REUNIÃO ROTINA - ALLAN"): o molde em si nunca tem etapa nem
+ *     atividade PRÓPRIA, só ciclos. Isto vem ANTES de entrega/plano de
+ *     propósito — checar isFlowDelivery ou isPlan primeiro (como era) fazia
+ *     vincular uma execução nova nunca aparecer no thread do molde, porque
+ *     o merge nem olhava pra lista certa.
+ *  2. Senão, é uma entrega DE VERDADE (uma ocorrência com etapas próprias)
+ *     → as etapas — regra documentada em isFamilyParent.
+ *  3. Senão, é uma OCORRÊNCIA de recorrência (aponta pra um molde) → o
+ *     histórico cruzado de ciclos (ATA 14/09).
+ *  4. Senão, é um Plano de Ação → as atividades. */
 export function familyCardsOf<T extends FamilyMember>(task: T, tasks: readonly T[], kind = task.kind): T[] {
   if (!isFamilyParent(task, kind)) return [task];
-  const templateId = isFlowDelivery(task) ? null : recurrenceTemplateIdOf(task);
-  const members = isFlowDelivery(task)
-    ? flowStepsOf(task.id, tasks)
-    : templateId
-      ? [...tasks.filter((t) => t.id === templateId), ...recurrenceExecutionsOf(templateId, tasks)]
+  const templateId = isRecurrenceTemplate(task)
+    ? task.id
+    : isFlowDelivery(task)
+      ? null
+      : recurrenceParentIdOf(task);
+  const members = templateId
+    ? [...tasks.filter((t) => t.id === templateId), ...recurrenceExecutionsOf(templateId, tasks)]
+    : isFlowDelivery(task)
+      ? flowStepsOf(task.id, tasks)
       : kindDef(kind).isPlan
         ? actionPlanMembersOf(task.id, tasks)
         : [];

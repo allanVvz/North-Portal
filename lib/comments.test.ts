@@ -172,6 +172,18 @@ describe("familyThreadOf", () => {
     expect(familyThreadOf(molde, [molde, execucao]).map((c) => c.text)).toEqual(["ciclo concluído"]);
   });
 
+  // Mesma classe de bug, achada ao consertar a de cima: o MOLDE de uma
+  // entrega recorrente carrega `flow_parent: true` (as ocorrências herdam
+  // as marcas de fluxo dele — lib/taskCatalog.ts, flowTotalWeight), então
+  // `isFlowDelivery(molde)` também dá true. Checar isso antes de recorrência
+  // faria o molde procurar ETAPAS PRÓPRIAS (que não existem — só as
+  // ocorrências têm etapas) em vez dos ciclos.
+  it("um molde de entrega recorrente (flow_parent herdado) mostra os ciclos, não etapas próprias", () => {
+    const moldeEntrega = { ...card("molde-e", "criativo", [], { flow_parent: true }), recurrence_cadence: "semanal" as const };
+    const execucao = card("exec-e", "criativo", [{ author: "A", text: "roteiro pronto", at: "2026-09-02T09:00:00Z" }], { recurrence_parent_id: "molde-e" });
+    expect(familyThreadOf(moldeEntrega, [moldeEntrega, execucao]).map((c) => c.text)).toEqual(["roteiro pronto"]);
+  });
+
   // O editor pergunta pelo tipo do RASCUNHO: trocar o tipo no formulário
   // reflete no thread antes de salvar.
   it("aceita um tipo diferente do salvo, para o formulário em edição", () => {
