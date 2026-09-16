@@ -259,11 +259,26 @@ async function runOneReportAutomation(
         })
         .eq("id", card1.id);
       if (c1Error) throw c1Error;
-      await advanceFlowMold(admin, target, today);
+      const advancedMold = await advanceFlowMold(admin, target, today);
+      // Daqui pra baixo é reforço/preparo do que vem depois — o relatório
+      // desta semana já está gerado e salvo. Uma falha aqui não pode marcar
+      // `parada` num card que já deu certo; só registra e segue.
       // O Feedback nasce junto com o Tráfego — não espera revisão de ninguém.
       // ensureFeedbackCard é idempotente (processOccurrence chama de novo
       // como reforço, se este caminho não tiver rodado por algum motivo).
-      await ensureFeedbackCard(admin, occ, today);
+      await ensureFeedbackCard(admin, occ, today).catch((error) => {
+        console.error("ensureFeedbackCard falhou", { occurrenceId: occ.id, error });
+      });
+      // Pré-cria o CONTÊINER (vazio, sem etapas) do próximo ciclo agora, não
+      // só no dia do vencimento dele — é o que faz a próxima semana já
+      // aparecer como Entrega na tela, adiantada, em vez de nascer do nada
+      // exatamente na data. A etapa `trafego` daquele ciclo continua nascendo
+      // só no dia certo (dados do Meta/Windsor daquela semana, não de hoje) —
+      // ensureFlowOccurrence é idempotente, então o cron do dia dela só acha
+      // o contêiner já pronto e segue para preencher a etapa.
+      await ensureFlowOccurrence(admin, advancedMold, today).catch((error) => {
+        console.error("Pré-criação do próximo ciclo do fluxo de relatório falhou", { moldId: advancedMold.id, error });
+      });
       await notifyFromAutomation(admin, card1.id, "task_commented", `Automação comentou em "${card1.title}".`);
       // Relatório de tráfego é assunto de quem gerencia tráfego, esteja ou não
       // no card — a frente do grid de Equipe & papéis é quem responde isso.

@@ -136,8 +136,10 @@ export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord,
 // Avança o MOLDE recorrente do fluxo (due_date → próximo ciclo, cycle+1) —
 // mesma matemática de completeTaskCycleForRequest / materializeOccurrenceForReport,
 // nunca reimplementada. Chamado por run.ts SÓ após o fill da etapa dar certo,
-// para uma falha não pular um ciclo.
-export async function advanceFlowMold(admin: AdminClient, mold: TaskRecord, today: string): Promise<void> {
+// para uma falha não pular um ciclo. Devolve o molde já atualizado — quem chama
+// usa o novo `recurrence_cycle` pra pré-criar o contêiner do ciclo seguinte
+// (ver ensureFlowOccurrence em run.ts), sem precisar buscar de novo.
+export async function advanceFlowMold(admin: AdminClient, mold: TaskRecord, today: string): Promise<TaskRecord> {
   const nextCycle = recurrenceCycleOf(mold) + 1;
   const revision = recurrenceRevisionOf(mold);
   const nextDue = nextRecurringDueDate(mold.due_date ?? today, {
@@ -146,15 +148,18 @@ export async function advanceFlowMold(admin: AdminClient, mold: TaskRecord, toda
     dayOfMonth: mold.recurrence_day_of_month,
     startDate: mold.start_date ?? mold.due_date,
   });
-  const { error } = await admin
+  const { data, error } = await admin
     .from("tasks")
     .update({
       due_date: nextDue,
       end_date: !mold.end_date || nextDue > mold.end_date ? nextDue : mold.end_date,
       payload: recurrenceParentPayload(mold.payload, nextCycle, revision),
     })
-    .eq("id", mold.id);
+    .eq("id", mold.id)
+    .select(TASK_COLUMNS)
+    .limit(1);
   if (error) throw error;
+  return data?.[0] ? asTaskRecord(data[0]) : mold;
 }
 
 // Plano de ação branch: clone the whole structure into a fresh instance
