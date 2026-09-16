@@ -6,9 +6,9 @@ describe("relações de 'Faz parte de' de um card", () => {
     expect(relevantParentRelationKinds({ isDelivery: false, isPlan: false })).toEqual(["entrega", "plano", "recorrencia"]);
   });
 
-  it("um Plano de Ação nunca tem nenhuma — ele é raiz, nunca filho por este mecanismo", () => {
-    expect(relevantParentRelationKinds({ isDelivery: true, isPlan: true })).toEqual([]);
-    expect(relevantParentRelationKinds({ isDelivery: false, isPlan: true })).toEqual([]);
+  it("um Plano de Ação nunca é etapa nem membro de outro plano — só sobra 'recorrencia', para quando ele mesmo é uma execução recorrente", () => {
+    expect(relevantParentRelationKinds({ isDelivery: true, isPlan: true })).toEqual(["recorrencia"]);
+    expect(relevantParentRelationKinds({ isDelivery: false, isPlan: true })).toEqual(["recorrencia"]);
   });
 
   // O caso que ninguém tinha testado: uma entrega-ocorrência de fluxo

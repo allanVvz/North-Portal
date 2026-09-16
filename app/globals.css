@@ -5280,11 +5280,19 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 /* Checks da recorrência. */
 .tm-cyclelog-next { margin: 0 0 8px; font-size: 12.5px; color: var(--a-sec); }
 .tm-cyclelog-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.tm-cyclelog-list li { display: grid; grid-template-columns: 22px auto 1fr auto; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--a-teal) 10%, var(--a-surface)); font-size: 12.5px; }
+.tm-cyclelog-list li { display: grid; grid-template-columns: 22px auto 1fr auto 14px; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--a-teal) 10%, var(--a-surface)); font-size: 12.5px; }
 .tm-cyclelog-check { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--a-teal-strong); color: var(--a-inverse); font-size: 11px; font-weight: 800; }
 .tm-cyclelog-when { color: var(--a-ink); font-weight: 600; }
 .tm-cyclelog-cycle { color: var(--a-muted); }
 .tm-cyclelog-by { color: var(--a-teal-text); }
+/* Um check com execução ainda encontrável vira o MESMO botão-linha usado em
+   "Faz parte de"/Execuções (.tm-member-open) — display:contents deixa os
+   filhos do botão ocuparem as colunas do grid do <li> como se o botão nem
+   existisse, então não é uma segunda estrutura visual, é a mesma esticada. */
+.tm-cyclelog-list li:has(.tm-cyclelog-open) { cursor: pointer; }
+.tm-cyclelog-list li:has(.tm-cyclelog-open:hover) { background: color-mix(in srgb, var(--a-teal) 18%, var(--a-surface)); }
+.tm-cyclelog-open { display: contents; border: 0; background: transparent; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.tm-cyclelog-open:disabled { cursor: default; }
 
 /* Home como painel operacional pessoal (dashboard-designer, 15/09). */
 .home-headline { font-weight: 650; color: var(--a-ink); }

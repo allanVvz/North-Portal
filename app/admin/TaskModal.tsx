@@ -673,12 +673,14 @@ export default function TaskModal({
     ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && t.client_id === liveTask.client_id)
     : [];
   // Candidatos a "vincular como execução" de um molde de recorrência: mesmo
-  // cliente, não pode ser molde de OUTRA recorrência nem já ser execução de
-  // outra — mas pode já pertencer a um Plano (mecanismo independente) e pode
-  // ser de um `kind` diferente do molde (a UI só ordena o mesmo tipo primeiro,
-  // não trava — pedido explícito: precisa aceitar vincular uma Entrega).
+  // cliente, não pode ser molde de nenhuma recorrência nem já ser execução de
+  // NENHUMA — inclusive desta, senão o card vinculado continua aparecendo
+  // como opção depois de já estar linkado — mas pode já pertencer a um Plano
+  // (mecanismo independente) e pode ser de um `kind` diferente do molde (a UI
+  // só ordena o mesmo tipo primeiro, não trava — pedido explícito: precisa
+  // aceitar vincular uma Entrega).
   const recurrenceLinkCandidates = liveTask && isRecurringParent
-    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && (recurrenceParentIdOf(t) === null || recurrenceParentIdOf(t) === liveTask.id) && t.client_id === liveTask.client_id)
+    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id)
     : [];
   /** A entrega a que a caixa de etapas se refere: o próprio card quando ele é a
    * entrega, ou o pai quando estamos olhando uma etapa (usado só para calcular o
@@ -1776,7 +1778,11 @@ export default function TaskModal({
                     ) : null}
                     <div className="tm-cycles-log">
                       <p className="tm-cycles-subtitle">Checks ({cycleLogOf(liveTask.payload).length})</p>
-                      <CycleChecks log={cycleLogOf(liveTask.payload)} />
+                      <CycleChecks
+                        log={cycleLogOf(liveTask.payload)}
+                        executionByCycle={(cycle) => planMembers.find((m) => recurrenceCycleOf(m) === cycle) ?? null}
+                        onOpen={(execution) => void openRelatedTask(execution)}
+                      />
                     </div>
                   </>
                 ) : (
