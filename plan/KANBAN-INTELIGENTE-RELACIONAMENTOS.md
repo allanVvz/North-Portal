@@ -10,6 +10,15 @@ O pedido continha hipóteses (nova tabela de relações, grafo, `parent_id`
 novo, refazer o Kanban, virar motor de workflow) — nenhuma se confirmou como
 necessária. Ver seção 23.
 
+> **Correção pós-revisão (2026-09-16, mesmo dia):** a primeira versão deste
+> documento recomendava impor "um plano por card" com um índice único no
+> banco (Alternativa C original). O usuário revisou e rejeitou essa parte
+> explicitamente: **um card DEVE poder pertencer a mais de um Plano de Ação
+> ao mesmo tempo** — não é para restringir, é para corrigir o relacionamento
+> de ponta a ponta para que isso funcione de verdade. As seções 4, 10, 12,
+> 15, 17–21 abaixo já refletem a direção corrigida, e a correção **já foi
+> implementada** nesta mesma sessão (não ficou só no papel): ver seção 24.
+
 ---
 
 ## 1. Resumo executivo
@@ -136,12 +145,17 @@ colunas estruturais `recurrence_cadence` e `plan_id`.
   (`20260902000000_desativa_relatorio_conversao.sql`). Concretamente: um tipo
   NOVO criado em Configurações com `behavior: 'plano'` não é reconhecido como
   Plano pelo quadro/progresso/combobox — só os 5 kinds embutidos são.
-- **"Um plano por card" é convenção, não garantia.** `setTaskPlanLink`
-  (`lib/supabase.ts:1654-1663`) desliga qualquer outro pai sem slot antes de
-  ligar um novo, mas `lib/flows/shootDay.ts:44-47` e
-  `lib/tasks/createFromInput.ts:137` chamam `linkTasks` direto, sem essa
-  exclusividade. Nada no schema impede hoje um card em 2+ Planos. Sem
-  incidente relatado — risco latente, não fogo ativo.
+- **"Um plano por card" era aplicado de forma inconsistente, não por
+  decisão.** `setTaskPlanLink` (`lib/supabase.ts:1654-1663`) desligava
+  qualquer outro pai sem slot antes de ligar um novo, enquanto
+  `lib/flows/shootDay.ts:44-47` e `lib/tasks/createFromInput.ts:137` chamam
+  `linkTasks` direto, sem essa exclusividade — dois caminhos de código
+  discordando sobre a mesma regra. Revisado com o usuário: **múltiplos
+  planos por card é o comportamento correto**, não uma exceção a fechar — a
+  inconsistência real era o combobox "vincular existente" bloquear um card
+  já membro de OUTRO plano (`linkableCandidates`,
+  `app/admin/TaskModal.tsx`) e `setTaskPlanLink` derrubar silenciosamente o
+  outro plano ao linkar um novo. **Corrigido nesta sessão** — ver seção 24.
 - **Percentual não é uma unidade só** — ver seção 5, é o achado com maior
   impacto de compreensão.
 - `flow_prev_task_id` está marcado "resíduo" no próprio schema, sem uso
@@ -238,10 +252,12 @@ colunas estruturais `recurrence_cadence` e `plan_id`.
 Três relações distintas compartilham os MESMOS mecanismos de armazenamento:
 
 1. **Composição** ("contém"): Plano → atividades, via `task_links` com
-   `slot = null`. Cardinalidade: o banco permite N:N (nada impede um filho
-   ligado a 2+ pais sem slot); a aplicação impõe 1-plano-por-card só por
-   convenção em `setTaskPlanLink` — ver achado da seção 4, bypassável por 2
-   outros caminhos de código.
+   `slot = null`. Cardinalidade: N:N por decisão — um card PODE pertencer a
+   2+ Planos ao mesmo tempo. A aplicação chegou a impor 1-plano-por-card por
+   acidente em parte do código (`setTaskPlanLink`) sem essa regra existir de
+   fato (outros dois caminhos já ignoravam a exclusividade) — corrigido
+   nesta sessão para que a escrita concorde em todo lugar com o que o banco
+   já permitia (seção 24).
 2. **Sequência/cascata** ("é etapa de"): Entrega(pai) → etapas(filhos), via
    `task_links` com `slot = chave do subtipo`. Cardinalidade: o banco
    permite (e a aplicação usa deliberadamente, testado) um filho com
@@ -285,13 +301,15 @@ desproporcional à evidência.
 armazenamento das relações. Acrescenta uma função pura pequena que nomeia a
 relação (contém | é etapa de | é execução de | compartilha etapa com) a
 partir dos sinais que já existem, e usa isso para consertar exatamente os
-achados de percentual, cabeçalho×corpo e navegação. Fecha a lacuna de "um
-plano por card" com um índice único parcial. Não mexe no que já funciona.
+achados de percentual, cabeçalho×corpo e navegação. Corrige o caminho de
+escrita de plano (`setTaskPlanLink`) e o combobox "vincular existente" para
+suportar de ponta a ponta um card em múltiplos Planos — sem migração, o
+schema já permitia. Não mexe no que já funciona.
 
 **D (conservadora) — Só os fechamentos pontuais, sem a camada semântica.**
-Resolve os achados de percentual/cabeçalho/navegação/índice imediatamente,
-mas cada tela continua decidindo "que tipo de relação é essa" com sua
-própria combinação ad hoc de `isFlowDelivery`/`kindDef().isPlan`/
+Resolve os achados de percentual/cabeçalho/navegação/multi-plano
+imediatamente, mas cada tela continua decidindo "que tipo de relação é essa"
+com sua própria combinação ad hoc de `isFlowDelivery`/`kindDef().isPlan`/
 `recurrence_cadence` — que a auditoria já achou começando a divergir
 sutilmente (achado da seção 4). Boa se o tempo de execução for curto; não
 prepara terreno para o NorthAi perguntar "o que depende disto" de forma
@@ -301,8 +319,8 @@ genérica no futuro.
 |---|---|---|---|---|
 | A | Baixo | Nenhuma | Não | Não |
 | B | Alto | Grande | Não mais que C | Sim, mas sem necessidade demonstrada |
-| **C** | Baixo | Pequena (1 índice) | Sim | Sim |
-| D | Baixo | Pequena (1 índice) | Sim (parcial) | Não |
+| **C** | Baixo | Nenhuma | Sim | Sim |
+| D | Baixo | Nenhuma | Sim (parcial) | Não |
 
 ## 12. Recomendação
 
@@ -331,9 +349,13 @@ Plano nunca é uma Entrega, o teto de 2 níveis de `listParentCards`.
 de 5 pontos herdado de Entrega e passa a mostrar a mesma contagem que o
 corpo já mostra; a barra de Entrega ganha um rótulo que deixa claro que é
 "progresso do fluxo", diferente de "conclusão"; "Faz parte de" ganha volta em
-toda tela; um card não pode mais ficar em dois planos ao mesmo tempo
-(índice único); um tipo configurado como Plano em Configurações passa a ser
-tratado como Plano em todo lugar.
+toda tela; um tipo configurado como Plano em Configurações passa a ser
+tratado como Plano em todo lugar; **um card pertencer a mais de um Plano ao
+mesmo tempo passa a ser suportado de ponta a ponta** (já implementado nesta
+sessão, seção 24) — em vez de restringir isso com um índice único, o
+caminho de escrita (`setTaskPlanLink`) e o combobox "vincular existente"
+(`linkableCandidates`) foram corrigidos para concordar com o que o banco
+sempre permitiu.
 
 **Invariantes que a execução não pode quebrar** (ver seção 19 para a lista
 completa de testes que os cobrem):
@@ -341,7 +363,10 @@ completa de testes que os cobrem):
 - A identidade de uma etapa/execução continua sendo o hash determinístico —
   nenhum retry pode criar duplicata.
 - Um filho pode continuar tendo vários pais quando o `slot` NÃO é nulo
-  (etapa de fluxo) — o índice único novo só vale para `slot IS NULL`.
+  (etapa de fluxo).
+- Um card pode continuar tendo vários pais quando o `slot` É nulo (membro de
+  vários Planos) — ligar a um novo plano nunca solta um plano existente;
+  só escolher explicitamente "— Sem plano —" solta todos de uma vez.
 - Uma entrega recorrente continua nascendo com o molde sem etapas.
 - Status/data/responsável espelhados de um pai de fluxo continuam calculados
   na leitura, nunca persistidos na linha do pai.
@@ -349,8 +374,13 @@ completa de testes que os cobrem):
 
 ## 13. Mudanças frontend
 
-- **`app/admin/TaskModal.tsx`** — cabeçalho de um card `isRollupParent &&
-  !isFlow` (Plano, Rotina-molde) passa a mostrar uma contagem de conclusão
+- **`app/admin/TaskModal.tsx` — já corrigido (seção 24)**: a caixa "Faz
+  parte de" mostra uma linha por Plano ao qual o card pertence (antes só
+  buscava/mostrava um), e "vincular existente" deixou de excluir cards já
+  membros de outro Plano — só exclui quem já é membro DESTE plano
+  especificamente. Independente disso, o cabeçalho de um card
+  `isRollupParent && !isFlow` (Plano, Rotina-molde) passa a mostrar uma
+  contagem de conclusão
   consistente com o corpo (ex.: "6 de 7 concluídas"), no lugar do stepper de
   5 pontos hoje compartilhado com Entrega. Rótulo de progresso da Entrega
   passa a dizer "progresso do fluxo"; Plano/Rotina passam a dizer
@@ -389,37 +419,34 @@ completa de testes que os cobrem):
   `task_types.behavior` também para kinds sem entrada embutida no código
   (hoje só os 5 kinds builtin são reconhecidos como Plano/Entrega/Simples).
   Aditivo — os 5 builtins continuam com o comportamento atual inalterado.
-- Nenhuma rota de API muda de contrato nesta fase; a única mudança de
-  comportamento observável de backend é a rejeição de um segundo elo de
-  plano no mesmo card (seção 15/17).
+- Nenhuma rota de API muda de contrato nesta fase.
+- **`lib/supabase.ts` (`setTaskPlanLink`) — já corrigido (seção 24)**: deixa
+  de remover qualquer outro plano ao ligar um novo (era isso, não o schema,
+  que impedia multi-plano na prática); só `parentId === null` continua
+  removendo todos os elos sem slot, como escolha explícita de "sair de
+  todos".
+- **`lib/taskRelations.ts` — já corrigido (seção 24)**: nova
+  `planParentIdsOf(task)` (plural, todos os elos sem slot) ao lado de
+  `planParentIdOf` (mantida para os controles de valor único que só
+  mostram/editam um).
 
 ## 15. Mudanças no banco (se necessárias)
 
-Uma única migração pequena e reversível:
-
-```sql
-create unique index concurrently if not exists task_links_um_plano_por_filho
-  on task_links (child_id) where slot is null;
-```
-
-Aplicada em duas etapas seguindo o padrão já usado em
-`20260829180000_plano_nao_e_entrega.sql`: primeiro checar produção por
-violações existentes (`select child_id, count(*) from task_links where slot
-is null group by child_id having count(*) > 1`), e só então criar o índice.
-Se houver violação real, ela precisa ser resolvida manualmente (decidir qual
-elo é o correto) ANTES da migração — não é esperado nenhuma, mas não foi
-verificado neste documento (é uma leitura de produção que a etapa de
-execução deve fazer primeiro, ver seção 23, passo 0).
-
-Este índice só restringe `slot IS NULL` (membresia de plano) — não afeta o
-padrão de etapa compartilhada da "diária de gravação" (esses elos sempre têm
-`slot` preenchido).
+**Nenhuma.** A versão original deste documento propunha um índice único
+parcial (`task_links(child_id) where slot is null`) para impedir um card em
+2+ Planos. Essa proposta foi revisada e rejeitada pelo usuário: múltiplos
+Planos por card é comportamento desejado, não um estado a impedir. O schema
+já suporta isso sem qualquer alteração — `task_links` nunca teve restrição
+de cardinalidade em `child_id`; o que faltava era a camada de aplicação
+(seção 14) tratar essa cardinalidade corretamente, o que já foi corrigido
+nesta sessão (seção 24) sem nenhuma migração.
 
 ## 16. Estratégia de compatibilidade/migração
 
-- A migração do índice é aditiva e não destrutiva — não apaga nem altera
-  dados, só passa a rejeitar uma inserção que hoje seria silenciosamente
-  aceita.
+- A correção de `setTaskPlanLink` (aditiva em vez de substituir) não tem
+  migração de dado associada — nenhuma linha existente muda; só o
+  comportamento de escritas FUTURAS deixa de derrubar outros planos. Já
+  aplicada e testada (seção 24).
 - A leitura de `task_types.behavior` em `kindDef()` é puramente aditiva: para
   os 5 kinds embutidos, o comportamento não muda (continuam vindo do código);
   só kinds SEM entrada embutida passam a herdar classificação do banco — não
@@ -427,22 +454,23 @@ padrão de etapa compartilhada da "diária de gravação" (esses elos sempre tê
   já em uso (precisa ser confirmado por teste, seção 19).
 - A camada semântica é pura e nova — nenhum consumidor existente quebra
   porque nada é removido, só centralizado.
-- Rollback: o índice pode ser dropado sem perda de dado; a camada semântica e
-  a mudança de rótulo/contagem no frontend podem ser revertidas por
-  reverter o commit, sem migração de dado associada.
+- Rollback: tudo aqui é reversível por reverter o commit — nenhuma mudança
+  tem migração de dado associada (nem a correção de multi-plano, nem a
+  camada semântica, nem os rótulos de frontend).
 
 ## 17. Fases de implementação
 
 Cada fase deixa o sistema utilizável — nenhuma depende de "big bang".
 
-**Fase 0 — Higiene, sem mudança visível ao usuário.**
-- Ler produção para confirmar ausência de violação da regra de plano único
-  antes de criar o índice.
-- Migração do índice único parcial (seção 15).
+**Fase 0 — Higiene, sem mudança visível ao usuário. JÁ FEITA (seção 24).**
+- ~~Migração de índice único~~ — descartada, ver seção 15.
+- Correção de `setTaskPlanLink`/`linkableCandidates`/"Faz parte de" para
+  suportar multi-plano de ponta a ponta — **feita**.
 - `kindDef()` passa a consultar `task_types.behavior` para kinds sem entrada
-  embutida.
+  embutida — **ainda não feita**, continua no escopo da próxima sessão.
 - Opcional: comentário de "morto, mantido só por compatibilidade de PATCH
-  antigo" no topo de `lib/taskDateGrouping.ts`, sem apagar nada.
+  antigo" no topo de `lib/taskDateGrouping.ts`, sem apagar nada — **ainda
+  não feita**.
 
 **Fase 1 — Camada semântica.**
 - Criar `lib/taskRelationSemantics.ts` com `describeRelation`, com testes de
@@ -478,9 +506,14 @@ fases que consertam compreensão real.
 - `app/admin/CardModalLauncher.tsx` (fonte do padrão de pilha a extrair)
 - `app/admin/CardParentBox.tsx` (rótulo de relação)
 - `app/admin/operacao/ParentCardsBoard.tsx` (rótulo de progresso)
-- `supabase/migrations/<novo>_task_links_um_plano_por_filho.sql` (novo)
 - Hook novo compartilhado de histórico de navegação (nome a definir na
   execução, ex. `useRelatedTaskHistory` — extraído de `CardModalLauncher`)
+
+Já corrigidos nesta sessão (seção 24), fora do escopo da próxima: `lib/
+taskRelations.ts` (`planParentIdsOf`), `lib/supabase.ts`
+(`setTaskPlanLink`), `app/admin/TaskModal.tsx` (`linkableCandidates`,
+caixas "Faz parte de" de plano), `app/admin/TaskDetailPanel.tsx`
+(comentário de semântica).
 
 ## 19. Testes
 
@@ -491,11 +524,11 @@ fases que consertam compreensão real.
   'plano'` é tratado como `isPlan` em toda checagem (quadro, combobox,
   progresso); os 5 kinds embutidos permanecem com o comportamento atual
   inalterado.
-- Teste de integração/migração: tentar criar um segundo elo `slot = null`
-  para o mesmo `child_id` é rejeitado pelo índice; um elo com `slot`
-  preenchido para múltiplos pais (padrão "diária de gravação") continua
-  funcionando sem trombar no índice novo — **regressão obrigatória**,
-  reexecutar `lib/flows/shootDayRows.test.ts`.
+- **Já feito (seção 24)**: `lib/taskRelations.test.ts` cobre
+  `planParentIdsOf` com um card em 2 Planos ao mesmo tempo; um elo com
+  `slot` preenchido para múltiplos pais (padrão "diária de gravação")
+  continua funcionando sem qualquer restrição nova — confirmado reexecutando
+  a suíte completa (851 testes, sem regressão).
 
 **Frontend**:
 - Fixture com Plano 6/7 concluídos: cabeçalho e corpo mostram a mesma
@@ -517,15 +550,12 @@ fases que consertam compreensão real.
 Cenários obrigatórios cobertos pela combinação acima: recorrência simples,
 execução de recorrência, plano, plano com múltiplos cards, entrega em
 cascata, etapa dentro de uma entrega, card em estruturas combinadas
-(recorrência+fluxo+plano), associar um card existente a um plano, remover
-essa associação, navegação entre os itens.
+(recorrência+fluxo+plano), associar um card existente a um plano (inclusive
+um já membro de outro plano), remover essa associação, navegação entre os
+itens.
 
 ## 20. Riscos
 
-- O índice único pode falhar de aplicar se já existirem, sem que a
-  investigação tenha visto, cards com 2+ planos em produção — mitigado por
-  checar antes de migrar (seção 15), seguindo o mesmo padrão já usado em
-  `20260829180000` e `20260909180000` neste repositório.
 - Ampliar `kindDef()` para consultar `task_types.behavior` amplamente pode
   mudar comportamento de algum tipo customizado ainda não descoberto em
   produção — mitigado por só ADICIONAR classificação a tipos sem entrada
@@ -548,8 +578,9 @@ essa associação, navegação entre os itens.
 - Clicar em "Faz parte de" a partir do Kanban e a partir de Operação
   (Entregas/Plano/Rotinas) oferecem a mesma affordance de voltar, e usá-la
   retorna ao card de origem exato.
-- Tentar ligar um segundo Plano a um card já membro de outro é rejeitado
-  (pelo índice), em vez de aceito silenciosamente.
+- Ligar um card já membro de um Plano a um SEGUNDO Plano funciona (não é
+  rejeitado nem derruba o primeiro), e a caixa "Faz parte de" do card mostra
+  os dois — **já verdadeiro, seção 24**.
 - Um tipo customizado com `behavior: 'plano'` em Configurações passa a ser
   excluído do quadro Kanban e da busca "Vincular existente" de plano, como
   o Plano embutido já é.
@@ -591,6 +622,61 @@ durante a execução — adaptar a implementação de volta para uma das hipóte
 originais sem evidência nova que a justifique — deve ser tratado como um erro
 de processo, não uma escolha de engenharia válida.
 
+## 24. Desvio já executado: suporte a multi-plano (2026-09-16)
+
+A primeira versão deste documento recomendava um índice único impedindo um
+card de pertencer a mais de um Plano de Ação. Ao revisar, o usuário
+corrigiu essa direção: **"não quero retornar para a regra 'um plano por
+card'. Corrija o relacionamento de ponta a ponta."** Isto foi tratado como
+correção de rumo sobre uma conclusão já commitada, não como início da fase
+de execução (Prompt 2) — o escopo do pedido original (investigar
+plano/cascata/recorrência) inclui a definição de como "Adicionar ao plano"
+deve funcionar, e a resposta correta a essa pergunta mudou.
+
+**Causa raiz encontrada**: nada no schema jamais impediu multi-plano
+(`task_links` nunca teve restrição de cardinalidade em `child_id`). A
+restrição vinha de dois lugares na camada de aplicação, e só um deles a
+aplicava — a inconsistência real, não a regra em si:
+- `setTaskPlanLink` (`lib/supabase.ts`) desligava QUALQUER outro plano ao
+  ligar um novo (substituição, não adição).
+- `linkableCandidates` (`app/admin/TaskModal.tsx`) excluía do "vincular
+  existente" qualquer card já membro de QUALQUER plano, não só deste.
+- A caixa "Faz parte de" só buscava/mostrava UM plano por card
+  (`planParent`/`planParentId`, singular), então mesmo que um card
+  acabasse em dois planos por algum caminho que ignorasse as duas
+  restrições acima (como já acontecia via `lib/flows/shootDay.ts` e
+  `lib/tasks/createFromInput.ts`), a interface não deixava isso visível.
+
+**Correção aplicada** (código, não só documento):
+- `lib/taskRelations.ts` — nova `planParentIdsOf(task): string[]` (todos os
+  elos sem slot); `planParentIdOf` mantida, documentada como "só para
+  controles de valor único", devolvendo o primeiro.
+- `lib/supabase.ts` (`setTaskPlanLink`) — agora aditivo: ligar a um
+  `parentId` não solta outros planos; só `parentId === null` (escolha
+  explícita de "— Sem plano —") solta todos de uma vez.
+- `app/admin/TaskModal.tsx` — `linkableCandidates` só exclui quem já é
+  membro DESTE plano (não de qualquer plano); as caixas "Faz parte de"
+  passam a buscar e renderizar TODOS os planos do card (`planParents`,
+  plural), uma caixa por plano, na mesma posição que antes tinha no máximo
+  uma.
+- `app/admin/TaskDetailPanel.tsx` — comentário explicando a nova semântica
+  aditiva do `<select>` de valor único (nenhuma mudança de comportamento
+  necessária ali além de herdar o `setTaskPlanLink` corrigido).
+- Testes: `lib/taskRelations.test.ts` ganhou um caso de card em 2 planos ao
+  mesmo tempo. Suíte completa reexecutada: 851 testes, sem regressão.
+  `npx tsc --noEmit` limpo.
+
+**O que NÃO mudou**: a remoção de uma associação continua por relação
+específica (`DELETE /api/admin/tasks/{id}/relations/{parentId}`, já
+corretamente escopada a um único pai — não precisou de correção); o padrão
+DAG da "diária de gravação" (etapa com múltiplos pais via `slot` não-nulo)
+não foi tocado, só verificado como já correto.
+
+Este item está **fora do escopo do Prompt 2** para a próxima sessão — já foi
+feito e testado nesta mesma sessão de investigação, como uma correção
+pontual sobre uma recomendação específica que se mostrou errada na revisão,
+não como antecipação da fase de execução.
+
 ---
 
 ## INSTRUÇÕES PARA O SONNET
@@ -603,18 +689,12 @@ Ao iniciar a sessão de execução, antes de tocar em qualquer código:
    que ainda descrevem o comportamento atual — este documento foi escrito em
    2026-09-16; se algo já mudou, ajustar o plano antes de prosseguir, não
    forçar o código a bater com o documento.
-2. **Fase 0** (seção 17):
-   a. Rodar em produção (via MCP do Supabase, só leitura) a query de
-      violação do índice único da seção 15. Se houver alguma linha, PARAR e
-      reportar ao usuário antes de prosseguir — não decidir sozinho qual elo
-      manter.
-   b. Escrever e aplicar a migração do índice (seção 15), seguindo o padrão
-      `not valid` → `validate` já usado em `20260829180000` e
-      `20260909180000`.
-   c. Ajustar `kindDef()` em `lib/taskCatalog.ts` para consultar
+2. **Fase 0** (seção 17) — a correção de multi-plano já foi feita (seção 24);
+   falta só:
+   a. Ajustar `kindDef()` em `lib/taskCatalog.ts` para consultar
       `task_types.behavior` para kinds sem entrada embutida. Escrever o
       teste que confirma os 5 builtins inalterados ANTES de mudar o código.
-   d. Rodar `npm run verify` — deve passar sem nenhuma mudança visível na
+   b. Rodar `npm run verify` — deve passar sem nenhuma mudança visível na
       UI ainda.
 3. **Fase 1**: criar `lib/taskRelationSemantics.ts` com testes de tabela
    primeiro (TDD), depois migrar `parentBoxes.ts` e `comments.ts` para

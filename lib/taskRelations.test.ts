@@ -15,6 +15,7 @@ import {
   isFlowDelivery,
   parentIdsOf,
   planParentIdOf,
+  planParentIdsOf,
   recurrenceParentOf,
   slotOf,
   stepOrderOf,
@@ -139,6 +140,16 @@ describe("etapa de entrega × membro de plano", () => {
     expect(planParentIdOf(soEtapa)).toBeNull();
   });
 
+  it("um card pode pertencer a mais de um Plano de Ação ao mesmo tempo", () => {
+    const outroPlanoId = "plano-2";
+    const emDoisPlanos = { id: "m2", parents: [elo(planoId, null), elo(outroPlanoId, null)] };
+    expect(planParentIdsOf(emDoisPlanos)).toEqual([planoId, outroPlanoId]);
+    // planParentIdOf continua devolvendo só um (uso de controle de valor
+    // único), sem quebrar quando há mais de um elo real.
+    expect(planParentIdOf(emDoisPlanos)).toBe(planoId);
+    expect(planParentIdsOf(soEtapa)).toEqual([]);
+  });
+
   it("as entregas de que um card é etapa saem separadas do plano", () => {
     expect(deliveryParentIdsOf(etapaNoPlano)).toEqual([entregaId]);
     expect(deliveryParentIdsOf(soMembro)).toEqual([]);
@@ -171,6 +182,7 @@ describe("resiliência a `parents` ausente (card não hidratado, ver P0-A)", () 
     expect(slotOf(semParents, "qualquer")).toBeNull();
     expect(stepOrderOf(semParents, "qualquer")).toBe(0);
     expect(planParentIdOf(semParents)).toBeNull();
+    expect(planParentIdsOf(semParents)).toEqual([]);
     expect(deliveryParentIdsOf(semParents)).toEqual([]);
     expect(familyRootIdOf(semParents)).toBeNull();
   });

@@ -191,6 +191,11 @@ export default function TaskDetailPanel({
         ) : null}
         {!isPlan ? (
           <div className="tdp-attr">
+            {/* Controle de valor único: escolher um plano ADICIONA aquele elo
+                sem soltar outro(s) plano(s) a que o card já pertença
+                (setTaskPlanLink é aditivo); só "— Sem plano —" solta todos de
+                uma vez. `planParentIdOf` mostra só um quando há mais de um —
+                ver `planParentIdsOf` para a lista completa. */}
             <span>Plano de Ação</span>
             <select
               value={planParentIdOf(task) ?? ""} disabled={busy}

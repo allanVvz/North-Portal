@@ -31,7 +31,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus } from "@/lib/flows/parentStatus";
@@ -304,9 +304,10 @@ export default function TaskModal({
   // cujo subtipo diz que etapa é.
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
   const [flowDelivery, setFlowDelivery] = useState<TaskRecord | null>(null);
-  // O Plano de Ação a que este card pertence — não aparece no quadro, então
-  // quase sempre precisa ser buscado por id (igual a `flowDelivery`).
-  const [planParent, setPlanParent] = useState<TaskRecord | null>(null);
+  // Os Planos de Ação a que este card pertence (pode ser mais de um) — não
+  // aparecem no quadro, então quase sempre precisam ser buscados por id
+  // (igual a `flowDelivery`).
+  const [planParents, setPlanParents] = useState<TaskRecord[]>([]);
   // A etapa recém-criada pela conclusão desta, devolvida pelo PATCH.
   const [flowNext, setFlowNext] = useState<TaskRecord | null>(null);
   const currentType = taskTypes.find((t) => t.key === draft.kind) ?? null;
@@ -588,21 +589,26 @@ export default function TaskModal({
   // de criação liga `flow.delivery.id` ao plano, não uma das etapas. Excluir
   // isDelivery aqui era o que fazia o card que É a entrega nunca mostrar "Faz
   // parte de": a caixa de etapas (FlowStepsBox) aparecia, a de plano nunca.
-  const planParentId = liveTask && !isRecurringParent && !kindDef(liveTask.kind).isPlan
-    ? planParentIdOf(liveTask)
-    : null;
+  const planParentIds = liveTask && !isRecurringParent && !kindDef(liveTask.kind).isPlan
+    ? planParentIdsOf(liveTask)
+    : [];
+  const planParentIdsKey = planParentIds.join(",");
   useEffect(() => {
-    if (!planParentId) { setPlanParent(null); return; }
+    if (!planParentIds.length) { setPlanParents([]); return; }
     const asPlan = (parent: TaskRecord | null) => (parent && kindDef(parent.kind).isPlan ? parent : null);
-    const loaded = clientTasks.find((t) => t.id === planParentId) ?? null;
-    if (loaded) { setPlanParent(asPlan(loaded)); return; }
     let cancelled = false;
-    fetch(`/api/admin/tasks/${encodeURIComponent(planParentId)}`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((parent: TaskRecord | null) => { if (!cancelled) setPlanParent(asPlan(parent)); })
-      .catch(() => {});
+    Promise.all(planParentIds.map((id) => {
+      const loaded = clientTasks.find((t) => t.id === id) ?? null;
+      if (loaded) return Promise.resolve(loaded);
+      return fetch(`/api/admin/tasks/${encodeURIComponent(id)}`)
+        .then((response) => response.ok ? response.json() : null)
+        .catch(() => null) as Promise<TaskRecord | null>;
+    })).then((parents) => {
+      if (!cancelled) setPlanParents(parents.map(asPlan).filter((p): p is TaskRecord => Boolean(p)));
+    });
     return () => { cancelled = true; };
-  }, [planParentId, clientTasks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planParentIdsKey, clientTasks]);
 
   function pickKind(kind: string) {
     if (kind === ROTINA_KEY) {
@@ -659,10 +665,11 @@ export default function TaskModal({
         : kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers) : taskProgress(progressTask))
     : 0;
   const linkableCandidates = liveTask
-    // Ter uma entrega como pai não impede mais entrar num plano — é
-    // justamente a combinação que passou a ser suportada. O que impede é já
-    // estar em outro plano.
-    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdOf(t) && t.client_id === liveTask.client_id)
+    // Ter uma entrega como pai não impede entrar num plano, e já pertencer a
+    // OUTRO plano também não — um card pode ser membro de vários Planos de
+    // Ação ao mesmo tempo. O que continua impedido é oferecer de novo um card
+    // que já é membro DESTE plano especificamente.
+    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && t.client_id === liveTask.client_id)
     : [];
   /** A entrega a que a caixa de etapas se refere: o próprio card quando ele é a
    * entrega, ou o pai quando estamos olhando uma etapa (usado só para calcular o
@@ -690,7 +697,10 @@ export default function TaskModal({
   // nenhuma caixa nascia para preenchê-lo. Com as duas nascendo do mesmo
   // `parentSlots`, não tem como voltar a divergir.
   const parentRelationKinds = liveTask ? relevantParentRelationKinds({ isDelivery, isPlan: Boolean(kd.isPlan) }) : [];
-  const parentSlotOf = (kind: ParentRelationKind): { id: string | null; parent: TaskRecord | null; subtitle: string; progress: number } => {
+  // "plano" fica de fora daqui: ao contrário de entrega/recorrência, que têm
+  // no máximo UM pai, um card pode ter vários Planos ao mesmo tempo — vira uma
+  // caixa por Plano, montada direto de `planParents` logo abaixo.
+  const parentSlotOf = (kind: Exclude<ParentRelationKind, "plano">): { id: string | null; parent: TaskRecord | null; subtitle: string; progress: number } => {
     if (kind === "entrega") {
       const total = deliveryType?.subtypes.length ?? 0;
       const stepLabel = liveTask ? subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo" : "";
@@ -701,14 +711,6 @@ export default function TaskModal({
         progress: flowDelivery ? taskProgress(flowDelivery, chainSteps) : 0,
       };
     }
-    if (kind === "plano") {
-      return {
-        id: planParentId,
-        parent: planParent,
-        subtitle: "Atividade do plano",
-        progress: planParent ? taskProgress(planParent, actionPlanMembersOf(planParent.id, clientTasks)) : 0,
-      };
-    }
     return {
       id: recurrenceParentId,
       parent: recurrenceParent,
@@ -716,14 +718,31 @@ export default function TaskModal({
       progress: recurrenceParent ? taskProgress(recurrenceParent, recurrenceExecutionsOf(recurrenceParent.id, clientTasks)) : 0,
     };
   };
-  const parentSlots = parentRelationKinds.map(parentSlotOf);
-  const parentBoxes = parentSlots
-    .filter((slot): slot is { id: string | null; parent: TaskRecord; subtitle: string; progress: number } => Boolean(slot.parent))
-    .map((slot) => ({ parent: slot.parent, subtitle: slot.subtitle, progress: slot.progress }));
+  const hasPlanKind = parentRelationKinds.includes("plano");
+  const entregaSlot = parentRelationKinds.includes("entrega") ? parentSlotOf("entrega") : null;
+  const recorrenciaSlot = parentRelationKinds.includes("recorrencia") ? parentSlotOf("recorrencia") : null;
+  const planBoxes = hasPlanKind
+    ? planParents.map((plan) => ({
+        parent: plan,
+        subtitle: "Atividade do plano",
+        progress: taskProgress(plan, actionPlanMembersOf(plan.id, clientTasks)),
+      }))
+    : [];
+  // Ordem preservada: entrega, depois um por plano, depois recorrência —
+  // igual à ordem que `relevantParentRelationKinds` sempre devolveu.
+  const parentBoxes = [
+    ...(entregaSlot?.parent ? [{ parent: entregaSlot.parent, subtitle: entregaSlot.subtitle, progress: entregaSlot.progress }] : []),
+    ...planBoxes,
+    ...(recorrenciaSlot?.parent ? [{ parent: recorrenciaSlot.parent, subtitle: recorrenciaSlot.subtitle, progress: recorrenciaSlot.progress }] : []),
+  ];
   // Um slot cujo id já se conhece mas cujo card pai ainda não chegou (fetch em
   // voo) — o placeholder de carregamento usa isto, e só isto, em vez de
-  // recalcular quais relações valem.
-  const pendingParentBox = parentSlots.some((slot) => slot.id && !slot.parent);
+  // recalcular quais relações valem. Para plano, "ainda chegando" é ter mais
+  // ids conhecidos do que planos já carregados.
+  const pendingParentBox =
+    Boolean(entregaSlot?.id && !entregaSlot.parent) ||
+    Boolean(recorrenciaSlot?.id && !recorrenciaSlot.parent) ||
+    (hasPlanKind && planParentIds.length > planParents.length);
 
   /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo tipo, mesmo
    * subtipo, e ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
@@ -1457,7 +1476,11 @@ export default function TaskModal({
                   </select>
                 </Cell>
               ) : null}
-              {/* Vínculo com plano (não para o próprio plano) */}
+              {/* Vínculo com plano (não para o próprio plano). Controle de
+                  valor único: escolher um plano ADICIONA aquele elo sem
+                  soltar outro(s) a que o card já pertença — um card pode
+                  estar em mais de um Plano ao mesmo tempo; só "— Sem plano —"
+                  solta todos de uma vez (setTaskPlanLink). */}
               {!kd.isPlan && !(mode === "new" && effectiveScope === "routine") ? (
                 <Cell icon="◆" label="Plano de Ação" hidden={!visible("plan_link")}>
                   <select value={draft.plan_id} onChange={(e) => set("plan_id", e.target.value)}>
@@ -1591,8 +1614,9 @@ export default function TaskModal({
                 onOpen={() => void openRelatedTask(box.parent)}
               />
             ))}
-            {/* Deriva de `pendingParentBox` (mesmos `parentSlots` que geram as
-                caixas acima) — não repete a combinação de flags aqui. */}
+            {/* Deriva de `pendingParentBox` (mesmos slots que geram as caixas
+                acima, entrega/plano(s)/recorrência) — não repete a
+                combinação de flags aqui. */}
             {pendingParentBox ? (
               <div className="tm-box tm-parentbox">
                 <p className="tm-box-label">Faz parte de</p>

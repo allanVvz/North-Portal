@@ -154,13 +154,26 @@ export function actionPlanMembersOf<T extends TaskRelation>(parentId: string, ta
   return tasks.filter((task) => (task.parents ?? []).some((p) => p.id === parentId && p.slot === null));
 }
 
-/** O Plano de Ação a que este card pertence — o único elo SEM slot.
+/** TODOS os Planos de Ação a que este card pertence — um card pode ser
+ * membro de mais de um ao mesmo tempo (elo SEM slot, sem limite de
+ * cardinalidade no banco nem na aplicação). Use isto para qualquer tela que
+ * precise mostrar/considerar a associação real; `planParentIdOf` só existe
+ * para os poucos controles que mostram um valor único por desenho (um
+ * `<select>`), não porque só possa haver um. */
+export function planParentIdsOf(task: TaskRelation): string[] {
+  return (task.parents ?? []).filter((p) => p.slot === null).map((p) => p.id);
+}
+
+/** UM Plano de Ação a que este card pertence — o primeiro elo SEM slot
+ * encontrado. Existe só para controles de UI que mostram um valor único (um
+ * `<select>` de "Plano de Ação"); quando o card pertence a mais de um, qual
+ * deles aparece aqui é arbitrário. Para saber TODOS, use `planParentIdsOf`.
  *
  * Ler `parents[0]` no lugar disto é o que fazia uma etapa perder a associação
  * com o plano: a consulta não tem ORDER BY, então "o primeiro pai" podia ser a
  * entrega, e o autosave mandava o id dela como se fosse o plano. */
 export function planParentIdOf(task: TaskRelation): string | null {
-  return (task.parents ?? []).find((p) => p.slot === null)?.id ?? null;
+  return planParentIdsOf(task)[0] ?? null;
 }
 
 /** As entregas de que este card é etapa — elos COM slot. */

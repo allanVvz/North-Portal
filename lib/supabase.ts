@@ -1647,19 +1647,25 @@ export async function unlinkTasks(parentId: string, childId: string): Promise<vo
   if (error) fail(error);
 }
 
-/** O atributo "Plano de Ação" do card continua sendo um campo único na
- * interface, então escrever nele substitui o elo SEM slot — os elos de etapa
- * (slot preenchido) pertencem à corrente e não podem ser derrubados por uma
- * edição de plano. */
+/** Escreve o campo "Plano de Ação" do card. Um card PODE pertencer a mais de
+ * um Plano ao mesmo tempo (a "diária de gravação" e o "vincular existente" já
+ * dependem disso) — por isso, ligar a um `parentId` é ADITIVO: só garante que
+ * aquele elo exista, sem soltar nenhum outro Plano ao qual o card já
+ * pertença. Só `parentId === null` (o `<select>` da UI voltando para "— Sem
+ * plano —", uma escolha explícita) solta TODOS os elos sem slot de uma vez —
+ * é o único jeito de um controle de valor único representar "sair de todos".
+ * Elos de etapa (slot preenchido) pertencem à corrente e nunca são tocados
+ * aqui. */
 export async function setTaskPlanLink(taskId: string, parentId: string | null): Promise<void> {
   const supabase = await createClient();
   const { data, error } = await supabase.from("task_links").select("parent_id,child_id,slot").eq("child_id", taskId);
   if (error) fail(error);
   const current = ((data as LinkRow[] | null) ?? []).filter((l) => l.slot === null);
-  for (const link of current) {
-    if (link.parent_id !== parentId) await unlinkTasks(link.parent_id, taskId);
+  if (parentId === null) {
+    for (const link of current) await unlinkTasks(link.parent_id, taskId);
+    return;
   }
-  if (parentId && !current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null);
+  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null);
 }
 
 // ---- Planos de Ação (admin) --------------------------------------------------
