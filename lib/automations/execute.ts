@@ -99,10 +99,30 @@ export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord,
   payload.flow_parent = true;
   payload.flow_total_weight = 2;
   payload.flow_step_count = 2;
+  // O molde continua `operacional` (não carrega marca de fluxo nenhuma), mas
+  // a OCORRÊNCIA que vira pai do fluxo não pode continuar com o mesmo kind —
+  // ela se comporta como uma Entrega (stepper, caixa de etapas, aba
+  // Entregas), então o selo do tipo tem que dizer isso, não "Tarefa".
+  //
+  // `relatorio_conversao` (20260901000000) já existe no vocabulário para isto,
+  // e continua `active = false` DE PROPÓSITO (20260902000000 apagou o uso dele
+  // exatamente para o fluxo não depender de um task_type) — não reativar aqui.
+  // `tasks_valida_vocabulario` só checa se a LINHA existe (parent_id is null),
+  // não se está ativa, então o insert abaixo passa sem tocar em `active`.
+  // Reativar acoplaria de novo: `lib/flows/advance.ts`'s `advanceFlow` decide
+  // "fluxo dinâmico vs. cascata declarada" por `findType(...).behavior ===
+  // "entrega"`, e `findType` só enxerga tipos `active`. Com o tipo ativo, a
+  // conclusão da etapa `trafego` faria o motor genérico (`advanceOneDelivery`)
+  // tentar criar a etapa `feedback` sozinho, brigando com a criação por
+  // comentário desta automação (`ensureFlowStep` em conversionFlow.ts).
+  // `kindLabel`/`kindDef` (lib/taskCatalog.ts) resolvem o selo do tipo pelo
+  // catálogo hardcoded ANTES de olhar o banco — o selo fica certo com o tipo
+  // inativo mesmo assim.
+  const flowKind = "relatorio_conversao";
 
   const { data, error } = await admin
     .from("tasks")
-    .insert({ ...fields, payload, status: "em_producao", assignee: AUTOMATION_ASSIGNEE })
+    .insert({ ...fields, kind: flowKind, payload, status: "em_producao", assignee: AUTOMATION_ASSIGNEE })
     .select(TASK_COLUMNS)
     .limit(1);
   if (error && (error as { code?: string }).code !== "23505") throw error;
