@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { requireCronSecret } from "@/lib/cron";
+import { requireAdmin } from "@/lib/supabase/auth";
 import { runAutomations } from "@/lib/automations/run";
 import { remindUpcomingRoutines } from "@/lib/automations/routineReminders";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -10,10 +11,28 @@ import { reconcileFlows } from "@/lib/flows/reconcile";
 export const runtime = "nodejs";
 
 // POST /api/admin/automations/run — cron-only entrypoint, called by
-// pg_cron/pg_net (supabase/migrations/20260820000003_automation_cron.sql).
-// Gated by x-cron-secret, not a user session.
+// pg_cron/pg_net (supabase/migrations/20260820000003_automation_cron.sql)
+// with an EMPTY body, gated by x-cron-secret, not a user session.
+//
+// `{ configIds: [...] }` no corpo é a outra porta que `RunOptions` já previa
+// ("reexecução manual, fluxo de exemplo") mas que nunca tinha um caminho de
+// admin de verdade até aqui — gated por requireAdmin() em vez do segredo do
+// cron. Existe pra depurar por que uma automação específica não gerou o que
+// devia, sem esperar a próxima janela real de disparo nem rodar a varredura
+// diária inteira (reconcileFlows/remindUpcomingRoutines ficam de fora desse
+// caminho de propósito — são responsabilidade do cron, não de um teste
+// pontual).
 export async function POST(request: Request) {
   try {
+    const body = (await request.json().catch(() => ({}))) as { configIds?: unknown; today?: unknown };
+    if (Array.isArray(body.configIds) && body.configIds.length > 0) {
+      await requireAdmin();
+      const summary = await runAutomations({
+        configIds: body.configIds as string[],
+        today: typeof body.today === "string" ? body.today : undefined,
+      });
+      return NextResponse.json(summary);
+    }
     await requireCronSecret(request);
     const summary = await runAutomations();
     // Varredura dos fluxos em cascata na mesma batida diária. É ela que
