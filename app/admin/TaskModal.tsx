@@ -1690,20 +1690,6 @@ export default function TaskModal({
               />
             ) : null}
 
-            {/* Numa EXECUÇÃO da recorrência, os checks do molde, só leitura. No
-                MOLDE eles moram na caixa de ciclos abaixo, junto da ação de
-                concluir — antes eram duas caixas ("Checks" e "Execuções") para a
-                mesma pergunta, e a ação ficava escondida no rodapé. */}
-            {liveTask && !isRecurringParent && recurrenceParent ? (
-              <div className="tm-box tm-cyclelog">
-                <p className="tm-box-label">Checks da recorrência ({cycleLogOf(recurrenceParent.payload).length})</p>
-                {recurrenceParent.due_date && recurrenceParent.recurrence_cadence && !recurrenceStopped(recurrenceParent.status) ? (
-                  <p className="tm-cyclelog-next">Próxima entrega: <b>{formatShortDate(recurrenceParent.due_date)}</b></p>
-                ) : null}
-                <CycleChecks log={cycleLogOf(recurrenceParent.payload)} />
-              </div>
-            ) : null}
-
             {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
               <div className={`tm-box tm-planmembers${isRecurringParent ? " tm-cycles" : ""}`}>
                 <div className="tm-box-head">
