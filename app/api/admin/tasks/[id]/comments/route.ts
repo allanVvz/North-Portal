@@ -6,6 +6,7 @@ import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleConversionComment } from "@/lib/automations/conversionFlow";
+import { handleTrafficRevisionComment } from "@/lib/automations/run";
 import { flowCommentTargetId } from "@/lib/flows/commentTarget";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
@@ -44,8 +45,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         await notifyProfiles(mentioned, targetId, "task_mentioned", `${authorName} mencionou você em "${task.title}".`);
       }
     }
-    // Gatilho instantâneo do fluxo de feedback: se este card (ou o pai dele) tem
-    // a automação `relatorio_vendas`, processa agora em vez de esperar o cron.
+    // Revisão editorial de tráfego e resposta de métricas são portas distintas.
+    // Ambas são instantâneas; o segundo handler só age quando o alvo é Feedback.
+    await handleTrafficRevisionComment(createAdminClient(), targetId);
     await handleConversionComment(createAdminClient(), targetId);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }

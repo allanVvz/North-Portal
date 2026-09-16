@@ -20,7 +20,6 @@ import type { WindsorSettings } from "@/lib/windsor";
 import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
 import { creativeRows, mediaOutcome, mediaTotals } from "@/lib/reports/adsInsights";
 import { collectAndStorePreviews } from "./creativeAssets";
-import { assignResponsibilityHolders } from "./responsibleOwners";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
@@ -30,6 +29,7 @@ import { logReportRun } from "./reportLog";
 import { ensureFlowStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
+import { commentsOf } from "@/lib/comments";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import {
@@ -99,6 +99,7 @@ async function fillReportCard(
   meta: ServiceMetaSettings,
   today: string,
   occurrenceId: string | null,
+  revisionInstruction: string | null = null,
 ): Promise<{ fileName: string; url: string; report: TrafficReportRow }> {
   const startedAt = Date.now();
   const clientId = target.client_id;
@@ -143,6 +144,7 @@ async function fillReportCard(
     prevAdPosts,
     trendPosts: campaignPosts,
     previews: assets,
+    revisionInstruction,
     generatedAt: new Date(),
   });
 
@@ -245,14 +247,11 @@ async function runOneReportAutomation(
       // ocorrência (flow_parent) é só o contêiner e não aparece em tela. O sinal
       // para a Automação 2 não é mais um marcador no payload: é a linha em
       // traffic_reports e o status dela.
-      // A etapa é de quem cuida do tráfego (Equipe & papéis), não da automação:
-      // é assim que ela entra na Home e na coluna de quem revisa.
-      const owners = await assignResponsibilityHolders(admin, card1.id, "gestor_trafego");
       const { error: c1Error } = await admin
         .from("tasks")
         .update({
           status: "revisao",
-          assignee: owners ?? AUTOMATION_ASSIGNEE,
+          assignee: AUTOMATION_ASSIGNEE,
           payload: appendedCommentPayload(card1.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`),
         })
         .eq("id", card1.id);
@@ -289,10 +288,9 @@ async function runOneReportAutomation(
   try {
     const { fileName, url } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today, null);
     const payload = appendedCommentPayload(actingTask.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`);
-    const owners = await assignResponsibilityHolders(admin, actingTask.id, "gestor_trafego");
     const { error: statusError } = await admin
       .from("tasks")
-      .update({ status: "revisao", payload, assignee: owners ?? AUTOMATION_ASSIGNEE })
+      .update({ status: "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
       .eq("id", actingTask.id);
     if (statusError) throw statusError;
     await notifyFromAutomation(admin, actingTask.id, "task_commented", `Automação comentou em "${actingTask.title}".`);
@@ -363,4 +361,49 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
   }
 
   return summary;
+}
+
+/** Regera a revisão de tráfego a partir de um comentário editorial humano.
+ * O comentário permanece na thread como instrução/auditoria; o PDF recebe uma
+ * nova revisão e tudo o que dependia do snapshot anterior volta a aguardar. */
+export async function handleTrafficRevisionComment(admin: AdminClient, taskId: string): Promise<void> {
+  const trafficTask = await getAdminTask(admin, taskId);
+  if (!trafficTask || trafficTask.subtype !== "trafego") return;
+  const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", taskId).limit(1);
+  const occurrenceId = (links?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (!occurrenceId) return;
+  const occ = await getAdminTask(admin, occurrenceId);
+  const moldId = typeof occ?.payload?.recurrence_parent_id === "string" ? occ.payload.recurrence_parent_id : null;
+  if (!occ || !moldId) return;
+  const mold = await getAdminTask(admin, moldId);
+  if (!mold) return;
+  const { data: rows } = await admin.from("automation_configs").select("*")
+    .eq("target_task_id", moldId).eq("automation_key", "relatorio_trafego_semanal").eq("active", true).limit(1);
+  const config = rows?.[0] as AutomationConfigRow | undefined;
+  if (!config) return;
+  const instruction = [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
+  if (!instruction) return;
+  const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
+  const today = occ.due_date ?? isoDay(new Date());
+  const { fileName, url } = await fillReportCard(admin, trafficTask, mold, config, windsor, meta, today, occ.id, instruction);
+  const { error } = await admin.from("tasks").update({
+    status: "revisao",
+    assignee: AUTOMATION_ASSIGNEE,
+    payload: {
+      ...appendedCommentPayload(trafficTask.payload, `Northia aplicou a instrução de revisão e gerou uma nova versão: [${fileName}](${url})`),
+      traffic_revision_instruction: instruction,
+    },
+  }).eq("id", trafficTask.id);
+  if (error) throw error;
+
+  // O relatório de conversão depende do snapshot de tráfego; uma revisão nova
+  // torna a coleta e a conversão anteriores obsoletas e pede novo feedback.
+  const nextPayload = { ...(occ.payload ?? {}) } as Record<string, unknown>;
+  delete nextPayload.feedback_prompt_at;
+  delete nextPayload.feedback_source_at;
+  delete nextPayload.sales_report_generated_at;
+  await admin.from("tasks").update({ payload: nextPayload, status: "em_producao" }).eq("id", occ.id);
+  const feedbackId = flowStepTaskId(occ.id, "feedback");
+  const conversionId = flowStepTaskId(occ.id, "conversao");
+  await admin.from("tasks").update({ status: "backlog" }).in("id", [feedbackId, conversionId]);
 }

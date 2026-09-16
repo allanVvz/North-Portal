@@ -11,6 +11,12 @@ export const DEFERRED_TASK_FLAG = "deferred_until_accessed";
  * passariam a marcar 0% com as etapas todas faltando. Mesmo precedente do
  * `payload.recurrence_group`, que responde a essa mesma pergunta na recorrência. */
 export const FLOW_PARENT_KEY = "flow_parent";
+/** Fluxo de relatórios: uma Entrega normal, com etapas dinâmicas do motor. */
+export const REPORT_CONVERSION_FLOW = "report_conversion";
+
+export function isReportConversionFlow(task: Pick<TaskRecord, "payload">): boolean {
+  return task.payload?.automation_flow === REPORT_CONVERSION_FLOW;
+}
 
 /** A etapa anterior da corrente, para o editor conseguir voltar ao roteiro em
  * vez de caçá-lo. */

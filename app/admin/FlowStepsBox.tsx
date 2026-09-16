@@ -129,7 +129,10 @@ export default function FlowStepsBox({
   // Fluxo DINÂMICO (tipo existe mas não tem subtipos — ex.: ocorrência
   // `operacional` promovida a pai de fluxo): não há sequência pré-definida, só
   // as etapas que existem.
-  const dynamic = type !== null && type.subtypes.length === 0;
+  // Uma Entrega de relatório tem etapas criadas pela automação, não pelo
+  // vocabulário estático. Quando o tipo não chegou (ou é legado inativo), os
+  // filhos ligados ainda são a fonte de verdade e nunca devem parecer loading.
+  const dynamic = (type !== null && type.subtypes.length === 0) || (type === null && steps.length > 0);
   if (dynamic) {
     if (!steps.length) return null;
     return (

@@ -15,6 +15,8 @@ import { taskPayloadSchema } from "./validation";
 const CHAVES_GRAVADAS = [
   "accessed_at",
   "action_plan_id",
+  "automation_actor",
+  "automation_flow",
   "barTone",
   "comments",
   "completed_cycles",
@@ -47,6 +49,7 @@ const CHAVES_GRAVADAS = [
   "recurrence_revision",
   "statusLabel",
   "statusTone",
+  "traffic_revision_instruction",
 ] as const;
 
 function fixtureFor(key: string): unknown {

@@ -49,6 +49,8 @@ export type AdsReportInput = {
   trendPosts?: MetaPost[];
   /** Por adId: miniatura já embutível e link do post. */
   previews?: Record<string, PreviewAsset>;
+  /** Instrução humana aplicada pela Northia nesta revisão. */
+  revisionInstruction?: string | null;
   generatedAt: Date;
 };
 
@@ -113,7 +115,7 @@ function campaignsOf(posts: MetaPost[], blockOf: (id: string | undefined, name: 
   return out.sort((a, b) => (b.metrics.custo ?? 0) - (a.metrics.custo ?? 0));
 }
 
-function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPosts, prevAdPosts, trendPosts, previews, generatedAt }: AdsReportInput) {
+function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPosts, prevAdPosts, trendPosts, previews, revisionInstruction, generatedAt }: AdsReportInput) {
   const { blockOf, postBlock } = blockResolver(config);
   const cur = mediaTotals(posts);
   const prev = prevPosts.some((p) => p.source === "paid") ? mediaTotals(prevPosts) : null;
@@ -277,6 +279,12 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
                 { title: `Custo por ${Wd.unit}`, periods: trend.map((t) => shortDay(t.weekTo)), values: trend.map((t) => t.cost), format: (v) => money(v) },
               ]}
             />
+          </Section>
+        ) : null}
+
+        {revisionInstruction ? (
+          <Section title="Revisão solicitada">
+            <Text style={T.note}>{revisionInstruction}</Text>
           </Section>
         ) : null}
 

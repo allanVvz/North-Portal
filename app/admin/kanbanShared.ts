@@ -80,7 +80,7 @@ export const TONES = ["green", "gold", "blue", "purple", "neutral"] as const;
 
 // "Banner" entrou com o NorthAi (lib/northai/formats.ts): a diária de gravação
 // gera banners além de Reels, carrossel e story.
-export const FORMATO_OPTIONS = ["Reels vertical", "Stories", "Post feed", "Carrossel", "Banner", "Vídeo horizontal", "Flyer"];
+export const FORMATO_OPTIONS = ["Reels vertical", "Stories", "Post feed", "Carrossel", "Banner", "Vídeo horizontal", "Flyer", "Relatório"];
 export const PLATAFORMA_OPTIONS = ["Instagram", "TikTok", "YouTube", "Facebook", "Google", "WhatsApp"];
 
 // Regra única de iniciais — mora em app/avatar/initials.ts. Reexportada daqui

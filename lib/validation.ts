@@ -202,6 +202,11 @@ export const taskPayloadSchema = z.object({
   flow_step_count: z.unknown().optional(),
   flow_prev_task_id: z.unknown().optional(),
   flow_step_key: z.unknown().optional(), // resíduo — hoje o slot do elo é a verdade
+  // Fluxos operados pela Northia. `formato` classifica a Entrega; esta chave
+  // descreve o motor que cria as etapas dinâmicas, sem inventar um tipo-pai.
+  automation_flow: z.unknown().optional(),
+  automation_actor: z.unknown().optional(),
+  traffic_revision_instruction: z.unknown().optional(),
   // Recorrência — template
   recurrence_group: z.unknown().optional(),
   recurrence_cycle: z.unknown().optional(),

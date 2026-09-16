@@ -30,7 +30,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, isReportConversionFlow, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
 import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus } from "@/lib/flows/parentStatus";
@@ -302,6 +302,7 @@ export default function TaskModal({
   // A ENTREGA é o card marcado com payload.flow_parent; a ETAPA é um filho dela
   // cujo subtipo diz que etapa é.
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
+  const isReportFlow = Boolean(liveTask && isReportConversionFlow(liveTask));
   const [flowDelivery, setFlowDelivery] = useState<TaskRecord | null>(null);
   // Os Planos de Ação a que este card pertence (pode ser mais de um) — não
   // aparecem no quadro, então quase sempre precisam ser buscados por id
@@ -1383,7 +1384,7 @@ export default function TaskModal({
                       className="tm-headpick-label tm-head-parentflag"
                       title="Este card é o pai da corrente: soma todas as etapas do fluxo abaixo."
                     >
-                      {typeLabelOf(draft.kind)} · card pai
+                      {typeLabelOf(draft.kind)}{isReportFlow ? ` · ${draft.formato || "Relatório"}` : ""} · card pai
                     </span>
                   </>
                 ) : subtypeOptions.length ? (

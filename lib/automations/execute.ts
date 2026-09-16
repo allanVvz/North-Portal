@@ -17,7 +17,7 @@ import { TASK_COLUMNS } from "@/lib/taskColumns";
 import type { TaskRecord } from "@/lib/validation";
 import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "@/lib/recurrence";
 import { recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "@/lib/recurrenceState";
-import { DEFERRED_TASK_FLAG } from "@/lib/taskRelations";
+import { DEFERRED_TASK_FLAG, REPORT_CONVERSION_FLOW } from "@/lib/taskRelations";
 import { clonePlan } from "./provision";
 import { asTaskRecord, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 
@@ -97,37 +97,33 @@ export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord,
   // M1 é tarefa recorrente comum — não carrega marcas de fluxo. A ocorrência é
   // que vira o pai do fluxo desta semana.
   payload.flow_parent = true;
-  payload.flow_total_weight = 2;
-  payload.flow_step_count = 2;
-  // O molde continua `operacional` (não carrega marca de fluxo nenhuma), mas
-  // a OCORRÊNCIA que vira pai do fluxo não pode continuar com o mesmo kind —
-  // ela se comporta como uma Entrega (stepper, caixa de etapas, aba
-  // Entregas), então o selo do tipo tem que dizer isso, não "Tarefa".
-  //
-  // `relatorio_conversao` (20260901000000) já existe no vocabulário para isto,
-  // e continua `active = false` DE PROPÓSITO (20260902000000 apagou o uso dele
-  // exatamente para o fluxo não depender de um task_type) — não reativar aqui.
-  // `tasks_valida_vocabulario` só checa se a LINHA existe (parent_id is null),
-  // não se está ativa, então o insert abaixo passa sem tocar em `active`.
-  // Reativar acoplaria de novo: `lib/flows/advance.ts`'s `advanceFlow` decide
-  // "fluxo dinâmico vs. cascata declarada" por `findType(...).behavior ===
-  // "entrega"`, e `findType` só enxerga tipos `active`. Com o tipo ativo, a
-  // conclusão da etapa `trafego` faria o motor genérico (`advanceOneDelivery`)
-  // tentar criar a etapa `feedback` sozinho, brigando com a criação por
-  // comentário desta automação (`ensureFlowStep` em conversionFlow.ts).
-  // `kindLabel`/`kindDef` (lib/taskCatalog.ts) resolvem o selo do tipo pelo
-  // catálogo hardcoded ANTES de olhar o banco — o selo fica certo com o tipo
-  // inativo mesmo assim.
-  const flowKind = "relatorio_conversao";
+  // 3 etapas reais (trafego, feedback, conversao — ver conversionFlow.ts),
+  // cada uma com progress_weight 1 (default de ensureFlowStep). Congelado em 2
+  // a barra bateria 100% assim que trafego+feedback fechassem, com a etapa de
+  // conversão ainda por nascer.
+  payload.flow_total_weight = 3;
+  payload.flow_step_count = 3;
+  // A ocorrência é uma Entrega comum classificada como Relatório. O motor é
+  // identificado no payload para não acionar a cascata editorial padrão de
+  // criativo (roteiro → captação → edição → publicação).
+  const flowKind = "criativo";
+  payload.formato = "Relatório";
+  payload.automation_flow = REPORT_CONVERSION_FLOW;
+  payload.automation_actor = AUTOMATION_ASSIGNEE;
 
   const { data, error } = await admin
     .from("tasks")
-    .insert({ ...fields, kind: flowKind, payload, status: "em_producao", assignee: AUTOMATION_ASSIGNEE })
+    .insert({ ...fields, kind: flowKind, subtype: null, payload, status: "em_producao", assignee: "Northia, Luiza" })
     .select(TASK_COLUMNS)
     .limit(1);
   if (error && (error as { code?: string }).code !== "23505") throw error;
   const occurrence = data?.[0] ? asTaskRecord(data[0]) : await getAdminTask(admin, occId);
   if (!occurrence) throw new Error("Não foi possível materializar a ocorrência do fluxo de relatório.");
+  // Northia é ator de sistema e Luiza é o vínculo humano do pai. O texto deixa
+  // os dois visíveis sem criar uma conta artificial para a IA.
+  if (mold.reviewer_id) {
+    await admin.from("task_assignees").upsert({ task_id: occurrence.id, profile_id: mold.reviewer_id }, { onConflict: "task_id,profile_id" });
+  }
   return occurrence;
 }
 

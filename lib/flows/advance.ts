@@ -20,7 +20,7 @@ import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, errorMessage, getAdminTask, type AdminClient } from "@/lib/automations/taskAccess";
 import { notifyFromAutomation } from "@/lib/automations/notify";
 import { markTaskParada } from "@/lib/automations/errorHandling";
-import { flowStepKeyOf, isFlowDelivery } from "@/lib/taskRelations";
+import { flowStepKeyOf, isFlowDelivery, isReportConversionFlow } from "@/lib/taskRelations";
 import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
 import { deliveryIsFinished, deliveryStatusOnFinish } from "./parentStatus";
 import {
@@ -140,6 +140,12 @@ export async function materializeFirstStep(admin: AdminClient, delivery: TaskRec
   // remove), então esta guarda separa molde de ocorrência. Mesmo princípio de
   // flowTotalWeight em lib/taskCatalog.ts.
   if (delivery.payload?.[RECURRENCE_GROUP_KEY] === true) return null;
+  // Relatório é `kind: criativo` só para herdar UI/rollup de Entrega — a
+  // sequência real (trafego/feedback/conversao) é da automação
+  // (`ensureFlowStep`), nunca do catálogo. Sem esta guarda, a varredura diária
+  // (reconcileFlows) materializaria um "roteiro" de conteúdo criativo na
+  // primeira falha da Automação 1 que deixasse a ocorrência sem etapa nenhuma.
+  if (isReportConversionFlow(delivery)) return null;
   const existing = await stepsOf(admin, delivery.id);
   if (existing.some((s) => s.slot !== null)) return null;
 
@@ -279,6 +285,12 @@ export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord,
   const today = todayIso();
 
   for (const delivery of parents) {
+    // Relatórios são Entregas para a UI e o rollup, mas a sequência é
+    // controlada pelas automações, não pelo molde editorial criativo.
+    if (isReportConversionFlow(delivery)) {
+      if (await settleTypelessFlow(admin, delivery.id, actorId)) outcome.finished.push(delivery.id);
+      continue;
+    }
     const type = findType(types, delivery.kind);
     if (!type || type.behavior !== "entrega") {
       // Fluxo DINÂMICO (o `kind` da ocorrência não é um tipo-entrega): as etapas
