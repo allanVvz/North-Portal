@@ -5205,6 +5205,10 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .tm-step-fields .tm-step-date { width: 148px; padding: 0 6px; }
 .tm-step-assignee { width: 136px; }
 .tm-step-row.is-atrasada .tm-step-date { border-color: var(--a-danger); color: var(--a-danger); font-weight: 650; }
+/* Ciclo concluído na caixa "Execuções da recorrência" do MOLDE: a data
+   trava (StepRow, lockDateWhenDone) em vez de existir um log de "Checks" à
+   parte — o próprio card concluído com data travada É o check. */
+.tm-step-date:disabled { opacity: .65; cursor: not-allowed; }
 .tm-step-comments { display: inline-flex; align-items: center; gap: 4px; }
 .tm-step-thread { display: grid; gap: 8px; margin: 2px 0 0 26px; padding: 10px; border-radius: 10px; background: var(--a-surface); border: 1px solid var(--a-border); }
 .tm-step-comment { display: flex; gap: 8px; }
@@ -5270,28 +5274,8 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .tm-cycles-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12.5px; color: var(--a-sec); }
 .tm-cycles-action b { color: var(--a-ink); }
 .tm-cycles-stopped { font-size: 12px; color: var(--a-muted); }
-.tm-cycles-log { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--a-border); }
-.tm-cycles-subtitle { margin: 0 0 6px; font-size: 10.5px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; color: var(--a-muted); }
-.tm-cycles-empty { margin: 0; font-size: 12.5px; color: var(--a-muted); }
-.tm-cycles-more { margin-top: 6px; padding: 2px 0; border: 0; background: none; color: var(--a-teal-text); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .tm-desc-add { display: block; width: fit-content; margin: 14px 30px 0; padding: 6px 12px; border: 1px dashed var(--a-border-strong); border-radius: 9px; background: transparent; color: var(--a-sec); font: inherit; font-size: 12.5px; cursor: pointer; }
 .tm-desc-add:hover { border-color: var(--a-teal); color: var(--a-teal-text); }
-
-/* Checks da recorrência. */
-.tm-cyclelog-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.tm-cyclelog-list li { display: grid; grid-template-columns: 22px auto 1fr auto 14px; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--a-teal) 10%, var(--a-surface)); font-size: 12.5px; }
-.tm-cyclelog-check { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--a-teal-strong); color: var(--a-inverse); font-size: 11px; font-weight: 800; }
-.tm-cyclelog-when { color: var(--a-ink); font-weight: 600; }
-.tm-cyclelog-cycle { color: var(--a-muted); }
-.tm-cyclelog-by { color: var(--a-teal-text); }
-/* Um check com execução ainda encontrável vira o MESMO botão-linha usado em
-   "Faz parte de"/Execuções (.tm-member-open) — display:contents deixa os
-   filhos do botão ocuparem as colunas do grid do <li> como se o botão nem
-   existisse, então não é uma segunda estrutura visual, é a mesma esticada. */
-.tm-cyclelog-list li:has(.tm-cyclelog-open) { cursor: pointer; }
-.tm-cyclelog-list li:has(.tm-cyclelog-open:hover) { background: color-mix(in srgb, var(--a-teal) 18%, var(--a-surface)); }
-.tm-cyclelog-open { display: contents; border: 0; background: transparent; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
-.tm-cyclelog-open:disabled { cursor: default; }
 
 /* Home como painel operacional pessoal (dashboard-designer, 15/09). */
 .home-headline { font-weight: 650; color: var(--a-ink); }

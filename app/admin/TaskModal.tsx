@@ -8,10 +8,8 @@ import TaskKindIcon from "./TaskKindIcon";
 import FlowStepsBox from "./FlowStepsBox";
 import MentionTextarea from "./MentionTextarea";
 import StepRow, { type StepPatch } from "./StepRow";
-import { cycleLogOf } from "@/lib/cycleLog";
 import { formatShortDate } from "./taskDates";
 import PlanAddCombobox from "./PlanAddCombobox";
-import CycleChecks from "./CycleChecks";
 import RecurrenceExecutionCombobox from "./RecurrenceExecutionCombobox";
 import { addDaysIso } from "./contentPlan";
 import { agencyToday } from "./recurringState";
@@ -1725,6 +1723,7 @@ export default function TaskModal({
                         onOpen={() => void openRelatedTask(m)}
                         onUnlink={() => void unlinkMember(m.id, liveTask.id)}
                         unlinkTitle={isRecurringParent ? `Remover ligação com ${m.title}` : `Desvincular ${m.title} do plano`}
+                        lockDateWhenDone={isRecurringParent}
                         onPatch={patchRelatedCard}
                         onComment={commentRelatedCard}
                       />
@@ -1753,24 +1752,22 @@ export default function TaskModal({
                   ) : null}
                 </div>
                 {isRecurringParent && liveTask ? (
-                  <>
-                    {!recurrenceStopped(liveTask.status) ? (
-                      <RecurrenceExecutionCombobox
-                        candidates={recurrenceLinkCandidates}
-                        templateKind={liveTask.kind}
-                        busy={busy}
-                        onLink={(c) => void linkRecurrenceExecution(c.id)}
-                      />
-                    ) : null}
-                    <div className="tm-cycles-log">
-                      <p className="tm-cycles-subtitle">Checks ({cycleLogOf(liveTask.payload).length})</p>
-                      <CycleChecks
-                        log={cycleLogOf(liveTask.payload)}
-                        executionByCycle={(cycle) => planMembers.find((m) => recurrenceCycleOf(m) === cycle) ?? null}
-                        onOpen={(execution) => void openRelatedTask(execution)}
-                      />
-                    </div>
-                  </>
+                  // O check de um ciclo não é mais um log à parte
+                  // (`payload.cycle_log`), que podia mostrar uma data
+                  // diferente da do card real daquele ciclo (era o bug
+                  // original: "Checks" e "Execuções" divergiam). Concluída,
+                  // a PRÓPRIA linha trava a data (StepRow, `lockDateWhenDone`)
+                  // — o card concluído com data travada É o check, aqui
+                  // nesta caixa. Abrir a execução (card filho) continua
+                  // liberando a data normalmente.
+                  !recurrenceStopped(liveTask.status) ? (
+                    <RecurrenceExecutionCombobox
+                      candidates={recurrenceLinkCandidates}
+                      templateKind={liveTask.kind}
+                      busy={busy}
+                      onLink={(c) => void linkRecurrenceExecution(c.id)}
+                    />
+                  ) : null
                 ) : (
                   <PlanAddCombobox
                     candidates={liveTask ? linkableCandidates : newPlanCandidates}

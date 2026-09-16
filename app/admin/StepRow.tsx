@@ -55,6 +55,7 @@ export default function StepRow({
   unlinkTitle,
   onPatch,
   onComment,
+  lockDateWhenDone = false,
 }: {
   card: TaskRecord;
   label: string;
@@ -70,6 +71,12 @@ export default function StepRow({
   unlinkTitle?: string;
   onPatch: (card: TaskRecord, patch: StepPatch) => Promise<void>;
   onComment: (card: TaskRecord, text: string) => Promise<void>;
+  /** Só a caixa "Execuções da recorrência" do MOLDE usa isto: concluída, a
+   * data desta linha trava — é o check do ciclo, sem log à parte. Abrir a
+   * própria execução (o card filho) continua liberando a data normalmente,
+   * porque esta trava é só do jeito que o MOLDE mostra a linha, não um
+   * estado do card. */
+  lockDateWhenDone?: boolean;
 }) {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -79,6 +86,7 @@ export default function StepRow({
   const done = card.status === "aprovado";
   const assigneeId = card.assignee_profile_ids?.[0] ?? team.find((member) => member.label === card.assignee)?.id ?? "";
   const disabled = busy || saving || isOpenCard;
+  const dateLocked = lockDateWhenDone && done;
   const showState = state === "atrasada" || state === "parada";
 
   async function run(patch: StepPatch) {
@@ -139,9 +147,9 @@ export default function StepRow({
             type="date"
             className="tm-step-date"
             aria-label={`Data prevista de ${label}`}
-            title="Data prevista"
+            title={dateLocked ? "Data travada — ciclo concluído. Abra a execução para alterar." : "Data prevista"}
             value={card.due_date ?? ""}
-            disabled={disabled}
+            disabled={disabled || dateLocked}
             onChange={(event) => {
               const value = event.target.value || null;
               void run({ due_date: value, start_date: value, end_date: value });
