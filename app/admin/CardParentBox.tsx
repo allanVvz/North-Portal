@@ -5,6 +5,17 @@ import type { TaskRecord } from "@/lib/validation";
 
 export type ParentRelation = "entrega" | "plano" | "recorrencia";
 
+// Um marcador fixo por TIPO DE RELAÇÃO (não pelo kind do card de destino) —
+// sem isto, duas caixas "Faz parte de" só se distinguiam pelo texto do
+// subtítulo, e uma relação de Plano e uma de Recorrência-para-um-Plano
+// podiam sair na MESMA cor (a do ícone do destino, que é `plano_acao` nos
+// dois casos). O ponto colorido aqui identifica a RELAÇÃO em si, de relance.
+const RELATION_DOT: Record<ParentRelation, string> = {
+  entrega: "tm-parentbox-dot-entrega",
+  plano: "tm-parentbox-dot-plano",
+  recorrencia: "tm-parentbox-dot-recorrencia",
+};
+
 // A caixa "Faz parte de" do modal de um card FILHO — etapa de uma entrega,
 // atividade de um plano ou execução de uma recorrência.
 //
@@ -15,12 +26,16 @@ export type ParentRelation = "entrega" | "plano" | "recorrencia";
 // nada que a atividade de plano tinha.
 export default function CardParentBox({
   parent,
+  relation,
   subtitle,
   progress,
   canOpen,
   onOpen,
 }: {
   parent: TaskRecord;
+  /** Que TIPO de relação isto é — não o kind do `parent`. Decide a cor do
+   * marcador (RELATION_DOT), não o ícone (que continua sendo o do `parent`). */
+  relation: ParentRelation;
   /** Ex.: "Etapa 2 de 4 · Captação", "Atividade do plano", "Execução da recorrência". */
   subtitle: string;
   /** Progresso do card pai, 0–100. */
@@ -37,7 +52,10 @@ export default function CardParentBox({
             <TaskKindIcon kind={parent.kind} size="sm" />
             <span className="tm-parentbox-main">
               <span className="tm-member-title">{parent.title}</span>
-              <span className="tm-parentbox-sub">{subtitle}</span>
+              <span className="tm-parentbox-sub">
+                <span className={`tm-parentbox-dot ${RELATION_DOT[relation]}`} aria-hidden />
+                {subtitle}
+              </span>
             </span>
             <span className="tm-parentbox-pct">{progress}%</span>
             {canOpen ? <span className="tm-member-arrow" aria-hidden>↗</span> : null}

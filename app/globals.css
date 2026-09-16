@@ -3763,8 +3763,15 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    só acrescenta o subtítulo de relação e o % do pai. */
 .tm-parentbox-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tm-parentbox-main .tm-member-title { flex: 0 0 auto; }
-.tm-parentbox-sub { font-size: 11.5px; color: var(--a-muted); }
+.tm-parentbox-sub { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--a-muted); }
 .tm-parentbox-pct { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--a-sec); }
+/* Marca a RELAÇÃO (entrega/plano/recorrência), não o kind do card de
+   destino — evita que uma caixa de Plano e uma de Recorrência-para-um-Plano
+   saiam na mesma cor só porque os dois apontam pra um card plano_acao. */
+.tm-parentbox-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; }
+.tm-parentbox-dot-entrega { background: var(--a-purple-text); }
+.tm-parentbox-dot-plano { background: var(--a-teal-text); }
+.tm-parentbox-dot-recorrencia { background: var(--a-blue-text); }
 
 /* O compositor de atividades do plano virou .pac (PlanAddCombobox, mais abaixo).
    Só a mensagem de lista vazia continua em uso, no seletor de anexos. */
@@ -4024,9 +4031,14 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-layout:has(.tm-side) .tm-main { grid-column: 1; grid-row: 1; }
 .tm-layout:has(.tm-side) .tm-side { grid-column: 2; grid-row: 1; }
 
-.tm-head-progress { display: flex; align-items: center; gap: 8px; min-width: 142px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--a-border) 76%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--a-surface) 86%, transparent); }
-.tm-head-progress > span { width: 82px; height: 6px; overflow: hidden; border-radius: 999px; background: var(--a-border); }
-.tm-head-progress > span > span { display: block; height: 100%; border-radius: inherit; background: var(--a-teal); transition: width .2s ease; }
+.tm-head-progress { display: flex; flex-direction: column; gap: 3px; min-width: 142px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--a-border) 76%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--a-surface) 86%, transparent); }
+/* O rótulo existe porque a mesma barra soma contas diferentes conforme o
+   card (progresso de fluxo vs. conclusão de membros) — sem ele, "70%" lia
+   como a mesma coisa nos dois casos. */
+.tm-head-progress-label { font-size: 10px; font-weight: 650; letter-spacing: .02em; color: var(--a-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-head-progress-row { display: flex; align-items: center; gap: 8px; }
+.tm-head-progress-row > span { width: 82px; height: 6px; overflow: hidden; border-radius: 999px; background: var(--a-border); }
+.tm-head-progress-row > span > span { display: block; height: 100%; border-radius: inherit; background: var(--a-teal); transition: width .2s ease; }
 .tm-head-progress b { min-width: 34px; font-size: 12px; color: var(--a-sec); font-variant-numeric: tabular-nums; text-align: right; }
 /* O mesmo alarme da etapa "Parada", na barra: um card travado exibia uma barra
    teal parada num número qualquer, que lê como progresso normal. `.tm-head-

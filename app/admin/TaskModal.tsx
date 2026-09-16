@@ -670,6 +670,15 @@ export default function TaskModal({
         ? taskProgress(progressTask, flowSteps, membersByParent)
         : kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers, membersByParent) : taskProgress(progressTask))
     : 0;
+  // A mesma barra representa contas diferentes conforme o card: numa Entrega
+  // é a posição no funil da etapa corrente (inclui etapas que nem nasceram
+  // ainda); num Plano/Rotina é a fração de membros concluídos. Um rótulo
+  // fixo "Progresso" sugeria que "70%" quer dizer a mesma coisa nos dois —
+  // não quer. A contagem ao lado tira a % de ter que ser tomada de fé.
+  const headerProgressLabel = isDelivery ? "Progresso do fluxo" : kd.isPlan || isRecurringParent ? "Conclusão" : "Progresso";
+  const headerProgressCount = !isDelivery && (kd.isPlan || isRecurringParent) && planMembers.length
+    ? `${planMembers.filter((m) => m.status === "aprovado").length} de ${planMembers.length}`
+    : null;
   const linkableCandidates = liveTask
     // Ter uma entrega como pai não impede entrar num plano, e já pertencer a
     // OUTRO plano também não — um card pode ser membro de vários Planos de
@@ -740,6 +749,7 @@ export default function TaskModal({
   const planBoxes = hasPlanKind
     ? planParents.map((plan) => ({
         parent: plan,
+        relation: "plano" as const,
         subtitle: "Atividade do plano",
         progress: taskProgress(plan, actionPlanMembersOf(plan.id, clientTasks), membersByParent),
       }))
@@ -747,9 +757,9 @@ export default function TaskModal({
   // Ordem preservada: entrega, depois um por plano, depois recorrência —
   // igual à ordem que `relevantParentRelationKinds` sempre devolveu.
   const parentBoxes = [
-    ...(entregaSlot?.parent ? [{ parent: entregaSlot.parent, subtitle: entregaSlot.subtitle, progress: entregaSlot.progress }] : []),
+    ...(entregaSlot?.parent ? [{ parent: entregaSlot.parent, relation: "entrega" as const, subtitle: entregaSlot.subtitle, progress: entregaSlot.progress }] : []),
     ...planBoxes,
-    ...(recorrenciaSlot?.parent ? [{ parent: recorrenciaSlot.parent, subtitle: recorrenciaSlot.subtitle, progress: recorrenciaSlot.progress }] : []),
+    ...(recorrenciaSlot?.parent ? [{ parent: recorrenciaSlot.parent, relation: "recorrencia" as const, subtitle: recorrenciaSlot.subtitle, progress: recorrenciaSlot.progress }] : []),
   ];
   // Um slot cujo id já se conhece mas cujo card pai ainda não chegou (fetch em
   // voo) — o placeholder de carregamento usa isto, e só isto, em vez de
@@ -1415,10 +1425,13 @@ export default function TaskModal({
               {visible("progress") ? (
                 <div
                   className={`tm-head-progress ${draft.status === "parada" ? "tm-head-progress-halt" : ""}`}
-                  title={draft.status === "parada" ? `Parada em ${headerPct}%` : `Progresso ${headerPct}%`}
+                  title={draft.status === "parada" ? `Parada em ${headerPct}%` : `${headerProgressLabel} ${headerPct}%`}
                 >
-                  <span><span className="tm-head-progress-fill" style={{ width: `${headerPct}%` }} /></span>
-                  <b>{headerPct}%</b>
+                  <span className="tm-head-progress-label">{headerProgressLabel}{headerProgressCount ? ` · ${headerProgressCount}` : ""}</span>
+                  <span className="tm-head-progress-row">
+                    <span><span className="tm-head-progress-fill" style={{ width: `${headerPct}%` }} /></span>
+                    <b>{headerPct}%</b>
+                  </span>
                 </div>
               ) : null}
               <AttrVisibilityPopover attrs={attrsForKind} />
@@ -1643,6 +1656,7 @@ export default function TaskModal({
               <CardParentBox
                 key={box.parent.id}
                 parent={box.parent}
+                relation={box.relation}
                 subtitle={box.subtitle}
                 progress={box.progress}
                 canOpen={Boolean(onOpenRelatedTask) && !busy}
