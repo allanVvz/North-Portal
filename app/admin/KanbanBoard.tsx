@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AttributesConfigModal from "./AttributesConfigModal";
 import HScrollRail from "./HScrollRail";
 import KanbanSearchBar, { taskMatchesFilters, type ActiveFilter } from "./KanbanSearchBar";
@@ -29,6 +29,7 @@ import { belongsToTaskScreen, childrenByParent, flowStepsOf, isFlowDelivery, par
 import type { ClientFlowFlags, ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation";
 import type { RecurringTask, ResponsibilityAssignment } from "@/lib/supabase";
 import { calendarMonthDates } from "./calendarUtils";
+import { withoutParam } from "@/lib/url";
 import { recurringOccurrences } from "./recurringOccurrences";
 
 type ClientLite = { slug: string; name: string };
@@ -111,6 +112,7 @@ function fmtDue(value: string | null): string {
 export default function KanbanBoard({ clients, assignees }: { clients: ClientLite[]; assignees: string[] }) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const pathname = usePathname();
   const deepLinkHandledRef = useRef(false);
   const [tasks, setTasks] = useState<BoardRow[]>([]);
   // Demandas recorrentes (moldes) — não entram no quadro, mas são guia no
@@ -588,6 +590,13 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // per page load (fetching the full record even if it isn't in the current
   // board feed, e.g. a filtered-out plan activity) and strip the param so a
   // later reload/close doesn't reopen the same card.
+  //
+  // Stripping via `pathname` (not a hardcoded "/admin/kanban") matters
+  // because this component is also mounted inside /admin/operacao's Tarefas
+  // tab: a literal target used to force-navigate away to /admin/kanban
+  // whenever a deep link landed there, unmounting Operação (its tabs and
+  // filters) and lighting the wrong sidebar item. `withoutParam` also keeps
+  // any other query (e.g. `?situacao=`) that came along for the ride.
   useEffect(() => {
     if (deepLinkHandledRef.current) return;
     const id = searchParams.get("task");
@@ -597,7 +606,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
       .then((res) => (res.ok ? res.json() : null))
       .then((found) => { if (found) { applyChanged(found); openTask(id); } })
       .catch(() => { /* bad/stale link; board just opens normally */ });
-    router.replace("/admin/kanban", { scroll: false });
+    router.replace(withoutParam(pathname, searchParams.toString(), "task"), { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 

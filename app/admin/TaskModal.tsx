@@ -950,7 +950,10 @@ export default function TaskModal({
   async function copyCardLink() {
     const id = liveTask?.id ?? task?.id;
     if (!id) return;
-    const url = `${window.location.origin}/admin/kanban?task=${id}`;
+    // /admin/operacao (aba Tarefas) é a tela canônica do quadro — com abas,
+    // filtros e o item certo da sidebar; /admin/kanban continua existindo
+    // (links antigos, e2e) mas deixou de ser o destino que este botão gera.
+    const url = `${window.location.origin}/admin/operacao?task=${id}`;
     try {
       await navigator.clipboard.writeText(url);
       setLinkCopied(true);

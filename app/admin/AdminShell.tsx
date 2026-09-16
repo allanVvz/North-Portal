@@ -11,6 +11,7 @@ import NotificationsList from "./NotificationsList";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
 import type { NotificationRecord } from "@/lib/notificationTypes";
 import { buildLiveKindDefs, setLiveKinds } from "@/lib/taskCatalog/liveKinds";
+import { isNavItemActive } from "./navActive";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 
 type Theme = "light" | "dark";
@@ -347,15 +348,7 @@ export default function AdminShell({
   }, [notifOpen]);
 
   function isActive(href: string): boolean {
-    if (pathname === href || pathname.startsWith(`${href}/`)) return true;
-    // Clientes also owns the screens that hang off a client: /admin/novo and
-    // /admin/<slug> (editor and visão). Those aren't nav entries of their own,
-    // so they'd otherwise leave the sidebar with nothing highlighted.
-    if (href === "/admin/clientes") {
-      if (SECTION_HREFS.some((h) => pathname === h || pathname.startsWith(`${h}/`))) return false;
-      return pathname.startsWith("/admin/");
-    }
-    return false;
+    return isNavItemActive(pathname, href, SECTION_HREFS);
   }
 
   return (

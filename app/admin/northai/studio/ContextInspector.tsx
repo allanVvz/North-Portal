@@ -152,8 +152,8 @@ export default function ContextInspector({
             <dl className="nai-rows">
               <div><dt>Tarefas abertas</dt><dd>{ready.operation.abertas}</dd></div>
               <div><dt>Rotinas · automações</dt><dd>{ready.operation.rotinasAtivas} · {ready.operation.automacoesAtivas}</dd></div>
-              <div><dt>Plano ativo</dt><dd>{ready.operation.planoAtivo ? <Link href={`/admin/kanban?task=${ready.operation.planoAtivo.id}`}>{ready.operation.planoAtivo.title}</Link> : "nenhum"}</dd></div>
-              <div><dt>Próxima gravação</dt><dd>{ready.operation.proximaGravacao ? <Link href={`/admin/kanban?task=${ready.operation.proximaGravacao.id}`}>{shortDate(ready.operation.proximaGravacao.date)}</Link> : "não agendada"}</dd></div>
+              <div><dt>Plano ativo</dt><dd>{ready.operation.planoAtivo ? <Link href={`/admin/operacao?task=${ready.operation.planoAtivo.id}`}>{ready.operation.planoAtivo.title}</Link> : "nenhum"}</dd></div>
+              <div><dt>Próxima gravação</dt><dd>{ready.operation.proximaGravacao ? <Link href={`/admin/operacao?task=${ready.operation.proximaGravacao.id}`}>{shortDate(ready.operation.proximaGravacao.date)}</Link> : "não agendada"}</dd></div>
             </dl>
           </section>
 
@@ -168,7 +168,7 @@ export default function ContextInspector({
                       <span>{gap.detail}</span>
                       {gap.tasks.length ? (
                         <span className="nai-attention-links">
-                          {gap.tasks.slice(0, 2).map((task) => <Link key={task.id} href={`/admin/kanban?task=${task.id}`}>{task.title || "abrir"}</Link>)}
+                          {gap.tasks.slice(0, 2).map((task) => <Link key={task.id} href={`/admin/operacao?task=${task.id}`}>{task.title || "abrir"}</Link>)}
                         </span>
                       ) : null}
                     </div>

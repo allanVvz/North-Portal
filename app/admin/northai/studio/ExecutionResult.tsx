@@ -53,7 +53,7 @@ export default function ExecutionResult({ message, onRestart }: { message: Recip
         </p>
       ) : null}
       <div className="nai-result-actions">
-        {primary ? <Link className="admin-btn primary" href={`/admin/kanban?task=${primary.id}`}>Abrir {primary.kind === "plan" ? "plano" : "card"}</Link> : null}
+        {primary ? <Link className="admin-btn primary" href={`/admin/operacao?task=${primary.id}`}>Abrir {primary.kind === "plan" ? "plano" : "card"}</Link> : null}
         {hasAutomation ? <Link className="admin-btn ghost" href="/admin/northai/automacoes">Ver automações</Link> : null}
         <Link className="admin-btn ghost" href="/admin/operacao">Abrir tarefas</Link>
         <button type="button" className="admin-btn ghost" onClick={onRestart}>Criar outra</button>
