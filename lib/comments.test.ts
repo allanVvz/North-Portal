@@ -161,6 +161,17 @@ describe("familyThreadOf", () => {
     expect(familyThreadOf(avulso, quadro).map((c) => c.text)).toEqual(["nada a ver"]);
   });
 
+  // Bug real (2026-09-16): um molde de recorrência que TAMBÉM é Plano de Ação
+  // (ex. "REUNIÃO ROTINA - ALLAN") checava isPlan antes de recorrência, então
+  // usava actionPlanMembersOf (task_links) em vez das execuções de verdade
+  // (plan_id) — vincular uma execução nova nunca aparecia no thread do
+  // molde, porque o merge nem olhava pra lá.
+  it("um molde de recorrência que também é Plano mostra ele + as execuções, não membros de task_links", () => {
+    const molde = { ...card("molde", "plano_acao", []), recurrence_cadence: "semanal" as const };
+    const execucao = card("exec", "plano_acao", [{ author: "A", text: "ciclo concluído", at: "2026-09-02T09:00:00Z" }], { recurrence_parent_id: "molde" });
+    expect(familyThreadOf(molde, [molde, execucao]).map((c) => c.text)).toEqual(["ciclo concluído"]);
+  });
+
   // O editor pergunta pelo tipo do RASCUNHO: trocar o tipo no formulário
   // reflete no thread antes de salvar.
   it("aceita um tipo diferente do salvo, para o formulário em edição", () => {

@@ -333,7 +333,13 @@ function rollupProgress(
 ): number {
   const memberWeight = members.reduce((s, m) => s + (m.progress_weight || 1), 0);
   const totalWeight = flowTotalWeight(task) || memberWeight;
-  if (totalWeight === 0) return 0;
+  // Um rollup parent SEM filhos (ex.: uma execução de recorrência cujo molde
+  // é um Plano de Ação, mas que nunca ganhou atividades próprias) não pode
+  // ficar preso em 0% só por não ter nada pra somar — sem isto, um card
+  // marcado "aprovado" à mão (a régua que "REUNIÃO ROTINA" realmente usa)
+  // contava 0% pra sempre na média do pai, mesmo concluído. Com filhos de
+  // verdade, o rollup continua sendo a única fonte (comentário abaixo).
+  if (totalWeight === 0) return leafStatusPct(task);
   // Só uma ENTREGA aplica a régua de casas aos próprios membros — Plano de
   // Ação e pai de recorrência continuam com a média ponderada por statusPct
   // comum (via progressOf), porque os membros deles não são etapas de um
@@ -352,6 +358,21 @@ function rollupProgress(
   return Math.round(weighted / totalWeight);
 }
 
+/** O percentual de um card FOLHA — seu próprio status, `parada` congelado no
+ * degrau de antes de parar. Extraído para `rollupProgress` também poder usar
+ * isto como fallback quando um rollup parent não tem filhos: sem filhos pra
+ * somar, o próprio status já é a melhor resposta disponível. */
+function leafStatusPct(task: ProgressTask): number {
+  if (task.status === "parada") {
+    const frozen = task.payload?.[PRE_PARADA_STATUS_KEY];
+    if (typeof frozen === "string" && (TASK_STATUSES as readonly string[]).includes(frozen)) {
+      return statusPct(frozen as TaskStatus);
+    }
+    return 0;
+  }
+  return statusPct(task.status);
+}
+
 function progressOf(
   task: ProgressTask,
   members: ProgressTask[],
@@ -365,14 +386,7 @@ function progressOf(
     if (task.id) seen.add(task.id);
     return rollupProgress(task, members, membersByParent, seen);
   }
-  if (task.status === "parada") {
-    const frozen = task.payload?.[PRE_PARADA_STATUS_KEY];
-    if (typeof frozen === "string" && (TASK_STATUSES as readonly string[]).includes(frozen)) {
-      return statusPct(frozen as TaskStatus);
-    }
-    return 0;
-  }
-  return statusPct(task.status);
+  return leafStatusPct(task);
 }
 
 /**

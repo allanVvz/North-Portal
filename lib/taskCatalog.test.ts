@@ -138,6 +138,18 @@ describe("taskProgress — membro que também é rollup parent (bug da 'rotina t
     // A execução sozinha vale (100+0)/2 = 50 — é isso que o molde devia refletir.
     expect(taskProgress(molde, [execucao], membersByParent)).toBe(50);
   });
+
+  // Segunda camada do mesmo bug: uma execução SEM nenhuma atividade própria
+  // (o caso comum de "REUNIÃO ROTINA" — a pessoa só marca o status, não cria
+  // sub-tarefas) tinha o rollup sempre devolvendo 0, mesmo com status
+  // "aprovado" já escrito no card. Um rollup parent vazio agora cai no
+  // próprio status em vez de 0 cego.
+  it("execução Plano SEM nenhuma atividade própria usa o próprio status, não 0 cego", () => {
+    const execucaoAprovada = { id: "exec-2", kind: "plano_acao", status: "aprovado" as const, progress_weight: 1 };
+    expect(taskProgress(molde, [execucaoAprovada])).toBe(100);
+    const execucaoAberta = { id: "exec-3", kind: "plano_acao", status: "backlog" as const, progress_weight: 1 };
+    expect(taskProgress(molde, [execucaoAberta])).toBe(0);
+  });
 });
 
 describe("checkpointsProgress — onboarding % from checkpoint_comercial cards", () => {

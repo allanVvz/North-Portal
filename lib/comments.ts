@@ -90,15 +90,25 @@ export function isFamilyParent(task: Pick<FamilyMember, "id" | "kind" | "payload
 }
 
 /** Os cards cujo thread aparece junto neste: ele mesmo e a família. Sempre
- *  começa pelo próprio card, e nunca repete um id. */
+ *  começa pelo próprio card, e nunca repete um id.
+ *
+ *  Ordem de prioridade, de propósito: entrega antes de recorrência (ver
+ *  comentário de isFamilyParent) — depois, RECORRÊNCIA antes de Plano. Um
+ *  molde de recorrência que também é um Plano de Ação (ex. "REUNIÃO ROTINA -
+ *  ALLAN") tem como família de verdade as suas EXECUÇÕES (`plan_id`), não os
+ *  membros de `task_links` que `actionPlanMembersOf` acharia — isPlan vinha
+ *  primeiro antes, então vincular uma nova execução nunca aparecia no thread
+ *  do molde, não importa quantas fossem linkadas: o merge nem olhava pra lá. */
 export function familyCardsOf<T extends FamilyMember>(task: T, tasks: readonly T[], kind = task.kind): T[] {
   if (!isFamilyParent(task, kind)) return [task];
-  const templateId = kindDef(kind).isPlan || isFlowDelivery(task) ? null : recurrenceTemplateIdOf(task);
-  const members = kindDef(kind).isPlan
-    ? actionPlanMembersOf(task.id, tasks)
+  const templateId = isFlowDelivery(task) ? null : recurrenceTemplateIdOf(task);
+  const members = isFlowDelivery(task)
+    ? flowStepsOf(task.id, tasks)
     : templateId
       ? [...tasks.filter((t) => t.id === templateId), ...recurrenceExecutionsOf(templateId, tasks)]
-      : flowStepsOf(task.id, tasks);
+      : kindDef(kind).isPlan
+        ? actionPlanMembersOf(task.id, tasks)
+        : [];
   const seen = new Set([task.id]);
   const family = [task];
   for (const member of members) {
