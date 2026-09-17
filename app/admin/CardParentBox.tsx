@@ -3,7 +3,7 @@
 import TaskKindIcon from "./TaskKindIcon";
 import type { TaskRecord } from "@/lib/validation";
 
-export type ParentRelation = "entrega" | "plano" | "recorrencia";
+export type ParentRelation = "entrega" | "plano" | "recorrencia" | "referencia";
 
 // Um marcador fixo por TIPO DE RELAÇÃO (não pelo kind do card de destino) —
 // sem isto, duas caixas "Faz parte de" só se distinguiam pelo texto do
@@ -14,6 +14,7 @@ const RELATION_DOT: Record<ParentRelation, string> = {
   entrega: "tm-parentbox-dot-entrega",
   plano: "tm-parentbox-dot-plano",
   recorrencia: "tm-parentbox-dot-recorrencia",
+  referencia: "tm-parentbox-dot-referencia",
 };
 
 // A caixa "Faz parte de" do modal de um card FILHO — etapa de uma entrega,
@@ -38,14 +39,15 @@ export default function CardParentBox({
   relation: ParentRelation;
   /** Ex.: "Etapa 2 de 4 · Captação", "Atividade do plano", "Execução da recorrência". */
   subtitle: string;
-  /** Progresso do card pai, 0–100. */
-  progress: number;
+  /** Progresso do card pai, 0–100. Referências não exibem percentual porque
+   * não participam do rollup da família atual. */
+  progress?: number;
   canOpen: boolean;
   onOpen: () => void;
 }) {
   return (
     <div className="tm-box tm-parentbox">
-      <p className="tm-box-label">Faz parte de</p>
+      <p className="tm-box-label">{relation === "referencia" ? "Relacionado a" : "Faz parte de"}</p>
       <div className="tm-member-list">
         <div className="tm-member">
           <button type="button" className="tm-member-open" onClick={onOpen} disabled={!canOpen}>
@@ -57,7 +59,7 @@ export default function CardParentBox({
                 {subtitle}
               </span>
             </span>
-            <span className="tm-parentbox-pct">{progress}%</span>
+            {progress !== undefined ? <span className="tm-parentbox-pct">{progress}%</span> : null}
             {canOpen ? <span className="tm-member-arrow" aria-hidden>↗</span> : null}
           </button>
         </div>

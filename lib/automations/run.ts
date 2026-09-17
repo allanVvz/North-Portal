@@ -393,7 +393,7 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
 export async function handleTrafficRevisionComment(admin: AdminClient, taskId: string): Promise<void> {
   const trafficTask = await getAdminTask(admin, taskId);
   if (!trafficTask || trafficTask.subtype !== "trafego") return;
-  const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", taskId).limit(1);
+  const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", taskId).eq("relation_kind", "workflow_step").limit(1);
   const occurrenceId = (links?.[0] as { parent_id?: string } | undefined)?.parent_id;
   if (!occurrenceId) return;
   const occ = await getAdminTask(admin, occurrenceId);

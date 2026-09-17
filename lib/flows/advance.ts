@@ -56,7 +56,7 @@ export function justCompleted(
 }
 
 async function parentsOf(admin: AdminClient, childId: string): Promise<TaskRecord[]> {
-  const { data, error } = await admin.from("task_links").select("parent_id").eq("child_id", childId);
+  const { data, error } = await admin.from("task_links").select("parent_id").eq("child_id", childId).eq("relation_kind", "workflow_step");
   if (error) throw error;
   const ids = (data ?? []).map((r) => (r as { parent_id: string }).parent_id);
   if (!ids.length) return [];
@@ -66,7 +66,7 @@ async function parentsOf(admin: AdminClient, childId: string): Promise<TaskRecor
 }
 
 async function stepsOf(admin: AdminClient, parentId: string): Promise<{ id: string; slot: string | null }[]> {
-  const { data, error } = await admin.from("task_links").select("child_id,slot").eq("parent_id", parentId);
+  const { data, error } = await admin.from("task_links").select("child_id,slot").eq("parent_id", parentId).eq("relation_kind", "workflow_step");
   if (error) throw error;
   return (data ?? []).map((r) => {
     const row = r as { child_id: string; slot: string | null };
@@ -75,7 +75,7 @@ async function stepsOf(admin: AdminClient, parentId: string): Promise<{ id: stri
 }
 
 async function linkStep(admin: AdminClient, parentId: string, childId: string, slot: string, position: number): Promise<void> {
-  const { error } = await admin.from("task_links").insert({ parent_id: parentId, child_id: childId, slot, position });
+  const { error } = await admin.from("task_links").insert({ parent_id: parentId, child_id: childId, relation_kind: "workflow_step", slot, position });
   // Já ligado: outro caminho (re-arrasto, reconciliador, requisição
   // concorrente) chegou antes. Isso é sucesso.
   if (error && !isDuplicate(error)) throw error;

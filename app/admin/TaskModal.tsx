@@ -30,7 +30,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, isReportConversionFlow, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, isReportConversionFlow, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf } from "@/lib/taskRelations";
 import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus } from "@/lib/flows/parentStatus";
@@ -303,17 +303,20 @@ export default function TaskModal({
   // cujo subtipo diz que etapa é.
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
   const isReportFlow = Boolean(liveTask && isReportConversionFlow(liveTask));
-  const [flowDelivery, setFlowDelivery] = useState<TaskRecord | null>(null);
+  const [flowDeliveries, setFlowDeliveries] = useState<TaskRecord[]>([]);
   // A entrega de verdade por trás do card aberto — ela mesma quando o card
   // aberto É a entrega, o pai buscado à parte quando o card aberto é uma
   // etapa. `isReportFlow` não serve para decidir "esta corrente é de
   // relatório?" fora do card da própria entrega: uma etapa (trafego/feedback/
   // conversao) não carrega `payload.automation_flow`, só o pai carrega.
-  const chainDelivery = isDelivery ? liveTask : flowDelivery;
+  // Uma etapa compartilhada pode alimentar várias Entregas. Ela não ganha um
+  // "primeiro pai" arbitrário: só há uma corrente editável quando existe uma
+  // única Entrega ligada; caso contrário o modal mostra todos os contextos.
+  const chainDelivery = isDelivery ? liveTask : flowDeliveries.length === 1 ? flowDeliveries[0] : null;
   const isReportFlowChain = Boolean(chainDelivery && isReportConversionFlow(chainDelivery));
   // Os Planos de Ação a que este card pertence (pode ser mais de um) — não
   // aparecem no quadro, então quase sempre precisam ser buscados por id
-  // (igual a `flowDelivery`).
+  // (igual às Entregas de fluxo).
   const [planParents, setPlanParents] = useState<TaskRecord[]>([]);
   // A etapa recém-criada pela conclusão desta, devolvida pelo PATCH.
   const [flowNext, setFlowNext] = useState<TaskRecord | null>(null);
@@ -328,7 +331,7 @@ export default function TaskModal({
     : currentType?.behavior === "entrega" && draft.subtype ? "flow-step"
     : draft.kind === "plano_acao" ? "plan"
     : "task";
-  const deliveryType = taskTypes.find((t) => t.key === (flowDelivery?.kind ?? (isDelivery ? liveTask?.kind : null))) ?? null;
+  const deliveryType = taskTypes.find((t) => t.key === (chainDelivery?.kind ?? (isDelivery ? liveTask?.kind : null))) ?? null;
   // Índice 1-based da etapa dentro do tipo, para o "2/4". -1 enquanto o
   // vocabulário não chegou, se o subtipo saiu do tipo depois de o card já
   // existir, ou se a entrega é um fluxo de relatório — aí a corrente é da
@@ -562,32 +565,28 @@ export default function TaskModal({
 
   useEffect(() => { setFlowNext(null); }, [liveTask?.id]);
 
-  // O `slot` do elo já diz qual pai é entrega — a resposta é síncrona e exata,
-  // sem depender de o pai estar carregado. O fallback "pega o primeiro pai" que
-  // morava aqui é o que fazia um card cujo único pai é um Plano abrir com a
-  // caixa "Entrega / Carregando entrega…" para sempre.
-  const flowDeliveryId = liveTask && !isDelivery ? deliveryParentIdsOf(liveTask)[0] ?? null : null;
+  // Os elos workflow_step já dizem TODAS as Entregas que consomem esta etapa.
+  // Não escolher `parents[0]`: a Diária de gravação é legitimamente N:N.
+  const flowDeliveryIds = liveTask && !isDelivery ? deliveryParentIdsOf(liveTask) : [];
+  const flowDeliveryIdsKey = flowDeliveryIds.join(",");
+  const singleFlowDeliveryId = flowDeliveryIds.length === 1 ? flowDeliveryIds[0] : null;
   useEffect(() => {
-    if (!flowDeliveryId) { setFlowDelivery(null); return; }
-    // Só ENTREGA vira corrente. `flowDeliveryId` cai no primeiro pai quando
-    // nenhum pai carregado é entrega — e um card pode ter como único pai um
-    // Plano de Ação, que não aparece no quadro e por isso costuma não estar em
-    // clientTasks. Sem esta guarda a caixa "Etapas" renderiza com o Plano no
-    // papel de entrega e mostra uma corrente `(N/0)` que não existe. Filtrar
-    // por id não resolve, porque o pai frequentemente não está carregado; a
-    // checagem tem que ser DEPOIS de ter o card em mãos.
+    if (!flowDeliveryIds.length) { setFlowDeliveries([]); return; }
+    // Só Entrega vira corrente. Um id pode estar fora do quadro normal, então
+    // cada pai ausente é buscado em paralelo, sem N+1 serial.
     const asDelivery = (parent: TaskRecord | null) => (parent && isFlowDelivery(parent) ? parent : null);
-    const loaded = clientTasks.find((t) => t.id === flowDeliveryId) ?? null;
-    if (loaded) { setFlowDelivery(asDelivery(loaded)); return; }
     let cancelled = false;
-    // A entrega não aparece no quadro, então frequentemente não está em
-    // clientTasks — buscar por id é o caminho normal aqui, não a exceção.
-    fetch(`/api/admin/tasks/${encodeURIComponent(flowDeliveryId)}`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((parent: TaskRecord | null) => { if (!cancelled) setFlowDelivery(asDelivery(parent)); })
-      .catch(() => {});
+    Promise.all(flowDeliveryIds.map((id) => {
+      const loaded = clientTasks.find((task) => task.id === id) ?? null;
+      if (loaded) return Promise.resolve(loaded);
+      return fetch(`/api/admin/tasks/${encodeURIComponent(id)}`)
+        .then((response) => response.ok ? response.json() : null)
+        .catch(() => null) as Promise<TaskRecord | null>;
+    })).then((parents) => {
+      if (!cancelled) setFlowDeliveries(parents.map(asDelivery).filter((parent): parent is TaskRecord => Boolean(parent)));
+    });
     return () => { cancelled = true; };
-  }, [flowDeliveryId, clientTasks]);
+  }, [flowDeliveryIdsKey, clientTasks]);
 
   // O mesmo, para o Plano de Ação a que o card pertence (elo sem slot). Igual à
   // entrega, o plano não aparece no quadro, então o normal é buscar por id.
@@ -737,10 +736,10 @@ export default function TaskModal({
       const total = isReportFlowChain ? 0 : (deliveryType?.subtypes.length ?? 0);
       const stepLabel = liveTask ? subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo" : "";
       return {
-        id: flowDeliveryId,
-        parent: flowDelivery,
+        id: singleFlowDeliveryId,
+        parent: chainDelivery,
         subtitle: flowStepIndex >= 0 && total ? `Etapa ${flowStepIndex + 1} de ${total} · ${stepLabel}` : stepLabel,
-        progress: flowDelivery ? taskProgress(flowDelivery, chainSteps, membersByParent) : 0,
+        progress: chainDelivery ? taskProgress(chainDelivery, chainSteps, membersByParent) : 0,
       };
     }
     return {
@@ -759,14 +758,31 @@ export default function TaskModal({
         relation: "plano" as const,
         subtitle: "Atividade do plano",
         progress: taskProgress(plan, actionPlanMembersOf(plan.id, clientTasks), membersByParent),
+    }))
+    : [];
+  const workflowBoxes = flowDeliveryIds.length > 1
+    ? flowDeliveries.map((parent) => ({
+        parent,
+        relation: "entrega" as const,
+        subtitle: "Etapa compartilhada desta entrega",
+        progress: taskProgress(parent, flowStepsOf(parent.id, clientTasks), membersByParent),
       }))
     : [];
-  // Ordem preservada: entrega, depois um por plano, depois recorrência —
-  // igual à ordem que `relevantParentRelationKinds` sempre devolveu.
+  // Referências são contexto N:N: aparecem no modal, mas nunca contam como
+  // família nem exibem o progresso do outro card como se fosse deste.
+  const referenceBoxes = liveTask
+    ? referenceParentIdsOf(liveTask)
+      .map((id) => clientTasks.find((task) => task.id === id))
+      .filter((task): task is TaskRecord => Boolean(task))
+      .map((parent) => ({ parent, relation: "referencia" as const, subtitle: "Referência · fora do progresso" }))
+    : [];
+  // Ordem: pertencimento estrutural, recorrência temporal, depois contexto.
   const parentBoxes = [
     ...(entregaSlot?.parent ? [{ parent: entregaSlot.parent, relation: "entrega" as const, subtitle: entregaSlot.subtitle, progress: entregaSlot.progress }] : []),
+    ...workflowBoxes,
     ...planBoxes,
     ...(recorrenciaSlot?.parent ? [{ parent: recorrenciaSlot.parent, relation: "recorrencia" as const, subtitle: recorrenciaSlot.subtitle, progress: recorrenciaSlot.progress }] : []),
+    ...referenceBoxes,
   ];
   // Um slot cujo id já se conhece mas cujo card pai ainda não chegou (fetch em
   // voo) — o placeholder de carregamento usa isto, e só isto, em vez de
@@ -774,6 +790,7 @@ export default function TaskModal({
   // ids conhecidos do que planos já carregados.
   const pendingParentBox =
     Boolean(entregaSlot?.id && !entregaSlot.parent) ||
+    (flowDeliveryIds.length > 1 && flowDeliveries.length < flowDeliveryIds.length) ||
     Boolean(recorrenciaSlot?.id && !recorrenciaSlot.parent) ||
     (hasPlanKind && planParentIds.length > planParents.length);
 
@@ -804,7 +821,7 @@ export default function TaskModal({
     try {
       const res = await fetch(`/api/admin/tasks/${chainDelivery.id}/relations`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ child_id: task.id, slot }),
+        body: JSON.stringify({ child_id: task.id, slot, relation_kind: "workflow_step" }),
       });
       const body = await res.json().catch(() => null) as (TaskRecord & { error?: string }) | null;
       if (!res.ok) throw new Error(body?.error ?? "Não foi possível ligar o card.");
@@ -1665,7 +1682,7 @@ export default function TaskModal({
                 parent={box.parent}
                 relation={box.relation}
                 subtitle={box.subtitle}
-                progress={box.progress}
+                progress={"progress" in box ? box.progress : undefined}
                 canOpen={Boolean(onOpenRelatedTask) && !busy}
                 onOpen={() => void openRelatedTask(box.parent)}
               />

@@ -412,7 +412,10 @@ export const performanceSyncSchema = z.object({
 // no molde), não a posição do card no quadro. São coisas diferentes e ficaram
 // confundidas por um tempo: ordenar as etapas por `task.position` numerava a
 // corrente pela ordem em que os cards calharam de estar no Kanban.
-export type TaskParentLink = { id: string; slot: string | null; position: number };
+export type TaskRelationKind = "structural_member" | "workflow_step" | "reference" | "dependency";
+// Persisted and mandatory since 20260917035220. A missing kind is a corrupt
+// DTO, not a legacy meaning to infer from `slot`.
+export type TaskParentLink = { id: string; slot: string | null; position: number; relation_kind: TaskRelationKind };
 
 export type TaskRecord = {
   id: string;
@@ -433,10 +436,11 @@ export type TaskRecord = {
   reviewer_id: string | null;
   approver_id: string | null;
   plan_id: string | null;
-  // Pais deste card, via task_links. N:N: um mesmo roteiro serve várias peças
-  // e uma diária de gravação serve vários criativos. `slot` diz qual etapa o
-  // card ocupa naquele pai (null em membro de Plano de Ação). Sempre presente
-  // na leitura; nunca escrito direto — ver linkTasks/unlinkTasks.
+  // Relações que chegam NESTE card por task_links. Somente
+  // structural_member/workflow_step definem pertencimento e entram em rollup;
+  // reference/dependency são N:N e ficam fora da família. `slot` só existe em
+  // workflow_step. Sempre presente na leitura; nunca escrito direto — ver
+  // linkTasks/unlinkTasks.
   parents: TaskParentLink[];
   requires_review: boolean;
   requires_approval: boolean;

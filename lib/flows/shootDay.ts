@@ -41,9 +41,9 @@ export async function createShootDay(input: ShootDayInput): Promise<ShootDayResu
   for (const row of rows.deliveries) deliveries.push(await createTask(input.clientId, row));
   const roteiro = await createTask(input.clientId, rows.roteiro);
   const captacao = await createTask(input.clientId, rows.captacao);
-  for (const link of rows.links) await linkTasks(link.parentId, link.childId, link.slot, link.position);
+  for (const link of rows.links) await linkTasks(link.parentId, link.childId, link.slot, link.position, "workflow_step");
   if (input.planId) {
-    for (const delivery of deliveries) await linkTasks(input.planId, delivery.id);
+    for (const delivery of deliveries) await linkTasks(input.planId, delivery.id, null, 0, "structural_member");
   }
   if (input.assigneeProfileIds?.length) {
     for (const card of [...deliveries, roteiro, captacao]) await setTaskAssigneeProfiles(card.id, input.assigneeProfileIds);

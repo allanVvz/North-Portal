@@ -121,7 +121,12 @@ describe("mergeFamilyComments", () => {
 // painel lateral está ligada) mostrava só os comentários do próprio card. Abrir
 // o mesmo card por portas diferentes devolvia threads diferentes.
 describe("familyThreadOf", () => {
-  const elo = (id: string, slot: string | null, position = 0) => ({ id, slot, position });
+  const elo = (id: string, slot: string | null, position = 0) => ({
+    id,
+    relation_kind: slot === null ? "structural_member" as const : "workflow_step" as const,
+    slot,
+    position,
+  });
   const card = (id: string, kind: string, comments: unknown[], extra: Record<string, unknown> = {}) => ({
     id,
     kind,

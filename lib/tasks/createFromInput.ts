@@ -134,7 +134,7 @@ export async function createTaskFromInput(
   // Mas quem entra no Plano de Ação é a ENTREGA, não o primeiro passo dela.
   // Ligar o passo, como se fazia, punha um pedaço da corrente no plano e
   // deixava a peça inteira de fora.
-  if (planLink) await linkTasks(planLink, flow ? flow.delivery.id : task.id);
+  if (planLink) await linkTasks(planLink, flow ? flow.delivery.id : task.id, null, 0, "structural_member");
   if (assignee_profile_ids?.length) {
     await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
     // O pai precisa dos mesmos responsáveis, porque é o card que a pessoa

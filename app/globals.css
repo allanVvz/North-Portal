@@ -3772,6 +3772,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-parentbox-dot-entrega { background: var(--a-purple-text); }
 .tm-parentbox-dot-plano { background: var(--a-teal-text); }
 .tm-parentbox-dot-recorrencia { background: var(--a-blue-text); }
+.tm-parentbox-dot-referencia { background: var(--a-muted); }
 
 /* O compositor de atividades do plano virou .pac (PlanAddCombobox, mais abaixo).
    Só a mensagem de lista vazia continua em uso, no seletor de anexos. */

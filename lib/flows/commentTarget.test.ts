@@ -17,7 +17,7 @@ function fakeAdmin(
   const linksQuery = {
     select: () => linksQuery,
     eq: () => linksQuery,
-    not: () => Promise.resolve({ data: links, error: null }),
+    then: (resolve: (result: { data: typeof links; error: null }) => unknown) => resolve({ data: links, error: null }),
   };
   const tasksQuery = {
     select: () => tasksQuery,

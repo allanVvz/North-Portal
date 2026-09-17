@@ -51,7 +51,7 @@ const HYDRATED_ROW = {
   assignee: null,
   task_assignees: [],
   created_by_profile: null,
-  task_links: [{ parent_id: "entrega-1", slot: "roteiro", position: 10 }],
+  task_links: [{ parent_id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }],
 };
 
 // A linha crua que a RPC de fato devolve hoje: `t.*` puro, sem os joins —
@@ -74,7 +74,7 @@ describe("appendTaskComment re-hidrata antes de devolver ao chamador", () => {
     expect(rpcMock).toHaveBeenCalledWith("append_task_comment", {
       p_task_id: "task-1", p_author_id: "author-1", p_text: "novo comentário",
     });
-    expect(result.parents).toEqual([{ id: "entrega-1", slot: "roteiro", position: 10 }]);
+    expect(result.parents).toEqual([{ id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }]);
   });
 
   it("cai para a linha crua da RPC quando o re-fetch falha — incompleta é melhor que 500 numa ação já persistida", async () => {
@@ -97,7 +97,7 @@ describe("editTaskComment e deleteTaskComment compartilham a mesma re-hidrataç�
     fromMock.mockReturnValueOnce(selectBuilder({ data: [HYDRATED_ROW], error: null }));
 
     const result = await editTaskComment("task-1", 0, "2026-09-01T10:00:00.000Z", "texto editado");
-    expect(result.parents).toEqual([{ id: "entrega-1", slot: "roteiro", position: 10 }]);
+    expect(result.parents).toEqual([{ id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }]);
   });
 
   it("deleteTaskComment devolve o card re-hidratado", async () => {
@@ -106,6 +106,6 @@ describe("editTaskComment e deleteTaskComment compartilham a mesma re-hidrataç�
     fromMock.mockReturnValueOnce(selectBuilder({ data: [HYDRATED_ROW], error: null }));
 
     const result = await deleteTaskComment("task-1", 0, "2026-09-01T10:00:00.000Z");
-    expect(result.parents).toEqual([{ id: "entrega-1", slot: "roteiro", position: 10 }]);
+    expect(result.parents).toEqual([{ id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }]);
   });
 });

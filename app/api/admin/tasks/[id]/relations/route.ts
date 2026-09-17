@@ -10,6 +10,7 @@ import { HttpError } from "@/lib/validation";
 const bodySchema = z.object({
   child_id: z.string().uuid(),
   slot: z.string().max(40).nullable().optional(),
+  relation_kind: z.enum(["structural_member", "workflow_step", "reference", "dependency"]),
 });
 
 /** O order_index do subtipo `slot` dentro do tipo do pai -- a mesma ordem que a
@@ -29,20 +30,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     await requireAdmin();
     const { id } = await context.params;
-    const { child_id, slot } = bodySchema.parse(await request.json());
+    const { child_id, slot, relation_kind: relationKind } = bodySchema.parse(await request.json());
     if (child_id === id) throw new HttpError(400, "Um card nao pode ser pai de si mesmo.");
 
     const [parent, child] = await Promise.all([getTaskById(id), getTaskById(child_id)]);
     if (!parent || !child) throw new HttpError(404, "Card nao encontrado.");
     // Uma etapa so encaixa no slot do proprio subtipo: ligar um roteiro na
     // etapa de edicao produziria uma corrente que nao quer dizer nada.
-    if (slot && child.subtype !== slot) throw new HttpError(400, "Este card nao e do subtipo desta etapa.");
+    if (relationKind === "workflow_step" && !slot) throw new HttpError(400, "Uma etapa de fluxo exige um slot.");
+    if (relationKind !== "workflow_step" && slot !== null && slot !== undefined) {
+      throw new HttpError(400, "Somente uma etapa de fluxo pode ter slot.");
+    }
+    if (relationKind === "workflow_step" && child.subtype !== slot) throw new HttpError(400, "Este card nao e do subtipo desta etapa.");
 
     // Uma etapa so aceita UM card. Sem esta trava, uma tela desatualizada
     // (mostrando o slot vazio depois de ja ter ligado algo) faz um segundo
     // clique criar um segundo elo no mesmo slot -- e a caixa de etapas renderiza
     // so o primeiro, entao o outro fica invisivel. Ja aconteceu em producao.
-    if (slot && (await slotIsTaken(id, slot, child_id))) {
+    if (relationKind === "workflow_step" && slot && (await slotIsTaken(id, slot, child_id))) {
       throw new HttpError(409, "Esta etapa ja tem um card ligado.");
     }
 
@@ -53,7 +58,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // Baita 19/09" veio com -680, na frente do roteiro (-640), e o selo
     // passou a mostra-la como 1/4. Sem slot (membro de Plano de Acao) nao ha
     // corrente e a posicao nao significa nada -- fica 0.
-    await linkTasks(id, child_id, slot ?? null, slot ? await slotOrderIndex(parent.kind, slot) : 0);
+    await linkTasks(id, child_id, slot ?? null, relationKind === "workflow_step" && slot ? await slotOrderIndex(parent.kind, slot) : 0, relationKind);
     return NextResponse.json(await getTaskById(child_id));
   } catch (error) {
     return apiError(error);

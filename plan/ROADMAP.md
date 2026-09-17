@@ -1,8 +1,10 @@
 # North Portal — Roadmap
 
-Fonte única de trabalho pendente. Atualizado em 2026-09-06 contra `main` /
+Fonte única de trabalho pendente. Atualizado em 2026-09-17 contra `main` /
 produção (`northportal.vercel.app`). Os arquivos `plan/*.md` individuais continuam
-como spec detalhada de cada item; este arquivo é o índice priorizado.
+como spec detalhada de cada item; este arquivo é o índice priorizado. A arquitetura
+canônica de cards e relações está em `docs/ARQUITETURA-TAREFAS.md`; quando houver
+conflito, ela prevalece sobre descrições históricas deste backlog.
 
 > **Revisão de 2026-09-06:** além de R2.1 e R6.5 (entregues nesta rodada), cinco
 > entradas foram conferidas contra o código e estavam **erradas**, não só
@@ -21,7 +23,7 @@ como spec detalhada de cada item; este arquivo é o índice priorizado.
 > item do portal como urgente, olhar o portão.
 
 **Já entregue e EM PRODUÇÃO (não repetir):** fluxos em cascata / Entregas (motor,
-UI, 5 tipos, funil único, "Publicado" vira card, entrega recorrente); recorrência
+UI, 4 tipos estruturais, funil único, "Publicado" vira card, entrega recorrente); recorrência
 v2 (dia-da-semana opcional, sem data-limite, encerra só no molde `aprovado`/`parada`,
 TODA tarefa pode recorrer incl. Entrega); higiene do modelo de tarefas (trigger de
 vocabulário `kind`/`subtype`, `requires_review`/`_approval` amarrados à tela Etapas,
@@ -52,6 +54,39 @@ desativação e exclusão; `35af152`); **calendário composto deixou de ser cóp
 `CalendarPicker` e `DateRangeField`, e o popover de 2 meses parou de abrir 25px
 por cima do próprio campo por não dividir a coordenada pelo `zoom`; `1401fab`).
 Ver `CHANGELOG.md`.
+
+---
+
+## Prioridade zero — família única e Operação consolidada
+
+Esta frente precede novas superfícies de Operação. A aplicação ainda expõe quatro
+visões com relações diferentes (Tarefas, Entregas, Rotinas e Planos), enquanto o
+banco sobrecarrega `task_links.slot`, `plan_id` e `payload` para representar
+composição, workflow e recorrência. A meta é um Kanban de **famílias**, no qual o
+card raiz reflete a ação aberta mais importante e o modal explica a árvore inteira.
+
+| ID | Item | Critério de saída |
+|---|---|---|
+| R0.5 | **Modelo de relações familiares.** **Fase 1 entregue em produção (2026-09-17):** `20260917035220_task_link_relation_kinds` tornou explícito `task_links.relation_kind`, com constraints, índices e trigger; 42 elos estruturais e 9 etapas foram classificados sem perda. `20260917052549_reconcile_family_ownership` reconcilia ocorrência recorrente → plano → entregas, converte o elo direto recorrência → entrega em `reference`, exige `relation_kind` em toda escrita e limita `structural_member` a um pai por card. `workflow_step` permanece N:N explícito para a Diária de gravação. | Todo card tem localização estrutural canônica; referência não duplica progresso; `slot` nunca decide semântica. |
+| R0.6 | **Higiene de catálogo e automação.** Eliminar tipos/subtipos legados, separar subtipo de papel de workflow e corrigir os moldes de relatório classificados como Entrega. | Quatro tipos estruturais explícitos, subtipo `geral` quando necessário; molde de relatório é Tarefa recorrente e ocorrência é Entrega. |
+| R0.7 | **Backend familiar e rollups.** Endpoint/DTO em lote para raiz, caminho, ação atual, bloqueios, histórico e progresso derivado. | Sem escolha arbitrária de pai, sem N+1, operações idempotentes de concluir/reabrir/reagendar. |
+| R0.8 | **TaskModal Família + Kanban único.** Substituir caixas relacionais repetidas por uma seção Família e consolidar as quatro abas em uma projeção. | O portão de login (`e2e/auth-login.spec.ts`) continua verde; E2E autenticado de família cobre Tarefa, Plano, Entrega, recorrência, referência compartilhada e relatório com fixtures isoladas. |
+
+Sequência obrigatória: R0.5 → R0.6 → R0.7 → R0.8. Não iniciar uma quinta tela
+de Operação nem ampliar o fluxo de automação antes de R0.5/R0.6. A migração deve
+manter compatibilidade temporária, dual-write e rollback, pois produção é o único
+ambiente integrado.
+
+**Evidência da Fase 1 (17/09):** preflight remoto sem `slot` vazio; schema
+validado com `relation_kind NOT NULL`, constraints, dois índices e trigger
+`validate_task_link`; ledger remoto registra `20260917035220`. E2E autenticado
+verde: login e os três cenários de navegação do TaskModal/Operação. O runbook
+de acesso direto, TLS e ledger está em `AGENTS.md`.
+
+**Decisão consolidada:** a Diária de gravação é `workflow_step` N:N explícito,
+não exceção nem segundo pai estrutural. A regra de unicidade recai somente em
+`structural_member`; o modal deve mostrar todas as Entregas que reutilizam uma
+etapa, sem somar referência contextual no progresso.
 
 ---
 
@@ -362,7 +397,7 @@ Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
 | R4.12 | **GED no Drive da plataforma + migração dos links.** O GED (`lib/ged/`) grava hoje no Supabase Storage e só espelha no Drive se `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` + `GOOGLE_DRIVE_ROOT_FOLDER_ID` existirem (casa com R1.4). Falta: configurar a conta "protagonista" da plataforma; criar a árvore `Clientes/<nome> (<slug>)/…` também para os clientes já cadastrados; migrar os links colados em `client_drive_links` (brand/products/uploads) copiando os arquivos para o GED; e trocar os links antigos dos cards/comentários pelos do GED. | `docs/northai/skills/ged.md`. Médio. |
 | R4.14 | **Débitos conscientes do Estúdio (16/09).** (a) Histórico das conversas mora no navegador (`app/admin/northai/studio/useStudioSession.ts`, uma thread por cliente); o contrato `append`/`patch` é o que um armazenamento no servidor implementa — faz parte de R4.11. (b) Rotinas padrão de clientes cadastrados antes de 16/09 não têm `payload.routine_key`; só o título exato as reconhece. Backfill: gravar a chave nos cards cujo título bate com o catálogo (SQL a rodar pelo usuário). (c) A automação criada pelo Estúdio ainda aponta para uma rotina via `target_task_id` (R4.10 continua aberto; o Estúdio não criou dependência nova). (d) Status "Agendada" da captação (R4.13) caberia na captação compartilhada da diária sem mudar o modelo. (e) Não existe logo de cliente no cadastro: avatar e identidade usam monograma (`app/admin/northai/studio/ClientIdentity.tsx` é o único lugar a trocar quando existir). (f) O composer já entrega `{ text, mentions }` com @cliente estruturado; "/operação" e "+arquivo" entram no mesmo pacote no harness (R4.11). (g) Perguntas ("quais são as rotinas?") ainda não têm resposta — o modo atual só monta pedidos. | `lib/northai/`, `docs/northai/skills/receitas.md`. |
 | R4.13 | **Lacunas da jornada do cliente ponta a ponta.** Mapeadas contra a jornada interna (17 slides) em `docs/northai/JORNADA-PONTA-A-PONTA.md`: classificação Bronze/Prata/Ouro no lead, follow-up da proposta no 4º dia útil, SLA de kickoff 48h, status "Agendada" da gravação, jornada de 14 passos visível por cliente, ciclo mensal. | Priorização no próprio documento. |
-| R4.10 | **Repensar "automação vira card".** Hoje uma automação de relatório se liga a um card comum (`kind='operacional'`) escolhido à mão como alvo (`automation_configs.target_task_id`); o subtipo `relatorio_trafego` existe mas está `active=false`. Frente: tipo dedicado de card para os alvos de automação (reativar/renomear `relatorio_trafego` ou um `kind` próprio), vínculo 1:1 explícito automação↔card, e criação do card pelo próprio fluxo de automação em vez de o admin ter que criar e apontar. O motor de recorrência **já** foi conciliado (dia-da-semana opcional; para de avançar quando o card-pai está `aprovado`/`parada` — `recurrenceStopped`). | `plan/AUTOMACOES-RELATORIO-TRAFEGO.md`, `docs/ARQUITETURA-TAREFAS.md`, `automacoes-plano-pendente` (memória). Casa com R6.6. Médio. |
+| R4.10 | **Automação ligada à família, não “vira card”.** Automação continua configuração + runs/artefatos; não cria um quinto `kind` nem reclassifica o alvo. R0.5/R0.6 definem FK entre configuração, molde/ocorrência e passos materializados. O molde de relatório é Tarefa recorrente; somente a ocorrência instancia Entrega · Relatório. | `docs/ARQUITETURA-TAREFAS.md`. Depende de R0.5/R0.6; casa com R6.6. |
 
 ---
 

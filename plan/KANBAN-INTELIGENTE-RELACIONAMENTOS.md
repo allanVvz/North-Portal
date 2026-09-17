@@ -1,5 +1,13 @@
 # Kanban inteligente: relacionamentos entre card, plano, cascata e rotina
 
+> **Status: investigação histórica, superada em 2026-09-17.** Este arquivo
+> preserva evidências e decisões da rodada anterior, mas não é a especificação
+> de implementação. A arquitetura canônica é
+> [`docs/ARQUITETURA-TAREFAS.md`](../docs/ARQUITETURA-TAREFAS.md) e o trabalho
+> priorizado está em [`plan/ROADMAP.md`](ROADMAP.md), R0.5–R0.8. Em particular,
+> não use este documento para manter múltiplos pais de propriedade ou para
+> interpretar `slot` como semântica definitiva.
+
 Investigação de arquitetura (Opus, 2026-09-16). **Só investigação — nada
 abaixo foi implementado.** Cobre plano/cascata/recorrência/relações a pedido
 explícito do usuário, para uma sessão de execução (Sonnet) posterior. Cada

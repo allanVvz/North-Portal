@@ -606,7 +606,7 @@ export async function handleConversionComment(admin: AdminClient, commentedTaskI
     // Tráfego/pai são instruções de revisão do PDF de mídia.
     if (!commented || commented.subtype !== "feedback") return;
     const candidates = new Set<string>([commentedTaskId]);
-    const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", commentedTaskId);
+    const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", commentedTaskId).eq("relation_kind", "workflow_step");
     for (const l of links ?? []) candidates.add((l as { parent_id: string }).parent_id);
     for (const id of candidates) await processConversionFeedback(admin, id);
   } catch {

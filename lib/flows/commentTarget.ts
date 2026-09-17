@@ -58,7 +58,7 @@ async function adminFlowStepsOf(admin: AdminClient, deliveryId: string): Promise
     .from("task_links")
     .select("child_id,slot,position")
     .eq("parent_id", deliveryId)
-    .not("slot", "is", null);
+    .eq("relation_kind", "workflow_step");
   if (linksError) throw linksError;
   const rows = (links ?? []) as { child_id: string; slot: string | null; position: number | null }[];
   if (!rows.length) return [];
@@ -69,7 +69,7 @@ async function adminFlowStepsOf(admin: AdminClient, deliveryId: string): Promise
     .in("id", rows.map((r) => r.child_id));
   if (stepsError) throw stepsError;
 
-  const parents = new Map(rows.map((r) => [r.child_id, [{ id: deliveryId, slot: r.slot, position: r.position ?? 0 }]]));
+  const parents = new Map(rows.map((r) => [r.child_id, [{ id: deliveryId, relation_kind: "workflow_step" as const, slot: r.slot, position: r.position ?? 0 }]]));
   return (steps ?? [])
     .map((row) => ({ ...asTaskRecord(row), parents: parents.get((row as { id: string }).id) ?? [] }))
     .sort((a, b) => stepOrderOf(a, deliveryId) - stepOrderOf(b, deliveryId));

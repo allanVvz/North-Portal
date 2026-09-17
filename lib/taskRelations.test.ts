@@ -17,6 +17,7 @@ import {
   parentIdsOf,
   planParentIdOf,
   planParentIdsOf,
+  referenceParentIdsOf,
   recurrenceParentOf,
   slotOf,
   stepOrderOf,
@@ -28,7 +29,12 @@ import {
 // DENTRO da corrente (o order_index do subtipo), não a posição do card no
 // quadro — só os testes de ordenação se importam com ela; os outros usam o
 // default.
-const elo = (id: string, slot: string | null = null, position = 0) => ({ id, slot, position });
+const elo = (
+  id: string,
+  slot: string | null = null,
+  position = 0,
+  relation_kind: TaskParentLink["relation_kind"] = slot === null ? "structural_member" : "workflow_step",
+): TaskParentLink => ({ id, slot, position, relation_kind });
 
 describe("relações entre tarefas", () => {
   it("resolve a relação imutável da execução com o card pai carregado", () => {
@@ -73,13 +79,13 @@ describe("relações entre tarefas", () => {
   });
 });
 
-describe("pertencimento N:N (task_links)", () => {
+describe("relações de tarefa (task_links)", () => {
   // O ponto todo da mudança: o mesmo roteiro serve várias peças, a mesma
   // diária de gravação serve vários criativos.
   const roteiro = { parents: [elo("entrega-a", "roteiro"), elo("entrega-b", "roteiro")] };
   const avulsa = { parents: [] };
 
-  it("um card pertence a vários pais ao mesmo tempo", () => {
+  it("mantém a leitura dos múltiplos donos legados até a reconciliação", () => {
     expect(parentIdsOf(roteiro)).toEqual(["entrega-a", "entrega-b"]);
     expect(hasParent(roteiro, "entrega-b")).toBe(true);
     expect(hasParent(avulsa, "entrega-a")).toBe(false);
@@ -97,6 +103,14 @@ describe("pertencimento N:N (task_links)", () => {
     expect(slotOf(compartilhado, "p1")).toBe("roteiro");
     expect(slotOf(compartilhado, "p2")).toBeNull();
     expect(slotOf(compartilhado, "inexistente")).toBeNull();
+  });
+
+  it("referência compartilhada não vira pertencimento nem entra no rollup", () => {
+    const referenciado = { parents: [elo("familia", null, 0, "reference")] };
+    expect(parentIdsOf(referenciado)).toEqual([]);
+    expect(hasParent(referenciado, "familia")).toBe(false);
+    expect(referenceParentIdsOf(referenciado)).toEqual(["familia"]);
+    expect(childrenByParent([referenciado]).get("familia")).toBeUndefined();
   });
 });
 
@@ -165,8 +179,8 @@ describe("etapa de entrega × membro de plano", () => {
     expect(deliveryParentIdsOf(soMembro)).toEqual([]);
   });
 
-  it("familyRootIdOf: entrega tem precedência sobre plano; card avulso é null", () => {
-    expect(familyRootIdOf(etapaNoPlano)).toBe(entregaId); // é etapa E membro → a entrega
+  it("familyRootIdOf não escolhe pai por ordem incidental; card avulso é null", () => {
+    expect(familyRootIdOf(etapaNoPlano)).toBeNull(); // há dois caminhos: precisa de contexto explícito
     expect(familyRootIdOf(soEtapa)).toBe(entregaId);
     expect(familyRootIdOf(soMembro)).toBe(planoId);
     expect(familyRootIdOf({ parents: [] })).toBeNull();
@@ -198,7 +212,7 @@ describe("resiliência a `parents` ausente (card não hidratado, ver P0-A)", () 
   });
 
   it("um card sem parents numa lista não quebra as varreduras por pai — só nunca aparece como filho de ninguém", () => {
-    const outro = { id: "outro", parents: [{ id: "p1", slot: null, position: 0 }] };
+    const outro = { id: "outro", parents: [{ id: "p1", relation_kind: "structural_member" as const, slot: null, position: 0 }] };
     const lista = [{ id: "sem-parents", ...semParents }, outro];
     expect(() => childrenOf("p1", lista)).not.toThrow();
     expect(childrenOf("p1", lista)).toEqual([outro]);

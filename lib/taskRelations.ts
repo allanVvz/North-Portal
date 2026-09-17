@@ -1,4 +1,4 @@
-import type { TaskParentLink, TaskRecord } from "./validation";
+import type { TaskParentLink, TaskRecord, TaskRelationKind } from "./validation";
 import type { TaskSubtypeDef } from "./taskTypes";
 
 export const DEFERRED_TASK_FLAG = "deferred_until_accessed";
@@ -47,29 +47,52 @@ const RECURRENCE_RELATION_PAYLOAD_KEYS = [
 
 type TaskRelation = Pick<TaskRecord, "parents">;
 
+/** Reads the persisted relation kind. `slot` names only a workflow role. */
+export function relationKindOf(link: TaskParentLink): TaskRelationKind {
+  return link.relation_kind;
+}
+
+function ownershipLink(link: TaskParentLink): boolean {
+  const kind = relationKindOf(link);
+  return kind === "structural_member" || kind === "workflow_step";
+}
+
 // ---- Pertencimento (task_links) ------------------------------------------
 //
-// Um card pode ter VÁRIOS pais: o mesmo roteiro serve três peças, a mesma
-// diária de gravação serve vários criativos. Por isso o vínculo saiu de
-// `plan_id` (1:1) para a tabela de elos, e é o MESMO mecanismo para Plano de
-// Ação e para entrega — a diferença entre os dois está no `behavior` do tipo
-// do pai, não na forma como eles seguram os filhos.
+// `task_links` guarda relações de vários significados. Durante a migração os
+// dados antigos ainda podem ter mais de um elo estrutural, mas o contrato de
+// destino é um único `structural_member` por card. `workflow_step` pode ser
+// N:N de propósito (uma Diária de gravação alimenta várias Entregas); ele é um
+// caminho de execução, não um segundo Plano dono. Reuso somente contextual é
+// `reference`. A diferença entre Plano e Entrega está no `behavior` do pai;
+// a semântica do elo vem de relation_kind.
 //
 // `plan_id` sobreviveu com um único significado: ocorrência de recorrência,
 // que é 1:1 por natureza.
 
 export function parentIdsOf(task: TaskRelation): string[] {
-  return (task.parents ?? []).map((p) => p.id);
+  return (task.parents ?? []).filter(ownershipLink).map((p) => p.id);
 }
 
 export function hasParent(task: TaskRelation, parentId: string): boolean {
-  return (task.parents ?? []).some((p) => p.id === parentId);
+  return (task.parents ?? []).some((p) => p.id === parentId && ownershipLink(p));
+}
+
+/** Ligações contextuais: aparecem na família como contexto, mas nunca mudam
+ * raiz, prazo, responsáveis ou o rollup do card. */
+export function referenceParentIdsOf(task: TaskRelation): string[] {
+  return (task.parents ?? []).filter((p) => relationKindOf(p) === "reference").map((p) => p.id);
+}
+
+/** Bloqueios explícitos entre cards; também não são parentesco. */
+export function dependencyParentIdsOf(task: TaskRelation): string[] {
+  return (task.parents ?? []).filter((p) => relationKindOf(p) === "dependency").map((p) => p.id);
 }
 
 /** O slot (etapa) que este card ocupa dentro de um pai específico. O mesmo
  * roteiro pode ocupar o slot "roteiro" em várias entregas. */
 export function slotOf(task: TaskRelation, parentId: string): string | null {
-  return (task.parents ?? []).find((p) => p.id === parentId)?.slot ?? null;
+  return (task.parents ?? []).find((p) => p.id === parentId && relationKindOf(p) === "workflow_step")?.slot ?? null;
 }
 
 /** A etapa que um card É, dentro de um fluxo: o próprio subtipo dele.
@@ -182,13 +205,13 @@ export function stepOrderOf(task: TaskRelation, parentId: string): number {
  * entrada, que é estável. */
 export function flowStepsOf<T extends TaskRelation>(parentId: string, tasks: readonly T[]): T[] {
   return tasks
-    .filter((task) => (task.parents ?? []).some((p) => p.id === parentId && p.slot !== null))
+    .filter((task) => (task.parents ?? []).some((p) => p.id === parentId && relationKindOf(p) === "workflow_step"))
     .sort((a, b) => stepOrderOf(a, parentId) - stepOrderOf(b, parentId));
 }
 
 /** Membros de um Plano de Ação: filhos ligados SEM slot. */
 export function actionPlanMembersOf<T extends TaskRelation>(parentId: string, tasks: readonly T[]): T[] {
-  return tasks.filter((task) => (task.parents ?? []).some((p) => p.id === parentId && p.slot === null));
+  return tasks.filter((task) => (task.parents ?? []).some((p) => p.id === parentId && relationKindOf(p) === "structural_member"));
 }
 
 /** TODOS os Planos de Ação a que este card pertence — um card pode ser
@@ -198,7 +221,7 @@ export function actionPlanMembersOf<T extends TaskRelation>(parentId: string, ta
  * para os poucos controles que mostram um valor único por desenho (um
  * `<select>`), não porque só possa haver um. */
 export function planParentIdsOf(task: TaskRelation): string[] {
-  return (task.parents ?? []).filter((p) => p.slot === null).map((p) => p.id);
+  return (task.parents ?? []).filter((p) => relationKindOf(p) === "structural_member").map((p) => p.id);
 }
 
 /** UM Plano de Ação a que este card pertence — o primeiro elo SEM slot
@@ -215,7 +238,7 @@ export function planParentIdOf(task: TaskRelation): string | null {
 
 /** As entregas de que este card é etapa — elos COM slot. */
 export function deliveryParentIdsOf(task: TaskRelation): string[] {
-  return (task.parents ?? []).filter((p) => p.slot !== null).map((p) => p.id);
+  return (task.parents ?? []).filter((p) => relationKindOf(p) === "workflow_step").map((p) => p.id);
 }
 
 /** O card-pai "família" deste card, para a visão pai↔filho do modal e para o
@@ -225,7 +248,8 @@ export function deliveryParentIdsOf(task: TaskRelation): string[] {
  *  ciclo é uma entrega própria e junta os comentários de meses seria ruído.
  *  `null` quando o card não é filho de nenhum dos dois. */
 export function familyRootIdOf(task: TaskRelation): string | null {
-  return deliveryParentIdsOf(task)[0] ?? planParentIdOf(task) ?? null;
+  const parents = parentIdsOf(task);
+  return parents.length === 1 ? parents[0] : null;
 }
 
 export function recurrenceExecutionsOf<T extends Pick<TaskRecord, "payload">>(parentId: string, tasks: readonly T[]): T[] {

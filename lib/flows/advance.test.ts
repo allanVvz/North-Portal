@@ -85,7 +85,7 @@ const doneStep = (id: string, subtype: string) =>
 function world() {
   return {
     tasks: [delivery("entrega", "Vídeo institucional") as unknown as Row, doneStep("card-roteiro", "roteiro") as unknown as Row],
-    task_links: [{ parent_id: "entrega", child_id: "card-roteiro", slot: "roteiro", position: 10 }] as Row[],
+    task_links: [{ parent_id: "entrega", child_id: "card-roteiro", relation_kind: "workflow_step", slot: "roteiro", position: 10 }] as Row[],
     task_types: [...TYPE_ROWS],
   };
 }
@@ -116,7 +116,7 @@ describe("advanceFlow", () => {
   it("avança TODAS as entregas de que a etapa participa", async () => {
     const state = world();
     state.tasks.push(delivery("entrega-2", "Reels promo") as unknown as Row);
-    state.task_links.push({ parent_id: "entrega-2", child_id: "card-roteiro", slot: "roteiro", position: 10 });
+    state.task_links.push({ parent_id: "entrega-2", child_id: "card-roteiro", relation_kind: "workflow_step", slot: "roteiro", position: 10 });
     const { admin } = fakeAdmin(state);
 
     const outcome = await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
@@ -131,7 +131,7 @@ describe("advanceFlow", () => {
   it("não cria nada quando o slot seguinte já está ocupado à mão", async () => {
     const state = world();
     state.tasks.push(doneStep("captacao-existente", "captacao") as unknown as Row);
-    state.task_links.push({ parent_id: "entrega", child_id: "captacao-existente", slot: "captacao", position: 20 });
+    state.task_links.push({ parent_id: "entrega", child_id: "captacao-existente", relation_kind: "workflow_step", slot: "captacao", position: 20 });
     const { admin, inserts } = fakeAdmin(state);
     const outcome = await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
     expect(outcome.created).toHaveLength(0);
@@ -168,7 +168,7 @@ describe("advanceFlow", () => {
     const state = world();
     for (const [id, slot] of [["c2", "captacao"], ["c3", "publicacao"]] as const) {
       state.tasks.push(doneStep(id, slot) as unknown as Row);
-      state.task_links.push({ parent_id: "entrega", child_id: id, slot, position: 20 });
+      state.task_links.push({ parent_id: "entrega", child_id: id, relation_kind: "workflow_step", slot, position: 20 });
     }
     const { admin } = fakeAdmin(state);
     const outcome = await advanceFlow(admin, doneStep("c3", "publicacao"));
@@ -200,8 +200,8 @@ describe("diária de gravação compartilhada", () => {
           doneStep("captacao-diaria", "captacao") as unknown as Row,
         ],
         task_links: pieces.flatMap((id) => [
-          { parent_id: id, child_id: "roteiro-diaria", slot: "roteiro", position: 10 },
-          { parent_id: id, child_id: "captacao-diaria", slot: "captacao", position: 20 },
+          { parent_id: id, child_id: "roteiro-diaria", relation_kind: "workflow_step", slot: "roteiro", position: 10 },
+          { parent_id: id, child_id: "captacao-diaria", relation_kind: "workflow_step", slot: "captacao", position: 20 },
         ]) as Row[],
         task_types: [...TYPES_WITH_EDICAO],
       },

@@ -17,13 +17,13 @@ determinístico (receitas); no roadmap (R4.11) um modelo lê este mesmo texto.
 | Cliente | `clients` (slug é a URL do portal: `/<slug>`) |
 | Tarefa / demanda | card em `tasks`, tipo `operacional` ("Tarefa") |
 | Entrega / fluxo em cascata | card com `payload.flow_parent = true`, tipo com `behavior = 'entrega'`; cada etapa concluída cria a próxima (`lib/flows/advance.ts`) |
-| Etapa | card filho da entrega, ligado por `task_links.slot` = subtipo (`roteiro`, `captacao`, `edicao`, `publicacao`) |
-| Plano de ação | card `kind = 'plano_acao'`; atividades ligadas por `task_links` sem slot |
+| Etapa | card filho materializado da entrega; `relation_kind = 'workflow_step'`, com `slot` apenas como papel e ordem da etapa. Pode alimentar mais de uma Entrega quando o trabalho é realmente compartilhado. |
+| Plano de ação | card `kind = 'plano_acao'`; atividades são membros estruturais (`relation_kind = 'structural_member'`). Cada card tem no máximo um pai estrutural. |
 | Rotina / recorrência | card molde com `recurrence_cadence` (`semanal`, `quinzenal`, `mensal`); cada ciclo concluído registra `payload.cycle_log` (data e quem) |
 | Diária de gravação | um roteiro e uma captação compartilhados por várias entregas (`lib/flows/shootDayRows.ts`) |
 | Formato | `payload.formato` — Reels vertical, Carrossel, Stories, Banner, Post feed (`lib/northai/formats.ts`) |
 | Situação | derivada, nunca gravada: Parada, Atrasada, Concluída, No prazo (`app/admin/deadlineState.ts`) |
-| Automação | `automation_configs` ligada a um card-alvo (`lib/automationCatalog.ts`) |
+| Automação | configuração + execuções/artefatos, ligada à família sem alterar o tipo do card; não é um quinto tipo estrutural |
 | GED | armazenamento interno de arquivos do cliente (ver `ged.md`) |
 
 Status do quadro: Entrada (`backlog`), Em produção, Revisão, Aprovação, Concluído

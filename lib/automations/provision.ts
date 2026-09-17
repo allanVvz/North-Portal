@@ -74,15 +74,38 @@ async function cloneSimpleTask(admin: AdminClient, template: TaskRecord, clientI
 }
 
 // Caso 3 (plano de ação): clone estrutural — o pai + todos os membros
-// (plan_id = pai.id), client_id trocado. Reatribuição de "itens atribuídos"
-// por responsável fica para depois (ver cabeçalho do arquivo). Exported —
+// ligados por task_links (slot NULL), client_id trocado. plan_id pertence
+// exclusivamente à relação molde -> ocorrência de recorrência; nunca a um
+// membro de Plano. Reatribuição de "itens atribuídos" por responsável fica
+// para depois (ver cabeçalho do arquivo). Exported —
 // lib/automations/execute.ts reuses this exact mechanism for Automação 1's
 // plano_acao branch (a new instance of the plan gets created on the plan's
 // own due date, not just on "Provisionar agora").
 export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, clientId: string): Promise<TaskRecord> {
-  const { data: memberRows, error: membersError } = await admin.from("tasks").select(TASK_COLUMNS).eq("plan_id", templateParent.id);
+  const { data: memberLinks, error: linksError } = await admin
+    .from("task_links")
+    .select("child_id,position")
+    .eq("parent_id", templateParent.id)
+    .eq("relation_kind", "structural_member")
+    .order("position", { ascending: true });
+  if (linksError) throw linksError;
+
+  const links = (memberLinks ?? []) as { child_id: string; position: number }[];
+  const childIds = links.map((link) => link.child_id);
+  const { data: memberRows, error: membersError } = childIds.length === 0
+    ? { data: [], error: null }
+    : await admin.from("tasks").select(TASK_COLUMNS).in("id", childIds);
   if (membersError) throw membersError;
-  const members = (memberRows ?? []).map(asTaskRecord);
+
+  const membersById = new Map((memberRows ?? []).map((row) => {
+    const member = asTaskRecord(row);
+    return [member.id, member] as const;
+  }));
+  const members = links.map((link) => {
+    const member = membersById.get(link.child_id);
+    if (!member) throw new Error(`Membro ${link.child_id} do plano-modelo não foi encontrado.`);
+    return { link, member };
+  });
 
   const parentId = crypto.randomUUID();
   const { data: parentData, error: parentError } = await admin
@@ -118,9 +141,10 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
   const parent = asTaskRecord(parentData![0]);
 
   try {
-    for (const member of members) {
+    for (const { link, member } of members) {
+      const memberId = crypto.randomUUID();
       const { error: memberError } = await admin.from("tasks").insert({
-        id: crypto.randomUUID(),
+        id: memberId,
         client_id: clientId,
         kind: member.kind,
         subtype: member.subtype,
@@ -130,7 +154,7 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
         assignee: AUTOMATION_ASSIGNEE,
         reviewer_id: null,
         approver_id: null,
-        plan_id: parent.id,
+        plan_id: null,
         requires_review: member.requires_review,
         requires_approval: member.requires_approval,
         due_date: member.due_date,
@@ -142,9 +166,18 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
         description: member.description,
         client_visible: member.client_visible,
         payload: member.payload,
-        position: member.position,
+        position: 0,
       });
       if (memberError) throw memberError;
+
+      const { error: linkError } = await admin.from("task_links").insert({
+        parent_id: parent.id,
+        child_id: memberId,
+        relation_kind: "structural_member",
+        slot: null,
+        position: link.position,
+      });
+      if (linkError) throw linkError;
     }
   } catch (error) {
     // Partial plan (parent exists, some members missing) — surface it on the

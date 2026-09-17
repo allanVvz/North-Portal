@@ -79,7 +79,7 @@ export { TASK_COLUMNS } from "./taskColumns";
 // of the bare TASK_COLUMNS so `assignee` always reflects linked accounts too.
 const TASK_ASSIGNEES_JOIN = "task_assignees(profile:profiles(id,full_name))";
 // !inner NÃO: um card sem pai nenhum é o caso comum e precisa vir mesmo assim.
-const TASK_LINKS_JOIN = "task_links!task_links_child_id_fkey(parent_id,slot,position)";
+const TASK_LINKS_JOIN = "task_links!task_links_child_id_fkey(parent_id,relation_kind,slot,position)";
 const TASK_AUTHOR_JOIN = "created_by_profile:profiles!tasks_created_by_fkey(full_name)";
 const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN},${TASK_AUTHOR_JOIN},${TASK_LINKS_JOIN}`;
 
@@ -92,7 +92,7 @@ type TaskAssigneesJoin = {
   // mesma consulta, como os responsáveis: todo o front trabalha com arrays de
   // TaskRecord e resolve pai/filho de forma síncrona (KanbanBoard, TaskModal,
   // portal). Buscar os elos à parte obrigaria a tornar assíncrono tudo isso.
-  task_links?: { parent_id: string; slot: string | null; position: number | null }[] | null;
+  task_links?: { parent_id: string; relation_kind: TaskParentLink["relation_kind"]; slot: string | null; position: number | null }[] | null;
 };
 
 // Merges linked-account names into the legacy free-text `assignee` column
@@ -117,7 +117,7 @@ function mergeTaskAssigneeRow<T extends { assignee: string | null } & TaskAssign
     assignee: mergeAssigneeDisplay(rest.assignee, linkedProfiles.map((p) => p.full_name)),
     assignee_profile_ids: linkedProfiles.map((p) => p.id),
     created_by_name: author?.full_name ?? null,
-    parents: (task_links ?? []).map((l) => ({ id: l.parent_id, slot: l.slot, position: l.position ?? 0 })),
+    parents: (task_links ?? []).map((l) => ({ id: l.parent_id, relation_kind: l.relation_kind, slot: l.slot, position: l.position ?? 0 })),
   };
 }
 
@@ -301,6 +301,18 @@ export async function getClient(slug: string, includeInactive = false): Promise<
   const { data, error } = await query;
   if (error) fail(error);
   return (data?.[0] as ClientRow | undefined) ?? null;
+}
+
+/** Resolve several client slugs in one indexed query (avoids route-level N+1). */
+export async function getClientsBySlugs(slugs: string[], includeInactive = false): Promise<Map<string, ClientRow>> {
+  const unique = [...new Set(slugs.filter(Boolean))];
+  if (unique.length === 0) return new Map();
+  const supabase = await createClient();
+  let query = supabase.from("clients").select("id,slug,name,is_active").in("slug", unique);
+  if (!includeInactive) query = query.eq("is_active", true);
+  const { data, error } = await query;
+  if (error) fail(error);
+  return new Map(((data as ClientRow[] | null) ?? []).map((row) => [row.slug, row]));
 }
 
 export async function getPortalPayload(slug: string): Promise<PortalPayload> {
@@ -1614,25 +1626,29 @@ export async function listFlowDeliveries(): Promise<FlowDelivery[]> {
 
 // ---- Elos de pertencimento (task_links) --------------------------------------
 //
-// Um card pode ter vários pais — o mesmo roteiro serve três peças, a mesma
-// diária de gravação serve vários criativos. Plano de Ação e entrega usam este
-// mesmo mecanismo; o que os diferencia é o `behavior` do tipo do pai.
+// Plano, entrega, referência e dependência usam a mesma tabela. Só
+// structural_member/workflow_step são propriedade; reuso N:N deve ser escrito
+// como reference, nunca como um segundo pai estrutural.
 
-type LinkRow = { parent_id: string; child_id: string; slot: string | null };
+type LinkRow = { parent_id: string; child_id: string; slot: string | null; relation_kind: TaskParentLink["relation_kind"] };
 type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
 
 /** Ids dos filhos de um conjunto de pais, em uma consulta. */
 async function childIdsOf(supabase: SupabaseLike, parentIds: readonly string[]): Promise<string[]> {
   if (!parentIds.length) return [];
-  const { data, error } = await supabase.from("task_links").select("child_id").in("parent_id", parentIds);
+  const { data, error } = await supabase
+    .from("task_links")
+    .select("child_id")
+    .in("parent_id", parentIds)
+    .in("relation_kind", ["structural_member", "workflow_step"]);
   if (error) fail(error);
   return ((data as { child_id: string }[] | null) ?? []).map((r) => r.child_id);
 }
 
-export async function linkTasks(parentId: string, childId: string, slot: string | null = null, position = 0): Promise<void> {
+export async function linkTasks(parentId: string, childId: string, slot: string | null, position: number, relationKind: TaskParentLink["relation_kind"]): Promise<void> {
   if (parentId === childId) throw new HttpError(400, "Um card nao pode ser pai de si mesmo.");
   const supabase = await createClient();
-  const { error } = await supabase.from("task_links").insert({ parent_id: parentId, child_id: childId, slot, position });
+  const { error } = await supabase.from("task_links").insert({ parent_id: parentId, child_id: childId, relation_kind: relationKind, slot, position });
   // 23505 = já ligado. Ligar duas vezes é a mesma coisa que ligar uma.
   if (error && (error as { code?: string }).code !== "23505") fail(error);
 }
@@ -1656,25 +1672,21 @@ export async function unlinkTasks(parentId: string, childId: string): Promise<vo
   if (error) fail(error);
 }
 
-/** Escreve o campo "Plano de Ação" do card. Um card PODE pertencer a mais de
- * um Plano ao mesmo tempo (a "diária de gravação" e o "vincular existente" já
- * dependem disso) — por isso, ligar a um `parentId` é ADITIVO: só garante que
- * aquele elo exista, sem soltar nenhum outro Plano ao qual o card já
- * pertença. Só `parentId === null` (o `<select>` da UI voltando para "— Sem
- * plano —", uma escolha explícita) solta TODOS os elos sem slot de uma vez —
- * é o único jeito de um controle de valor único representar "sair de todos".
- * Elos de etapa (slot preenchido) pertencem à corrente e nunca são tocados
- * aqui. */
+/** Escreve o pai estrutural de Plano. A interface antiga ainda é aditiva até
+ * os quatro vínculos históricos serem reconciliados; código novo não deve
+ * usar esta função para reuso — use `linkTasks(..., null, 0, "reference")`. Só
+ * `parentId === null` solta os elos estruturais de Plano. Etapas e referências
+ * nunca são tocadas aqui. */
 export async function setTaskPlanLink(taskId: string, parentId: string | null): Promise<void> {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("task_links").select("parent_id,child_id,slot").eq("child_id", taskId);
+  const { data, error } = await supabase.from("task_links").select("parent_id,child_id,relation_kind,slot").eq("child_id", taskId);
   if (error) fail(error);
-  const current = ((data as LinkRow[] | null) ?? []).filter((l) => l.slot === null);
+  const current = ((data as LinkRow[] | null) ?? []).filter((l) => l.relation_kind === "structural_member");
   if (parentId === null) {
     for (const link of current) await unlinkTasks(link.parent_id, taskId);
     return;
   }
-  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null);
+  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null, 0, "structural_member");
 }
 
 // ---- Planos de Ação (admin) --------------------------------------------------
@@ -1833,7 +1845,7 @@ export async function createFlowDelivery(
 
   try {
     const step = await createTask(clientId, flowStepFields(delivery, firstStep, null));
-    await linkTasks(delivery.id, step.id, firstStep.key, firstStep.order_index);
+    await linkTasks(delivery.id, step.id, firstStep.key, firstStep.order_index, "workflow_step");
     // Os DOIS. Devolver só o passo fazia quem chamava tratá-lo como "o card
     // criado" — e ligar ao Plano de Ação o primeiro passo em vez da entrega.
     return { delivery, step };
@@ -1896,7 +1908,7 @@ export async function createRecurringFlowDelivery(
     const occurrence = await createTask(clientId, currentRecurringExecutionFields(template, occurrenceId, startDate));
     const firstStep = type.subtypes[0];
     const step = await createTask(clientId, flowStepFields(occurrence, firstStep, null));
-    await linkTasks(occurrence.id, step.id, firstStep.key, firstStep.order_index);
+    await linkTasks(occurrence.id, step.id, firstStep.key, firstStep.order_index, "workflow_step");
     return { delivery: occurrence, step };
   } catch (error) {
     await deleteTask(template.id).catch(() => undefined);
@@ -3462,8 +3474,9 @@ export function maskWindsorSettings(s: WindsorSettings): MaskedWindsorSettings {
   };
 }
 
-// Cached Windsor payloads — one row per (account, datasource), always covering
-// a ~90-day window so the dashboard slices periods in memory.
+// Cached provider payloads — one replaceable covered window per
+// (account, datasource). Callers should pass account ids whenever possible so
+// a client-scoped request does not decode every cached payload.
 export type InsightsCacheRow = {
   client_id: string | null;
   account_id: string;
@@ -3474,15 +3487,18 @@ export type InsightsCacheRow = {
   fetched_at: string;
 };
 
-export async function getCachedInsights(): Promise<InsightsCacheRow[]> {
+export async function getCachedInsights(accountIds?: string[]): Promise<InsightsCacheRow[]> {
+  if (accountIds && accountIds.length === 0) return [];
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("meta_insights_cache")
     .select("client_id,account_id,datasource,date_from,date_to,payload,fetched_at")
     // Ad-level drill-down rows are fetched/cached on demand per campaign
     // (see getCachedAdCreativeInsights) — excluded here so every full
     // dashboard load doesn't also pull every expanded campaign's payload.
     .not("datasource", "in", `(${META_ADS_CREATIVE_DATASOURCE},${META_ADS_ADSET_DATASOURCE})`);
+  if (accountIds) query = query.in("account_id", [...new Set(accountIds)]);
+  const { data, error } = await query;
   // An un-migrated cache table should degrade to "no cache yet", not take the
   // whole performance dashboard down with a 503.
   if (isMissingOptionalTable(error, "meta_insights_cache")) return [];

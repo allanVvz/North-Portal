@@ -92,7 +92,7 @@ const HYDRATED_AFTER_UPDATE = {
   created_by_profile: null,
   // O elo que só aparece porque getTaskById faz o join — é exatamente o que
   // a resposta crua do UPDATE não carrega.
-  task_links: [{ parent_id: "entrega-1", slot: "roteiro", position: 10 }],
+  task_links: [{ parent_id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }],
 };
 
 beforeEach(() => { fromMock.mockReset(); });
@@ -109,7 +109,7 @@ describe("updateTaskGroup re-hidrata antes de devolver ao chamador", () => {
 
     const result = await updateTaskGroup("task-1", current, { title: "Título editado", position: 0 });
 
-    expect(result.parents).toEqual([{ id: "entrega-1", slot: "roteiro", position: 10 }]);
+    expect(result.parents).toEqual([{ id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }]);
   });
 });
 
