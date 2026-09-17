@@ -3,7 +3,6 @@ import {
   createTaskType,
   deactivationProblem,
   deletionProblem,
-  lastStepProblem,
   nextOrderIndex,
   slugifyTypeKey,
   tallyVocabUsage,
@@ -38,7 +37,13 @@ function deliveryType(subtypes: ReturnType<typeof step>[]): TaskTypeEditorNode {
     icon: null,
     tone: null,
     show_in_performance: true,
-    subtypes,
+    subtypes: [],
+    workflowSteps: subtypes.map((item, index) => ({
+      ...item,
+      task_type_id: `task-${item.id}`,
+      workflow_step_id: `workflow-${item.id}`,
+      creation_trigger: index === 0 ? "delivery_created" as const : "previous_step_approved" as const,
+    })),
   };
 }
 
@@ -79,16 +84,10 @@ describe("travas de edição do vocabulário", () => {
     expect(deletionProblem("Edição", { total: 0, open: 0 })).toBeNull();
   });
 
-  it("não deixa uma Entrega ficar sem etapa ativa", () => {
-    const type = deliveryType([step("s1", "roteiro"), step("s2", "edicao", false)]);
-    expect(lastStepProblem(type, "s1")).toContain("pelo menos uma etapa ativa");
-    // Com duas ativas, tirar uma continua deixando cascata de pé.
-    expect(lastStepProblem(deliveryType([step("s1", "roteiro"), step("s2", "edicao")]), "s1")).toBeNull();
-  });
-
-  it("a trava da última etapa vale só para Entrega — Tarefa/Plano não cascateiam", () => {
-    const simples = { ...deliveryType([step("s1", "gestao")]), behavior: "simples" as const };
-    expect(lastStepProblem(simples, "s1")).toBeNull();
+  it("mantém subtipos físicos fora da Entrega e etapas na versão", () => {
+    const type = deliveryType([step("s1", "roteiro"), step("s2", "edicao")]);
+    expect(type.subtypes).toEqual([]);
+    expect(type.workflowSteps.map((item) => item.key)).toEqual(["roteiro", "edicao"]);
   });
 });
 
@@ -202,8 +201,9 @@ describe("createTaskType — nasce um tipo de topo novo", () => {
     expect(created.key).toBe("reels");
     expect(created.icon).toBe("▶");
     expect(created.tone).toBe("purple");
-    expect(created.subtypes.map((s) => s.key)).toEqual(["roteiro", "gravacao", "corte"]);
-    expect(created.subtypes.map((s) => s.order_index)).toEqual([10, 20, 30]);
+    expect(created.subtypes).toEqual([]);
+    expect(created.workflowSteps.map((s) => s.key)).toEqual(["roteiro", "gravacao", "corte"]);
+    expect(created.workflowSteps.map((s) => s.order_index)).toEqual([10, 20, 30]);
   });
 
   it("recusa um tipo cuja key já existe", async () => {

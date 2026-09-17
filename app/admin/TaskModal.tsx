@@ -77,9 +77,8 @@ type Draft = {
 // O contexto de criação NÃO vem mais de fora — o botão é o mesmo em toda tela.
 // O que nasce é decidido pelo TIPO escolhido no dropdown do modal, e este valor
 // é derivado desse tipo (ver `effectiveScope`), só para dizer ao servidor qual
-// caminho seguir. "flow-step" = escolher um subtipo de entrega em vez de "Fluxo
-// completo": cria só o card daquela etapa, solto.
-export type TaskCreationScope = "task" | "plan" | "routine" | "flow-step";
+// caminho seguir. Etapas só nascem pelo workflow versionado da Entrega.
+export type TaskCreationScope = "task" | "plan" | "routine";
 
 /** Pré-preenchimento opcional que uma tela pode passar — nunca comportamento.
  *  Ex.: o "+" embaixo de uma coluna do quadro abre o modal já com aquele status. */
@@ -152,6 +151,7 @@ const ROTINA_OPTION = {
   id: ROTINA_KEY,
   order_index: 999,
   subtypes: [],
+  workflowSteps: [],
 };
 
 function Cell({ icon, label, hidden, children }: { icon: string; label: string; hidden?: boolean; children: React.ReactNode }) {
@@ -295,9 +295,8 @@ export default function TaskModal({
   const isRecurringParent = Boolean(liveTask && isRecurrenceTemplate(liveTask));
   const recurrenceParentId = liveTask && !isRecurringParent ? recurrenceParentIdOf(liveTask) : null;
   const [recurrenceParent, setRecurrenceParent] = useState<TaskRecord | null>(() => recurrenceParentOf(recurrenceParentId, clientTasks));
-  // Vocabulário (tipos + subtipos) vindo de task_types. É a fonte dos dois
-  // dropdowns do cabeçalho E das etapas de uma entrega — um fluxo É um tipo e
-  // suas etapas SÃO os subtipos dele, então não há duas listas para sincronizar.
+  // Subtipos físicos vêm de task_types. Etapas de Entrega vêm exclusivamente
+  // da versão persistida do workflow e nunca são opções de subtipo.
   const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([]);
   // A ENTREGA é o card ligado a uma versão de workflow; a ETAPA é um filho dela
   // cujo subtipo diz que etapa é.
@@ -318,13 +317,11 @@ export default function TaskModal({
   const [flowNext, setFlowNext] = useState<TaskRecord | null>(null);
   const currentType = taskTypes.find((t) => t.key === draft.kind) ?? null;
   // O que o servidor vai criar, derivado do TIPO escolhido no dropdown — não de
-  // uma prop. Rotina (porta sintética) → molde recorrente; tipo-entrega com
-  // "Fluxo completo" → a corrente; tipo-entrega com um subtipo → só aquele card
-  // ("flow-step"); Plano de Ação → agregador; o resto → card comum.
+  // uma prop. Rotina (porta sintética) cria molde recorrente; uma Entrega
+  // materializa obrigatoriamente a primeira etapa da sua versão.
   const effectiveScope: TaskCreationScope =
     mode !== "new" ? "task"
     : rotinaMode ? "routine"
-    : currentType?.behavior === "entrega" && draft.subtype ? "flow-step"
     : draft.kind === "plano_acao" ? "plan"
     : "task";
   const deliveryType = taskTypes.find((t) => t.key === (chainDelivery?.kind ?? (isDelivery ? liveTask?.kind : null))) ?? null;
@@ -335,7 +332,7 @@ export default function TaskModal({
     ? liveTask.parents.find((parent) => parent.id === chainDelivery.id)?.workflow_step_id
     : null;
   const flowStepIndex = deliveryType && liveWorkflowStepId
-    ? deliveryType.subtypes.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
+    ? deliveryType.workflowSteps.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
     : -1;
   const [comment, setComment] = useState("");
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
@@ -386,7 +383,7 @@ export default function TaskModal({
   // a recorrência tem campo próprio.
   const creationTypes = mode === "new" ? [...realTypes, ROTINA_OPTION] : realTypes;
   const typeLabelOf = (key: string) => taskTypes.find((t) => t.key === key)?.label ?? kindLabel(key);
-  const subtypeOptions = currentType?.subtypes ?? [];
+  const subtypeOptions = currentType?.behavior === "entrega" ? [] : currentType?.subtypes ?? [];
   const subtypeLabelOf = (key: string) => subtypeOptions.find((sub) => sub.key === key)?.label ?? subtypeLabel(key);
   // The Cliente attribute can change the target client in both modes now, so
   // the header label tracks the draft instead of the (possibly stale) prop.
@@ -642,10 +639,8 @@ export default function TaskModal({
       return {
         ...d,
         kind,
-        // Trocar de tipo troca o vocabulário de subtipo. Uma entrega abre em
-        // "Fluxo completo" (subtype vazio) — a corrente inteira; escolher um
-        // subtipo ali cria só aquele card. Os demais tipos abrem no primeiro
-        // subtipo declarado (é assim que Operacional já nasce em "Gestão").
+        // Trocar de tipo troca o vocabulário de subtipo. Entrega não recebe
+        // subtipo: suas etapas são materializadas pela versão persistida.
         subtype: type?.behavior === "entrega" ? "" : type?.subtypes[0]?.key ?? "",
         // A plan can't belong to another plan.
         plan_id: def.isPlan ? "" : d.plan_id,
@@ -733,7 +728,7 @@ export default function TaskModal({
   const parentSlotOf = (kind: Exclude<ParentRelationKind, "plano">): { id: string | null; parent: TaskRecord | null; subtitle: string; progress: number } => {
     if (kind === "entrega") {
       // A contagem vem da versão persistida, não de flags no payload.
-      const total = deliveryType?.subtypes.length ?? 0;
+      const total = deliveryType?.workflowSteps.length ?? 0;
       const stepLabel = liveTask ? subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo" : "";
       return {
         id: singleFlowDeliveryId,
@@ -794,21 +789,19 @@ export default function TaskModal({
     Boolean(recorrenciaSlot?.id && !recorrenciaSlot.parent) ||
     (hasPlanKind && planParentIds.length > planParents.length);
 
-  /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo tipo, mesmo
-   * subtipo, e ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
+  /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo task_type_id, e
+   * ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
    * entrega aparece de propósito — compartilhar é o objetivo. E nada de filtrar
    * por status: um card concluído continua associável. */
-  function chainCandidates(slot: string) {
+  function chainCandidates(taskTypeId: string) {
     if (!chainDelivery) return [];
     return clientTasks.filter(
       (t) =>
         t.id !== chainDelivery.id &&
         t.client_id === chainDelivery.client_id &&
-        // A etapa é uma Tarefa comum; a Entrega só define a sequência em
-        // workflow_version_steps. Comparar com o kind da Entrega escondia
-        // justamente os cards elegíveis depois da migração de subtipos.
-        t.kind === "operacional" &&
-        t.subtype === slot &&
+        // A etapa é uma Tarefa comum; o FK da etapa versionada é a única
+        // autoridade para sua classificação, não o texto em `subtype`.
+        t.task_type_id === taskTypeId &&
         // `?? []`: um card que chegou de uma resposta crua da API (ex.: RPC de
         // comentário devolvendo só `t.*`, sem os joins de `mergeTaskAssigneeRow`)
         // não tem `parents` nenhum — sem a guarda isto quebrava a árvore inteira
@@ -817,14 +810,14 @@ export default function TaskModal({
     );
   }
 
-  async function linkStepCard(task: TaskRecord, slot: string) {
+  async function linkStepCard(task: TaskRecord, workflowStepId: string) {
     if (!chainDelivery) return;
     setBusy(true);
     setError("");
     try {
       const res = await fetch(`/api/admin/tasks/${chainDelivery.id}/relations`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ child_id: task.id, slot, relation_kind: "workflow_step" }),
+        body: JSON.stringify({ child_id: task.id, workflow_step_id: workflowStepId, relation_kind: "workflow_step" }),
       });
       const body = await res.json().catch(() => null) as (TaskRecord & { error?: string }) | null;
       if (!res.ok) throw new Error(body?.error ?? "Não foi possível ligar o card.");
@@ -1499,15 +1492,9 @@ export default function TaskModal({
                 {subtypeOptions.length ? (
                   <HeadDropdown
                     className="tm-new-kind"
-                    trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : currentType?.behavior === "entrega" ? "Fluxo completo" : "Subtipo"}</span>}
+                    trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}
                   >
-                    {currentType?.behavior === "entrega" ? (
-                      // "Fluxo completo" (default) monta a corrente inteira;
-                      // escolher uma etapa abaixo cria SÓ aquele card, solto.
-                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>Fluxo completo</button>
-                    ) : (
-                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
-                    )}
+                    <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
                     {subtypeOptions.map((sub) => (
                       <button type="button" key={sub.key} className={`tm-headpick-option ${draft.subtype === sub.key ? "on" : ""}`} onClick={() => set("subtype", sub.key)}>{sub.label}</button>
                     ))}
@@ -1518,9 +1505,7 @@ export default function TaskModal({
                 {rotinaMode
                   ? "Uma rotina se repete na cadência escolhida. Cada ciclo nasce como um card próprio."
                   : currentType?.behavior === "entrega"
-                    ? (draft.subtype
-                        ? `Cria só o card de ${subtypeLabelOf(draft.subtype)}. Pode ser vinculado a uma entrega depois.`
-                        : `Nasce em ${currentType.subtypes[0]?.label ?? "primeira etapa"} e cada etapa concluída cria a próxima.`)
+                    ? `Nasce com ${currentType.workflowSteps[0]?.label ?? "a primeira etapa"} em Entrada; as próximas seguem os gatilhos da versão.`
                     : currentType?.behavior === "plano"
                       ? "Um plano agrega outras tarefas e mostra o progresso do conjunto."
                       : "Conte o essencial e escolha o tipo do card."}
@@ -1741,7 +1726,7 @@ export default function TaskModal({
                 team={adminReviewers}
                 onOpenStep={(card) => void openRelatedTask(card)}
                 onUnlinkStep={(card) => void unlinkMember(card.id, chainDelivery.id)}
-                onLinkStep={(card, slot) => void linkStepCard(card, slot)}
+                onLinkStep={(card, workflowStepId) => void linkStepCard(card, workflowStepId)}
                 onPatchStep={patchRelatedCard}
                 onCommentStep={commentRelatedCard}
               />

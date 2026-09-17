@@ -226,8 +226,8 @@ describe("entregas de fluxo", () => {
   // A etapa que um card É vem do próprio subtipo: os subtipos de um
   // tipo-entrega SÃO as etapas dele, sem segunda lista para sincronizar.
   it("lê a etapa a partir do subtipo do card", () => {
-    expect(flowStepKeyOf({ subtype: "captacao" })).toBe("captacao");
-    expect(flowStepKeyOf({ subtype: null })).toBeNull();
+    expect(flowStepKeyOf({ parents: [{ id: "p1", relation_kind: "workflow_step", workflow_step_id: "step-captacao", slot: "captacao", position: 20 }] })).toBe("step-captacao");
+    expect(flowStepKeyOf({ parents: [] })).toBeNull();
   });
 
   // Marca explícita, e não inferida do tipo: há cards `criativo` legados que

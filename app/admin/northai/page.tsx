@@ -15,7 +15,7 @@ export default async function NorthAiStudioPage() {
       label: type.label,
       behavior: type.behavior,
       // A diária precisa de um tipo Entrega com roteiro e captação para compartilhar.
-      shootReady: type.behavior === "entrega" && ["roteiro", "captacao"].every((key) => type.subtypes.some((step) => step.key === key)),
+      shootReady: type.behavior === "entrega" && ["roteiro", "captacao"].every((key) => type.workflowSteps.some((step) => step.key === key)),
     }));
   return <NorthAiStudio clients={clients} assignees={assignees} types={creatable} />;
 }

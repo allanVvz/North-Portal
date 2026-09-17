@@ -27,7 +27,7 @@ import type { taskCreateSchema } from "@/lib/validation";
 import { createClient } from "@/lib/supabase/server";
 import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
 
-export const TASK_CREATE_SCOPES = ["task", "plan", "routine", "flow-step"] as const;
+export const TASK_CREATE_SCOPES = ["task", "plan", "routine"] as const;
 export type TaskCreateScope = (typeof TASK_CREATE_SCOPES)[number];
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
 
@@ -65,15 +65,10 @@ export async function createTaskFromInput(
   // pessoa clicou. Um tipo com behavior 'entrega' vira uma corrente de
   // etapas; 'plano' vira um agregador; o resto vira um card comum.
   //
-  // A exceção: `scope=flow-step` diz "crie SÓ o card daquela etapa, não a
-  // corrente". Vem de escolher um subtipo específico de uma Entrega no modal
-  // (em vez de "Fluxo completo"). O card nasce solto — sem entrega-pai — e é
-  // inofensivo: `chainDelivery` fica nulo, `reconcileFlows` acha zero pais.
-  // Pode ser ligado a uma entrega depois pelo botão de corrente.
   const behavior = await taskBehaviorOf(fields.kind ?? "operacional");
-  const flowStepOnly = scope === "flow-step";
-  if (flowStepOnly && behavior !== "entrega") throw new HttpError(400, "Etapa de fluxo exige um tipo de entrega.");
-  if (flowStepOnly && !fields.subtype) throw new HttpError(400, "Escolha a etapa do fluxo.");
+  if (behavior === "entrega" && fields.subtype) {
+    throw new HttpError(400, "Uma Entrega não possui subtipo; escolha sua variante e a versão materializa a primeira etapa.");
+  }
   if (scope === "plan") {
     fields.kind = "plano_acao";
   } else if (scope === "routine") {
@@ -119,10 +114,10 @@ export async function createTaskFromInput(
   // cada ciclo materializa uma entrega-ocorrência própria (com sua primeira
   // etapa) — o rollup de progresso lê a ocorrência, nunca o molde, então não
   // há "pai de pai".
-  const flow = behavior === "entrega" && !flowStepOnly
+  const flow = behavior === "entrega"
     ? fields.recurrence_cadence
-      ? await createRecurringFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
-      : await createFlowDelivery(client?.id ?? null, taskFields, fields.kind!, fields.subtype)
+      ? await createRecurringFlowDelivery(client?.id ?? null, taskFields, fields.kind!)
+      : await createFlowDelivery(client?.id ?? null, taskFields, fields.kind!)
     : null;
   // A resposta continua sendo o PASSO — é o card que a pessoa vai abrir, já
   // que a entrega não aparece no quadro.
@@ -134,7 +129,7 @@ export async function createTaskFromInput(
   // Mas quem entra no Plano de Ação é a ENTREGA, não o primeiro passo dela.
   // Ligar o passo, como se fazia, punha um pedaço da corrente no plano e
   // deixava a peça inteira de fora.
-  if (planLink) await linkTasks(planLink, flow ? flow.delivery.id : task.id, null, 0, "structural_member");
+  if (planLink) await linkTasks(planLink, flow ? flow.delivery.id : task.id, null, "structural_member");
   if (assignee_profile_ids?.length) {
     await setTaskAssigneeProfiles(task.id, assignee_profile_ids);
     // O pai precisa dos mesmos responsáveis, porque é o card que a pessoa

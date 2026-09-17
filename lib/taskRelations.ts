@@ -64,14 +64,13 @@ export function slotOf(task: TaskRelation, parentId: string): string | null {
   return (task.parents ?? []).find((p) => p.id === parentId && relationKindOf(p) === "workflow_step")?.slot ?? null;
 }
 
-/** A etapa que um card É, dentro de um fluxo: o próprio subtipo dele.
+/** Identidade persistida de uma etapa dentro de alguma Entrega.
  *
- * Os subtipos de um tipo-entrega SÃO as etapas dele — não existe uma segunda
- * lista para manter em sincronia. O `slot` gravado no elo é a mesma informação
- * denormalizada, para dar para perguntar "este slot já está ocupado neste
- * pai?" sem carregar o card inteiro. */
-export function flowStepKeyOf(task: Pick<TaskRecord, "subtype">): string | null {
-  return task.subtype || null;
+ * O subtipo descreve a Tarefa executável; o papel naquela Entrega vem apenas
+ * da FK `workflow_step_id` do elo, pois a mesma Tarefa pode ser reutilizada.
+ */
+export function flowStepKeyOf(task: Pick<TaskRecord, "parents">): string | null {
+  return (task.parents ?? []).find((parent) => relationKindOf(parent) === "workflow_step")?.workflow_step_id ?? null;
 }
 
 export function isFlowDelivery(task: {

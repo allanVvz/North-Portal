@@ -19,6 +19,7 @@ import { HttpError } from "@/lib/validation";
 
 export type TaskBehavior = "entrega" | "plano" | "simples";
 
+/** Um subtipo físico, filho direto da raiz `Tarefa`. */
 export type TaskSubtypeDef = {
   /** FK to the executable Task subtype. */
   task_type_id?: string;
@@ -32,6 +33,17 @@ export type TaskSubtypeDef = {
   default_assignee: string | null;
   client_visible: boolean;
   creation_trigger?: "delivery_created" | "ads_report_approved" | "feedback_approved" | "previous_step_approved";
+};
+
+/** Uma etapa declarada numa versão imutável de workflow.
+ *
+ * Não é subtipo da Entrega: referencia um `TaskSubtypeDef` por FK e acrescenta
+ * as regras que pertencem exclusivamente à versão (ordem, gatilho e prazo).
+ */
+export type WorkflowStepDef = TaskSubtypeDef & {
+  task_type_id: string;
+  workflow_step_id: string;
+  creation_trigger: NonNullable<TaskSubtypeDef["creation_trigger"]>;
 };
 
 /** As 5 tonalidades que já existem no design system (app/globals.css) — sem
@@ -52,7 +64,10 @@ export type TaskTypeDef = {
   tone: TaskKindTone | null;
   show_in_performance: boolean;
   workflow_version_id?: string;
+  /** Filhos físicos no catálogo. Em Entrega é sempre vazio. */
   subtypes: TaskSubtypeDef[];
+  /** Etapas da versão publicada. Só existe em variantes de Entrega. */
+  workflowSteps: WorkflowStepDef[];
 };
 
 /** Só a capacidade de ler tabelas. O vocabulário é lido tanto pelo client de
@@ -139,6 +154,7 @@ function editorNode(row: Row, key: string, subtypes: TaskTypeEditorSubtype[]): T
     tone: row.tone,
     show_in_performance: row.show_in_performance,
     subtypes,
+    workflowSteps: [],
   };
 }
 
@@ -184,7 +200,7 @@ function decorateWorkflowSteps<T extends TaskTypeEditorNode>(
   }
   return types.map((type) => {
     if (type.behavior !== "entrega") return type;
-    const subtypes = (mappingsByDelivery.get(type.id) ?? [])
+    const workflowSteps = (mappingsByDelivery.get(type.id) ?? [])
       .slice()
       .sort((a, b) => a.order_index - b.order_index || a.task_subtype_id.localeCompare(b.task_subtype_id))
       .map((mapping) => {
@@ -202,11 +218,11 @@ function decorateWorkflowSteps<T extends TaskTypeEditorNode>(
           creation_trigger: mapping.creation_trigger,
         } : null;
       })
-      .filter(Boolean) as (TaskTypeEditorSubtype & TaskSubtypeDef)[];
+      .filter(Boolean) as WorkflowStepDef[];
     return {
       ...type,
       workflow_version_id: (mappingsByDelivery.get(type.id) ?? [])[0]?.workflow_version_id,
-      subtypes,
+      workflowSteps,
     } as T;
   });
 }
@@ -276,27 +292,27 @@ export function isDeliveryType(type: TaskTypeDef | null): boolean {
 
 export function stepIndexOf(type: TaskTypeDef, subtype: string | null): number {
   if (!subtype) return -1;
-  return type.subtypes.findIndex((s) => s.key === subtype);
+  return type.workflowSteps.findIndex((s) => s.key === subtype);
 }
 
 /** A etapa seguinte a `subtype` dentro deste tipo, ou null se for a última. */
-export function nextSubtypeAfter(type: TaskTypeDef, subtype: string | null): TaskSubtypeDef | null {
+export function nextWorkflowStepAfter(type: TaskTypeDef, subtype: string | null): WorkflowStepDef | null {
   const index = stepIndexOf(type, subtype);
   if (index < 0) return null;
-  return type.subtypes[index + 1] ?? null;
+  return type.workflowSteps[index + 1] ?? null;
 }
 
 /** Peso total do molde — o denominador do progresso de uma entrega. Etapas que
  * ainda não nasceram contam aqui: é isso que impede uma entrega com só o
  * roteiro pronto de marcar 100%. */
 export function typeTotalWeight(type: TaskTypeDef): number {
-  return type.subtypes.reduce((sum, s) => sum + (s.progress_weight || 1), 0);
+  return type.workflowSteps.reduce((sum, s) => sum + (s.progress_weight || 1), 0);
 }
 
 /** Um molde que produziria uma cascata quebrada. */
 export function deliveryTypeProblem(type: TaskTypeDef): string | null {
   if (type.behavior !== "entrega") return null;
-  if (type.subtypes.length === 0) return `O tipo "${type.label}" precisa de pelo menos uma etapa.`;
+  if (type.workflowSteps.length === 0) return `O tipo "${type.label}" precisa de pelo menos uma etapa.`;
   return null;
 }
 
@@ -359,7 +375,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /** Desativar tira a linha de `listTaskTypes` — e é dela que o motor da cascata
  * lê a etapa seguinte. Com um card em aberto no meio do caminho,
- * `nextSubtypeAfter` deixaria de encontrar a etapa e a corrente pararia em
+ * a versão publicada deixaria de encontrar a etapa e a corrente pararia em
  * silêncio, sem erro nenhum. Por isso a trava olha `open`, não `total`. */
 export function deactivationProblem(label: string, usage: VocabUsage | undefined): string | null {
   const open = usage?.open ?? 0;
@@ -379,12 +395,6 @@ export function deletionProblem(label: string, usage: VocabUsage | undefined): s
 /** Uma Entrega sem etapa ativa é um molde que não cascateia: o card-pai nasce
  * e nada é materializado. Mesma regra de `deliveryTypeProblem`, aplicada antes
  * do estrago. */
-export function lastStepProblem(type: TaskTypeEditorNode, subtypeId: string): string | null {
-  if (type.behavior !== "entrega") return null;
-  const remaining = type.subtypes.filter((s) => s.active && s.id !== subtypeId);
-  if (remaining.length > 0) return null;
-  return `"${type.label}" é uma Entrega e precisa de pelo menos uma etapa ativa.`;
-}
 
 /** Deriva a key a partir do rótulo: minúscula, sem acento, `_` no lugar do
  * resto. A key é a identidade da linha para `tasks.subtype` e nunca muda depois
@@ -682,7 +692,15 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
       icon: rootRow.icon,
       tone: rootRow.tone,
       show_in_performance: rootRow.show_in_performance,
-      subtypes,
+      subtypes: input.behavior === "entrega" ? [] : subtypes,
+      workflowSteps: input.behavior === "entrega"
+        ? subtypes.map((step, index) => ({
+            ...step,
+            task_type_id: step.task_type_id ?? step.id,
+            workflow_step_id: "",
+            creation_trigger: index === 0 ? "delivery_created" : "previous_step_approved",
+          }))
+        : [],
     };
   } catch (stepError) {
     // Desfaz a raiz e seus elos. Etapas comuns já podem ser usadas por outros
@@ -717,7 +735,7 @@ export async function updateTaskType(db: TypeWriter, id: string, patch: TypePatc
 
   if (patch.active === false && target.active) {
     const key = subtype ? usageKey(type.key, subtype.key) : usageKey(type.key);
-    const problem = deactivationProblem(target.label, usage[key]) ?? (subtype ? lastStepProblem(type, subtype.id) : null);
+    const problem = deactivationProblem(target.label, usage[key]);
     if (problem) throw new HttpError(409, problem);
   }
 
@@ -735,7 +753,7 @@ export async function deleteTaskType(db: TypeWriter, id: string): Promise<void> 
   }
 
   const problem =
-    deletionProblem(subtype.label, usage[usageKey(type.key, subtype.key)]) ?? lastStepProblem(type, subtype.id);
+    deletionProblem(subtype.label, usage[usageKey(type.key, subtype.key)]);
   if (problem) throw new HttpError(409, problem);
 
   const { error } = await db.from("task_types").delete().eq("id", id);

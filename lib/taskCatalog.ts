@@ -27,7 +27,6 @@ export type KindDef = {
   blurb: string;
   performance: boolean; // eligible to hold task_metrics + show in Performance
   isPlan?: boolean; // aggregates member tasks; progress is a rollup
-  subtypes?: string[]; // subtype keys (labels in SUBTYPE_LABEL)
 };
 
 // Quatro tipos, e o mesmo funil para todos.
@@ -63,9 +62,8 @@ export const TASK_KINDS: Record<TaskKind, KindDef> = {
     label: "Entrega",
     icon: "✦",
     tone: "purple",
-    blurb: "Uma corrente de etapas: roteiro, captação, edição e publicação",
+    blurb: "Entrega versionada; as etapas pertencem ao workflow persistido",
     performance: true,
-    subtypes: ["roteiro", "captacao", "edicao", "publicacao"],
   },
   checkpoint_comercial: {
     label: "Checkpoint",
@@ -78,9 +76,8 @@ export const TASK_KINDS: Record<TaskKind, KindDef> = {
     label: "Automação",
     icon: "⚡",
     tone: "purple",
-    blurb: "Entrega automatizada de relatórios de anúncios, feedback e conversão",
+    blurb: "Entrega automatizada; as etapas pertencem ao workflow persistido",
     performance: false,
-    subtypes: ["relatorio_anuncios", "feedback", "relatorio_conversao"],
   },
 };
 
@@ -100,9 +97,9 @@ export const SUBTYPE_LABEL: Record<string, string> = {
   // canonical specializations
   roteiro: "Roteiro",
   gravacao: "Gravação",
-  // criativo flow steps. `captacao` is deliberately NOT an alias of
-  // `gravacao`: an agendamento/gravacao is a standalone shoot on the calendar,
-  // while criativo/captacao is step 2 of a specific piece's flow.
+  // Subtipos executáveis de Tarefa. `captacao` is deliberately NOT an alias of
+  // `gravacao`: a gravação pode ser avulsa no calendário, enquanto Captação
+  // é uma tarefa que pode ocupar uma etapa de workflow.
   captacao: "Captação",
   edicao: "Edição",
   // Tarefas de automação

@@ -288,6 +288,12 @@ export default function FluxosPanel() {
           const typeUsage = data.usage[usageKey(type.key)];
           const isExpanded = expanded.has(type.id);
           const isDelivery = type.behavior === "entrega";
+          // A tela só edita subtipos físicos de Tarefa. Para Entrega, adapta a
+          // versão publicada para a lista estritamente de leitura — o id é do
+          // passo versionado, nunca de um filho imaginário da Entrega.
+          const displayedSteps: TaskTypeEditorSubtype[] = isDelivery
+            ? type.workflowSteps.map((step) => ({ ...step, id: step.workflow_step_id, active: true }))
+            : type.subtypes;
           return (
             <section className={`voc-type ${type.active ? "" : "off"}`} key={type.id}>
               <header className="voc-type-head">
@@ -318,7 +324,7 @@ export default function FluxosPanel() {
                           {type.creatable ? null : <span className="set-badge rascunho">Fora do dropdown</span>}
                         </div>
                         <span className="admin-sub">
-                          {type.subtypes.filter((s) => s.active).length} etapa(s){isDelivery ? " de Tarefa" : ""}
+                          {isDelivery ? displayedSteps.length : type.subtypes.filter((s) => s.active).length} etapa(s){isDelivery ? " da versão publicada" : ""}
                           {typeUsage ? ` · ${typeUsage.total} card(s)` : " · nenhum card"}
                         </span>
                       </div>
@@ -342,7 +348,7 @@ export default function FluxosPanel() {
               {isExpanded ? (
               <div className="voc-steps">
                 {isDelivery ? <p className="admin-sub">Sequência composta por subtipos reutilizáveis de Tarefa. Edite o subtipo na seção Tarefa.</p> : null}
-                {type.subtypes.map((step, index) =>
+                {displayedSteps.map((step, index) =>
                   editing === step.id ? (
                     <StepEditor
                       key={step.id}
@@ -354,8 +360,8 @@ export default function FluxosPanel() {
                     />
                   ) : (
                     <div
-                      className={`voc-step ${step.active ? "" : "off"} ${dragId === step.id ? "dragging" : ""}`}
-                      key={step.id}
+                      className={`voc-step ${("active" in step && !step.active) ? "off" : ""} ${dragId === step.workflow_step_id ? "dragging" : ""}`}
+                      key={step.workflow_step_id ?? step.id}
                       draggable={!isDelivery && editing === null}
                       onDragStart={(e) => { if (!isDelivery) { setDragId(step.id); e.dataTransfer.effectAllowed = "move"; } }}
                       onDragEnd={() => setDragId(null)}
@@ -367,7 +373,7 @@ export default function FluxosPanel() {
                         <div className="voc-type-titlerow">
                           <strong>{step.label}</strong>
                           {step.client_visible ? <span className="set-badge publicada">Cliente vê</span> : null}
-                          {step.active ? null : <span className="set-badge rascunho">Inativa</span>}
+                          {("active" in step && !step.active) ? <span className="set-badge rascunho">Inativa</span> : null}
                         </div>
                         <span className="admin-sub">
                           peso {step.progress_weight}

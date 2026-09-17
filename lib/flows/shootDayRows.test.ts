@@ -17,7 +17,8 @@ const entrega = {
   behavior: "entrega",
   workflow_version_id: "workflow-v1",
   creatable: true,
-  subtypes: [step("roteiro", "Roteiro", 1, 2), step("captacao", "Captação", 2, 3), step("edicao", "Edição", 3, 4), step("publicacao", "Publicação", 4, 2)],
+  subtypes: [],
+  workflowSteps: [step("roteiro", "Roteiro", 1, 2), step("captacao", "Captação", 2, 3), step("edicao", "Edição", 3, 4), step("publicacao", "Publicação", 4, 2)],
 } as unknown as TaskTypeDef;
 
 const base = {
@@ -64,7 +65,7 @@ describe("shootDayRows", () => {
   });
 
   it("recusa tipo sem roteiro/captação e diária sem peças", () => {
-    const semRoteiro = { ...entrega, subtypes: entrega.subtypes.slice(2) } as TaskTypeDef;
+    const semRoteiro = { ...entrega, workflowSteps: entrega.workflowSteps.slice(2) } as TaskTypeDef;
     expect(() => shootDayRows({ ...base, type: semRoteiro })).toThrow(/roteiro e captação/);
     expect(() => shootDayRows({ ...base, pieces: [], deliveryIds: [] })).toThrow(/pelo menos uma/);
   });

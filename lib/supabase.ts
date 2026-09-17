@@ -1641,46 +1641,31 @@ async function childIdsOf(supabase: SupabaseLike, parentIds: readonly string[]):
   return ((data as { child_id: string }[] | null) ?? []).map((r) => r.child_id);
 }
 
-export async function linkTasks(parentId: string, childId: string, slot: string | null, position: number, relationKind: TaskParentLink["relation_kind"]): Promise<void> {
+export async function linkTasks(parentId: string, childId: string, workflowStepId: string | null, relationKind: TaskParentLink["relation_kind"]): Promise<void> {
   if (parentId === childId) throw new HttpError(400, "Um card nao pode ser pai de si mesmo.");
   const supabase = await createClient();
-  let workflowStepId: string | null = null;
   if (relationKind === "workflow_step") {
-    if (!slot) throw new HttpError(400, "Informe a etapa do workflow.");
-    const { data: parents, error: parentError } = await supabase
-      .from("tasks")
-      .select("workflow_version_id")
-      .eq("id", parentId)
-      .limit(1);
-    if (parentError) fail(parentError);
-    const workflowVersionId = (parents?.[0] as { workflow_version_id?: string | null } | undefined)?.workflow_version_id;
-    if (!workflowVersionId) throw new HttpError(409, "A Entrega não possui uma versão de workflow.");
-    const { data: steps, error: stepError } = await supabase
-      .from("workflow_version_steps")
-      .select("id,order_index")
-      .eq("workflow_version_id", workflowVersionId)
-      .eq("step_key", slot)
-      .limit(1);
-    if (stepError) fail(stepError);
-    const persistedStep = steps?.[0] as { id?: string; order_index?: number } | undefined;
-    if (!persistedStep?.id) throw new HttpError(409, "A etapa não pertence à versão desta Entrega.");
-    workflowStepId = persistedStep.id;
-    position = persistedStep.order_index ?? position;
+    if (!workflowStepId) throw new HttpError(400, "Informe a etapa persistida do workflow.");
+  } else if (workflowStepId) {
+    throw new HttpError(400, "Somente uma etapa de workflow pode receber workflow_step_id.");
   }
-  const { error } = await supabase.from("task_links").insert({ parent_id: parentId, child_id: childId, relation_kind: relationKind, workflow_step_id: workflowStepId, slot, position });
+  // O trigger do banco confere que a etapa pertence à versão do pai, que o
+  // filho tem o task_type_id esperado e projeta slot/posição legados. Nenhum
+  // chamador escolhe mais essas projeções textuais.
+  const { error } = await supabase.from("task_links").insert({ parent_id: parentId, child_id: childId, relation_kind: relationKind, workflow_step_id: workflowStepId, slot: null, position: 0 });
   // 23505 = já ligado. Ligar duas vezes é a mesma coisa que ligar uma.
   if (error && (error as { code?: string }).code !== "23505") fail(error);
 }
 
 /** Já existe card ligado neste slot deste pai? `ignoreChildId` deixa religar o
  * mesmo card sem falso positivo. */
-export async function slotIsTaken(parentId: string, slot: string, ignoreChildId?: string): Promise<boolean> {
+export async function workflowStepIsTaken(parentId: string, workflowStepId: string, ignoreChildId?: string): Promise<boolean> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("task_links")
     .select("child_id")
     .eq("parent_id", parentId)
-    .eq("slot", slot);
+    .eq("workflow_step_id", workflowStepId);
   if (error) fail(error);
   return ((data as { child_id: string }[] | null) ?? []).some((l) => l.child_id !== ignoreChildId);
 }
@@ -1693,7 +1678,7 @@ export async function unlinkTasks(parentId: string, childId: string): Promise<vo
 
 /** Escreve o pai estrutural de Plano. A interface antiga ainda é aditiva até
  * os quatro vínculos históricos serem reconciliados; código novo não deve
- * usar esta função para reuso — use `linkTasks(..., null, 0, "reference")`. Só
+ * usar esta função para reuso — use `linkTasks(..., null, "reference")`. Só
  * `parentId === null` solta os elos estruturais de Plano. Etapas e referências
  * nunca são tocadas aqui. */
 export async function setTaskPlanLink(taskId: string, parentId: string | null): Promise<void> {
@@ -1705,7 +1690,7 @@ export async function setTaskPlanLink(taskId: string, parentId: string | null): 
     for (const link of current) await unlinkTasks(link.parent_id, taskId);
     return;
   }
-  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null, 0, "structural_member");
+  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null, "structural_member");
 }
 
 // ---- Planos de Ação (admin) --------------------------------------------------
@@ -1834,7 +1819,6 @@ export async function createFlowDelivery(
   clientId: string | null,
   input: Record<string, unknown>,
   typeKey: string,
-  startAtSubtype?: string | null,
 ): Promise<{ delivery: TaskRecord; step: TaskRecord }> {
   const supabase = await createClient();
   const type = findType(await listTaskTypes(supabase), typeKey);
@@ -1844,11 +1828,7 @@ export async function createFlowDelivery(
   const workflow = await publishedWorkflowForKind(supabase, typeKey);
   if (!workflow?.steps.length) throw new HttpError(409, "Este tipo não possui workflow publicado.");
 
-  // Começar por uma etapa do meio é legítimo (a peça pode chegar com o roteiro
-  // pronto de fora); as anteriores simplesmente nunca nascem e contam como
-  // puladas no denominador.
-  const startIndex = startAtSubtype ? type.subtypes.findIndex((sub) => sub.key === startAtSubtype) : 0;
-  const firstStep = workflow.steps[startIndex >= 0 ? startIndex : 0];
+  const firstStep = workflow.steps[0];
 
   const delivery = await createTask(clientId, {
     ...input,
@@ -1893,9 +1873,7 @@ export async function createRecurringFlowDelivery(
   clientId: string | null,
   input: Record<string, unknown>,
   typeKey: string,
-  _startAtSubtype?: string | null,
 ): Promise<{ delivery: TaskRecord; step: TaskRecord }> {
-  void _startAtSubtype;
   const supabase = await createClient();
   const type = findType(await listTaskTypes(supabase), typeKey);
   if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
@@ -2302,9 +2280,11 @@ async function patchWithCanonicalClassification(
   const nextKind = typeof rawPatch.kind === "string" ? rawPatch.kind : current.kind;
   const nextSubtype = rawPatch.subtype === undefined ? current.subtype : rawPatch.subtype;
   const type = findType(await listTaskTypes(supabase), nextKind);
-  const taskTypeId = typeof nextSubtype === "string"
-    ? type?.subtypes.find((subtype) => subtype.key === nextSubtype)?.task_type_id
-    : type?.id;
+  const taskTypeId = type?.behavior === "entrega"
+    ? type.id
+    : typeof nextSubtype === "string" && nextSubtype
+      ? type?.subtypes.find((subtype) => subtype.key === nextSubtype)?.task_type_id
+      : type?.id;
   if (!taskTypeId) throw new HttpError(409, "A classificação escolhida não existe mais.");
   const workflowPatch = type?.behavior === "entrega"
     ? { workflow_version_id: type.workflow_version_id, workflow_activated_at: null }

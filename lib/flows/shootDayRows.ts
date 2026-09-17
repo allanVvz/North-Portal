@@ -67,8 +67,8 @@ export function shootDayRows(input: ShootDayRowsInput): ShootDayRows {
   const { type, pieces } = input;
   if (!pieces.length) throw new Error("A diária precisa de pelo menos uma publicação.");
   if (input.deliveryIds.length !== pieces.length) throw new Error("Cada publicação precisa de um id de entrega.");
-  const roteiroStep = type.subtypes.find((step) => step.key === "roteiro");
-  const captacaoStep = type.subtypes.find((step) => step.key === "captacao");
+  const roteiroStep = type.workflowSteps.find((step) => step.key === "roteiro");
+  const captacaoStep = type.workflowSteps.find((step) => step.key === "captacao");
   if (!roteiroStep || !captacaoStep) {
     throw new Error(`O tipo ${type.label} não tem as etapas de roteiro e captação — a diária precisa das duas.`);
   }

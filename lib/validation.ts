@@ -649,9 +649,8 @@ export const TASK_KIND_TONES = ["green", "gold", "blue", "purple", "neutral"] as
 
 // Cria um TIPO de topo novo (2026-09-13) — o pedaço que faltava pra "criar um
 // fluxo em cascata pela tela" (reels, carrossel, ...) funcionar sem mudança de
-// código. `steps.min(1)`: a mesma regra que `lastStepProblem` já garante em
-// outro lugar (uma Entrega não pode ficar sem etapa ativa), checada aqui mais
-// cedo, antes de qualquer INSERT.
+// código. `steps.min(1)` antecipa a regra do schema: uma versão publicável de
+// Entrega precisa declarar ao menos a primeira etapa antes de qualquer INSERT.
 export const taskTypeCreateSchema = z.object({
   label: z.string().min(1).max(80),
   behavior: z.enum(["entrega", "plano", "simples"]).default("entrega"),

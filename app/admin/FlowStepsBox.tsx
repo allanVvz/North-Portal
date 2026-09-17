@@ -7,7 +7,7 @@ import { STATUS_LABEL } from "./kanbanShared";
 import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "./FloatingPopover";
 import { taskMatchesQuery } from "@/lib/taskSearch";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
-import type { TaskSubtypeDef, TaskTypeDef } from "@/lib/taskTypes";
+import type { TaskTypeDef, WorkflowStepDef } from "@/lib/taskTypes";
 import type { ReviewerCandidate, TaskRecord } from "@/lib/validation";
 
 // A corrente de uma entrega, com o botão de corrente nas etapas vazias.
@@ -29,7 +29,7 @@ function ChainPicker({
   busy,
   onPick,
 }: {
-  step: TaskSubtypeDef;
+  step: WorkflowStepDef;
   candidates: TaskRecord[];
   busy: boolean;
   onPick: (task: TaskRecord) => void;
@@ -112,21 +112,21 @@ export default function FlowStepsBox({
   steps: TaskRecord[];
   /** Card aberto no momento, para destacar "você está aqui". */
   currentTaskId: string | null;
-  candidatesFor: (slot: string) => TaskRecord[];
+  candidatesFor: (taskTypeId: string) => TaskRecord[];
   busy: boolean;
   canOpen: boolean;
   /** Quem pode ser responsável por uma etapa (a equipe). */
   team: ReviewerCandidate[];
   onOpenStep: (task: TaskRecord) => void;
   onUnlinkStep: (task: TaskRecord) => void;
-  onLinkStep: (task: TaskRecord, slot: string) => void;
+  onLinkStep: (task: TaskRecord, workflowStepId: string) => void;
   onPatchStep: (task: TaskRecord, patch: StepPatch) => Promise<void>;
   onCommentStep: (task: TaskRecord, text: string) => Promise<void>;
 }) {
   const current = currentFlowStepOf(steps);
 
   // A lista planejada vem exclusivamente da versão publicada/persistida.
-  const plannedSteps = type && type.subtypes.length > 0 ? type.subtypes : null;
+  const plannedSteps = type && type.workflowSteps.length > 0 ? type.workflowSteps : null;
 
   // Sem a versão carregada não há denominador legítimo: não derive estrutura
   // dos cards materializados.
@@ -170,9 +170,9 @@ export default function FlowStepsBox({
                   criativos. */}
               <ChainPicker
                 step={step}
-                candidates={candidatesFor(step.key)}
+                candidates={candidatesFor(step.task_type_id)}
                 busy={busy}
-                onPick={(task) => onLinkStep(task, step.key)}
+                onPick={(task) => onLinkStep(task, step.workflow_step_id)}
               />
               <span className="tm-member-open tm-member-pending">
                 {/* Etapas de relatório nascem sempre `operacional` (ver
