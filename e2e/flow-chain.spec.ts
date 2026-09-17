@@ -82,20 +82,20 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
       status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
     });
     roteiroId = await insertTask(sb, {
-      client_id: clientId, kind: "criativo", subtype: "roteiro",
+      client_id: clientId, kind: "operacional", subtype: "roteiro",
       title: `${deliveryTitle} — Roteiro`, status: "backlog", position: 10,
     });
     captacaoA = await insertTask(sb, {
-      client_id: clientId, kind: "criativo", subtype: "captacao",
+      client_id: clientId, kind: "operacional", subtype: "captacao",
       title: `${PREFIX} Captação A`, status: "backlog", position: 20,
     });
     captacaoB = await insertTask(sb, {
-      client_id: clientId, kind: "criativo", subtype: "captacao",
+      client_id: clientId, kind: "operacional", subtype: "captacao",
       title: `${PREFIX} Captação B`, status: "backlog", position: 20,
     });
     const { error: linkErr } = await sb
       .from("task_links")
-      .insert({ parent_id: deliveryId, child_id: roteiroId, slot: "roteiro", position: 10 });
+      .insert({ parent_id: deliveryId, child_id: roteiroId, relation_kind: "workflow_step", slot: "roteiro", position: 10 });
     if (linkErr) throw new Error(`seed link failed: ${linkErr.message}`);
   });
 
@@ -152,7 +152,7 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     // rota direto com a tela desatualizada. Foi assim que a entrega
     // "criativo fluxo" acabou com dois cards no slot de edição em produção.
     const second = await page.request.post(`/api/admin/tasks/${deliveryId}/relations`, {
-      data: { child_id: captacaoB, slot: "captacao" },
+      data: { child_id: captacaoB, slot: "captacao", relation_kind: "workflow_step" },
     });
     expect(second.status()).toBe(409);
     const { data: afterLinks } = await sb

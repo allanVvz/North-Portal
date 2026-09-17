@@ -24,7 +24,7 @@ function fakeAdmin(tables: Record<string, Row[]>) {
       return Promise.resolve({ data: null, error: null });
     },
     from(table: string) {
-      let rows = [...(tables[table] ?? [])];
+      let rows = [...(tables[table] ?? (table === "task_type_workflow_steps" ? WORKFLOW_STEP_ROWS : []))];
       const chain = {
         select: () => chain,
         eq: (col: string, value: unknown) => { rows = rows.filter((r) => r[col] === value); return chain; },
@@ -65,6 +65,12 @@ const TYPE_ROWS: Row[] = [
   { id: "s1", parent_id: "t0", key: "roteiro", label: "Roteiro", order_index: 10, behavior: "simples", creatable: true, active: true, lead_days: 2, progress_weight: 1, default_assignee: null, client_visible: false },
   { id: "s2", parent_id: "t0", key: "captacao", label: "Captação", order_index: 20, behavior: "simples", creatable: true, active: true, lead_days: 3, progress_weight: 1, default_assignee: null, client_visible: false },
   { id: "s3", parent_id: "t0", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
+];
+
+const WORKFLOW_STEP_ROWS: Row[] = [
+  { delivery_type_id: "t1", task_subtype_id: "s1", order_index: 10 },
+  { delivery_type_id: "t1", task_subtype_id: "s2", order_index: 20 },
+  { delivery_type_id: "t1", task_subtype_id: "s3", order_index: 30 },
 ];
 
 const base = {
@@ -205,6 +211,12 @@ describe("diária de gravação compartilhada", () => {
           { parent_id: id, child_id: "captacao-diaria", relation_kind: "workflow_step", slot: "captacao", position: 20 },
         ]) as Row[],
         task_types: [...TYPES_WITH_EDICAO],
+        task_type_workflow_steps: [
+          { delivery_type_id: "t1", task_subtype_id: "s1", order_index: 10 },
+          { delivery_type_id: "t1", task_subtype_id: "s2", order_index: 20 },
+          { delivery_type_id: "t1", task_subtype_id: "s4", order_index: 30 },
+          { delivery_type_id: "t1", task_subtype_id: "s3", order_index: 40 },
+        ] as Row[],
       },
     };
   }

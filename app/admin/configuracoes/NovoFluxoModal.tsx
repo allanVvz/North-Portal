@@ -5,8 +5,7 @@ import { EMPTY_STEP, StepEditor, type StepDraft } from "./FluxosPanel";
 import type { TaskTypeEditorNode } from "@/lib/taskTypes";
 
 // Modal de criação de um TIPO de topo novo (reels, carrossel, automação...) —
-// o pedaço que faltava pra "criar um fluxo em cascata pela tela" funcionar
-// sem mudança de código (2026-09-13). Monta o tipo E as etapas dele numa
+// monta a Entrega e sua sequência de subtipos de Tarefa numa
 // tacada só: nada é gravado até o "Criar fluxo" final — arrastar pra
 // reordenar aqui é só array local, sem PATCH por etapa (diferente do drag em
 // FluxosPanel.tsx, que já opera sobre linhas salvas).
@@ -107,7 +106,7 @@ export default function NovoFluxoModal({
         <div className="attrcfg-head">
           <div>
             <h2>Novo fluxo em cascata</h2>
-            <p className="admin-sub">Um tipo Entrega novo, com as próprias etapas — reels, carrossel, o que for.</p>
+            <p className="admin-sub">Uma Entrega nova composta por etapas reutilizáveis de Tarefa — reels, carrossel, o que for.</p>
           </div>
           <button className="kb-modal-close" onClick={onClose} aria-label="Fechar" disabled={busy}>✕</button>
         </div>
@@ -160,7 +159,7 @@ export default function NovoFluxoModal({
           </label>
 
           <div className="novofluxo-steps">
-            <span className="admin-sub">Etapas da cascata — arraste para reordenar</span>
+            <span className="admin-sub">Etapas de Tarefa usadas nesta cascata — arraste para ordenar</span>
             {steps.map((step, index) =>
               editingIndex === index ? (
                 <StepEditor

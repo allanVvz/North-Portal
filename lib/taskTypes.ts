@@ -76,6 +76,14 @@ type Row = {
   show_in_performance: boolean;
 };
 
+/** Uma Entrega não possui mais linhas-filhas de vocabulário. Esta associação
+ * declara quais subtipos de Tarefa podem ocupar seus slots, e em qual ordem. */
+type WorkflowStepRow = {
+  delivery_type_id: string;
+  task_subtype_id: string;
+  order_index: number;
+};
+
 /** Monta a árvore a partir das linhas cruas. Separado da consulta porque o
  * editor de fluxos precisa da MESMA montagem sobre um conjunto maior de linhas
  * (as inativas inclusas) — duas montagens divergentes seriam duas verdades
@@ -121,18 +129,50 @@ function groupRows(rows: Row[]): TaskTypeEditorNode[] {
     .sort((a, b) => a.order_index - b.order_index || a.key.localeCompare(b.key));
 }
 
+function decorateWorkflowSteps<T extends TaskTypeEditorNode>(
+  types: T[],
+  mappings: readonly WorkflowStepRow[],
+): T[] {
+  const subtypeById = new Map<string, TaskTypeEditorSubtype>();
+  for (const type of types) for (const subtype of type.subtypes) subtypeById.set(subtype.id, subtype);
+  const mappingsByDelivery = new Map<string, WorkflowStepRow[]>();
+  for (const mapping of mappings) {
+    const list = mappingsByDelivery.get(mapping.delivery_type_id) ?? [];
+    list.push(mapping);
+    mappingsByDelivery.set(mapping.delivery_type_id, list);
+  }
+  return types.map((type) => {
+    if (type.behavior !== "entrega") return type;
+    const subtypes = (mappingsByDelivery.get(type.id) ?? [])
+      .slice()
+      .sort((a, b) => a.order_index - b.order_index || a.task_subtype_id.localeCompare(b.task_subtype_id))
+      .map((mapping) => subtypeById.get(mapping.task_subtype_id))
+      .filter((step): step is TaskTypeEditorSubtype => Boolean(step));
+    return { ...type, subtypes } as T;
+  });
+}
+
+async function readWorkflowStepMappings(db: TypeReader): Promise<WorkflowStepRow[]> {
+  const { data, error } = await db
+    .from("task_type_workflow_steps")
+    .select("delivery_type_id,task_subtype_id,order_index");
+  if (error) throw error;
+  return (data ?? []) as WorkflowStepRow[];
+}
+
 /** Todo o vocabulário em UMA consulta — tipos e subtipos moram na mesma
  * tabela, então buscar os dois é uma leitura só. */
 export async function listTaskTypes(db: TypeReader): Promise<TaskTypeDef[]> {
-  const { data, error } = await db.from("task_types").select(COLUMNS).eq("active", true);
+  const [typesResult, mappings] = await Promise.all([
+    db.from("task_types").select(COLUMNS).eq("active", true),
+    readWorkflowStepMappings(db),
+  ]);
+  const { data, error } = typesResult;
   if (error) throw error;
-  const types = groupRows((data ?? []) as Row[]);
-  // Etapa é sempre uma especialização de Tarefa comum. A Entrega só declara
-  // que agrega uma sequência; ela não é dona do vocabulário das etapas.
-  // Para o motor existente, a sequência padrão de uma Entrega é a lista
-  // ordenada dos subtipos ativos de `operacional`.
-  const commonSteps = types.find((type) => type.key === "operacional")?.subtypes ?? [];
-  return types.map((type) => type.behavior === "entrega" ? { ...type, subtypes: commonSteps } : type);
+  // Etapa é uma especialização de Tarefa comum. A associação abaixo conserva
+  // a outra metade do modelo: uma Entrega escolhe uma sequência, não absorve
+  // todo subtipo disponível de Tarefa.
+  return decorateWorkflowSteps(groupRows((data ?? []) as Row[]), mappings);
 }
 
 export function findType(types: readonly TaskTypeDef[], key: string): TaskTypeDef | null {
@@ -281,11 +321,14 @@ export type TypeWriter = TypeReader;
 export async function listTaskTypesForEditor(
   db: TypeReader,
 ): Promise<{ types: TaskTypeEditorNode[]; usage: VocabUsageMap }> {
-  const { data, error } = await db.from("task_types").select(COLUMNS);
+  const [{ data, error }, mappings] = await Promise.all([
+    db.from("task_types").select(COLUMNS),
+    readWorkflowStepMappings(db),
+  ]);
   if (error) throw error;
 
   return {
-    types: groupRows((data ?? []) as Row[]),
+    types: decorateWorkflowSteps(groupRows((data ?? []) as Row[]), mappings),
     usage: tallyVocabUsage(await readClassifications(db)),
   };
 }
@@ -390,6 +433,9 @@ export async function createTaskSubtype(
 ): Promise<TaskTypeEditorSubtype> {
   const { type, subtype } = await locate(db, parentId);
   if (subtype) throw new HttpError(400, "Uma etapa nao pode ter etapas dentro dela.");
+  if (type.behavior === "entrega") {
+    throw new HttpError(400, "Etapas sao subtipos de Tarefa; uma Entrega apenas escolhe quais delas compoem seu fluxo.");
+  }
 
   const key = slugifyTypeKey(input.key ?? input.label);
   if (!key) throw new HttpError(400, "O nome da etapa precisa ter ao menos uma letra ou numero.");
@@ -409,16 +455,26 @@ export type TaskTypeCreateInput = {
   steps: SubtypeInput[];
 };
 
+async function insertWorkflowStep(
+  db: TypeWriter,
+  deliveryTypeId: string,
+  taskSubtypeId: string,
+  orderIndex: number,
+): Promise<void> {
+  const { error } = await db
+    .from("task_type_workflow_steps")
+    .insert({ delivery_type_id: deliveryTypeId, task_subtype_id: taskSubtypeId, order_index: orderIndex });
+  if (error) throw error;
+}
+
 /** Cria um TIPO de topo novo — a peça que faltava para "criar um fluxo em
  * cascata pela tela" funcionar de ponta a ponta. Ícone/tom vêm no input (uma
  * paleta fixa escolhida na tela, lib/taskCatalog.ts lê isso via o cache ao
  * vivo em vez de precisar de uma entrada em código para cada tipo novo).
  *
- * Sem RPC/transação Postgres nova: cria a linha de topo, depois cada etapa em
- * sequência; se uma etapa falhar no meio, apaga a linha de topo — o `on
- * delete cascade` de `task_types.parent_id` já limpa as etapas já inseridas
- * sozinho. Mesmo padrão que `createFlowDelivery` (lib/supabase.ts) já usa
- * para "cria pai, tenta criar filhos, desfaz o pai se algum filho falhar".
+ * Uma Entrega nova cria apenas sua raiz e os elos para subtipos de Tarefa. Se
+ * uma etapa ainda não existe no vocabulário comum, ela é criada ali — nunca
+ * como filha da Entrega. A associação é a ordem específica do fluxo.
  */
 export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput): Promise<TaskTypeEditorNode> {
   if (!input.steps.length) throw new HttpError(400, "Um fluxo em cascata precisa de pelo menos uma etapa.");
@@ -462,10 +518,31 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
   const rootRow = (data ?? [])[0] as Row | undefined;
   if (!rootRow) throw new HttpError(503, "Não foi possível criar o tipo.");
 
+  const createdCommonSubtypeIds: string[] = [];
   try {
     const subtypes: TaskTypeEditorSubtype[] = [];
-    for (let i = 0; i < input.steps.length; i++) {
-      subtypes.push(await insertSubtypeRow(db, rootRow.id, (i + 1) * 10, stepKeys[i], input.steps[i]));
+    if (input.behavior === "entrega") {
+      const commonType = existingTypes.find((type) => type.key === "operacional");
+      if (!commonType) throw new HttpError(503, "O tipo Tarefa nao esta configurado.");
+      const commonByKey = new Map(commonType.subtypes.map((subtype) => [subtype.key, subtype]));
+      for (let i = 0; i < input.steps.length; i++) {
+        const existing = commonByKey.get(stepKeys[i]);
+        const subtype = existing ?? await insertSubtypeRow(
+          db,
+          commonType.id,
+          nextOrderIndex([...commonByKey.values()]),
+          stepKeys[i],
+          input.steps[i],
+        );
+        if (!existing) createdCommonSubtypeIds.push(subtype.id);
+        commonByKey.set(subtype.key, subtype);
+        await insertWorkflowStep(db, rootRow.id, subtype.id, (i + 1) * 10);
+        subtypes.push(subtype);
+      }
+    } else {
+      for (let i = 0; i < input.steps.length; i++) {
+        subtypes.push(await insertSubtypeRow(db, rootRow.id, (i + 1) * 10, stepKeys[i], input.steps[i]));
+      }
     }
     return {
       id: rootRow.id,
@@ -481,8 +558,12 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
       subtypes,
     };
   } catch (stepError) {
-    // Desfaz o tipo inteiro — o cascade já leva as etapas já inseridas junto.
+    // Desfaz a raiz e seus elos. Etapas comuns já podem ser usadas por outros
+    // fluxos, portanto somente as que esta tentativa acabou de criar saem.
     await db.from("task_types").delete().eq("id", rootRow.id);
+    for (const subtypeId of createdCommonSubtypeIds) {
+      await db.from("task_types").delete().eq("id", subtypeId);
+    }
     throw stepError;
   }
 }

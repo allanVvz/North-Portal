@@ -1,16 +1,16 @@
-# Arquitetura de tarefas e famílias
+# Arquitetura de tarefas e relações
 
 ## Fonte única e decisão de produto
 
 `public.tasks` é a única tabela de cards. Remover uma relação nunca apaga um card: relações apenas organizam e contextualizam trabalho existente.
 
-A Operação deve convergir para uma única visão de **famílias de trabalho**. O card mais alto é a unidade de atenção e representa, por cálculo, a ação aberta mais importante abaixo dele. A visão plana continua como filtro alternativo, não como representação principal. Esta decisão substitui quatro quadros independentes (Tarefas, Entregas, Rotinas e Planos), sem criar uma tabela paralela por tipo de trabalho.
+A Operação deve convergir para uma única visão de trabalho relacionado. O card mais alto é a unidade de atenção e representa, por cálculo, a ação aberta mais importante abaixo dele. A visão plana continua como filtro alternativo, não como representação principal. Esta decisão substitui quatro quadros independentes (Tarefas, Entregas, Rotinas e Planos), sem criar uma tabela ou `relation_kind` chamada “família”.
 
 ## Modelo canônico
 
 ```text
-Família estrutural (uma raiz canônica)
-└─ card pai/contêiner ou executável
+Árvore estrutural calculada (uma raiz canônica)
+└─ card agregador ou executável
    ├─ membro estrutural
    ├─ ocorrência recorrente datada
    └─ etapa materializada de workflow
@@ -40,7 +40,8 @@ abaixo para ser removida na próxima fase.
 - `task_links(parent_id, child_id, relation_kind, slot, position)` torna a semântica explícita. `slot` é somente o papel ordenado de um `workflow_step`; não infere mais parentesco.
 - `tasks.plan_id` e `payload.recurrence_parent_id` ainda duplicam o ponteiro da ocorrência recorrente por compatibilidade de leitura, mas ambos apontam para o mesmo molde existente. Molde não carrega pai temporal.
 - `payload.flow_parent`, `automation_flow`, pesos e chaves de recorrência carregam estrutura que o banco não consegue validar por completo.
-- `roteiro`, `captacao`, `edicao`, `publicacao` funcionam simultaneamente como subtipo e papel de workflow.
+- `task_type_workflow_steps(delivery_type_id, task_subtype_id, order_index)` define, com FKs, quais subtipos de Tarefa compõem cada Entrega. Não há subtipo filho de Entrega nem fallback para “todos os subtipos”.
+- `roteiro`, `captacao`, `edicao`, `publicacao` são subtipos de `operacional` (Tarefa) e ocupam o papel de workflow que o elo declara.
 - Um card pode ter vários caminhos de workflow compartilhado; escolher “o primeiro pai” é proibido para breadcrumb, Kanban e progresso.
 
 ### Incidente de relatório
@@ -101,7 +102,7 @@ Regras protegidas:
 
 Permanecem quatro tipos estruturais: Tarefa, Entrega, Plano e Checkpoint. Recorrência é atributo de molde; Automação é configuração/runs. Todo card novo recebe subtipo explícito, com `geral` quando não houver especialização.
 
-Subtipo responde “o que é?”. Papel de workflow responde “o que faz nesta família?”. Uma Diária de gravação pode ser Tarefa de produção e `workflow_step` de captação em Reel, Carrossel e Story sem ser duplicada ou reclassificada.
+Subtipo responde “o que é?”. Papel de workflow responde “o que faz nesta relação?”. Uma Diária de gravação pode ser Tarefa de produção e `workflow_step` de captação em várias Entregas sem ser duplicada ou reclassificada. A composição do molde é `task_type_workflow_steps`; a instância é `task_links`. São camadas diferentes e ambas têm FK.
 
 Workflows são pequenos e versionados: definição, passos ordenados, pesos, política de responsáveis e dependências. A instância fixa a versão aplicada; editar a definição não reescreve trabalho em andamento.
 
@@ -122,7 +123,7 @@ A ação atual usa precedência: bloqueada/parada, atrasada, revisão, produçã
 
 O Kanban único lista famílias. Busca por descendente retorna a raiz; filtros podem revelar itens individuais sem duplicar dados. Card mostra tipo, subtipo, ação atual, prazo crítico e progresso familiar.
 
-O TaskModal terá uma seção sempre visível, **Família**, substituindo caixas repetidas “Faz parte de”, “Etapas” e “Próxima etapa”:
+O TaskModal terá uma seção sempre visível, **Relações**, substituindo caixas repetidas “Faz parte de”, “Etapas” e “Próxima etapa”:
 
 - breadcrumb da raiz ao card e “você está aqui”;
 - pai estrutural, ação atual, bloqueio e próximo desbloqueio;
@@ -136,15 +137,16 @@ Descrição, materiais e atividade continuam independentes. Ícones seguem contr
 1. Inventariar: zerar tipo/subtipo legado ativo, corrigir somente moldes de relatório comprovadamente errados, detectar pais múltiplos, ciclos e links cross-client.
 2. **Concluído em produção:** adicionar `relation_kind`, índices e guardas a `task_links`; migrar todos os escritores e remover o fallback por `slot`.
 3. Reconciliar vínculos múltiplos: a ocorrência recorrente é filha temporal do molde (`plan_id` + `recurrence_parent_id`), o plano da ocorrência é o dono estrutural das entregas e uma reunião histórica ligada diretamente à entrega é `reference`.
-4. Extrair recorrência/workflow de `plan_id` e flags; enquanto a compatibilidade existir, exigir par temporal sincronizado, molde existente e nenhum molde aninhado. Validar cardinalidade, caminho e progresso antes da troca de leitura.
-5. Remover adaptadores/dados legados só após E2E de modal e Kanban. Não apagar catálogo/documento histórico sem confirmar zero referências.
+4. **Concluído em produção:** extrair a composição de workflow para `task_type_workflow_steps`; cada etapa é subtipo de Tarefa e a Entrega só aponta para ela por FK. As linhas-filhas legadas de Entrega e os tipos inativos sem uso foram removidos por `20260917083000_normalize_delivery_workflow_steps`.
+5. Extrair recorrência de `plan_id` e flags; enquanto a compatibilidade existir, exigir par temporal sincronizado, molde existente e nenhum molde aninhado. Validar cardinalidade, caminho e progresso antes da troca de leitura.
+6. Remover adaptadores legados só após E2E de modal e Kanban. Não apagar catálogo/documento histórico sem confirmar zero referências.
 
 Produção é o único ambiente integrado. Toda migration requer preflight, snapshot de schema/ledger, rollback documentado e SQL versionado. Nunca usar `db push`, `migration repair` ou `db reset` automaticamente.
 
 ## Critérios de aceite
 
 - Nenhum card novo/migrado usa tipo legado, `slot` ambíguo ou flag estrutural como fonte.
-- Todo card abre com caminho familiar estável; nenhum algoritmo escolhe pai por ordem incidental.
+- Todo card abre com caminho relacional estável; nenhum algoritmo escolhe ancestral por ordem incidental.
 - Referência compartilhada não duplica card, contagem ou progresso.
 - Concluir, reabrir, reagendar e materializar ocorrência atualizam só a família correta e são idempotentes.
 - Modal mostra raiz, caminho, relação, ação, bloqueio e histórico sem N+1.

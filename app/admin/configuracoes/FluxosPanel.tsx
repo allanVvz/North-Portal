@@ -7,8 +7,8 @@ import NovoFluxoModal from "./NovoFluxoModal";
 
 // Configurações › Tipos e fluxos — o molde das Entregas fora do SQL.
 //
-// A tela edita `task_types`, a tabela auto-referenciada onde um Tipo é a linha
-// sem pai e suas Etapas são as linhas filhas: a ordem das etapas É a cascata.
+// A tela edita o vocabulário de `task_types`. Etapas são subtipos de Tarefa;
+// uma Entrega apenas compõe uma sequência por `task_type_workflow_steps`.
 // O que NÃO se faz aqui é criar um tipo de topo — ele tem contraparte em
 // lib/taskCatalog.ts (tom, ícone, união TaskKind) e uma linha só no banco
 // renderizaria com o visual de fallback em todo card.
@@ -287,6 +287,7 @@ export default function FluxosPanel() {
         {visibleTypes.map((type) => {
           const typeUsage = data.usage[usageKey(type.key)];
           const isExpanded = expanded.has(type.id);
+          const isDelivery = type.behavior === "entrega";
           return (
             <section className={`voc-type ${type.active ? "" : "off"}`} key={type.id}>
               <header className="voc-type-head">
@@ -317,7 +318,7 @@ export default function FluxosPanel() {
                           {type.creatable ? null : <span className="set-badge rascunho">Fora do dropdown</span>}
                         </div>
                         <span className="admin-sub">
-                          {type.subtypes.filter((s) => s.active).length} etapa(s)
+                          {type.subtypes.filter((s) => s.active).length} etapa(s){isDelivery ? " de Tarefa" : ""}
                           {typeUsage ? ` · ${typeUsage.total} card(s)` : " · nenhum card"}
                         </span>
                       </div>
@@ -340,6 +341,7 @@ export default function FluxosPanel() {
 
               {isExpanded ? (
               <div className="voc-steps">
+                {isDelivery ? <p className="admin-sub">Sequência composta por subtipos reutilizáveis de Tarefa. Edite o subtipo na seção Tarefa.</p> : null}
                 {type.subtypes.map((step, index) =>
                   editing === step.id ? (
                     <StepEditor
@@ -354,11 +356,11 @@ export default function FluxosPanel() {
                     <div
                       className={`voc-step ${step.active ? "" : "off"} ${dragId === step.id ? "dragging" : ""}`}
                       key={step.id}
-                      draggable={editing === null}
-                      onDragStart={(e) => { setDragId(step.id); e.dataTransfer.effectAllowed = "move"; }}
+                      draggable={!isDelivery && editing === null}
+                      onDragStart={(e) => { if (!isDelivery) { setDragId(step.id); e.dataTransfer.effectAllowed = "move"; } }}
                       onDragEnd={() => setDragId(null)}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => { e.preventDefault(); void reorder(type, step.id); }}
+                      onDragOver={(e) => { if (!isDelivery) e.preventDefault(); }}
+                      onDrop={(e) => { if (!isDelivery) { e.preventDefault(); void reorder(type, step.id); } }}
                     >
                       <span className="voc-step-pos" aria-hidden>{index + 1}</span>
                       <div className="voc-step-meta">
@@ -372,7 +374,7 @@ export default function FluxosPanel() {
                           {step.default_assignee ? ` · ${step.default_assignee}` : ""}
                         </span>
                       </div>
-                      <div className="voc-actions">
+                      {!isDelivery ? <div className="voc-actions">
                         <button
                           className="admin-btn ghost"
                           onClick={() => { setEditing(step.id); setStepDraft(toStepDraft(step)); }}
@@ -398,12 +400,12 @@ export default function FluxosPanel() {
                             Excluir
                           </button>
                         )}
-                      </div>
+                      </div> : null}
                     </div>
                   ),
                 )}
 
-                {editing === `new:${type.id}` ? (
+                {!isDelivery && editing === `new:${type.id}` ? (
                   <StepEditor
                     draft={stepDraft}
                     setDraft={setStepDraft}
@@ -411,7 +413,7 @@ export default function FluxosPanel() {
                     onCancel={closeEditor}
                     onSave={() => void saveStep(type)}
                   />
-                ) : (
+                ) : !isDelivery ? (
                   <button
                     className="admin-btn ghost voc-add"
                     onClick={() => { setEditing(`new:${type.id}`); setStepDraft(EMPTY_STEP); }}
@@ -419,7 +421,7 @@ export default function FluxosPanel() {
                   >
                     + Etapa em {type.label}
                   </button>
-                )}
+                ) : null}
               </div>
               ) : null}
             </section>

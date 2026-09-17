@@ -117,13 +117,17 @@ describe("posição de uma etapa nova", () => {
 // (select sem filtro, insert + select + limit, delete + eq). `failStepIndex`
 // simula a N-ésima etapa falhando no insert, para provar a limpeza compensatória.
 function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number | null = null): TypeWriter {
-  const state: { task_types: Record<string, unknown>[]; tasks: Record<string, unknown>[] } = {
-    task_types: [...seedTypes],
+  const state: { task_types: Record<string, unknown>[]; tasks: Record<string, unknown>[]; task_type_workflow_steps: Record<string, unknown>[] } = {
+    task_types: [
+      { id: "operacional", parent_id: null, key: "operacional", label: "Tarefa", order_index: 10, behavior: "simples", creatable: true, active: true },
+      ...seedTypes,
+    ],
     tasks: [],
+    task_type_workflow_steps: [],
   };
   let insertCount = -1; // -1 = a próxima insert é a linha de topo; 0+ = índice da etapa
 
-  function builder(table: "task_types" | "tasks") {
+  function builder(table: "task_types" | "tasks" | "task_type_workflow_steps") {
     let mode: "select" | "insert" | "delete" = "select";
     let insertPayload: Record<string, unknown> | null = null;
     let failThis = false;
@@ -168,7 +172,7 @@ function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number
     return api;
   }
 
-  return { from: (table: string) => builder(table as "task_types" | "tasks") } as unknown as TypeWriter;
+  return { from: (table: string) => builder(table as "task_types" | "tasks" | "task_type_workflow_steps") } as unknown as TypeWriter;
 }
 
 const baseCreateInput = {
@@ -206,6 +210,7 @@ describe("createTaskType — nasce um tipo de topo novo", () => {
     const db = fakeDb([], 1); // a 2ª etapa (índice 1) falha
     await expect(createTaskType(db, baseCreateInput)).rejects.toThrow(/simulado/);
     const { data } = (await db.from("task_types").select()) as { data: unknown[] };
-    expect(data).toEqual([]);
+    expect(data).toHaveLength(1);
+    expect(data?.[0]).toMatchObject({ key: "operacional" });
   });
 });

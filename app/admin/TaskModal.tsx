@@ -804,7 +804,10 @@ export default function TaskModal({
       (t) =>
         t.id !== chainDelivery.id &&
         t.client_id === chainDelivery.client_id &&
-        t.kind === chainDelivery.kind &&
+        // A etapa é uma Tarefa comum; a Entrega só define a sequência em
+        // task_type_workflow_steps. Comparar com o kind da Entrega escondia
+        // justamente os cards elegíveis depois da migração de subtipos.
+        t.kind === "operacional" &&
         t.subtype === slot &&
         // `?? []`: um card que chegou de uma resposta crua da API (ex.: RPC de
         // comentário devolvendo só `t.*`, sem os joins de `mergeTaskAssigneeRow`)

@@ -213,7 +213,7 @@ export default function FlowStepsBox({
               <span className="tm-member-open tm-member-pending">
                 {/* Etapas de relatório nascem sempre `operacional` (ver
                     ensureFlowStep) — nunca do kind da entrega ("criativo"). */}
-                <TaskKindIcon kind={isReportFlow ? "operacional" : (type?.key ?? "operacional")} size="sm" />
+                <TaskKindIcon kind="operacional" size="sm" />
                 <span className="tm-member-title">{step.label}</span>
                 <span className="tm-member-status">
                   Nasce quando a anterior for concluída{step.lead_days ? ` · prazo de ${step.lead_days} dia${step.lead_days === 1 ? "" : "s"}` : ""}
