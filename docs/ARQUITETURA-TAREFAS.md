@@ -38,7 +38,7 @@ abaixo para ser removida na próxima fase.
 
 - Tipos ativos: `operacional` (Tarefa), `plano_acao` (Plano), `criativo` (Entrega) e `checkpoint_comercial` (Checkpoint), validados por trigger contra `task_types`.
 - `task_links(parent_id, child_id, relation_kind, slot, position)` torna a semântica explícita. `slot` é somente o papel ordenado de um `workflow_step`; não infere mais parentesco.
-- `tasks.plan_id` e `payload.recurrence_parent_id` representam a ocorrência recorrente com redundância.
+- `tasks.plan_id` e `payload.recurrence_parent_id` ainda duplicam o ponteiro da ocorrência recorrente por compatibilidade de leitura, mas ambos apontam para o mesmo molde existente. Molde não carrega pai temporal.
 - `payload.flow_parent`, `automation_flow`, pesos e chaves de recorrência carregam estrutura que o banco não consegue validar por completo.
 - `roteiro`, `captacao`, `edicao`, `publicacao` funcionam simultaneamente como subtipo e papel de workflow.
 - Um card pode ter vários caminhos de workflow compartilhado; escolher “o primeiro pai” é proibido para breadcrumb, Kanban e progresso.
@@ -55,7 +55,7 @@ Molde recorrente: Tarefa
    └─ Automação: relatório de conversão
 ```
 
-A correção será migration nova, idempotente e restrita a moldes recorrentes com configuração ativa; ocorrências `flow_parent` não entram no backfill.
+Corrigido em produção por `20260917070000_reconcile_report_templates`: a mudança é idempotente e restrita a moldes recorrentes com configuração ativa; ocorrências `flow_parent`, PDFs e etapas não entram no backfill. As reconciliações `20260917071500` e `20260917073000` também eliminaram ponteiros temporais apagados, execuções com cadência copiada e o único elo cross-client histórico, preservando cards, comentários e documentos.
 
 ## Arquitetura de destino
 
@@ -136,7 +136,7 @@ Descrição, materiais e atividade continuam independentes. Ícones seguem contr
 1. Inventariar: zerar tipo/subtipo legado ativo, corrigir somente moldes de relatório comprovadamente errados, detectar pais múltiplos, ciclos e links cross-client.
 2. **Concluído em produção:** adicionar `relation_kind`, índices e guardas a `task_links`; migrar todos os escritores e remover o fallback por `slot`.
 3. Reconciliar vínculos múltiplos: a ocorrência recorrente é filha temporal do molde (`plan_id` + `recurrence_parent_id`), o plano da ocorrência é o dono estrutural das entregas e uma reunião histórica ligada diretamente à entrega é `reference`.
-4. Extrair recorrência/workflow de `plan_id` e flags; validar cardinalidade, caminho e progresso antes da troca de leitura.
+4. Extrair recorrência/workflow de `plan_id` e flags; enquanto a compatibilidade existir, exigir par temporal sincronizado, molde existente e nenhum molde aninhado. Validar cardinalidade, caminho e progresso antes da troca de leitura.
 5. Remover adaptadores/dados legados só após E2E de modal e Kanban. Não apagar catálogo/documento histórico sem confirmar zero referências.
 
 Produção é o único ambiente integrado. Toda migration requer preflight, snapshot de schema/ledger, rollback documentado e SQL versionado. Nunca usar `db push`, `migration repair` ou `db reset` automaticamente.

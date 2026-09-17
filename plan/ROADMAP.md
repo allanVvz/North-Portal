@@ -68,7 +68,7 @@ card raiz reflete a ação aberta mais importante e o modal explica a árvore in
 | ID | Item | Critério de saída |
 |---|---|---|
 | R0.5 | **Modelo de relações familiares — entregue em produção (2026-09-17).** `20260917035220_task_link_relation_kinds` explicitou os elos; `20260917052549_reconcile_family_ownership` converteu os 3 vínculos históricos Reunião → entrega em `reference`, moveu Baita para Plano → Entrega → etapa, exigiu `relation_kind` em toda escrita e limitou `structural_member` a um pai por card. Resultado remoto validado: 39 estruturais, 9 `workflow_step`, 3 referências e zero card com dois pais estruturais. `workflow_step` permanece N:N explícito para a Diária de gravação. | Todo card tem localização estrutural canônica; referência não duplica progresso; `slot` nunca decide semântica. |
-| R0.6 | **Higiene de catálogo e automação.** Eliminar tipos/subtipos legados, separar subtipo de papel de workflow e corrigir os moldes de relatório classificados como Entrega. | Quatro tipos estruturais explícitos, subtipo `geral` quando necessário; molde de relatório é Tarefa recorrente e ocorrência é Entrega. |
+| R0.6 | **Higiene de catálogo e automação — em andamento.** A correção de moldes de relatório e dos resíduos temporais foi entregue em produção (`20260917070000`, `20260917071500`, `20260917073000`): zero tipo de relatório legado, molde ativo = Tarefa recorrente, ocorrência = Entrega, nenhum ponteiro/cadência temporal inconsistente nem elo cross-client. Resta extrair o papel de workflow dos subtipos editoriais sem reclassificar cards. | Quatro tipos estruturais explícitos; papel de workflow separado do subtipo; compatibilidade temporal removida somente depois do novo leitor em lote (R0.7). |
 | R0.7 | **Backend familiar e rollups.** Endpoint/DTO em lote para raiz, caminho, ação atual, bloqueios, histórico e progresso derivado. | Sem escolha arbitrária de pai, sem N+1, operações idempotentes de concluir/reabrir/reagendar. |
 | R0.8 | **TaskModal Família + Kanban único.** Substituir caixas relacionais repetidas por uma seção Família e consolidar as quatro abas em uma projeção. | O portão de login (`e2e/auth-login.spec.ts`) continua verde; E2E autenticado de família cobre Tarefa, Plano, Entrega, recorrência, referência compartilhada e relatório com fixtures isoladas. |
 
@@ -82,6 +82,13 @@ verificação de catálogo/dados e rollback.
 trigger sem fallback por `slot`. E2E autenticado verde: login, três cenários de
 navegação do TaskModal/Operação e referência visual isolada. O runbook de acesso
 direto, TLS e ledger está em `AGENTS.md`.
+
+**Evidência R0.6 parcial (17/09):** preflight, transação e ledger remoto das
+migrations `20260917070000`, `20260917071500` e `20260917073000`. Auditoria
+final: 38 elos estruturais, 9 etapas de workflow e 4 referências; zero elo
+cross-client, ciclo, pai estrutural duplicado, slot inválido, tipo/subtipo de
+relatório legado, molde com pai temporal, execução com ponteiros divergentes
+ou molde recorrente aninhado.
 
 **Decisão consolidada:** a Diária de gravação é `workflow_step` N:N explícito,
 não exceção nem segundo pai estrutural. A regra de unicidade recai somente em
