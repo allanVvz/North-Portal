@@ -132,7 +132,7 @@ Descrição, materiais e atividade continuam independentes. Ícones seguem contr
 
 1. Inventariar: zerar tipo/subtipo legado ativo, corrigir somente moldes de relatório comprovadamente errados, detectar pais múltiplos, ciclos e links cross-client.
 2. Adicionar `relation_kind`, índices e guardas a `task_links`; migrar todos os escritores e remover o fallback por `slot`.
-3. Reconciliar vínculos múltiplos: a ocorrência recorrente é filha temporal do molde (`plan_id` + `recurrence_parent_id`), o plano da ocorrência é o dono estrutural das entregas e qualquer ligação direta molde → entrega é `reference`.
+3. Reconciliar vínculos múltiplos: a ocorrência recorrente é filha temporal do molde (`plan_id` + `recurrence_parent_id`), o plano da ocorrência é o dono estrutural das entregas e uma reunião histórica ligada diretamente à entrega é `reference`.
 4. Extrair recorrência/workflow de `plan_id` e flags; validar cardinalidade, caminho e progresso antes da troca de leitura.
 5. Remover adaptadores/dados legados só após E2E de modal e Kanban. Não apagar catálogo/documento histórico sem confirmar zero referências.
 

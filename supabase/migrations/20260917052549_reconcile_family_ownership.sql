@@ -2,9 +2,9 @@
 --
 -- Product decision (2026-09-17): a recurring template owns its dated plan
 -- occurrence through tasks.plan_id / payload.recurrence_parent_id. The plan
--- occurrence owns its work structurally. A direct template -> work connection
--- may remain for navigation, but it is contextual (`reference`), never a
--- second family owner.
+-- occurrence owns its work structurally. A completed historical meeting may
+-- remain directly connected to its action items, but that is contextual
+-- (`reference`), never a second family owner.
 --
 -- This migration intentionally identifies the two reviewed families by their
 -- stable production ids. It will fail rather than guess if the reviewed graph
@@ -13,19 +13,21 @@
 
 do $$
 declare
-  meeting_template constant uuid := '1d6239fd-c535-5405-92ef-bfaf8a639821';
+  historical_meeting constant uuid := '1d6239fd-c535-5405-92ef-bfaf8a639821';
+  recurrence_template constant uuid := '71e87469-990b-416e-9d0e-a6f57e781343';
   portal_occurrence constant uuid := '01220f73-3f62-40a0-85cb-a1b8e8b83078';
   september_plan constant uuid := '1f179322-90f0-4a2d-8df0-9b72507dda27';
   baita_delivery constant uuid := 'e0b23dce-3f4f-4d2a-bd30-eaa377dbba80';
   baita_edit_step constant uuid := 'f6c9580e-aa2f-486d-8937-88dbe52a6bcd';
   shared_from_meeting integer;
 begin
-  -- Only the links that are simultaneously owned by the dated Portal plan are
-  -- retyped. Other future members of the recurring template are untouched.
+  -- Only historical Meeting links that are simultaneously owned by the dated
+  -- Portal plan are retyped. Other actions recorded in that meeting remain
+  -- untouched and structurally valid.
   select count(*) into shared_from_meeting
   from public.task_links meeting_link
   join public.task_links portal_link on portal_link.child_id = meeting_link.child_id
-  where meeting_link.parent_id = meeting_template
+  where meeting_link.parent_id = historical_meeting
     and meeting_link.relation_kind = 'structural_member'
     and portal_link.parent_id = portal_occurrence
     and portal_link.relation_kind = 'structural_member';
@@ -34,21 +36,21 @@ begin
     select 1
     from public.task_links meeting_link
     join public.task_links portal_link on portal_link.child_id = meeting_link.child_id
-    where meeting_link.parent_id = meeting_template
+    where meeting_link.parent_id = historical_meeting
       and meeting_link.relation_kind = 'reference'
       and portal_link.parent_id = portal_occurrence
       and portal_link.relation_kind = 'structural_member'
   ) then
-    raise exception 'Reviewed Reunião -> Portal shared links are not in the expected state (found % structural links)', shared_from_meeting;
+    raise exception 'Reviewed historical Reunião -> Portal shared links are not in the expected state (found % structural links)', shared_from_meeting;
   end if;
 
   if not exists (
     select 1 from public.tasks
     where id = portal_occurrence
-      and plan_id = meeting_template
-      and payload ->> 'recurrence_parent_id' = meeting_template::text
+      and plan_id = recurrence_template
+      and payload ->> 'recurrence_parent_id' = recurrence_template::text
   ) then
-    raise exception 'Portal occurrence is no longer linked to the reviewed Reunião recurrence';
+    raise exception 'Portal occurrence is no longer linked to the reviewed recurrence template';
   end if;
 
   if not exists (
@@ -61,13 +63,13 @@ begin
     raise exception 'Reviewed Baita workflow edge is not present';
   end if;
 
-  -- Reunião remains directly visible as context for the three deliveries, but
-  -- Portal is their only owner. No rollup, status or deadline can now be
-  -- inherited through the contextual line.
+  -- The historical meeting remains directly visible as context for the three
+  -- action items, but Portal is their only structural owner. No rollup, status
+  -- or deadline can now be inherited through the contextual line.
   update public.task_links meeting_link
      set relation_kind = 'reference', slot = null, position = 0
     from public.task_links portal_link
-   where meeting_link.parent_id = meeting_template
+   where meeting_link.parent_id = historical_meeting
      and meeting_link.child_id = portal_link.child_id
      and meeting_link.relation_kind = 'structural_member'
      and portal_link.parent_id = portal_occurrence
