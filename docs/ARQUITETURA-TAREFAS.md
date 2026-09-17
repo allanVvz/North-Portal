@@ -29,16 +29,19 @@ Referência contextual N:N
 
 Recorrência é relação temporal: molde → ocorrências datadas. Workflow é uma definição versionada aplicada à instância. Automação é processo configurado com runs/artefatos; não é `kind` e não reclassifica seu alvo.
 
-## Estado atual e compatibilidade
+## Estado atual e compatibilidade residual
 
-O banco ainda mistura esses conceitos. Esta seção registra a compatibilidade necessária durante a migração.
+`task_links` já não mistura significado: todo elo persistido tem
+`relation_kind`, e `slot` não é interpretado como parentesco. A compatibilidade
+restante é exclusivamente da recorrência e de metadados de automação, descrita
+abaixo para ser removida na próxima fase.
 
 - Tipos ativos: `operacional` (Tarefa), `plano_acao` (Plano), `criativo` (Entrega) e `checkpoint_comercial` (Checkpoint), validados por trigger contra `task_types`.
 - `task_links(parent_id, child_id, relation_kind, slot, position)` torna a semântica explícita. `slot` é somente o papel ordenado de um `workflow_step`; não infere mais parentesco.
 - `tasks.plan_id` e `payload.recurrence_parent_id` representam a ocorrência recorrente com redundância.
 - `payload.flow_parent`, `automation_flow`, pesos e chaves de recorrência carregam estrutura que o banco não consegue validar por completo.
 - `roteiro`, `captacao`, `edicao`, `publicacao` funcionam simultaneamente como subtipo e papel de workflow.
-- Um card pode ter múltiplos pais; escolher “o primeiro pai” é proibido para breadcrumb, Kanban e progresso.
+- Um card pode ter vários caminhos de workflow compartilhado; escolher “o primeiro pai” é proibido para breadcrumb, Kanban e progresso.
 
 ### Incidente de relatório
 
@@ -131,7 +134,7 @@ Descrição, materiais e atividade continuam independentes. Ícones seguem contr
 ## Migração sem perda e validação
 
 1. Inventariar: zerar tipo/subtipo legado ativo, corrigir somente moldes de relatório comprovadamente errados, detectar pais múltiplos, ciclos e links cross-client.
-2. Adicionar `relation_kind`, índices e guardas a `task_links`; migrar todos os escritores e remover o fallback por `slot`.
+2. **Concluído em produção:** adicionar `relation_kind`, índices e guardas a `task_links`; migrar todos os escritores e remover o fallback por `slot`.
 3. Reconciliar vínculos múltiplos: a ocorrência recorrente é filha temporal do molde (`plan_id` + `recurrence_parent_id`), o plano da ocorrência é o dono estrutural das entregas e uma reunião histórica ligada diretamente à entrega é `reference`.
 4. Extrair recorrência/workflow de `plan_id` e flags; validar cardinalidade, caminho e progresso antes da troca de leitura.
 5. Remover adaptadores/dados legados só após E2E de modal e Kanban. Não apagar catálogo/documento histórico sem confirmar zero referências.

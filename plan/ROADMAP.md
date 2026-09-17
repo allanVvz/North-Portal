@@ -67,21 +67,21 @@ card raiz reflete a ação aberta mais importante e o modal explica a árvore in
 
 | ID | Item | Critério de saída |
 |---|---|---|
-| R0.5 | **Modelo de relações familiares.** **Fase 1 entregue em produção (2026-09-17):** `20260917035220_task_link_relation_kinds` tornou explícito `task_links.relation_kind`, com constraints, índices e trigger; 42 elos estruturais e 9 etapas foram classificados sem perda. `20260917052549_reconcile_family_ownership` reconcilia ocorrência recorrente → plano → entregas, converte o elo histórico Reunião → entrega em `reference`, exige `relation_kind` em toda escrita e limita `structural_member` a um pai por card. `workflow_step` permanece N:N explícito para a Diária de gravação. | Todo card tem localização estrutural canônica; referência não duplica progresso; `slot` nunca decide semântica. |
+| R0.5 | **Modelo de relações familiares — entregue em produção (2026-09-17).** `20260917035220_task_link_relation_kinds` explicitou os elos; `20260917052549_reconcile_family_ownership` converteu os 3 vínculos históricos Reunião → entrega em `reference`, moveu Baita para Plano → Entrega → etapa, exigiu `relation_kind` em toda escrita e limitou `structural_member` a um pai por card. Resultado remoto validado: 39 estruturais, 9 `workflow_step`, 3 referências e zero card com dois pais estruturais. `workflow_step` permanece N:N explícito para a Diária de gravação. | Todo card tem localização estrutural canônica; referência não duplica progresso; `slot` nunca decide semântica. |
 | R0.6 | **Higiene de catálogo e automação.** Eliminar tipos/subtipos legados, separar subtipo de papel de workflow e corrigir os moldes de relatório classificados como Entrega. | Quatro tipos estruturais explícitos, subtipo `geral` quando necessário; molde de relatório é Tarefa recorrente e ocorrência é Entrega. |
 | R0.7 | **Backend familiar e rollups.** Endpoint/DTO em lote para raiz, caminho, ação atual, bloqueios, histórico e progresso derivado. | Sem escolha arbitrária de pai, sem N+1, operações idempotentes de concluir/reabrir/reagendar. |
 | R0.8 | **TaskModal Família + Kanban único.** Substituir caixas relacionais repetidas por uma seção Família e consolidar as quatro abas em uma projeção. | O portão de login (`e2e/auth-login.spec.ts`) continua verde; E2E autenticado de família cobre Tarefa, Plano, Entrega, recorrência, referência compartilhada e relatório com fixtures isoladas. |
 
-Sequência obrigatória: R0.5 → R0.6 → R0.7 → R0.8. Não iniciar uma quinta tela
-de Operação nem ampliar o fluxo de automação antes de R0.5/R0.6. A migração deve
-manter compatibilidade temporária, dual-write e rollback, pois produção é o único
-ambiente integrado.
+Sequência obrigatória: R0.6 → R0.7 → R0.8. Não iniciar uma quinta tela de
+Operação nem ampliar o fluxo de automação antes de R0.6. Produção é o único
+ambiente integrado: migrations devem preservar preflight, transação única,
+verificação de catálogo/dados e rollback.
 
-**Evidência da Fase 1 (17/09):** preflight remoto sem `slot` vazio; schema
-validado com `relation_kind NOT NULL`, constraints, dois índices e trigger
-`validate_task_link`; ledger remoto registra `20260917035220`. E2E autenticado
-verde: login e os três cenários de navegação do TaskModal/Operação. O runbook
-de acesso direto, TLS e ledger está em `AGENTS.md`.
+**Evidência R0.5 (17/09):** preflight remoto, ledger `20260917035220` e
+`20260917052549`, `relation_kind NOT NULL`, índice parcial de pai estrutural e
+trigger sem fallback por `slot`. E2E autenticado verde: login, três cenários de
+navegação do TaskModal/Operação e referência visual isolada. O runbook de acesso
+direto, TLS e ledger está em `AGENTS.md`.
 
 **Decisão consolidada:** a Diária de gravação é `workflow_step` N:N explícito,
 não exceção nem segundo pai estrutural. A regra de unicidade recai somente em
