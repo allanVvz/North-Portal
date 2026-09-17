@@ -1,37 +1,6 @@
 import type { TaskParentLink, TaskRecord, TaskRelationKind } from "./validation";
-import type { TaskSubtypeDef } from "./taskTypes";
 
 export const DEFERRED_TASK_FLAG = "deferred_until_accessed";
-
-/** Marca de que este card é uma ENTREGA: um pai que agrega etapas em sequência.
- *
- * É uma marca explícita, e não algo inferido do tipo, porque existem cards
- * `criativo` antigos, de antes dos fluxos, que são trabalho comum. Inferir
- * "criativo sem subtipo = entrega" transformaria todos eles em pais de uma
- * hora para outra: sumiriam do quadro (belongsToTaskScreen exclui pais) e
- * passariam a marcar 0% com as etapas todas faltando. Mesmo precedente do
- * `payload.recurrence_group`, que responde a essa mesma pergunta na recorrência. */
-export const FLOW_PARENT_KEY = "flow_parent";
-/** Fluxo de relatórios: uma Entrega normal, com etapas dinâmicas do motor. */
-export const REPORT_CONVERSION_FLOW = "report_conversion";
-
-export function isReportConversionFlow(task: Pick<TaskRecord, "payload">): boolean {
-  return task.payload?.automation_flow === REPORT_CONVERSION_FLOW;
-}
-
-/** As 3 etapas do fluxo de relatório, na ordem — fonte única para quem CRIA
- * cada uma (lib/automations/run.ts, conversionFlow.ts) e para quem MOSTRA a
- * corrente planejada antes de qualquer etapa existir (FlowStepsBox). Nunca
- * declarado em `task_types`: isso reacoplaria o motor genérico de cascata a
- * um fluxo que só as automações administram (ver execute.ts). Formato
- * TaskSubtypeDef só para reaproveitar a mesma UI/lógica da corrente
- * declarada — os campos sem uso aqui (progress_weight, default_assignee,
- * client_visible) ficam nos valores que a automação já cria hoje. */
-export const REPORT_FLOW_STEPS: readonly TaskSubtypeDef[] = [
-  { key: "trafego", label: "Relatório de anúncios", order_index: 10, lead_days: 0, progress_weight: 1, default_assignee: null, client_visible: false },
-  { key: "feedback", label: "Feedback da semana", order_index: 20, lead_days: 2, progress_weight: 1, default_assignee: null, client_visible: true },
-  { key: "conversao", label: "Relatório de conversão", order_index: 30, lead_days: 0, progress_weight: 1, default_assignee: null, client_visible: false },
-];
 
 /** A etapa anterior da corrente, para o editor conseguir voltar ao roteiro em
  * vez de caçá-lo. */
@@ -105,8 +74,11 @@ export function flowStepKeyOf(task: Pick<TaskRecord, "subtype">): string | null 
   return task.subtype || null;
 }
 
-export function isFlowDelivery(task: Pick<TaskRecord, "payload">): boolean {
-  return task.payload?.[FLOW_PARENT_KEY] === true;
+export function isFlowDelivery(task: {
+  workflow_version_id?: TaskRecord["workflow_version_id"];
+  payload?: TaskRecord["payload"];
+}): boolean {
+  return Boolean(task.workflow_version_id);
 }
 
 export function recurrenceParentIdOf(task: Pick<TaskRecord, "payload">): string | null {
@@ -161,7 +133,7 @@ export function clientVisibleInOps(client: { disabled?: boolean | null; is_activ
  * onde encaixá-los. O quadro mostra a etapa de agora; os pais vivem em
  * Operação e no cabeçalho do card filho. */
 export function belongsToTaskScreen(
-  task: Pick<TaskRecord, "kind" | "recurrence_cadence" | "payload">,
+  task: Pick<TaskRecord, "kind" | "recurrence_cadence" | "payload" | "workflow_version_id">,
 ): boolean {
   return visibleOnTaskBoard(task) && task.kind !== "plano_acao" && !task.recurrence_cadence && !isFlowDelivery(task);
 }

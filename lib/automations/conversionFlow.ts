@@ -1,17 +1,7 @@
-// Automação 2 (relatorio_vendas) — o "fluxo de feedback" genérico.
-//
-// Encaixada numa tarefa recorrente (M1), cada ocorrência dessa tarefa vira o
-// PAI de um fluxo dinâmico (sem task_type): a Automação 1 cria a etapa `trafego`
-// (relatório de anúncios do Meta); esta automação cria a etapa `feedback`
-// quando alguém comenta os números no pai ou na etapa de tráfego, lê o
-// comentário com IA (métricas configuráveis: tags livres), grava em
-// `task_metrics`, gera o PDF de vendas e põe a etapa `feedback` + o pai em
-// REVISÃO. Sem retorno até o prazo → a etapa nasce com zeros e fecha assim mesmo.
-//
-// Não filtra por due_date — reage ao comentário em qualquer dia, mas SÓ depois
-// que o relatório de anúncios da mesma ocorrência está na revisão final
-// (`traffic_reports`), e só lê comentários posteriores a ela. A mídia vem do
-// snapshot daquela revisão, nunca de uma segunda busca na API.
+// Automação 2 (relatorio_vendas), executada pela Entrega · Automação.
+// A aprovação manual do relatório de anúncios abre Feedback; concluir esse
+// card libera uma única etapa Relatório de conversão. Comentários fornecem os
+// dados, mas nunca aprovam o Feedback e vencimento nunca o fecha sozinho.
 //
 // Idempotência em duas camadas: marcadores no payload (feedback_source_at /
 // sales_report_generated_at) decidem se há algo novo; a
@@ -24,10 +14,10 @@ import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { commentsOf, type TaskComment } from "@/lib/comments";
-import { flowStepTaskId } from "@/lib/flows/ids";
-import { ensureFlowStep, settleTypelessFlow } from "@/lib/flows/advance";
+import { addDaysIso, agencyToday } from "@/lib/time/agency";
 import { recurrenceStopped } from "@/lib/recurrenceState";
-import { REPORT_FLOW_STEPS } from "@/lib/taskRelations";
+import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } from "@/lib/automationWorkflow";
+import { workflowByVersionId, workflowStepByKey } from "@/lib/workflows";
 import { mergeAssigneeDisplay } from "@/lib/assignees";
 import type { Period } from "@/app/admin/performance/insights";
 import { extractMetrics, type ConversionRow, type MetricExtract } from "@/lib/ai/extractMetrics";
@@ -67,10 +57,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // não verificada, acordava para chamar um modelo que devolvia 404. A IA virou um
 // fallback opcional (`COMMENT_AI_FALLBACK=1`, ver extractMetrics.ts).
 // Prazo do card de feedback = vencimento da ocorrência + lead_days dele em
-// REPORT_FLOW_STEPS (fonte única, junto com o título e a posição — ver
-// lib/taskRelations.ts).
-const FEEDBACK_LEAD_DAYS = REPORT_FLOW_STEPS.find((s) => s.key === "feedback")!.lead_days;
-const TOLERANCIA_DIAS = 3;      // dias após o prazo antes de fechar com zeros
+// A versão persistida do workflow guarda o prazo, o título e a posição.
 
 // Descrição permanente do card — explica a FINALIDADE (por que responder
 // importa), sempre visível mesmo antes de qualquer comentário. O formato
@@ -86,17 +73,10 @@ const FEEDBACK_DESCRIPTION = [
 type OccPayload = Record<string, unknown> & {
   feedback_source_at?: string;
   sales_report_generated_at?: string;
-  /** `at` do comentário fora do modelo que já recebeu o pedido de correção. */
-  feedback_format_warned_for?: string;
 };
 
 function nowIso() {
   return new Date().toISOString();
-}
-function addDays(isoDate: string, days: number): string {
-  const d = new Date(`${isoDate}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 function tagsOf(config: AutomationConfigRow): string[] {
@@ -120,30 +100,18 @@ function pedidoDe(tags: string[]): string {
   ].join("\n");
 }
 
-/** Resposta a um comentário que o parser não conseguiu ler. */
-function pedidoDeCorrecao(tags: string[], ext: MetricExtract): string {
-  const motivo = ext.problemas?.length ? ` (${ext.problemas.join("; ")})` : "";
-  return [
-    `Não consegui ler os números deste comentário${motivo}. Pode reenviar no modelo? Uma informação por linha:`,
-    "",
-    feedbackTemplate(tags),
-  ].join("\n");
-}
-
 /**
- * Nasce a etapa `feedback` no mesmo instante em que o relatório de tráfego
- * é gerado — não mais depois da revisão final dele (ver `processOccurrence`
- * abaixo, que também chama esta função como reforço para ocorrências que não
- * passaram por aqui). Idempotente por id determinístico: quem chegar
- * primeiro cria, o resto só confirma.
+ * Prepara a etapa `feedback` quando o relatório de anúncios é aprovado.
+ * O prazo nasce da aprovação + dois dias corridos; repetir a mesma aprovação
+ * não empurra o prazo outra vez.
  *
  * Responsável vem do papel `gestor_trafego` (Configurações › Equipe &
  * papéis), não de um nome craveado — hoje resolve para Allan e Luiza, sem o
  * código saber quem são. Sem ninguém no papel, cai no rótulo de automação.
  */
-export async function ensureFeedbackCard(admin: AdminClient, occ: TaskRecord, today: string): Promise<TaskRecord | null> {
-  const existing = await getAdminTask(admin, flowStepTaskId(occ.id, "feedback"));
-  if (existing) return existing;
+export async function prepareFeedbackCard(admin: AdminClient, occ: TaskRecord): Promise<TaskRecord | null> {
+  const card = await linkedCardForStep(admin, occ, FEEDBACK_STEP_KEY);
+  if (!card) return null;
 
   const moldId = (occ.payload as Record<string, unknown> | null)?.recurrence_parent_id;
   if (typeof moldId !== "string") return null;
@@ -158,26 +126,36 @@ export async function ensureFeedbackCard(admin: AdminClient, occ: TaskRecord, to
   if (!config) return null; // cliente sem relatorio_vendas configurado: este fluxo não tem Feedback
 
   const tags = tagsOf(config);
-  const feedbackStep = REPORT_FLOW_STEPS.find((s) => s.key === "feedback")!;
-  const card = await ensureFlowStep(admin, occ, feedbackStep.key, {
-    title: feedbackStep.label,
-    leadDays: feedbackStep.lead_days,
-    clientVisible: feedbackStep.client_visible,
-    position: feedbackStep.order_index,
-    assignee: AUTOMATION_ASSIGNEE, // placeholder até o papel ser resolvido logo abaixo
-    description: FEEDBACK_DESCRIPTION,
-  }, today);
-
   const holderNames = await assignResponsibilityHolders(admin, card.id, "gestor_trafego");
+  const alreadyPrompted = typeof card.payload?.feedback_prompted_at === "string";
+  const openedOn = agencyToday();
+  const feedbackDue = addDaysIso(openedOn, 2);
+  const nextPayload = alreadyPrompted
+    ? card.payload
+    : {
+        ...appendedCommentPayload(card.payload, pedidoDe(tags)),
+        feedback_prompted_at: nowIso(),
+      };
   const { error } = await admin
     .from("tasks")
     .update({
       assignee: holderNames ? mergeAssigneeDisplay(null, [holderNames]) : AUTOMATION_ASSIGNEE,
-      requires_review: false, // autorrevisão — quem responde já fecha o card
-      payload: appendedCommentPayload(card.payload, pedidoDe(tags)), // formato técnico que o parser lê
+      requires_review: false,
+      description: FEEDBACK_DESCRIPTION,
+      payload: nextPayload,
+      ...(!alreadyPrompted && !card.completed_at
+        ? { start_date: openedOn, due_date: feedbackDue, end_date: feedbackDue }
+        : {}),
     })
     .eq("id", card.id);
   if (error) throw error;
+  if (!alreadyPrompted && !card.completed_at) {
+    const { error: parentError } = await admin
+      .from("tasks")
+      .update({ due_date: feedbackDue, end_date: feedbackDue })
+      .eq("id", occ.id);
+    if (parentError) throw parentError;
+  }
   return (await getAdminTask(admin, card.id)) ?? card;
 }
 
@@ -220,6 +198,22 @@ async function openOccurrences(admin: AdminClient, moldId: string): Promise<Task
     .is("completed_at", null);
   if (error) throw error;
   return (data ?? []).map(asTaskRecord);
+}
+
+async function linkedCardForStep(admin: AdminClient, occ: TaskRecord, stepKey: string): Promise<TaskRecord | null> {
+  if (!occ.workflow_version_id) return null;
+  const workflow = await workflowByVersionId(admin, occ.workflow_version_id);
+  const step = workflow ? workflowStepByKey(workflow, stepKey) : null;
+  if (!step) return null;
+  const { data, error } = await admin.from("task_links")
+    .select("child_id")
+    .eq("parent_id", occ.id)
+    .eq("workflow_step_id", step.workflow_step_id)
+    .eq("relation_kind", "workflow_step")
+    .limit(1);
+  if (error) throw error;
+  const childId = (data?.[0] as { child_id?: string } | undefined)?.child_id;
+  return childId ? getAdminTask(admin, childId) : null;
 }
 
 // ---- PDF de vendas ----------------------------------------------------------
@@ -337,6 +331,19 @@ async function generateSalesReport(
 
   // Nome versionado: um comentário corrigido regera o PDF sem colidir no storage.
   const fileName = `relatorio-vendas-${period.to}.pdf`;
+  // A claim may be retried after a crash between document creation and the
+  // final task update. Reuse that persisted artifact instead of creating a
+  // second PDF/object for the same conversion card and period.
+  const { data: existingRows, error: existingError } = await admin
+    .from("documents")
+    .select("id")
+    .eq("task_id", card2.id)
+    .eq("name", fileName)
+    .limit(1);
+  if (existingError) throw existingError;
+  const existingId = (existingRows?.[0] as { id?: string } | undefined)?.id;
+  if (existingId) return existingId;
+
   const path = documentStoragePath(client.slug, `relatorio-vendas-${period.to}-${Date.now()}.pdf`, card2.id);
   const { error: uploadError } = await admin.storage.from(DOCUMENT_BUCKET).upload(path, pdf, {
     contentType: "application/pdf",
@@ -358,7 +365,12 @@ async function generateSalesReport(
     size_bytes: pdf.byteLength,
     doc_date: period.to,
   }).select("id").limit(1);
-  if (docError) throw docError;
+  if (docError) {
+    // Storage and Postgres are not one transaction. Compensate immediately so
+    // retrying the failed run cannot leak an unreferenced PDF.
+    await admin.storage.from(DOCUMENT_BUCKET).remove([path]);
+    throw docError;
+  }
 
   const fresh = (await getAdminTask(admin, card2.id))?.payload ?? card2.payload;
   const { error: updErr } = await admin
@@ -382,15 +394,11 @@ async function processOccurrence(
   const tags = tagsOf(config);
   let occPayload = (occ.payload ?? {}) as OccPayload;
 
-  let card1 = await getAdminTask(admin, flowStepTaskId(occ.id, "trafego"));
+  const card1 = await linkedCardForStep(admin, occ, ADS_REPORT_STEP_KEY);
   if (!card1) return false; // espera a Automação 1
 
-  // Reforço: o nascimento normal do Feedback é em run.ts, junto com o PDF de
-  // tráfego (não depende de revisão). Isto aqui só cobre ocorrências que por
-  // algum motivo não passaram por lá (ex.: criadas antes deste fix).
-  // Idempotente — se já existe, só devolve.
-  const card2 = await ensureFeedbackCard(admin, occ, today);
-  if (!card2) return false; // cliente sem relatorio_vendas configurado
+  const card2 = await linkedCardForStep(admin, occ, FEEDBACK_STEP_KEY);
+  if (!card2?.completed_at) return false;
 
   // GATE DA CASCATA: só GERAR o relatório de conversão espera a revisão FINAL
   // do relatório de anúncios (o PDF de vendas usa o snapshot final). O card
@@ -408,36 +416,9 @@ async function processOccurrence(
   const since = laterOf(traffic.finalized_at, occPayload.feedback_source_at);
   const human = latestHumanComment([card2], since);
 
-  const agendDue = addDays(occ.due_date ?? today, FEEDBACK_LEAD_DAYS);
-  const overdue = today >= addDays(agendDue, TOLERANCIA_DIAS);
-  if (!human && !overdue) return true; // ainda dentro do prazo, esperando
-  if (occPayload.sales_report_generated_at && !human) return false; // já fechado, sem novidade
-
   const ext: MetricExtract = human
     ? await extractMetrics(human.text, tags)
-    // Sem retorno é o caso mais claro de "não informado": ninguém disse que a
-    // semana foi zero — ninguém disse nada.
-    : { valores: Object.fromEntries(tags.map((t) => [t, null])), linhas: [], note: "sem retorno do responsável" };
-
-  // O gestor respondeu, mas fora do modelo, e o parser não leu: responde no mesmo
-  // card com o modelo (uma vez por comentário) e segue esperando. Fechar a semana
-  // como "não informado" diria que ninguém respondeu. Passado o prazo e a
-  // tolerância, fecha como antes.
-  if (human && !overdue && (ext.note === "formato não reconhecido" || ext.note === "comentário ambíguo")) {
-    if (occPayload.feedback_format_warned_for === human.at) return false;
-    const commented = await getAdminTask(admin, human.taskId);
-    if (commented) {
-      const { error: warnErr } = await admin
-        .from("tasks")
-        .update({ payload: appendedCommentPayload(commented.payload, pedidoDeCorrecao(tags, ext)) })
-        .eq("id", commented.id);
-      if (warnErr) throw warnErr;
-    }
-    occPayload = { ...occPayload, feedback_format_warned_for: human.at };
-    const { error: occWarnErr } = await admin.from("tasks").update({ payload: occPayload }).eq("id", occ.id);
-    if (occWarnErr) throw occWarnErr;
-    return true;
-  }
+    : { valores: Object.fromEntries(tags.map((tag) => [tag, null])), linhas: [], note: "feedback aprovado sem métricas" };
 
   // O período REPORTADO (não a data em que a automação rodou) é o eixo da série
   // temporal em `task_metrics` — é o que deixa "seguidores ao longo do tempo" e
@@ -474,6 +455,24 @@ async function processOccurrence(
   });
   if (!claim) return false;
 
+  const { data: runRows, error: runError } = await admin.rpc("claim_automation_run", {
+    p_config_id: config.id,
+    p_occurrence_key: occ.id,
+    p_scheduled_for: `${occ.due_date ?? today}T11:00:00.000Z`,
+    p_action: "conversion_report",
+    p_occurrence_id: occ.id,
+  });
+  if (runError) {
+    await releaseConversionReport(admin, claim.id);
+    throw runError;
+  }
+  const automationRunId = (runRows?.[0] as { id?: string } | undefined)?.id;
+  if (!automationRunId) {
+    await releaseConversionReport(admin, claim.id);
+    return false;
+  }
+
+  let conversionTaskId: string | null = null;
   try {
     // task_metrics — só as tags que o gestor realmente informou (ver metricsParaBanco).
     // Fluxo de EXEMPLO (molde com payload.report_example) não entra na série: os
@@ -488,46 +487,33 @@ async function processOccurrence(
       if (metricsErr) throw metricsErr;
     }
 
-    const sourceAt = sourceCommentAt ?? nowIso();
+    const sourceAt = sourceCommentAt ?? card2.completed_at;
     const resumo = human
       ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.${ext.problemas?.length ? ` Deixei de fora: ${ext.problemas.join("; ")}.` : ""}`
-      : `Sem retorno do responsável até o prazo — fechando a semana sem métricas registradas.`;
-    // Autorrevisão: quem responde já fecha o card — sem comentário novo aqui,
-    // porque o Feedback não tem a automação como responsável (é do papel
-    // gestor_trafego). O resumo do que foi registrado vai para o card de
-    // Conversão logo abaixo, que É automação-responsável.
-    const { error: c2Err } = await admin
-      .from("tasks")
-      .update({
-        status: "aprovado",
-        payload: {
-          ...card2.payload,
-          metricas: ext.valores,
-          linhas: ext.linhas,
-          feedback_source_at: sourceAt,
-        },
-      })
-      .eq("id", card2.id);
-    if (c2Err) throw c2Err;
+      : `Feedback aprovado sem métricas informadas; o relatório registra os campos como não informados.`;
 
     // Pai: só o estado + os marcadores estruturais (sem comentário — invisível).
     occPayload = { ...occPayload, feedback_source_at: sourceAt };
-    const { error: occErr } = await admin.from("tasks").update({ payload: occPayload, status: "revisao" }).eq("id", occ.id);
+    const { error: occErr } = await admin.from("tasks").update({ payload: occPayload, status: "em_producao" }).eq("id", occ.id);
     if (occErr) throw occErr;
     occ = { ...occ, payload: occPayload };
 
     // O relatório de conversão é uma etapa própria; Feedback é só a coleta.
-    const conversaoStep = REPORT_FLOW_STEPS.find((s) => s.key === "conversao")!;
-    let card3 = await getAdminTask(admin, flowStepTaskId(occ.id, "conversao"));
-    if (!card3) card3 = await ensureFlowStep(admin, occ, conversaoStep.key, { title: conversaoStep.label, leadDays: conversaoStep.lead_days, position: conversaoStep.order_index, assignee: AUTOMATION_ASSIGNEE }, today);
+    let card3 = await linkedCardForStep(admin, occ, CONVERSION_REPORT_STEP_KEY);
+    if (!card3) throw new Error("A etapa Relatório de conversão não foi materializada.");
+    conversionTaskId = card3.id;
     const { error: c3Err } = await admin
       .from("tasks")
-      .update({ status: "revisao", assignee: AUTOMATION_ASSIGNEE, payload: appendedCommentPayload(card3.payload, resumo) })
+      .update({ status: "em_producao", assignee: AUTOMATION_ASSIGNEE, payload: appendedCommentPayload(card3.payload, resumo) })
       .eq("id", card3.id);
     if (c3Err) throw c3Err;
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
     const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period);
     await attachConversionDocument(admin, claim.id, documentId);
+    const { error: reviewError } = await admin.from("tasks").update({ status: "revisao" }).eq("id", card3.id);
+    if (reviewError) throw reviewError;
+    const { error: parentReviewError } = await admin.from("tasks").update({ status: "revisao" }).eq("id", occ.id);
+    if (parentReviewError) throw parentReviewError;
 
     const { error: markErr } = await admin
       .from("tasks")
@@ -538,14 +524,26 @@ async function processOccurrence(
     // Sem isto a reivindicação ficaria órfã e bloquearia o retry do mesmo
     // comentário para sempre.
     await releaseConversionReport(admin, claim.id);
+    await admin.from("automation_runs").update({
+      status: "failed",
+      last_error: errorMessage(error),
+      finished_at: nowIso(),
+    }).eq("id", automationRunId);
     throw error;
   }
+
+  const { error: finishRunError } = await admin.from("automation_runs").update({
+    status: "succeeded",
+    last_error: null,
+    finished_at: nowIso(),
+  }).eq("id", automationRunId);
+  if (finishRunError) throw finishRunError;
 
   logReportRun({
     report_type: "conversion",
     automation_id: config.id,
     client_id: occ.client_id,
-    task_id: flowStepTaskId(occ.id, "conversao"),
+    task_id: conversionTaskId,
     period: `${period.from}..${period.to}`,
     revision: traffic.revision,
     mode,
@@ -556,7 +554,7 @@ async function processOccurrence(
     duration_ms: Date.now() - startedAt,
   });
 
-  const conversionId = flowStepTaskId(occ.id, "conversao");
+  const conversionId = conversionTaskId!;
   await notifyFromAutomation(admin, conversionId, "task_commented", "Automação anexou o relatório de conversão.");
   await notifyResponsibilityHolders(admin, conversionId, "gestor_trafego", "task_commented", "Relatório de conversão pronto.");
   return true;
@@ -571,7 +569,7 @@ export async function runConversionFlow(
   // qual relatório de anúncios ela é a continuação — e diz isso, em vez de rodar
   // em silêncio sobre o que achar no card.
   if (!config.depends_on_config_id) {
-    return { error: "Relatório de vendas sem dependência declarada: registre o Relatório de anúncios no mesmo card e salve de novo." };
+    return { error: "Relatório de vendas sem dependência declarada: registre o Relatório de anúncios para o mesmo cliente e salve de novo." };
   }
   const mold = await getAdminTask(admin, config.target_task_id);
   if (!mold || !mold.recurrence_cadence || recurrenceStopped(mold.status)) return "not_due";
@@ -587,34 +585,12 @@ export async function runConversionFlow(
       await markTaskParada(admin, occ.id, `Falha ao processar o feedback da semana: ${message}`);
       return { error: message };
     }
-    // Fecho: quando os cards já foram aprovados por um humano.
-    await settleTypelessFlow(admin, occ.id).catch(() => {});
   }
 
   return didSomething ? "ran" : "not_due";
 }
 
-/**
- * Chamado pelo hook de comentário: o card comentado pode ser a própria
- * ocorrência (pai do fluxo) ou uma etapa dela (`trafego`/`feedback`). Dispara o
- * processamento para toda ocorrência candidata. Best-effort — nunca lança.
- */
-export async function handleConversionComment(admin: AdminClient, commentedTaskId: string): Promise<void> {
-  try {
-    const commented = await getAdminTask(admin, commentedTaskId);
-    // Métricas são aceitas exclusivamente no card Feedback. Comentários no
-    // Tráfego/pai são instruções de revisão do PDF de mídia.
-    if (!commented || commented.subtype !== "feedback") return;
-    const candidates = new Set<string>([commentedTaskId]);
-    const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", commentedTaskId).eq("relation_kind", "workflow_step");
-    for (const l of links ?? []) candidates.add((l as { parent_id: string }).parent_id);
-    for (const id of candidates) await processConversionFeedback(admin, id);
-  } catch {
-    // O comentário já foi gravado; falha no hook não pode derrubar a resposta.
-  }
-}
-
-/** Versão de-uma-ocorrência, chamada pelo hook de comentário (fora do cron). */
+/** Executa a conversão depois da aprovação manual do Feedback. */
 export async function processConversionFeedback(admin: AdminClient, occId: string): Promise<void> {
   const occ = await getAdminTask(admin, occId);
   if (!occ) return;
@@ -635,7 +611,6 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
   const today = new Date().toISOString().slice(0, 10);
   try {
     await processOccurrence(admin, config, mold, occ, today);
-    await settleTypelessFlow(admin, occId).catch(() => {});
   } catch (error) {
     await markTaskParada(admin, occId, `Falha ao processar o feedback da semana: ${errorMessage(error)}`);
   }

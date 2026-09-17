@@ -1,5 +1,5 @@
 // Uniform "an automation run failed" handling — see
-// plan/AUTOMACOES-RELATORIO-TRAFEGO.md "Novo status parada". Every automation
+// docs/reporting/report-pipeline.md. Every automation
 // error (data fetch, PDF render, upload, missing eligibility) leaves a
 // comment explaining what happened and moves the card to `parada`, instead
 // of failing silently or crashing the whole cron tick.

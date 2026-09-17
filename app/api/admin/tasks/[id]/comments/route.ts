@@ -5,7 +5,6 @@ import { requireAdmin } from "@/lib/supabase/auth";
 import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/lib/notifications";
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { handleConversionComment } from "@/lib/automations/conversionFlow";
 import { handleTrafficRevisionComment } from "@/lib/automations/run";
 import { flowCommentTargetId } from "@/lib/flows/commentTarget";
 
@@ -29,10 +28,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const parent = await getTaskById(id);
     const targetId = parent ? await flowCommentTargetId(createAdminClient(), parent, session.userId) : id;
     const task = await appendTaskComment(targetId, session.userId, text);
-    // handleConversionComment e notifyTaskParticipants leem o id EFETIVO (a
-    // etapa), não o da URL — é o card que de fato recebeu o comentário, e é
-    // nele (não no pai) que uma automação como relatorio_vendas escuta e que
-    // os participantes daquele card específico são notificados.
+    // As notificações leem o id EFETIVO (a etapa), não o da URL.
     const authorName = (await getProfileName(session.userId)) ?? session.email ?? "Alguém";
     await notifyTaskParticipants(targetId, "task_commented", taskCommentedMessage(task.title, authorName));
     // @menção (ATA 14/09): quem foi citado recebe um aviso próprio, esteja ou
@@ -45,10 +41,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         await notifyProfiles(mentioned, targetId, "task_mentioned", `${authorName} mencionou você em "${task.title}".`);
       }
     }
-    // Revisão editorial de tráfego e resposta de métricas são portas distintas.
-    // Ambas são instantâneas; o segundo handler só age quando o alvo é Feedback.
+    // Comentários podem pedir revisão editorial do relatório de anúncios, mas
+    // nunca aprovam Feedback. A conversão só parte da aprovação manual.
     await handleTrafficRevisionComment(createAdminClient(), targetId);
-    await handleConversionComment(createAdminClient(), targetId);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }

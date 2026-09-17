@@ -59,7 +59,7 @@ comentário
                              → com fallback: LLM (aiComplete)
 ```
 
-A IA só entra com `COMMENT_AI_FALLBACK=1` (ou `AI_CLI=1` em dev). Com o fallback ligado, ela
+A IA só entra com `COMMENT_AI_FALLBACK=1`. O único provedor atual é OpenAI; com o fallback ligado, ela
 também é usada quando o parser leu, mas marcou `precisaIa` (origem no meio da frase, ganho de
 seguidores sem total).
 

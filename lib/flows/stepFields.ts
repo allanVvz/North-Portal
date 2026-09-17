@@ -41,6 +41,7 @@ export function flowStepFields(
   return {
     id: flowStepTaskId(delivery.id, step.key),
     client_id: delivery.client_id,
+    task_type_id: step.task_type_id,
     // Uma etapa é sempre uma Tarefa comum. O vínculo workflow_step, e não o
     // kind, diz em qual Entrega ela atua; por isso pode ser compartilhada.
     kind: "operacional",

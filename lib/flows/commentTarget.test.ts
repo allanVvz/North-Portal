@@ -37,7 +37,7 @@ function fakeAdmin(
 }
 
 const delivery = (id = "entrega"): TaskRecord =>
-  ({ id, kind: "criativo", payload: { flow_parent: true } }) as unknown as TaskRecord;
+  ({ id, kind: "criativo", payload: {}, workflow_version_id: "workflow-v1" }) as unknown as TaskRecord;
 
 const step = (
   id: string,

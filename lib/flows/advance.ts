@@ -20,19 +20,13 @@ import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, errorMessage, getAdminTask, type AdminClient } from "@/lib/automations/taskAccess";
 import { notifyFromAutomation } from "@/lib/automations/notify";
 import { markTaskParada } from "@/lib/automations/errorHandling";
-import { flowStepKeyOf, isFlowDelivery, isReportConversionFlow } from "@/lib/taskRelations";
+import { isFlowDelivery } from "@/lib/taskRelations";
 import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
-import { deliveryIsFinished, deliveryStatusOnFinish } from "./parentStatus";
-import {
-  deliveryTypeProblem,
-  findType,
-  listTaskTypes,
-  nextSubtypeAfter,
-  type TaskTypeDef,
-} from "@/lib/taskTypes";
+import { deliveryStatusOnFinish } from "./parentStatus";
 import type { TaskRecord } from "@/lib/validation";
 import { flowStepFields, todayIso } from "./stepFields";
 import { flowStepTaskId } from "./ids";
+import { nextWorkflowStep, workflowByVersionId, type WorkflowStepDef, type WorkflowVersionDef } from "@/lib/workflows";
 
 export type AdvanceOutcome = {
   created: TaskRecord[];
@@ -55,27 +49,43 @@ export function justCompleted(
   return !before.completed_at && Boolean(after.completed_at);
 }
 
-async function parentsOf(admin: AdminClient, childId: string): Promise<TaskRecord[]> {
-  const { data, error } = await admin.from("task_links").select("parent_id").eq("child_id", childId).eq("relation_kind", "workflow_step");
+type WorkflowParent = { delivery: TaskRecord; workflowStepId: string };
+
+async function parentsOf(admin: AdminClient, childId: string): Promise<WorkflowParent[]> {
+  const { data, error } = await admin.from("task_links").select("parent_id,workflow_step_id").eq("child_id", childId).eq("relation_kind", "workflow_step");
   if (error) throw error;
-  const ids = (data ?? []).map((r) => (r as { parent_id: string }).parent_id);
+  const links = (data ?? []) as { parent_id: string; workflow_step_id: string | null }[];
+  const ids = links.map((link) => link.parent_id);
   if (!ids.length) return [];
   const { data: rows, error: rowsError } = await admin.from("tasks").select(TASK_COLUMNS).in("id", ids);
   if (rowsError) throw rowsError;
-  return (rows ?? []).map(asTaskRecord);
-}
-
-async function stepsOf(admin: AdminClient, parentId: string): Promise<{ id: string; slot: string | null }[]> {
-  const { data, error } = await admin.from("task_links").select("child_id,slot").eq("parent_id", parentId).eq("relation_kind", "workflow_step");
-  if (error) throw error;
-  return (data ?? []).map((r) => {
-    const row = r as { child_id: string; slot: string | null };
-    return { id: row.child_id, slot: row.slot };
+  const deliveries = new Map((rows ?? []).map((row) => {
+    const delivery = asTaskRecord(row);
+    return [delivery.id, delivery];
+  }));
+  return links.flatMap((link) => {
+    const delivery = deliveries.get(link.parent_id);
+    return delivery && link.workflow_step_id ? [{ delivery, workflowStepId: link.workflow_step_id }] : [];
   });
 }
 
-async function linkStep(admin: AdminClient, parentId: string, childId: string, slot: string, position: number): Promise<void> {
-  const { error } = await admin.from("task_links").insert({ parent_id: parentId, child_id: childId, relation_kind: "workflow_step", slot, position });
+async function stepsOf(admin: AdminClient, parentId: string): Promise<{ id: string; workflowStepId: string }[]> {
+  const { data, error } = await admin.from("task_links").select("child_id,workflow_step_id").eq("parent_id", parentId).eq("relation_kind", "workflow_step");
+  if (error) throw error;
+  return ((data ?? []) as { child_id: string; workflow_step_id: string | null }[])
+    .filter((row): row is { child_id: string; workflow_step_id: string } => Boolean(row.workflow_step_id))
+    .map((row) => ({ id: row.child_id, workflowStepId: row.workflow_step_id }));
+}
+
+async function linkStep(admin: AdminClient, parentId: string, childId: string, step: WorkflowStepDef): Promise<void> {
+  const { error } = await admin.from("task_links").insert({
+    parent_id: parentId,
+    child_id: childId,
+    relation_kind: "workflow_step",
+    workflow_step_id: step.workflow_step_id,
+    slot: step.key,
+    position: step.order_index,
+  });
   // Já ligado: outro caminho (re-arrasto, reconciliador, requisição
   // concorrente) chegou antes. Isso é sucesso.
   if (error && !isDuplicate(error)) throw error;
@@ -87,25 +97,26 @@ async function advanceOneDelivery(
   admin: AdminClient,
   delivery: TaskRecord,
   completedStep: TaskRecord,
-  type: TaskTypeDef,
+  workflow: WorkflowVersionDef,
+  completedWorkflowStepId: string,
   today: string,
   actorId: string | null = null,
 ): Promise<TaskRecord | null> {
-  const next = nextSubtypeAfter(type, flowStepKeyOf(completedStep));
+  const next = nextWorkflowStep(workflow, completedWorkflowStepId);
   if (!next) return null;
 
   // O slot ocupado é a trava de idempotência que importa aqui: o id
   // determinístico sozinho não bastaria se alguém já tivesse ligado à mão um
   // card existente naquela etapa.
   const existing = await stepsOf(admin, delivery.id);
-  if (existing.some((s) => s.slot === next.key)) return null;
+  if (existing.some((s) => s.workflowStepId === next.workflow_step_id)) return null;
 
   const fields = flowStepFields(delivery, next, completedStep, today);
   const id = String(fields.id);
   const { data, error } = await admin.from("tasks").insert(fields).select(TASK_COLUMNS).limit(1);
   if (error && !isDuplicate(error)) throw error;
 
-  await linkStep(admin, delivery.id, id, next.key, next.order_index);
+  await linkStep(admin, delivery.id, id, next);
   if (error) {
     // O card já existia (id determinístico); só faltava o elo, que acabou de
     // ser criado. Devolver o card real e não null.
@@ -120,45 +131,28 @@ async function advanceOneDelivery(
   return created;
 }
 
-/** Materializa a PRIMEIRA etapa de uma entrega que ainda não tem nenhuma.
- *
- * Existe por causa da entrega recorrente: cada ocorrência nasce como uma
- * entrega própria — ela herda as marcas de fluxo do template —, mas nasce
- * VAZIA. `advanceFlow` não a resgata, porque aquela varredura é movida por
- * etapa concluída, e uma entrega sem etapa nenhuma nunca conclui nada. Ficaria
- * parada em 0% para sempre.
- *
- * Idempotente por construção: se já existe qualquer elo com slot, não faz
- * nada; e o id da etapa é determinístico, então uma corrida colide na chave
- * primária em vez de duplicar. */
+/** Materializa a primeira etapa de uma ocorrência enquanto ela ainda está na
+ * mesma transação lógica de criação. A constraint diferida do banco garante
+ * que nenhuma Entrega vazia sobreviva ao commit. Idempotente por construção:
+ * elo persistido + id determinístico impedem duplicação em corridas. */
 export async function materializeFirstStep(admin: AdminClient, delivery: TaskRecord, actorId: string | null = null): Promise<TaskRecord | null> {
   if (!isFlowDelivery(delivery)) return null;
-  // Um MOLDE de entrega recorrente carrega `flow_parent` (cada ocorrência herda
-  // dele), mas ele não é uma entrega — os filhos dele são as OCORRÊNCIAS, não as
-  // etapas. Materializar uma etapa aqui a ligaria direto no molde, sem slot.
-  // Ocorrências não herdam `recurrence_group` (recurringExecutionFields o
-  // remove), então esta guarda separa molde de ocorrência. Mesmo princípio de
-  // flowTotalWeight em lib/taskCatalog.ts.
+  // O molde recorrente é uma definição, não uma ocorrência. Seus filhos são as
+  // ocorrências; cada ocorrência é que recebe as etapas da versão persistida.
   if (delivery.payload?.[RECURRENCE_GROUP_KEY] === true) return null;
-  // Relatório é `kind: criativo` só para herdar UI/rollup de Entrega — a
-  // sequência real (trafego/feedback/conversao) é da automação
-  // (`ensureFlowStep`), nunca do catálogo. Sem esta guarda, a varredura diária
-  // (reconcileFlows) materializaria um "roteiro" de conteúdo criativo na
-  // primeira falha da Automação 1 que deixasse a ocorrência sem etapa nenhuma.
-  if (isReportConversionFlow(delivery)) return null;
   const existing = await stepsOf(admin, delivery.id);
-  if (existing.some((s) => s.slot !== null)) return null;
+  if (existing.length) return null;
 
-  const types = await listTaskTypes(admin);
-  const type = findType(types, delivery.kind);
-  if (!type || !type.subtypes.length) return null;
+  if (!delivery.workflow_version_id) return null;
+  const workflow = await workflowByVersionId(admin, delivery.workflow_version_id);
+  if (!workflow?.steps.length) return null;
 
-  const first = type.subtypes[0];
+  const first = workflow.steps[0];
   const fields = flowStepFields(delivery, first, null);
   const id = String(fields.id);
   const { data, error } = await admin.from("tasks").insert(fields).select(TASK_COLUMNS).limit(1);
   if (error && !isDuplicate(error)) throw error;
-  await linkStep(admin, delivery.id, id, first.key, first.order_index);
+  await linkStep(admin, delivery.id, id, first);
   if (error) return await getAdminTask(admin, id);
 
   const created = asTaskRecord(data![0]);
@@ -167,50 +161,36 @@ export async function materializeFirstStep(admin: AdminClient, delivery: TaskRec
 }
 
 /**
- * Materializa UMA etapa específica de um pai de fluxo — sem depender de um
- * `task_type` / lista de subtipos. É o que um fluxo DINÂMICO usa: a automação
- * `relatorio_vendas` promove a ocorrência recorrente a pai de fluxo
- * (`flow_parent`) e chama isto para criar a etapa de tráfego e a de feedback,
- * com slot livre. Idempotente: id determinístico + elo tolerante a `23505`.
+ * Materializa uma etapa específica da versão persistida de um workflow.
+ * Idempotente: id determinístico + elo tolerante a `23505`.
  */
-export async function ensureFlowStep(
+export async function ensureWorkflowStep(
   admin: AdminClient,
   parent: TaskRecord,
-  slot: string,
-  fields: { title: string; leadDays?: number; clientVisible?: boolean; assignee?: string | null; position?: number; description?: string },
+  stepDefinition: WorkflowStepDef,
+  fields: { title?: string; description?: string } = {},
   today = todayIso(),
   actorId: string | null = null,
 ): Promise<TaskRecord> {
-  const id = flowStepTaskId(parent.id, slot);
+  const id = flowStepTaskId(parent.id, stepDefinition.key);
   const existing = await getAdminTask(admin, id);
   if (existing) {
     // Garante o elo mesmo que o card já tivesse sido criado por outro caminho.
-    await linkStep(admin, parent.id, id, slot, fields.position ?? 0);
+    await linkStep(admin, parent.id, id, stepDefinition);
     return existing;
   }
   const step = flowStepFields(
     parent,
-    {
-      key: slot,
-      label: fields.title,
-      order_index: fields.position ?? 0,
-      lead_days: fields.leadDays ?? 0,
-      progress_weight: 1,
-      default_assignee: fields.assignee ?? null,
-      client_visible: fields.clientVisible ?? false,
-    },
+    stepDefinition,
     null,
     today,
   );
-  step.title = fields.title; // flowStepFields monta "<pai> — <label>"; aqui o título é literal
-  // Etapa de fluxo dinâmico é sempre uma tarefa comum (`operacional`), não "do
-  // mesmo tipo do pai" — o pai pode ser qualquer recorrente. `operacional/<slot>`
-  // existe no vocabulário só para a trava (migração 20260902000000).
+  if (fields.title) step.title = fields.title;
   step.kind = "operacional";
   if (fields.description) step.description = fields.description;
   const { data, error } = await admin.from("tasks").insert(step).select(TASK_COLUMNS).limit(1);
   if (error && !isDuplicate(error)) throw error;
-  await linkStep(admin, parent.id, id, slot, fields.position ?? 0);
+  await linkStep(admin, parent.id, id, stepDefinition);
   const created = error ? await getAdminTask(admin, id) : asTaskRecord(data![0]);
   if (!created) throw new Error("Não foi possível materializar a etapa do fluxo.");
   await notifyFromAutomation(admin, created.id, "task_created", `"${created.title}" foi criado.`, actorId);
@@ -218,52 +198,29 @@ export async function ensureFlowStep(
 }
 
 /**
- * Fecha um pai de fluxo DINÂMICO (sem `task_type`): quando todas as etapas
- * ligadas a ele têm `completed_at`, move o pai para o estado de fim
- * (`deliveryStatusOnFinish` — o trigger carimba o `completed_at` do pai). O
- * `settleDelivery` normal não serve porque precisa de `type.subtypes.length`.
+ * Fecha uma Entrega somente quando todos os passos declarados na versão estão
+ * ligados e concluídos. Passos materializados parcialmente nunca bastam.
  */
-export async function settleTypelessFlow(admin: AdminClient, parentId: string, actorId: string | null = null): Promise<boolean> {
+export async function settleWorkflowDelivery(admin: AdminClient, parentId: string, actorId: string | null = null): Promise<boolean> {
   const parent = await getAdminTask(admin, parentId);
   if (!parent || parent.completed_at || !isFlowDelivery(parent)) return false;
+  if (!parent.workflow_version_id) return false;
+  const workflow = await workflowByVersionId(admin, parent.workflow_version_id);
+  if (!workflow?.steps.length) return false;
   const links = await stepsOf(admin, parentId);
-  if (links.length === 0) return false;
+  if (links.length !== workflow.steps.length) return false;
+  const declared = new Set(workflow.steps.map((step) => step.workflow_step_id));
+  if (links.some((link) => !declared.has(link.workflowStepId))) return false;
   const { data, error } = await admin.from("tasks").select("completed_at").in("id", links.map((l) => l.id));
   if (error) throw error;
-  const steps = (data ?? []) as { completed_at: string | null }[];
-  if (!steps.every((s) => Boolean(s.completed_at))) return false;
+  const completedSteps = (data ?? []) as { completed_at: string | null }[];
+  if (!completedSteps.every((step) => Boolean(step.completed_at))) return false;
 
-  const nextStatus = deliveryStatusOnFinish(parent);
+  const nextStatus = parent.kind === "automacao" ? "aprovado" : deliveryStatusOnFinish(parent);
   if (parent.status === nextStatus) return false;
   const { error: updateError } = await admin.from("tasks").update({ status: nextStatus }).eq("id", parentId);
   if (updateError) throw updateError;
   await notifyFromAutomation(admin, parentId, "task_status_changed", `"${parent.title}" foi concluído.`, actorId);
-  return true;
-}
-
-/** Fecha a entrega se esta conclusão foi a da última etapa. */
-async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: TaskTypeDef, actorId: string | null = null): Promise<boolean> {
-  // Uma entrega já encerrada não volta para o funil de conferência. Esta
-  // função é chamada toda vez que o reconciliador vê uma etapa concluída —
-  // inclusive meses depois, e inclusive para etapas que nasceram já
-  // concluídas. Sem esta guarda, qualquer varredura reabre Revisão numa
-  // entrega encerrada só porque ela tem revisor.
-  if (delivery.completed_at) return false;
-  const links = await stepsOf(admin, delivery.id);
-  if (links.length === 0) return false;
-  const { data, error } = await admin.from("tasks").select("completed_at").in("id", links.map((l) => l.id));
-  if (error) throw error;
-  const steps = (data ?? []) as { completed_at: string | null }[];
-  if (!deliveryIsFinished(steps, type.subtypes.length)) return false;
-
-  const nextStatus = deliveryStatusOnFinish(delivery);
-  if (delivery.status === nextStatus) return false;
-  const { error: updateError } = await admin.from("tasks").update({ status: nextStatus }).eq("id", delivery.id);
-  if (updateError) throw updateError;
-  // Só quando o status REALMENTE virou — as guardas acima já garantiram isso.
-  // Criar a etapa seguinte e encerrar a entrega são dois fatos distintos, não o
-  // mesmo aviso duas vezes.
-  await notifyFromAutomation(admin, delivery.id, "task_status_changed", `"${delivery.title}" mudou para ${nextStatus === "aprovado" ? "Concluído" : nextStatus === "revisao" ? "Revisão" : "Aprovação"}.`, actorId);
   return true;
 }
 
@@ -277,35 +234,20 @@ async function settleDelivery(admin: AdminClient, delivery: TaskRecord, type: Ta
  */
 export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord, actorId: string | null = null): Promise<AdvanceOutcome> {
   const outcome: AdvanceOutcome = { created: [], finished: [] };
-  if (!completedStep.completed_at || !flowStepKeyOf(completedStep)) return outcome;
+  if (!completedStep.completed_at) return outcome;
 
-  const parents = (await parentsOf(admin, completedStep.id)).filter(isFlowDelivery);
+  const parents = (await parentsOf(admin, completedStep.id)).filter(({ delivery }) => isFlowDelivery(delivery));
   if (!parents.length) return outcome;
 
-  const types = await listTaskTypes(admin);
   const today = todayIso();
 
-  for (const delivery of parents) {
-    // Relatórios são Entregas para a UI e o rollup, mas a sequência é
-    // controlada pelas automações, não pelo molde editorial criativo.
-    if (isReportConversionFlow(delivery)) {
-      if (await settleTypelessFlow(admin, delivery.id, actorId)) outcome.finished.push(delivery.id);
-      continue;
-    }
-    const type = findType(types, delivery.kind);
-    if (!type || type.behavior !== "entrega") {
-      // Fluxo DINÂMICO (o `kind` da ocorrência não é um tipo-entrega): as etapas
-      // são criadas pelas automações, não pelo motor. Aqui só resta fechar o pai
-      // quando a última etapa concluir.
-      if (await settleTypelessFlow(admin, delivery.id, actorId)) outcome.finished.push(delivery.id);
-      continue;
-    }
-    const problem = deliveryTypeProblem(type);
-    if (problem) throw new Error(problem);
-
-    const created = await advanceOneDelivery(admin, delivery, completedStep, type, today, actorId);
+  for (const { delivery, workflowStepId } of parents) {
+    if (!delivery.workflow_version_id) continue;
+    const workflow = await workflowByVersionId(admin, delivery.workflow_version_id);
+    if (!workflow?.steps.length) continue;
+    const created = await advanceOneDelivery(admin, delivery, completedStep, workflow, workflowStepId, today, actorId);
     if (created) outcome.created.push(created);
-    if (await settleDelivery(admin, delivery, type, actorId)) outcome.finished.push(delivery.id);
+    if (await settleWorkflowDelivery(admin, delivery.id, actorId)) outcome.finished.push(delivery.id);
   }
   return outcome;
 }
@@ -320,17 +262,23 @@ export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord,
  * está na caixa de etapas.
  */
 export async function nextFlowStepCardOf(admin: AdminClient, step: TaskRecord): Promise<TaskRecord | null> {
-  const stepKey = flowStepKeyOf(step);
-  if (!stepKey) return null;
-  const parents = (await parentsOf(admin, step.id)).filter(isFlowDelivery);
+  const parents = (await parentsOf(admin, step.id)).filter(({ delivery }) => isFlowDelivery(delivery));
   if (!parents.length) return null;
-  const types = await listTaskTypes(admin);
-  for (const delivery of parents) {
-    const type = findType(types, delivery.kind);
-    if (!type) continue;
-    const next = nextSubtypeAfter(type, stepKey);
+  for (const { delivery, workflowStepId } of parents) {
+    if (!delivery.workflow_version_id) continue;
+    const workflow = await workflowByVersionId(admin, delivery.workflow_version_id);
+    if (!workflow) continue;
+    const next = nextWorkflowStep(workflow, workflowStepId);
     if (!next) continue;
-    const card = await getAdminTask(admin, flowStepTaskId(delivery.id, next.key));
+    const { data: links, error } = await admin.from("task_links")
+      .select("child_id")
+      .eq("parent_id", delivery.id)
+      .eq("workflow_step_id", next.workflow_step_id)
+      .eq("relation_kind", "workflow_step")
+      .limit(1);
+    if (error) throw error;
+    const childId = (links?.[0] as { child_id?: string } | undefined)?.child_id;
+    const card = childId ? await getAdminTask(admin, childId) : null;
     if (card) return card;
   }
   return null;
@@ -344,10 +292,45 @@ export async function nextFlowStepCardOf(admin: AdminClient, step: TaskRecord): 
  */
 export async function advanceFlowAfterUpdate(before: TaskRecord, after: TaskRecord, actorId: string | null = null): Promise<void> {
   if (!justCompleted(before, after)) return;
-  if (!flowStepKeyOf(after)) return;
   const admin = createAdminClient();
   try {
-    await advanceFlow(admin, after, actorId);
+    const finished = new Set<string>();
+    let cursor: TaskRecord | null = after;
+    for (let guard = 0; cursor && guard < 50; guard += 1) {
+      const outcome = await advanceFlow(admin, cursor, actorId);
+      outcome.finished.forEach((id) => finished.add(id));
+
+      const next = await nextFlowStepCardOf(admin, cursor);
+      if (next?.subtype === "feedback") {
+        const { prepareFeedbackCard } = await import("@/lib/automations/conversionFlow");
+        for (const { delivery } of await parentsOf(admin, next.id)) {
+          await prepareFeedbackCard(admin, delivery);
+        }
+      }
+
+      if (cursor.subtype === "feedback") {
+        const { processConversionFeedback } = await import("@/lib/automations/conversionFlow");
+        for (const { delivery } of await parentsOf(admin, cursor.id)) {
+          await processConversionFeedback(admin, delivery.id);
+        }
+      }
+
+      cursor = next?.completed_at ? next : null;
+    }
+
+    for (const deliveryId of finished) {
+      const delivery = await getAdminTask(admin, deliveryId);
+      if (!delivery || delivery.kind !== "automacao") continue;
+      const moldId = typeof delivery.payload?.recurrence_parent_id === "string"
+        ? delivery.payload.recurrence_parent_id
+        : null;
+      if (!moldId) continue;
+      const mold = await getAdminTask(admin, moldId);
+      if (!mold) continue;
+      const { ensureFlowOccurrence } = await import("@/lib/automations/execute");
+      const next = await ensureFlowOccurrence(admin, mold, mold.due_date ?? todayIso());
+      await materializeFirstStep(admin, next, actorId);
+    }
   } catch (error) {
     await markTaskParada(admin, after.id, `Não foi possível criar a próxima etapa do fluxo: ${errorMessage(error)}`);
   }

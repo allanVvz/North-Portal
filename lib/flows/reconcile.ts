@@ -51,7 +51,7 @@ export async function reconcileFlows(): Promise<ReconcileSummary> {
   const { data: vazias, error: vaziasError } = await admin
     .from("tasks")
     .select(TASK_COLUMNS)
-    .eq("payload->>flow_parent", "true")
+    .not("workflow_version_id", "is", null)
     .limit(BATCH);
   if (vaziasError) throw vaziasError;
   for (const row of vazias ?? []) {

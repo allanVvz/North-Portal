@@ -10,7 +10,7 @@
 //   node scripts/relatorio-conversao-e2e.mjs teardown [--client cris-car-care]
 //
 // Entre seed e inspect, dispare um tique da cron:
-//   RUN_AUTOMATIONS=1 AI_CLI=1 AI_CLI_BIN=<claude> AI_MODEL=sonnet npx vitest run lib/automations/e2e.manual.test.ts
+//   RUN_AUTOMATIONS=1 npx vitest run lib/automations/e2e.manual.test.ts
 //
 // Sequência de um caso:
 //   node scripts/relatorio-conversao-e2e.mjs seed

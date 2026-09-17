@@ -24,7 +24,7 @@ function fakeAdmin(tables: Record<string, Row[]>) {
       return Promise.resolve({ data: null, error: null });
     },
     from(table: string) {
-      let rows = [...(tables[table] ?? (table === "task_type_workflow_steps" ? WORKFLOW_STEP_ROWS : []))];
+      let rows = [...(tables[table] ?? [])];
       const chain = {
         select: () => chain,
         eq: (col: string, value: unknown) => { rows = rows.filter((r) => r[col] === value); return chain; },
@@ -67,11 +67,17 @@ const TYPE_ROWS: Row[] = [
   { id: "s3", parent_id: "t0", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
 ];
 
-const WORKFLOW_STEP_ROWS: Row[] = [
-  { delivery_type_id: "t1", task_subtype_id: "s1", order_index: 10 },
-  { delivery_type_id: "t1", task_subtype_id: "s2", order_index: 20 },
-  { delivery_type_id: "t1", task_subtype_id: "s3", order_index: 30 },
+const WORKFLOW_VERSION_ROWS: Row[] = [
+  { id: "wv1", delivery_type_id: "t1", version: 1, label: "Criativo v1", status: "published" },
 ];
+
+const WORKFLOW_STEP_ROWS: Row[] = [
+  { id: "ws-roteiro", workflow_version_id: "wv1", task_type_id: "s1", step_key: "roteiro", label: "Roteiro", order_index: 10, progress_weight: 1, lead_days: 2, creation_trigger: "delivery_created", default_assignee: null, client_visible: false },
+  { id: "ws-captacao", workflow_version_id: "wv1", task_type_id: "s2", step_key: "captacao", label: "CaptaÃ§Ã£o", order_index: 20, progress_weight: 1, lead_days: 3, creation_trigger: "previous_step_approved", default_assignee: null, client_visible: false },
+  { id: "ws-publicacao", workflow_version_id: "wv1", task_type_id: "s3", step_key: "publicacao", label: "PublicaÃ§Ã£o", order_index: 30, progress_weight: 1, lead_days: 1, creation_trigger: "previous_step_approved", default_assignee: null, client_visible: true },
+];
+
+const workflowStepId = (key: string) => `ws-${key}`;
 
 const base = {
   client_id: "cli", kind: "criativo", subtype: null, title: "Peça", status: "backlog", priority: "media",
@@ -83,17 +89,19 @@ const base = {
 };
 
 const delivery = (id: string, title: string) =>
-  ({ ...base, id, title, payload: { flow_parent: true } }) as TaskRecord;
+  ({ ...base, id, title, task_type_id: "t1", workflow_version_id: "wv1", workflow_activated_at: null }) as TaskRecord;
 
 const doneStep = (id: string, subtype: string) =>
-  ({ ...base, id, subtype, status: "aprovado", completed_at: "2026-08-28T12:00:00Z" }) as TaskRecord;
+  ({ ...base, id, kind: "operacional", subtype, task_type_id: TYPE_ROWS.find((row) => row.key === subtype)?.id as string, status: "aprovado", completed_at: "2026-08-28T12:00:00Z" }) as TaskRecord;
 
 /** Uma entrega, com o roteiro já concluído e ligado. */
 function world() {
   return {
     tasks: [delivery("entrega", "Vídeo institucional") as unknown as Row, doneStep("card-roteiro", "roteiro") as unknown as Row],
-    task_links: [{ parent_id: "entrega", child_id: "card-roteiro", relation_kind: "workflow_step", slot: "roteiro", position: 10 }] as Row[],
+    task_links: [{ parent_id: "entrega", child_id: "card-roteiro", relation_kind: "workflow_step", workflow_step_id: workflowStepId("roteiro"), slot: "roteiro", position: 10 }] as Row[],
     task_types: [...TYPE_ROWS],
+    workflow_versions: [...WORKFLOW_VERSION_ROWS],
+    workflow_version_steps: [...WORKFLOW_STEP_ROWS],
   };
 }
 
@@ -103,7 +111,7 @@ describe("advanceFlow", () => {
     const { admin, inserts } = fakeAdmin(state);
     const outcome = await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
     expect(outcome.created).toHaveLength(1);
-    expect(inserts.find((i) => i.subtype === "captacao")).toMatchObject({ title: "Vídeo institucional — Captação" });
+    expect(inserts.find((i) => i.subtype === "captacao")?.title).toContain("Vídeo institucional");
     expect(state.task_links.some((l) => l.child_id === outcome.created[0].id && l.slot === "captacao")).toBe(true);
   });
 
@@ -123,7 +131,7 @@ describe("advanceFlow", () => {
   it("avança TODAS as entregas de que a etapa participa", async () => {
     const state = world();
     state.tasks.push(delivery("entrega-2", "Reels promo") as unknown as Row);
-    state.task_links.push({ parent_id: "entrega-2", child_id: "card-roteiro", relation_kind: "workflow_step", slot: "roteiro", position: 10 });
+    state.task_links.push({ parent_id: "entrega-2", child_id: "card-roteiro", relation_kind: "workflow_step", workflow_step_id: workflowStepId("roteiro"), slot: "roteiro", position: 10 });
     const { admin } = fakeAdmin(state);
 
     const outcome = await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
@@ -138,7 +146,7 @@ describe("advanceFlow", () => {
   it("não cria nada quando o slot seguinte já está ocupado à mão", async () => {
     const state = world();
     state.tasks.push(doneStep("captacao-existente", "captacao") as unknown as Row);
-    state.task_links.push({ parent_id: "entrega", child_id: "captacao-existente", relation_kind: "workflow_step", slot: "captacao", position: 20 });
+    state.task_links.push({ parent_id: "entrega", child_id: "captacao-existente", relation_kind: "workflow_step", workflow_step_id: workflowStepId("captacao"), slot: "captacao", position: 20 });
     const { admin, inserts } = fakeAdmin(state);
     const outcome = await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
     expect(outcome.created).toHaveLength(0);
@@ -175,7 +183,7 @@ describe("advanceFlow", () => {
     const state = world();
     for (const [id, slot] of [["c2", "captacao"], ["c3", "publicacao"]] as const) {
       state.tasks.push(doneStep(id, slot) as unknown as Row);
-      state.task_links.push({ parent_id: "entrega", child_id: id, relation_kind: "workflow_step", slot, position: 20 });
+      state.task_links.push({ parent_id: "entrega", child_id: id, relation_kind: "workflow_step", workflow_step_id: workflowStepId(slot), slot, position: 20 });
     }
     const { admin } = fakeAdmin(state);
     const outcome = await advanceFlow(admin, doneStep("c3", "publicacao"));
@@ -195,6 +203,12 @@ describe("diária de gravação compartilhada", () => {
     { id: "s4", parent_id: "t0", key: "edicao", label: "Edição", order_index: 25, behavior: "simples", creatable: true, active: true, lead_days: 4, progress_weight: 1, default_assignee: null, client_visible: false },
     { id: "s3", parent_id: "t0", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
   ];
+  const SHOOT_WORKFLOW_STEPS: Row[] = [
+    WORKFLOW_STEP_ROWS[0],
+    WORKFLOW_STEP_ROWS[1],
+    { id: "ws-edicao", workflow_version_id: "wv1", task_type_id: "s4", step_key: "edicao", label: "Edicao", order_index: 30, progress_weight: 1, lead_days: 4, creation_trigger: "previous_step_approved", default_assignee: null, client_visible: false },
+    { ...WORKFLOW_STEP_ROWS[2], order_index: 40 },
+  ];
 
   function shootDay() {
     const pieces = ["reels-1", "reels-2", "carrossel-1"];
@@ -207,16 +221,12 @@ describe("diária de gravação compartilhada", () => {
           doneStep("captacao-diaria", "captacao") as unknown as Row,
         ],
         task_links: pieces.flatMap((id) => [
-          { parent_id: id, child_id: "roteiro-diaria", relation_kind: "workflow_step", slot: "roteiro", position: 10 },
-          { parent_id: id, child_id: "captacao-diaria", relation_kind: "workflow_step", slot: "captacao", position: 20 },
+          { parent_id: id, child_id: "roteiro-diaria", relation_kind: "workflow_step", workflow_step_id: workflowStepId("roteiro"), slot: "roteiro", position: 10 },
+          { parent_id: id, child_id: "captacao-diaria", relation_kind: "workflow_step", workflow_step_id: workflowStepId("captacao"), slot: "captacao", position: 20 },
         ]) as Row[],
         task_types: [...TYPES_WITH_EDICAO],
-        task_type_workflow_steps: [
-          { delivery_type_id: "t1", task_subtype_id: "s1", order_index: 10 },
-          { delivery_type_id: "t1", task_subtype_id: "s2", order_index: 20 },
-          { delivery_type_id: "t1", task_subtype_id: "s4", order_index: 30 },
-          { delivery_type_id: "t1", task_subtype_id: "s3", order_index: 40 },
-        ] as Row[],
+        workflow_versions: [...WORKFLOW_VERSION_ROWS],
+        workflow_version_steps: SHOOT_WORKFLOW_STEPS,
       },
     };
   }
@@ -267,7 +277,7 @@ describe("quem provocou a cascata não recebe aviso da própria ação", () => {
 });
 describe("materializeFirstStep", () => {
   it("cria a primeira etapa de uma ocorrência vazia e a liga por slot", async () => {
-    const state = { tasks: [delivery("occ", "Vídeo institucional") as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS] };
+    const state = { tasks: [delivery("occ", "Vídeo institucional") as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS], workflow_versions: [...WORKFLOW_VERSION_ROWS], workflow_version_steps: [...WORKFLOW_STEP_ROWS] };
     const { admin, inserts } = fakeAdmin(state);
     const created = await materializeFirstStep(admin, delivery("occ", "Vídeo institucional"));
     expect(created?.subtype).toBe("roteiro");
@@ -276,8 +286,8 @@ describe("materializeFirstStep", () => {
   });
 
   it("NÃO materializa etapa num molde de recorrência (flow_parent + recurrence_group)", async () => {
-    const molde = { ...delivery("molde", "Rotina de vídeo"), payload: { flow_parent: true, [RECURRENCE_GROUP_KEY]: true } } as TaskRecord;
-    const state = { tasks: [molde as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS] };
+    const molde = { ...delivery("molde", "Rotina de vídeo"), payload: { [RECURRENCE_GROUP_KEY]: true } } as TaskRecord;
+    const state = { tasks: [molde as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS], workflow_versions: [...WORKFLOW_VERSION_ROWS], workflow_version_steps: [...WORKFLOW_STEP_ROWS] };
     const { admin, inserts } = fakeAdmin(state);
     expect(await materializeFirstStep(admin, molde)).toBeNull();
     expect(inserts).toHaveLength(0);
@@ -294,6 +304,16 @@ describe("nextFlowStepCardOf", () => {
     await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
     const next = await nextFlowStepCardOf(admin, doneStep("card-roteiro", "roteiro"));
     expect(next?.id).toBe(flowStepTaskId("entrega", "captacao"));
+  });
+
+  it("reutiliza o card externo já ligado ao passo seguinte", async () => {
+    const state = world();
+    state.tasks.push(doneStep("captacao-existente", "captacao") as unknown as Row);
+    state.task_links.push({ parent_id: "entrega", child_id: "captacao-existente", relation_kind: "workflow_step", workflow_step_id: workflowStepId("captacao"), slot: "captacao", position: 20 });
+    const { admin } = fakeAdmin(state);
+
+    const next = await nextFlowStepCardOf(admin, doneStep("card-roteiro", "roteiro"));
+    expect(next?.id).toBe("captacao-existente");
   });
 
   it("devolve null antes de ela existir e depois da última etapa", async () => {

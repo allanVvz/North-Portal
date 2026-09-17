@@ -6,20 +6,22 @@
 // scope='agency') — see getAiProviderSettings/saveAiProviderSettings in
 // lib/supabase.ts.
 
-export type AiVendor = "anthropic" | "chatgpt" | "deepseek";
+/** OpenAI is the sole production provider. Multi-provider routing belongs to
+ * the future Harness/OpenRouter work, not to this integration. */
+export type AiVendor = "openai";
 
-export const AI_VENDORS: { key: AiVendor; label: string; models: string[] }[] = [
-  { key: "anthropic", label: "Anthropic", models: ["Claude Sonnet 5", "Claude Opus 5"] },
-  { key: "chatgpt", label: "ChatGPT", models: ["GPT-5", "GPT-5 mini"] },
-  { key: "deepseek", label: "DeepSeek", models: ["DeepSeek V4"] },
-];
+export const AI_PROVIDER = {
+  key: "openai" as const,
+  label: "OpenAI · GPT",
+  models: ["GPT-5", "GPT-5 mini"],
+};
 
 export type AiProviderSettings = {
   apiKey: string;
-  vendor: AiVendor | null;
+  vendor: AiVendor;
 };
 
 export const AI_PROVIDER_SETTINGS_DEFAULT: AiProviderSettings = {
   apiKey: "",
-  vendor: null,
+  vendor: "openai",
 };

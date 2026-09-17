@@ -6,7 +6,7 @@
 // forma SÍNCRONA em dezenas de componentes (Kanban, Calendário, Performance,
 // portal) — tornar isso assíncrono era o "refactor de superfície ampla" que
 // ficou de fora quando esse gap foi mapeado pela primeira vez
-// (plan/FLUXOS-COMPOSICAO.md). Em vez disso: um cache em módulo, alimentado
+// (docs/ARQUITETURA-TAREFAS.md). Em vez disso: um cache em módulo, alimentado
 // por UMA busca (AdminShell.tsx, uma vez por sessão admin), lido de forma
 // síncrona — `kindDef` nunca espera nada, só olha o que já está aqui.
 //

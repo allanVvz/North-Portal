@@ -3,6 +3,7 @@ import {
   TASK_STATUSES,
   anyClientHasFlowEnabled,
   canDecideApproval,
+  aiProviderSettingsPatchSchema,
   clientApprovalActionSchema,
   flowFlagsCascadeEffects,
   requiresManagerApproval,
@@ -29,6 +30,13 @@ describe("TASK_STATUSES", () => {
     // Entrega. O valor `concluido` segue existindo no enum do Postgres, órfão,
     // porque enum não perde valor em lugar — mas não é vocabulário do app.
     expect(TASK_STATUSES as readonly string[]).not.toContain("concluido");
+  });
+});
+
+describe("configuração de IA", () => {
+  it("aceita somente operações de chave e rejeita seleção de fornecedor", () => {
+    expect(aiProviderSettingsPatchSchema.safeParse({ apiKey: "sk-openai-test" }).success).toBe(true);
+    expect(aiProviderSettingsPatchSchema.safeParse({ vendor: "anthropic" }).success).toBe(false);
   });
 });
 

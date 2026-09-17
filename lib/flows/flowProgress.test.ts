@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLOW_TOTAL_WEIGHT_KEY, dedupePlanMembers, taskProgress } from "@/lib/taskCatalog";
+import { dedupePlanMembers, taskProgress } from "@/lib/taskCatalog";
 import { currentFlowStepOf } from "./currentStep";
 import { flowFunnelSize, flowFunnelStops, flowStepCasas, flowStepPct } from "./flowProgress";
 import { mirroredParentStatus } from "./parentStatus";
@@ -22,7 +22,15 @@ const delivery = (totalWeight: number, flags: { requires_review?: boolean; requi
   kind: "criativo",
   status: "em_producao" as TaskStatus,
   progress_weight: 1,
-  payload: { flow_parent: true, [FLOW_TOTAL_WEIGHT_KEY]: totalWeight },
+  payload: {},
+  workflow_version_id: "workflow-v1",
+  workflow_version: {
+    id: "workflow-v1",
+    workflow_version_steps: Array.from({ length: totalWeight }, (_, index) => ({
+      id: `workflow-step-${index}`,
+      progress_weight: 1,
+    })),
+  },
   ...flags,
 });
 
@@ -117,7 +125,7 @@ describe("progresso de uma entrega em cascata", () => {
   });
 
   it("cai para o peso dos membros quando o snapshot sumiu (molde apagado)", () => {
-    const orphan = { ...delivery(0), payload: { flow_parent: true } };
+    const orphan = { ...delivery(0), workflow_version: null };
     expect(taskProgress(orphan, [step("aprovado", "roteiro")])).toBe(100);
   });
 
@@ -160,7 +168,12 @@ describe("progresso de uma entrega em cascata", () => {
       kind: "criativo",
       status: "em_producao" as TaskStatus,
       progress_weight: 1,
-      payload: { flow_parent: true, recurrence_group: true },
+      payload: { recurrence_group: true },
+      workflow_version_id: "workflow-v1",
+      workflow_version: {
+        id: "workflow-v1",
+        workflow_version_steps: Array.from({ length: 4 }, (_, index) => ({ id: `step-${index}`, progress_weight: 1 })),
+      },
     };
     const ocorrencia1 = delivery(4, { requires_review: true, requires_approval: false });
     const byParent = new Map([

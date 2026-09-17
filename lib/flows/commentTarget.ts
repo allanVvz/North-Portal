@@ -44,7 +44,7 @@
 
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, type AdminClient } from "@/lib/automations/taskAccess";
-import { isFlowDelivery, isReportConversionFlow, stepOrderOf } from "@/lib/taskRelations";
+import { isFlowDelivery, stepOrderOf } from "@/lib/taskRelations";
 import type { TaskRecord } from "@/lib/validation";
 import { currentFlowStepOf } from "./currentStep";
 
@@ -120,12 +120,6 @@ export async function flowCommentTargetId(
 ): Promise<string> {
   if (!isFlowDelivery(task)) return task.id;
   const steps = await adminFlowStepsOf(admin, task.id);
-
-  // O pai de um relatório é uma porta de revisão do PDF de tráfego. Métricas
-  // nunca entram nele: elas pertencem exclusivamente ao card Feedback.
-  if (isReportConversionFlow(task)) {
-    return steps.find((step) => step.subtype === "trafego")?.id ?? task.id;
-  }
 
   if (commenterId) {
     const openSteps = steps.filter((step) => !step.completed_at);

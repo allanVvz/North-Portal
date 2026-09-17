@@ -1,24 +1,29 @@
-import { describe, expect, it } from "vitest";
-import { isAiVendorSupported, SUPPORTED_AI_VENDORS } from "./complete";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AI_PROVIDER, AI_PROVIDER_SETTINGS_DEFAULT } from "@/lib/aiProviders";
 
-// Só a função pura (`isAiVendorSupported`) — `aiComplete` em si depende de
-// rede + do provedor gravado no banco (getAiProviderSettingsService), fora
-// do escopo de um teste unitário.
-describe("isAiVendorSupported", () => {
-  it("Anthropic e ChatGPT têm um caminho implementado", () => {
-    expect(isAiVendorSupported("anthropic")).toBe(true);
-    expect(isAiVendorSupported("chatgpt")).toBe(true);
+const { getAiProviderSettingsService } = vi.hoisted(() => ({ getAiProviderSettingsService: vi.fn() }));
+vi.mock("./provider", () => ({ getAiProviderSettingsService }));
+
+import { aiComplete } from "./complete";
+
+describe("provider de IA", () => {
+  it("expõe somente OpenAI como configuração de produção", () => {
+    expect(AI_PROVIDER.key).toBe("openai");
+    expect(AI_PROVIDER_SETTINGS_DEFAULT.vendor).toBe("openai");
   });
 
-  it("DeepSeek ainda não — a tela deixa escolher, mas ninguém pediu ainda", () => {
-    expect(isAiVendorSupported("deepseek")).toBe(false);
+  it("usa OpenAI mesmo se metadado legado de vendor estiver ausente", async () => {
+    getAiProviderSettingsService.mockResolvedValue({ apiKey: "test-openai-key", vendor: null });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(aiComplete({ system: "s", user: "u" })).resolves.toBe("ok");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.openai.com/v1/chat/completions");
   });
 
-  it("null (nunca escolhido) conta como suportado — cai no default (Anthropic)", () => {
-    expect(isAiVendorSupported(null)).toBe(true);
-  });
-
-  it("SUPPORTED_AI_VENDORS não inclui deepseek", () => {
-    expect(SUPPORTED_AI_VENDORS).toEqual(["anthropic", "chatgpt"]);
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    getAiProviderSettingsService.mockReset();
   });
 });

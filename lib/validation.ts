@@ -196,15 +196,8 @@ export const taskPayloadSchema = z.object({
   hora: z.string().max(20).optional(),
   // Atividade (comentários do card, mais recente por último)
   comments: z.array(taskCommentSchema).max(200).optional(),
-  // Fluxo em cascata (Entregas)
-  flow_parent: z.unknown().optional(),
-  flow_total_weight: z.unknown().optional(),
-  flow_step_count: z.unknown().optional(),
+  // Proveniência entre etapas; a estrutura vive nas FKs do workflow.
   flow_prev_task_id: z.unknown().optional(),
-  flow_step_key: z.unknown().optional(), // resíduo — hoje o slot do elo é a verdade
-  // Fluxos operados pela Northia. `formato` classifica a Entrega; esta chave
-  // descreve o motor que cria as etapas dinâmicas, sem inventar um tipo-pai.
-  automation_flow: z.unknown().optional(),
   automation_actor: z.unknown().optional(),
   traffic_revision_instruction: z.unknown().optional(),
   // Recorrência — template
@@ -242,17 +235,8 @@ export type TaskComment = z.infer<typeof taskCommentSchema>;
 // Plano agrega membros; Entrega agrega etapas por um molde congelado. Ser os
 // dois não tem progresso definido — ver a CHECK `tasks_plano_nao_e_entrega`.
 //
-// A guarda real é a do banco, e ela é que precisa existir: um PATCH que mande
-// SÓ `payload.flow_parent` num card que já é plano passa por aqui em branco,
-// porque `kind` não vem no corpo. Isto é para o 400 legível, não para a
-// integridade.
-const PLAN_AND_DELIVERY_ERROR = {
-  message: "Um Plano de Ação não pode ser uma entrega.",
-  path: ["payload", "flow_parent"],
-};
-function notPlanAndDelivery(value: { kind?: string | null; payload?: Record<string, unknown> | null }): boolean {
-  return !(value.kind === "plano_acao" && value.payload?.flow_parent === true);
-}
+// A guarda real de classificação e versão vive no banco. A validação HTTP
+// existe para devolver erros legíveis antes de chegar às constraints.
 
 const taskFieldsShape = z.object({
   // Omitted/empty = "sem cliente" (unassigned) — the "Outros" filter.
@@ -285,7 +269,7 @@ const taskFieldsShape = z.object({
   recurrence_weekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
   recurrence_day_of_month: z.number().int().min(1).max(31).nullable().optional(),
 });
-export const taskCreateSchema = taskFieldsShape.refine(notPlanAndDelivery, PLAN_AND_DELIVERY_ERROR);
+export const taskCreateSchema = taskFieldsShape;
 // slug is nullable here (unlike taskCreateSchema): null explicitly means
 // "unassign the client", undefined means "leave the client unchanged" — the
 // route resolves it to client_id since tasks has no slug column of its own.
@@ -299,7 +283,7 @@ export const taskPatchSchema = taskFieldsShape.partial().omit({ slug: true }).ex
     plataforma: z.string().max(80).nullable().optional(),
     hora: z.string().max(20).nullable().optional(),
   }).strict().optional(),
-}).refine(notPlanAndDelivery, PLAN_AND_DELIVERY_ERROR);
+});
 
 export const taskCommentCreateSchema = z.object({ text: z.string().trim().min(1).max(2000) });
 
@@ -336,8 +320,7 @@ export const windsorTestSchema = z.object({
 export const aiProviderSettingsPatchSchema = z.object({
   apiKey: z.string().trim().min(8).max(200).optional(),
   clearApiKey: z.boolean().optional(),
-  vendor: z.enum(["anthropic", "chatgpt", "deepseek"]).nullable().optional(),
-});
+}).strict();
 // PATCH semantics for the Meta integration: only the ad-account-per-client
 // mapping is ever written from the browser — the OAuth token itself is only
 // ever set by the server-side callback route, never via this schema.
@@ -415,12 +398,25 @@ export const performanceSyncSchema = z.object({
 export type TaskRelationKind = "structural_member" | "workflow_step" | "reference" | "dependency";
 // Persisted and mandatory since 20260917035220. A missing kind is a corrupt
 // DTO, not a legacy meaning to infer from `slot`.
-export type TaskParentLink = { id: string; slot: string | null; position: number; relation_kind: TaskRelationKind };
+export type TaskParentLink = {
+  id: string;
+  slot: string | null;
+  position: number;
+  relation_kind: TaskRelationKind;
+  workflow_step_id?: string | null;
+};
 
 export type TaskRecord = {
   id: string;
   // null = unassigned ("Outros") — a task with no client.
   client_id: string | null;
+  task_type_id?: string;
+  workflow_version_id?: string | null;
+  workflow_activated_at?: string | null;
+  workflow_version?: {
+    id: string;
+    workflow_version_steps: Array<{ id: string; progress_weight: number }>;
+  } | null;
   kind: string;
   subtype: string | null;
   title: string;
@@ -524,7 +520,7 @@ export const recurringGenerateSchema = z.object({
 // ---- Automations (Configurações → Automações) ----------------------------------
 // v2: one row per registered automation instance, always bound to a target
 // card (cadence/execution date come from that card — see
-// plan/AUTOMACOES-RELATORIO-TRAFEGO.md). No more agency/client scope.
+// docs/reporting/report-pipeline.md). No more agency/client scope.
 const automationKeySchema = z.enum([
   "relatorio_trafego_semanal",
   "provisionar_card_metricas",

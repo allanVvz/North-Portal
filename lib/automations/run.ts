@@ -6,7 +6,7 @@
 //
 // v2: one row per registered automation instance, bound to a target card
 // whose OWN due date/cadence drives everything — see
-// plan/AUTOMACOES-RELATORIO-TRAFEGO.md. Every failure (missing eligibility,
+// docs/reporting/report-pipeline.md. Every failure (missing eligibility,
 // data fetch, PDF render, upload) marks the relevant card `parada` with an
 // explanatory comment (lib/automations/errorHandling.ts) instead of failing
 // silently or aborting the rest of the run.
@@ -23,13 +23,13 @@ import { collectAndStorePreviews } from "./creativeAssets";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
-import { ensureFeedbackCard, runConversionFlow } from "./conversionFlow";
+import { runConversionFlow } from "./conversionFlow";
 import { nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
 import { logReportRun } from "./reportLog";
-import { ensureFlowStep } from "@/lib/flows/advance";
+import { materializeFirstStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
-import { REPORT_FLOW_STEPS } from "@/lib/taskRelations";
+import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } from "@/lib/automationWorkflow";
 import { commentsOf } from "@/lib/comments";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
@@ -47,7 +47,6 @@ export type AutomationConfigRow = {
   target_task_id: string;
   performance_template_id: string | null;
   active: boolean;
-  last_run_date: string | null;
   /** Métricas (tags) que `relatorio_vendas` lê do comentário. */
   collect_metric_keys: string[] | null;
   /** A automação da qual esta depende (a de anúncios, para `relatorio_vendas`). */
@@ -58,16 +57,19 @@ export type AutomationConfigRow = {
  *  automação `relatorio_vendas` ativa DECLARA depender desta automação de
  *  anúncios. Antes era deduzido de "as duas apontam pro mesmo card"
  *  (docs/audits/report-automation-flow.md, A6). */
-async function hasDependentConversion(admin: AdminClient, trafficConfigId: string): Promise<boolean> {
+async function dependentConversionConfig(
+  admin: AdminClient,
+  trafficConfigId: string,
+): Promise<Pick<AutomationConfigRow, "id" | "target_task_id"> | null> {
   const { data, error } = await admin
     .from("automation_configs")
-    .select("id")
+    .select("id,target_task_id")
     .eq("depends_on_config_id", trafficConfigId)
     .eq("automation_key", "relatorio_vendas")
     .eq("active", true)
     .limit(1);
   if (error) throw error;
-  return Boolean(data?.length);
+  return (data?.[0] as Pick<AutomationConfigRow, "id" | "target_task_id"> | undefined) ?? null;
 }
 
 export type AutomationRunSummary = {
@@ -175,7 +177,12 @@ async function fillReportCard(
     size_bytes: pdfBuffer.byteLength,
     doc_date: period.to,
   }).select("id").limit(1);
-  if (docError) throw docError;
+  if (docError) {
+    // Compensate the preceding Storage write: retries must not leave orphaned
+    // report files when the corresponding document row was not persisted.
+    await admin.storage.from(DOCUMENT_BUCKET).remove([path]);
+    throw docError;
+  }
 
   // O registro estruturado: os posts EXATAMENTE como entraram no PDF. É daqui que
   // a Automação 2 lê a mídia da semana, em vez de refazer a busca (A3). Sem
@@ -229,15 +236,28 @@ async function runOneReportAutomation(
   // da Automação 2. Sem molde de task_type — o fluxo é dinâmico.
   // Não depende mais de IA: o comentário é lido pelo parser determinístico
   // (lib/ai/commentParser.ts), e a IA é só um fallback opcional.
-  const flowMode = Boolean(target.recurrence_cadence) && (await hasDependentConversion(admin, config.id));
+  const conversionConfig = target.recurrence_cadence
+    ? await dependentConversionConfig(admin, config.id)
+    : null;
 
-  if (flowMode) {
+  if (conversionConfig) {
     let card1: TaskRecord;
     let occ: TaskRecord;
     try {
-      occ = await ensureFlowOccurrence(admin, target, today);
-      const trafegoStep = REPORT_FLOW_STEPS[0];
-      card1 = await ensureFlowStep(admin, occ, trafegoStep.key, { title: trafegoStep.label, leadDays: trafegoStep.lead_days, position: trafegoStep.order_index }, today);
+      const deliveryMold = await getAdminTask(admin, conversionConfig.target_task_id);
+      if (!deliveryMold?.recurrence_cadence) {
+        throw new Error("A automação de conversão não aponta para uma Entrega recorrente.");
+      }
+      occ = await ensureFlowOccurrence(admin, deliveryMold, today);
+      card1 = await materializeFirstStep(admin, occ)
+        ?? await getAdminTask(admin, flowStepTaskId(occ.id, ADS_REPORT_STEP_KEY))
+        ?? (() => { throw new Error("A primeira etapa da Entrega de Automação não foi materializada."); })();
+      const { error: startError } = await admin.from("tasks").update({ status: "em_producao" }).eq("id", card1.id);
+      if (startError) throw startError;
+      const { error: activationError } = await admin.from("tasks")
+        .update({ workflow_activated_at: new Date().toISOString(), status: "em_producao" })
+        .eq("id", occ.id);
+      if (activationError) throw activationError;
     } catch (error) {
       const message = errorMessage(error);
       await markTaskParada(admin, target.id, `Falha ao preparar o fluxo do relatório de anúncios: ${message}`);
@@ -261,26 +281,9 @@ async function runOneReportAutomation(
         })
         .eq("id", card1.id);
       if (c1Error) throw c1Error;
-      const advancedMold = await advanceFlowMold(admin, target, today);
-      // Daqui pra baixo é reforço/preparo do que vem depois — o relatório
-      // desta semana já está gerado e salvo. Uma falha aqui não pode marcar
-      // `parada` num card que já deu certo; só registra e segue.
-      // O Feedback nasce junto com o Tráfego — não espera revisão de ninguém.
-      // ensureFeedbackCard é idempotente (processOccurrence chama de novo
-      // como reforço, se este caminho não tiver rodado por algum motivo).
-      await ensureFeedbackCard(admin, occ, today).catch((error) => {
-        console.error("ensureFeedbackCard falhou", { occurrenceId: occ.id, error });
-      });
-      // Pré-cria o CONTÊINER (vazio, sem etapas) do próximo ciclo agora, não
-      // só no dia do vencimento dele — é o que faz a próxima semana já
-      // aparecer como Entrega na tela, adiantada, em vez de nascer do nada
-      // exatamente na data. A etapa `trafego` daquele ciclo continua nascendo
-      // só no dia certo (dados do Meta/Windsor daquela semana, não de hoje) —
-      // ensureFlowOccurrence é idempotente, então o cron do dia dela só acha
-      // o contêiner já pronto e segue para preencher a etapa.
-      await ensureFlowOccurrence(admin, advancedMold, today).catch((error) => {
-        console.error("Pré-criação do próximo ciclo do fluxo de relatório falhou", { moldId: advancedMold.id, error });
-      });
+      // O molde avança depois de o PDF existir. A próxima Entrega só será
+      // materializada quando a Conversão final for aprovada.
+      await advanceFlowMold(admin, target, today);
       await notifyFromAutomation(admin, card1.id, "task_commented", `Automação comentou em "${card1.title}".`);
       // Relatório de tráfego é assunto de quem gerencia tráfego, esteja ou não
       // no card — a frente do grid de Equipe & papéis é quem responde isso.
@@ -338,6 +341,30 @@ export type RunOptions = {
   configIds?: string[];
 };
 
+type AutomationRunRow = { id: string };
+
+async function claimDailyRun(admin: AdminClient, config: AutomationConfigRow, today: string): Promise<AutomationRunRow | null> {
+  const action = config.automation_key === "relatorio_vendas" ? "conversion_report" : "ads_report";
+  const { data, error } = await admin.rpc("claim_automation_run", {
+    p_config_id: config.id,
+    p_occurrence_key: today,
+    p_scheduled_for: `${today}T11:00:00.000Z`,
+    p_action: action,
+    p_occurrence_id: null,
+  });
+  if (error) throw error;
+  return (data?.[0] as AutomationRunRow | undefined) ?? null;
+}
+
+async function finishRun(admin: AdminClient, runId: string, status: "succeeded" | "failed", lastError: string | null = null): Promise<void> {
+  const { error } = await admin.from("automation_runs").update({
+    status,
+    last_error: lastError,
+    finished_at: new Date().toISOString(),
+  }).eq("id", runId);
+  if (error) throw error;
+}
+
 export async function runAutomations(options: RunOptions = {}): Promise<AutomationRunSummary> {
   const admin = createAdminClient();
   const summary: AutomationRunSummary = { processed: 0, succeeded: 0, errors: [] };
@@ -362,10 +389,10 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
 
   for (const config of configs) {
-    // last_run_date guarda a Automação 1 (uma vez por dia). A Automação 2 reage
-    // ao comentário do responsável em qualquer dia — a idempotência dela vem de
-    // marcadores em payload — mas ainda gravamos a data para observabilidade.
-    if (config.automation_key === "relatorio_trafego_semanal" && config.last_run_date === today) continue;
+    const run = config.automation_key === "relatorio_trafego_semanal"
+      ? await claimDailyRun(admin, config, today)
+      : null;
+    if (config.automation_key === "relatorio_trafego_semanal" && !run) continue;
 
     let outcome: RunOutcome;
     try {
@@ -375,13 +402,19 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
     } catch (error) {
       outcome = { error: errorMessage(error) };
     }
-    if (outcome === "not_due") continue;
+    if (outcome === "not_due") {
+      if (run) await finishRun(admin, run.id, "succeeded");
+      continue;
+    }
 
     summary.processed += 1;
     if (outcome === "ran") summary.succeeded += 1;
     else summary.errors.push({ configId: config.id, message: outcome.error });
 
-    await admin.from("automation_configs").update({ last_run_date: today }).eq("id", config.id);
+    if (run) {
+      if (outcome === "ran") await finishRun(admin, run.id, "succeeded");
+      else await finishRun(admin, run.id, "failed", outcome.error);
+    }
   }
 
   return summary;
@@ -392,7 +425,7 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
  * nova revisão e tudo o que dependia do snapshot anterior volta a aguardar. */
 export async function handleTrafficRevisionComment(admin: AdminClient, taskId: string): Promise<void> {
   const trafficTask = await getAdminTask(admin, taskId);
-  if (!trafficTask || trafficTask.subtype !== "trafego") return;
+  if (!trafficTask || trafficTask.subtype !== ADS_REPORT_STEP_KEY) return;
   const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", taskId).eq("relation_kind", "workflow_step").limit(1);
   const occurrenceId = (links?.[0] as { parent_id?: string } | undefined)?.parent_id;
   if (!occurrenceId) return;
@@ -426,7 +459,7 @@ export async function handleTrafficRevisionComment(admin: AdminClient, taskId: s
   delete nextPayload.feedback_source_at;
   delete nextPayload.sales_report_generated_at;
   await admin.from("tasks").update({ payload: nextPayload, status: "em_producao" }).eq("id", occ.id);
-  const feedbackId = flowStepTaskId(occ.id, "feedback");
-  const conversionId = flowStepTaskId(occ.id, "conversao");
+  const feedbackId = flowStepTaskId(occ.id, FEEDBACK_STEP_KEY);
+  const conversionId = flowStepTaskId(occ.id, CONVERSION_REPORT_STEP_KEY);
   await admin.from("tasks").update({ status: "backlog" }).in("id", [feedbackId, conversionId]);
 }

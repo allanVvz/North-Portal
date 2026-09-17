@@ -8,7 +8,7 @@ import NovoFluxoModal from "./NovoFluxoModal";
 // Configurações › Tipos e fluxos — o molde das Entregas fora do SQL.
 //
 // A tela edita o vocabulário de `task_types`. Etapas são subtipos de Tarefa;
-// uma Entrega apenas compõe uma sequência por `task_type_workflow_steps`.
+// uma Entrega apenas compõe uma sequência por uma versão publicada de workflow.
 // O que NÃO se faz aqui é criar um tipo de topo — ele tem contraparte em
 // lib/taskCatalog.ts (tom, ícone, união TaskKind) e uma linha só no banco
 // renderizaria com o visual de fallback em todo card.

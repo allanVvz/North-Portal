@@ -30,7 +30,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, isReportConversionFlow, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf } from "@/lib/taskRelations";
 import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus } from "@/lib/flows/parentStatus";
@@ -299,21 +299,17 @@ export default function TaskModal({
   // dropdowns do cabeçalho E das etapas de uma entrega — um fluxo É um tipo e
   // suas etapas SÃO os subtipos dele, então não há duas listas para sincronizar.
   const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([]);
-  // A ENTREGA é o card marcado com payload.flow_parent; a ETAPA é um filho dela
+  // A ENTREGA é o card ligado a uma versão de workflow; a ETAPA é um filho dela
   // cujo subtipo diz que etapa é.
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
-  const isReportFlow = Boolean(liveTask && isReportConversionFlow(liveTask));
   const [flowDeliveries, setFlowDeliveries] = useState<TaskRecord[]>([]);
   // A entrega de verdade por trás do card aberto — ela mesma quando o card
   // aberto É a entrega, o pai buscado à parte quando o card aberto é uma
-  // etapa. `isReportFlow` não serve para decidir "esta corrente é de
-  // relatório?" fora do card da própria entrega: uma etapa (trafego/feedback/
-  // conversao) não carrega `payload.automation_flow`, só o pai carrega.
+  // etapa. A versão persistida no pai é a autoridade da corrente.
   // Uma etapa compartilhada pode alimentar várias Entregas. Ela não ganha um
   // "primeiro pai" arbitrário: só há uma corrente editável quando existe uma
   // única Entrega ligada; caso contrário o modal mostra todos os contextos.
   const chainDelivery = isDelivery ? liveTask : flowDeliveries.length === 1 ? flowDeliveries[0] : null;
-  const isReportFlowChain = Boolean(chainDelivery && isReportConversionFlow(chainDelivery));
   // Os Planos de Ação a que este card pertence (pode ser mais de um) — não
   // aparecem no quadro, então quase sempre precisam ser buscados por id
   // (igual às Entregas de fluxo).
@@ -334,9 +330,13 @@ export default function TaskModal({
   const deliveryType = taskTypes.find((t) => t.key === (chainDelivery?.kind ?? (isDelivery ? liveTask?.kind : null))) ?? null;
   // Índice 1-based da etapa dentro do tipo, para o "2/4". -1 enquanto o
   // vocabulário não chegou, se o subtipo saiu do tipo depois de o card já
-  // existir, ou se a entrega é um fluxo de relatório — aí a corrente é da
-  // automação, não do vocabulário declarado (ver isReportFlowChain).
-  const flowStepIndex = deliveryType && liveTask && !isReportFlowChain ? deliveryType.subtypes.findIndex((sub) => sub.key === liveTask.subtype) : -1;
+  // existir. A posição é resolvida pelo FK workflow_step_id do elo.
+  const liveWorkflowStepId = chainDelivery && liveTask
+    ? liveTask.parents.find((parent) => parent.id === chainDelivery.id)?.workflow_step_id
+    : null;
+  const flowStepIndex = deliveryType && liveWorkflowStepId
+    ? deliveryType.subtypes.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
+    : -1;
   const [comment, setComment] = useState("");
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
@@ -707,8 +707,9 @@ export default function TaskModal({
   // As etapas da corrente a que este card pertence — as do próprio card quando
   // ele é a entrega, as do pai quando ele é uma etapa. `chainDelivery` (a
   // entrega a que a caixa de etapas se refere) já foi calculado mais acima,
-  // junto de `isReportFlowChain`.
+  // junto da versão persistida da Entrega.
   const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
+  const deliveryClassificationLocked = Boolean(chainDelivery && chainSteps.some((step) => step.status !== "backlog"));
 
   // As caixas "Faz parte de": uma linha enxuta por card pai (entrega, plano,
   // molde de recorrência), só para navegar. Um card pode ter mais de uma ao
@@ -731,9 +732,8 @@ export default function TaskModal({
   // caixa por Plano, montada direto de `planParents` logo abaixo.
   const parentSlotOf = (kind: Exclude<ParentRelationKind, "plano">): { id: string | null; parent: TaskRecord | null; subtitle: string; progress: number } => {
     if (kind === "entrega") {
-      // Fluxo de relatório: a contagem declarada de "criativo" não descreve
-      // esta corrente (ver isReportFlowChain / flowStepIndex acima).
-      const total = isReportFlowChain ? 0 : (deliveryType?.subtypes.length ?? 0);
+      // A contagem vem da versão persistida, não de flags no payload.
+      const total = deliveryType?.subtypes.length ?? 0;
       const stepLabel = liveTask ? subtypeLabelOf(liveTask.subtype ?? "") || "Etapa do fluxo" : "";
       return {
         id: singleFlowDeliveryId,
@@ -805,7 +805,7 @@ export default function TaskModal({
         t.id !== chainDelivery.id &&
         t.client_id === chainDelivery.client_id &&
         // A etapa é uma Tarefa comum; a Entrega só define a sequência em
-        // task_type_workflow_steps. Comparar com o kind da Entrega escondia
+        // workflow_version_steps. Comparar com o kind da Entrega escondia
         // justamente os cards elegíveis depois da migração de subtipos.
         t.kind === "operacional" &&
         t.subtype === slot &&
@@ -1381,7 +1381,7 @@ export default function TaskModal({
                     </button>
                   ))}
                 </HeadDropdown>
-                {visible("kind") ? (
+                {visible("kind") && !isDelivery ? (
                   <>
                     <span className="tm-head-sep">·</span>
                     <HeadDropdown
@@ -1389,7 +1389,7 @@ export default function TaskModal({
                       trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{typeLabelOf(draft.kind)}</span>}
                     >
                       {creationTypes.map((type) => (
-                        <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)}>
+                        <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)} disabled={deliveryClassificationLocked}>
                           <span className="tm-headpick-ico" aria-hidden>{kindIcon(type.key)}</span>{type.label}
                         </button>
                       ))}
@@ -1406,12 +1406,22 @@ export default function TaskModal({
                   // mostrava só "Subtipo" vazio, igual a qualquer card comum.
                   <>
                     <span className="tm-head-sep">·</span>
-                    <span
-                      className="tm-headpick-label tm-head-parentflag"
-                      title="Esta Entrega agrega o progresso das etapas do fluxo abaixo."
-                    >
-                      {typeLabelOf(draft.kind)}{isReportFlow ? ` · ${draft.formato || "Relatório"}` : ""} · fluxo de etapas
-                    </span>
+                    {deliveryClassificationLocked ? (
+                      <span className="tm-headpick-label tm-head-parentflag" title="Tipo bloqueado após a primeira etapa sair de Entrada.">
+                        <span aria-hidden>✦</span> Entrega · <span aria-hidden>{kindIcon(draft.kind)}</span> {typeLabelOf(draft.kind)}
+                      </span>
+                    ) : (
+                      <HeadDropdown
+                        className="tm-headpick-kind"
+                        trigger={<span className="tm-headpick-label tm-head-parentflag"><span aria-hidden>✦</span> Entrega · <span aria-hidden>{kindIcon(draft.kind)}</span> {typeLabelOf(draft.kind)}</span>}
+                      >
+                        {creationTypes.filter((type) => type.behavior === "entrega").map((type) => (
+                          <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)}>
+                            <span className="tm-headpick-ico" aria-hidden>{kindIcon(type.key)}</span>{type.label}
+                          </button>
+                        ))}
+                      </HeadDropdown>
+                    )}
                   </>
                 ) : subtypeOptions.length ? (
                   <>
@@ -1420,9 +1430,9 @@ export default function TaskModal({
                       className="tm-headpick-subtype"
                       trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}
                     >
-                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
+                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")} disabled={deliveryClassificationLocked}>— Sem subtipo —</button>
                       {subtypeOptions.map((sub) => (
-                        <button type="button" key={sub.key} className={`tm-headpick-option ${draft.subtype === sub.key ? "on" : ""}`} onClick={() => set("subtype", sub.key)}>
+                        <button type="button" key={sub.key} className={`tm-headpick-option ${draft.subtype === sub.key ? "on" : ""}`} onClick={() => set("subtype", sub.key)} disabled={deliveryClassificationLocked}>
                           {sub.label}
                         </button>
                       ))}
@@ -1724,7 +1734,6 @@ export default function TaskModal({
               <FlowStepsBox
                 type={deliveryType}
                 steps={chainSteps}
-                isReportFlow={isReportFlowChain}
                 currentTaskId={liveTask.id}
                 candidatesFor={chainCandidates}
                 busy={busy}

@@ -21,10 +21,6 @@
 
 import type { TaskRecord } from "@/lib/validation";
 import type { TaskTypeDef } from "@/lib/taskTypes";
-import { typeTotalWeight } from "@/lib/taskTypes";
-import { FLOW_STEP_COUNT_KEY, FLOW_TOTAL_WEIGHT_KEY } from "@/lib/taskCatalog";
-import { FLOW_PARENT_KEY } from "@/lib/taskRelations";
-import { DELIVERY_INITIAL_STATUS } from "./parentStatus";
 import { flowStepFields } from "./stepFields";
 
 export type ShootDayPiece = {
@@ -49,7 +45,7 @@ export type ShootDayRowsInput = {
   deliveryIds: string[];
 };
 
-export type ShootDayLink = { parentId: string; childId: string; slot: string; position: number };
+export type ShootDayLink = { parentId: string; childId: string; workflowStepId: string; slot: string; position: number };
 
 export type ShootDayRows = {
   deliveries: Record<string, unknown>[];
@@ -76,6 +72,7 @@ export function shootDayRows(input: ShootDayRowsInput): ShootDayRows {
   if (!roteiroStep || !captacaoStep) {
     throw new Error(`O tipo ${type.label} não tem as etapas de roteiro e captação — a diária precisa das duas.`);
   }
+  if (!type.workflow_version_id) throw new Error(`O tipo ${type.label} não tem uma versão publicada.`);
 
   const deliveries = pieces.map((piece, index) => ({
     id: input.deliveryIds[index],
@@ -83,8 +80,11 @@ export function shootDayRows(input: ShootDayRowsInput): ShootDayRows {
     description: piece.description ?? null,
     kind: type.key,
     subtype: null,
+    task_type_id: type.id,
+    workflow_version_id: type.workflow_version_id,
+    workflow_activated_at: null,
     plan_id: null,
-    status: DELIVERY_INITIAL_STATUS,
+    status: "backlog",
     priority: "media",
     assignee: input.assignee,
     due_date: piece.publishDate,
@@ -95,9 +95,6 @@ export function shootDayRows(input: ShootDayRowsInput): ShootDayRows {
     recurrence_day_of_month: null,
     payload: {
       formato: piece.formato,
-      [FLOW_PARENT_KEY]: true,
-      [FLOW_TOTAL_WEIGHT_KEY]: typeTotalWeight(type),
-      [FLOW_STEP_COUNT_KEY]: type.subtypes.length,
     },
   }));
 
@@ -134,8 +131,8 @@ export function shootDayRows(input: ShootDayRowsInput): ShootDayRows {
   };
 
   const links = deliveries.flatMap((delivery) => [
-    { parentId: delivery.id, childId: String(roteiro.id), slot: roteiroStep.key, position: roteiroStep.order_index },
-    { parentId: delivery.id, childId: String(captacao.id), slot: captacaoStep.key, position: captacaoStep.order_index },
+    { parentId: delivery.id, childId: String(roteiro.id), workflowStepId: roteiroStep.workflow_step_id!, slot: roteiroStep.key, position: roteiroStep.order_index },
+    { parentId: delivery.id, childId: String(captacao.id), workflowStepId: captacaoStep.workflow_step_id!, slot: captacaoStep.key, position: captacaoStep.order_index },
   ]);
 
   return { deliveries, roteiro, captacao, links };

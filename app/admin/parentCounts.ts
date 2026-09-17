@@ -13,11 +13,9 @@
 // menção às etapas que faltam nascer. Duas telas dizendo coisas diferentes
 // sobre o mesmo card.
 
-import { FLOW_STEP_COUNT_KEY } from "@/lib/taskCatalog";
-import { FLOW_PARENT_KEY } from "@/lib/taskRelations";
-
 type CountableParent = {
-  payload: Record<string, unknown> | null;
+  workflow_version_id?: string | null;
+  workflow_version?: { workflow_version_steps: unknown[] } | null;
   activities: unknown[];
 };
 
@@ -27,9 +25,9 @@ type CountableParent = {
  * ter mudado desde então (agora que ele é editável em Configurações › Tipos e
  * fluxos, muda mesmo), e uma entrega em andamento tem que continuar contando
  * pelo que combinou no início — senão ela encolhe ou cresce no meio do
- * caminho. Mesma razão pela qual o progresso usa `flow_total_weight`. */
+ * caminho. A FK da versão congela essa definição. */
 export function stepTotal(card: CountableParent): number {
-  return Number(card.payload?.[FLOW_STEP_COUNT_KEY]) || card.activities.length;
+  return card.workflow_version?.workflow_version_steps.length || card.activities.length;
 }
 
 /** Etapas que ainda vão nascer. Zero para um plano, sempre. */
@@ -41,9 +39,9 @@ export function pendingSteps(card: CountableParent): number {
 /** Entrega (cascateia por etapas) ou Plano (composição manual)?
  *
  * A marca está no payload, não no tipo: existem cards `criativo` legados, de
- * antes dos fluxos, que não são entrega nenhuma. Ver FLOW_PARENT_KEY. */
+ * antes dos fluxos, que não são entrega nenhuma. */
 export function isDeliveryCard(card: CountableParent): boolean {
-  return card.payload?.[FLOW_PARENT_KEY] === true;
+  return Boolean(card.workflow_version_id);
 }
 
 /** O texto que descreve o tamanho do card, na forma certa para o que ele é. */

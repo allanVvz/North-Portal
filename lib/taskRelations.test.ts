@@ -233,14 +233,14 @@ describe("entregas de fluxo", () => {
   // Marca explícita, e não inferida do tipo: há cards `criativo` legados que
   // são trabalho comum e não podem virar pais de uma hora para outra.
   it("reconhece a entrega pela marca no payload, não pelo tipo", () => {
-    expect(isFlowDelivery({ payload: { flow_parent: true } })).toBe(true);
-    expect(isFlowDelivery({ payload: {} })).toBe(false);
+    expect(isFlowDelivery({ workflow_version_id: "workflow-v1" })).toBe(true);
+    expect(isFlowDelivery({ workflow_version_id: null })).toBe(false);
   });
 
   it("mantém a entrega fora do quadro Tarefas e a etapa dentro", () => {
-    const entrega = { kind: "criativo", recurrence_cadence: null, payload: { flow_parent: true } } as const;
-    const etapa = { kind: "criativo", recurrence_cadence: null, payload: {} } as const;
-    const legado = { kind: "criativo", recurrence_cadence: null, payload: {} } as const;
+    const entrega = { kind: "criativo", recurrence_cadence: null, workflow_version_id: "workflow-v1", payload: {} } as const;
+    const etapa = { kind: "criativo", recurrence_cadence: null, workflow_version_id: null, payload: {} } as const;
+    const legado = { kind: "criativo", recurrence_cadence: null, workflow_version_id: null, payload: {} } as const;
     expect(belongsToTaskScreen(entrega)).toBe(false);
     expect(belongsToTaskScreen(etapa)).toBe(true);
     // O card criativo antigo continua sendo trabalho comum no quadro.

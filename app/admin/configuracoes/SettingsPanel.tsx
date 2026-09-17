@@ -18,7 +18,7 @@ import LandingPagesSettings from "./LandingPagesSettings";
 import { useSidebarEnabledPref } from "../kanbanPrefs";
 
 // Automações foi promovida de aba daqui pra tela própria no menu principal
-// (/admin/automacoes) em 2026-08-21 — ver plan/AUTOMACOES-RELATORIO-TRAFEGO.md.
+// (/admin/automacoes) em 2026-08-21; ver docs/reporting/report-pipeline.md.
 type Tab = "perfil" | "equipe" | "politicas" | "notificacoes" | "etapas" | "fluxos" | "checkpoints" | "faturamento" | "landing-pages" | "integracoes";
 const TABS: { key: Tab; label: string }[] = [
   { key: "perfil", label: "Perfil da agência" },

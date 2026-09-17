@@ -117,19 +117,22 @@ describe("posição de uma etapa nova", () => {
 // (select sem filtro, insert + select + limit, delete + eq). `failStepIndex`
 // simula a N-ésima etapa falhando no insert, para provar a limpeza compensatória.
 function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number | null = null): TypeWriter {
-  const state: { task_types: Record<string, unknown>[]; tasks: Record<string, unknown>[]; task_type_workflow_steps: Record<string, unknown>[] } = {
+  type FakeTable = "task_types" | "tasks" | "workflow_versions" | "workflow_version_steps";
+  const state: Record<FakeTable, Record<string, unknown>[]> = {
     task_types: [
       { id: "operacional", parent_id: null, key: "operacional", label: "Tarefa", order_index: 10, behavior: "simples", creatable: true, active: true },
       ...seedTypes,
     ],
     tasks: [],
-    task_type_workflow_steps: [],
+    workflow_versions: [],
+    workflow_version_steps: [],
   };
   let insertCount = -1; // -1 = a próxima insert é a linha de topo; 0+ = índice da etapa
 
-  function builder(table: "task_types" | "tasks" | "task_type_workflow_steps") {
-    let mode: "select" | "insert" | "delete" = "select";
+  function builder(table: FakeTable) {
+    let mode: "select" | "insert" | "update" | "delete" = "select";
     let insertPayload: Record<string, unknown> | null = null;
+    let updatePayload: Record<string, unknown> | null = null;
     let failThis = false;
     const filters: { col: string; val: unknown }[] = [];
 
@@ -137,13 +140,14 @@ function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number
       select() { return api; },
       insert(payload: Record<string, unknown>) {
         mode = "insert";
-        if (payload.parent_id !== null && payload.parent_id !== undefined) {
+        if (table === "task_types" && payload.parent_id !== null && payload.parent_id !== undefined) {
           insertCount += 1;
           if (failStepIndex !== null && insertCount === failStepIndex) failThis = true;
         }
         insertPayload = { id: `row-${state[table].length + 1}`, active: true, ...payload };
         return api;
       },
+      update(payload: Record<string, unknown>) { mode = "update"; updatePayload = payload; return api; },
       delete() { mode = "delete"; return api; },
       eq(col: string, val: unknown) { filters.push({ col, val }); return api; },
       order() { return api; },
@@ -165,6 +169,13 @@ function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number
           resolve({ data: null, error: null });
           return;
         }
+        if (mode === "update") {
+          for (const row of state[table]) {
+            if (filters.every((f) => row[f.col] === f.val)) Object.assign(row, updatePayload);
+          }
+          resolve({ data: null, error: null });
+          return;
+        }
         const rows = state[table].filter((r) => filters.every((f) => r[f.col] === f.val));
         resolve({ data: rows, error: null });
       },
@@ -172,7 +183,7 @@ function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number
     return api;
   }
 
-  return { from: (table: string) => builder(table as "task_types" | "tasks" | "task_type_workflow_steps") } as unknown as TypeWriter;
+  return { from: (table: string) => builder(table as FakeTable) } as unknown as TypeWriter;
 }
 
 const baseCreateInput = {

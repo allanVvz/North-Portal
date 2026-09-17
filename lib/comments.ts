@@ -59,10 +59,11 @@ export function mergeFamilyComments(
     .sort((a, b) => time(a.at) - time(b.at));
 }
 
-/** O card mínimo que a regra de família precisa ler — quem é (`kind`,
- *  `payload.flow_parent`, recorrência) e de quem é filho (`parents`). */
+/** O card mínimo que a regra de família precisa ler — classificação,
+ * versão de workflow, recorrência e relações de parentesco. */
 type FamilyMember = Pick<TaskRecord, "id" | "kind" | "payload" | "parents"> & {
   recurrence_cadence?: TaskRecord["recurrence_cadence"];
+  workflow_version_id?: TaskRecord["workflow_version_id"];
 };
 
 /** O molde de recorrência a que o card pertence (ele mesmo, se for o molde). */

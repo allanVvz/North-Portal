@@ -13,7 +13,7 @@
 import { isFlowDelivery } from "@/lib/taskRelations";
 import type { TaskRecord } from "@/lib/validation";
 
-export function flowDemotionProblem(current: Pick<TaskRecord, "payload" | "title">): string | null {
+export function flowDemotionProblem(current: Pick<TaskRecord, "payload" | "title" | "workflow_version_id">): string | null {
   if (!isFlowDelivery(current)) return null;
   return `"${current.title}" é uma Entrega — trocar o Tipo dela deixaria a corrente de etapas órfã. Desvincule ou apague as etapas antes de mudar o Tipo.`;
 }

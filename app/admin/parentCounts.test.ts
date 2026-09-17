@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { isDeliveryCard, partsLabel, pendingLabel, pendingSteps, stepTotal } from "./parentCounts";
 
 const entrega = (feitas: number, molde: number) => ({
-  payload: { flow_parent: true, flow_step_count: molde },
+  workflow_version_id: "workflow-v1",
+  workflow_version: {
+    workflow_version_steps: Array.from({ length: molde }, (_, index) => ({ id: `step-${index}` })),
+  },
   activities: Array.from({ length: feitas }, (_, i) => i),
 });
 const plano = (itens: number) => ({
-  payload: {},
   activities: Array.from({ length: itens }, (_, i) => i),
 });
 
@@ -40,10 +42,11 @@ describe("entrega conta pelo molde, plano conta o que tem", () => {
 
   // O molde é um instantâneo do nascimento. Se alguém acrescentar uma etapa em
   // Configurações › Tipos e fluxos, as entregas em andamento não podem encolher
-  // nem crescer no meio do caminho — mesma razão do flow_total_weight.
+  // nem crescer no meio do caminho: a FK da versão congela o molde.
   it("sem instantâneo do molde, cai no que existe em vez de mentir", () => {
-    expect(stepTotal({ payload: { flow_parent: true }, activities: [1, 2] })).toBe(2);
-    expect(partsLabel({ payload: { flow_parent: true }, activities: [1, 2] })).toBe("etapa 2/2");
+    const semDefinicao = { workflow_version_id: "workflow-v1", workflow_version: null, activities: [1, 2] };
+    expect(stepTotal(semDefinicao)).toBe(2);
+    expect(partsLabel(semDefinicao)).toBe("etapa 2/2");
   });
 
   // Existem cards `criativo` legados, de antes dos fluxos, que não são entrega:
@@ -51,6 +54,6 @@ describe("entrega conta pelo molde, plano conta o que tem", () => {
   it("card sem a marca de fluxo é plano, mesmo tendo atividades", () => {
     expect(isDeliveryCard(plano(3))).toBe(false);
     expect(isDeliveryCard(entrega(1, 4))).toBe(true);
-    expect(isDeliveryCard({ payload: null, activities: [] })).toBe(false);
+    expect(isDeliveryCard({ workflow_version_id: null, activities: [] })).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { vaultReadService } from "@/lib/vault";
 import type { AiVendor } from "@/lib/aiProviders";
 
-export type ServiceAiSettings = { apiKey: string; vendor: AiVendor | null };
+export type ServiceAiSettings = { apiKey: string; vendor: AiVendor };
 
 /** `null` quando não há credencial de IA cadastrada (Configurações ›
  *  Integrações › Provedor de IA) ou a chave está vazia. */
@@ -20,9 +20,12 @@ export async function getAiProviderSettingsService(): Promise<ServiceAiSettings 
     .eq("scope", "agency")
     .limit(1);
   if (error) throw error;
-  const row = data?.[0] as { vault_secret_id: string; meta: { vendor?: AiVendor | null } | null } | undefined;
+  const row = data?.[0] as { vault_secret_id: string } | undefined;
   if (!row) return null;
   const apiKey = await vaultReadService(row.vault_secret_id);
   if (!apiKey) return null;
-  return { apiKey, vendor: row.meta?.vendor ?? null };
+  // The credential is agency-wide and OpenAI-only.  Do not infer a provider
+  // from old metadata: a null/invalid legacy value must never route to another
+  // network provider.
+  return { apiKey, vendor: "openai" };
 }

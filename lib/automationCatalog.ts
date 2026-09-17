@@ -36,7 +36,7 @@ export type AutomationDef = {
   /** De onde vêm os dados. Mostrado na tela para que as duas pipelines de
    *  relatório não pareçam configurações irmãs. */
   source: string;
-  /** Automação da qual esta depende no MESMO card. Resolvida e gravada como
+  /** Automação da qual esta depende para o mesmo cliente. Resolvida e gravada como
    *  `automation_configs.depends_on_config_id` ao salvar — a cascata é um
    *  atributo, não uma dedução por co-locação. */
   dependsOn?: AutomationKey;

@@ -16,7 +16,6 @@ const CHAVES_GRAVADAS = [
   "accessed_at",
   "action_plan_id",
   "automation_actor",
-  "automation_flow",
   "barTone",
   "comments",
   "completed_cycles",
@@ -26,11 +25,7 @@ const CHAVES_GRAVADAS = [
   "explicit_date_group_id",
   "explicit_occurrence_dates",
   "external_id",
-  "flow_parent",
   "flow_prev_task_id",
-  "flow_step_count",
-  "flow_step_key",
-  "flow_total_weight",
   "formato",
   "hora",
   "imported_from",
@@ -57,7 +52,7 @@ function fixtureFor(key: string): unknown {
   if (key === "statusTone" || key === "barTone") return "neutral";
   if (key === "explicit_occurrence_dates") return ["2026-01-01"];
   if (key.endsWith("_cycle") || key.endsWith("_revision") || key.endsWith("cycles") || key === "pct") return 1;
-  if (key === "flow_parent" || key === "recurrence_group" || key === "deferred_until_accessed") return true;
+  if (key === "recurrence_group" || key === "deferred_until_accessed") return true;
   return "x";
 }
 

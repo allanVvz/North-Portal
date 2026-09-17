@@ -5,7 +5,6 @@ import TaskKindIcon from "./TaskKindIcon";
 import StepRow, { type StepPatch } from "./StepRow";
 import { STATUS_LABEL } from "./kanbanShared";
 import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "./FloatingPopover";
-import { REPORT_FLOW_STEPS, flowStepKeyOf } from "@/lib/taskRelations";
 import { taskMatchesQuery } from "@/lib/taskSearch";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import type { TaskSubtypeDef, TaskTypeDef } from "@/lib/taskTypes";
@@ -96,7 +95,6 @@ function ChainPicker({
 export default function FlowStepsBox({
   type,
   steps,
-  isReportFlow,
   currentTaskId,
   candidatesFor,
   busy,
@@ -112,12 +110,6 @@ export default function FlowStepsBox({
   type: TaskTypeDef | null;
   /** Os cards que já ocupam alguma etapa desta entrega. */
   steps: TaskRecord[];
-  /** Fluxo de relatório (Tráfego/Feedback/Conversão): as etapas são criadas
-   * pela automação, nunca pelo vocabulário declarado do `kind` ("criativo",
-   * que tem sua própria corrente de Roteiro/Captação/Edição/Publicação).
-   * Sem isto, `type` chega com subtipos DECLARADOS de verdade (não nulo/vazio
-   * como no fluxo dinâmico antigo) e a caixa renderiza a corrente errada. */
-  isReportFlow: boolean;
   /** Card aberto no momento, para destacar "você está aqui". */
   currentTaskId: string | null;
   candidatesFor: (slot: string) => TaskRecord[];
@@ -133,53 +125,25 @@ export default function FlowStepsBox({
 }) {
   const current = currentFlowStepOf(steps);
 
-  // A corrente PLANEJADA — quando se sabe de antemão quais etapas vão
-  // existir e em que ordem, mesmo antes de qualquer uma nascer. Um fluxo de
-  // relatório sempre tem as mesmas 3 (REPORT_FLOW_STEPS — nunca declaradas em
-  // task_types, ver o comentário lá); um tipo real com subtipos declarados
-  // usa os dele. Nenhum dos dois é "o tipo do kind" — para relatório, `type`
-  // chega com a corrente ERRADA de "criativo" (Roteiro/Captação/...), por
-  // isso `isReportFlow` decide primeiro.
-  const plannedSteps = isReportFlow ? REPORT_FLOW_STEPS : type && type.subtypes.length > 0 ? type.subtypes : null;
+  // A lista planejada vem exclusivamente da versão publicada/persistida.
+  const plannedSteps = type && type.subtypes.length > 0 ? type.subtypes : null;
 
-  // Fluxo DINÂMICO de verdade (sem corrente conhecida — ex.: ocorrência
-  // `operacional` promovida a pai de fluxo antiga, sem tipo declarado): não
-  // há o que planejar, só as etapas que já existem. Quando o tipo ainda não
-  // chegou mas já existem etapas, mostra o que já existe em vez de "Carregando".
+  // Sem a versão carregada não há denominador legítimo: não derive estrutura
+  // dos cards materializados.
   if (!plannedSteps) {
-    if (!steps.length) return type === null ? <div className="tm-box tm-planmembers"><p className="admin-sub" style={{ margin: 0 }}>Carregando etapas…</p></div> : null;
-    return (
-      <div className="tm-box tm-planmembers">
-        <p className="tm-box-label">Etapas ({steps.length})</p>
-        <div className="tm-member-list">
-          {steps.map((card) => (
-            <StepRow
-              key={card.id}
-              card={card}
-              label={card.title}
-              isCurrent={current?.id === card.id}
-              isOpenCard={card.id === currentTaskId}
-              team={team}
-              busy={busy}
-              canOpen={canOpen}
-              onOpen={() => onOpenStep(card)}
-              onPatch={onPatchStep}
-              onComment={onCommentStep}
-            />
-          ))}
-        </div>
-      </div>
-    );
+    return type === null
+      ? <div className="tm-box tm-planmembers"><p className="admin-sub" style={{ margin: 0 }}>Carregando etapas…</p></div>
+      : null;
   }
 
   return (
     <div className="tm-box tm-planmembers">
       <p className="tm-box-label">
-        Etapas{isReportFlow ? " · Relatório" : type ? ` · ${type.label}` : ""} ({steps.length}/{plannedSteps.length})
+        Etapas ({steps.length}/{plannedSteps.length})
       </p>
       <div className="tm-member-list">
         {plannedSteps.map((step) => {
-          const card = steps.find((t) => flowStepKeyOf(t) === step.key) ?? null;
+          const card = steps.find((task) => task.parents.some((parent) => parent.workflow_step_id === step.workflow_step_id)) ?? null;
           if (card) {
             return (
               <StepRow
@@ -216,7 +180,14 @@ export default function FlowStepsBox({
                 <TaskKindIcon kind="operacional" size="sm" />
                 <span className="tm-member-title">{step.label}</span>
                 <span className="tm-member-status">
-                  Nasce quando a anterior for concluída{step.lead_days ? ` · prazo de ${step.lead_days} dia${step.lead_days === 1 ? "" : "s"}` : ""}
+                  {step.creation_trigger === "ads_report_approved"
+                    ? "Nasce quando o Relatório de anúncios for aprovado"
+                    : step.creation_trigger === "feedback_approved"
+                      ? "Nasce quando o Feedback for aprovado"
+                      : step.creation_trigger === "delivery_created"
+                        ? "É criada junto com a Entrega"
+                        : "Nasce quando a etapa anterior for aprovada"}
+                  {step.lead_days ? ` · prazo de ${step.lead_days} dia${step.lead_days === 1 ? "" : "s"}` : ""}
                 </span>
               </span>
             </div>

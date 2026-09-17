@@ -7,6 +7,20 @@ Escopo: as duas automações que formam a cascata semanal de relatórios. **Não
 sistema de tarefas em geral — o que está aqui é só o caminho que leva de uma tarefa
 recorrente até dois PDFs.
 
+> **Errata de 2026-09-16.** A conclusão abaixo de que o fluxo dinâmico não
+> reclassifica o `kind` do molde deixou de representar produção depois da
+> migration `20260916190000_relatorio_entrega_northia.sql`. Ela converteu os
+> `target_task_id` ativos para `criativo`, embora o runtime promova somente a
+> ocorrência. O diagnóstico e a arquitetura corretiva estão em
+> `docs/audits/2026-09-16-backend-task-architecture.md`.
+
+> **Substituído em 2026-09-17.** O corte definitivo elimina o motor dinâmico
+> descrito nesta auditoria. Criativo e Automação passam a usar
+> `workflow_versions`/`workflow_version_steps`, e `task_links.workflow_step_id`
+> é a autoridade da instância. O contrato vigente está em
+> `docs/reporting/report-pipeline.md`; o texto abaixo permanece somente como
+> registro do diagnóstico que motivou o corte.
+
 > **Correção de premissa.** O briefing que originou esta auditoria assume Python. Não é:
 > os dois PDFs são TypeScript/React via `@react-pdf/renderer`, renderizados dentro do
 > Next.js (runtime `nodejs`) e publicados na Vercel. A arquitetura proposta continua

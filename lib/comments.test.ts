@@ -134,7 +134,7 @@ describe("familyThreadOf", () => {
     parents: [] as ReturnType<typeof elo>[],
   });
 
-  const entrega = card("entrega", "criativo", [{ author: "A", text: "briefing", at: "2026-09-01T09:00:00Z" }], { flow_parent: true });
+  const entrega = { ...card("entrega", "criativo", [{ author: "A", text: "briefing", at: "2026-09-01T09:00:00Z" }]), workflow_version_id: "workflow-v1" };
   const roteiro = { ...card("roteiro", "criativo", [{ author: "B", text: "roteiro ok", at: "2026-09-02T09:00:00Z" }]), parents: [elo("entrega", "roteiro", 10)] };
   const captacao = { ...card("captacao", "criativo", [{ author: "C", text: "gravado", at: "2026-09-03T09:00:00Z" }]), parents: [elo("entrega", "captacao", 20)] };
   const avulso = card("avulso", "criativo", [{ author: "D", text: "nada a ver", at: "2026-09-04T09:00:00Z" }]);
@@ -184,7 +184,7 @@ describe("familyThreadOf", () => {
   // faria o molde procurar ETAPAS PRÓPRIAS (que não existem — só as
   // ocorrências têm etapas) em vez dos ciclos.
   it("um molde de entrega recorrente (flow_parent herdado) mostra os ciclos, não etapas próprias", () => {
-    const moldeEntrega = { ...card("molde-e", "criativo", [], { flow_parent: true }), recurrence_cadence: "semanal" as const };
+    const moldeEntrega = { ...card("molde-e", "criativo", []), workflow_version_id: "workflow-v1", recurrence_cadence: "semanal" as const };
     const execucao = card("exec-e", "criativo", [{ author: "A", text: "roteiro pronto", at: "2026-09-02T09:00:00Z" }], { recurrence_parent_id: "molde-e" });
     expect(familyThreadOf(moldeEntrega, [moldeEntrega, execucao]).map((c) => c.text)).toEqual(["roteiro pronto"]);
   });

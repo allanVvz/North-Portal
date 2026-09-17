@@ -7,7 +7,6 @@
 // validation never has to import back.
 
 import { TASK_STATUSES, type TaskRecord, type TaskStatus } from "@/lib/validation";
-import { FLOW_PARENT_KEY } from "@/lib/taskRelations";
 import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
 import { flowStepPct } from "@/lib/flows/flowProgress";
 import { getLiveKindDef } from "@/lib/taskCatalog/liveKinds";
@@ -18,8 +17,8 @@ export type TaskKind =
   | "operacional"
   | "plano_acao"
   | "criativo"
-  | "checkpoint_comercial"
-  | "relatorio_conversao";
+  | "automacao"
+  | "checkpoint_comercial";
 
 export type KindDef = {
   label: string;
@@ -75,13 +74,13 @@ export const TASK_KINDS: Record<TaskKind, KindDef> = {
     blurb: "Marco do onboarding/relacionamento comercial com o cliente",
     performance: false,
   },
-  relatorio_conversao: {
-    label: "Relatório de conversão",
-    icon: "▦",
-    tone: "blue",
-    blurb: "Fluxo de 2 etapas: relatório de tráfego (automático) + agendamentos (manual) → relatório de vendas",
-    performance: true,
-    subtypes: ["relatorio_trafego", "agendamentos"],
+  automacao: {
+    label: "Automação",
+    icon: "⚡",
+    tone: "purple",
+    blurb: "Entrega automatizada de relatórios de anúncios, feedback e conversão",
+    performance: false,
+    subtypes: ["relatorio_anuncios", "feedback", "relatorio_conversao"],
   },
 };
 
@@ -106,8 +105,11 @@ export const SUBTYPE_LABEL: Record<string, string> = {
   // while criativo/captacao is step 2 of a specific piece's flow.
   captacao: "Captação",
   edicao: "Edição",
-  // operacional / relatorio_conversao
-  relatorio_trafego: "Relatório de tráfego",
+  // Tarefas de automação
+  relatorio_anuncios: "Relatório de anúncios",
+  feedback: "Feedback",
+  relatorio_conversao: "Relatório de conversão",
+  relatorio_trafego: "Relatório de anúncios",
   agendamentos: "Agendamentos",
 };
 
@@ -204,6 +206,8 @@ type ProgressTask = Pick<TaskRecord, "kind" | "status" | "progress_weight"> & {
   id?: string;
   recurrence_cadence?: TaskRecord["recurrence_cadence"];
   payload?: TaskRecord["payload"];
+  workflow_version_id?: TaskRecord["workflow_version_id"];
+  workflow_version?: TaskRecord["workflow_version"];
   // Só lidas dentro de um rollup de ENTREGA (ver flowMemberPct) — a régua de
   // casas do fluxo depende delas. Opcionais para não quebrar os dezenas de
   // call sites que montam um ProgressTask sem pensar em fluxo; ausentes,
@@ -231,9 +235,6 @@ export const PRE_PARADA_STATUS_KEY = "pre_parada_status";
  * `members` differently and none of them can await a query. Freezing it is also
  * the correct semantics: editing a template must not silently rewrite the
  * progress of deliveries already in flight. */
-export const FLOW_TOTAL_WEIGHT_KEY = "flow_total_weight";
-export const FLOW_STEP_COUNT_KEY = "flow_step_count";
-
 function flowTotalWeight(task: ProgressTask): number {
   // Um TEMPLATE de recorrência de entrega carrega as marcas de fluxo, porque é
   // delas que cada ocorrência herda o próprio molde. Mas o template não é uma
@@ -242,22 +243,23 @@ function flowTotalWeight(task: ProgressTask): number {
   // de 100%. O denominador dele são os próprios filhos, como em qualquer
   // recorrência — e é isso que o zero aqui devolve.
   if (task.payload?.[RECURRENCE_GROUP_KEY] === true) return 0;
-  const value = task.payload?.[FLOW_TOTAL_WEIGHT_KEY];
-  return typeof value === "number" && value > 0 ? value : 0;
+  return task.workflow_version?.workflow_version_steps.reduce(
+    (total, step) => total + (Number(step.progress_weight) || 1),
+    0,
+  ) ?? 0;
 }
 
 /** A card that aggregates children instead of holding a status of its own.
- * A entrega é reconhecida pela marca no payload, não pelo tipo — ver
- * FLOW_PARENT_KEY em lib/taskRelations.ts. */
+ * A entrega é reconhecida pela FK da versão de workflow. */
 export function isRollupParent(task: ProgressTask): boolean {
-  return Boolean(kindDef(task.kind).isPlan || task.recurrence_cadence || task.payload?.flow_parent === true);
+  return Boolean(kindDef(task.kind).isPlan || task.recurrence_cadence || task.workflow_version_id);
 }
 
 /**
  * Single source of truth for a card's progress (0–100).
  * - Plan cards (isPlan), recurrence parents and flow deliveries: weighted
- *   rollup of their children. A delivery divides by the template snapshot
- *   (FLOW_TOTAL_WEIGHT_KEY) so steps not materialized yet still count against
+ *   rollup of their children. A delivery divides by its pinned workflow version
+ *   so steps not materialized yet still count against
  *   it; the others divide by the weight of the members they actually have.
  *   Dentro de uma entrega, cada etapa-membro entra na média pela régua de
  *   "casas" de lib/flows/flowProgress.ts (flowMemberPct), não pelo statusPct
@@ -283,14 +285,14 @@ export function isRollupParent(task: ProgressTask): boolean {
  * mesma lista sai da contagem.
  *
  * Ele continua aparecendo na tela como atividade — o que muda é só o peso. */
-export function dedupePlanMembers<T extends { id: string; payload?: TaskRecord["payload"] }>(
+export function dedupePlanMembers<T extends { id: string; workflow_version_id?: string | null }>(
   members: readonly T[],
   membersByParent: ReadonlyMap<string, { id: string }[]> | undefined,
 ): T[] {
   if (!membersByParent) return [...members];
   const stepIds = new Set<string>();
   for (const member of members) {
-    if (member.payload?.[FLOW_PARENT_KEY] !== true) continue;
+    if (!member.workflow_version_id) continue;
     for (const step of membersByParent.get(member.id) ?? []) stepIds.add(step.id);
   }
   return members.filter((member) => !stepIds.has(member.id));
@@ -348,7 +350,7 @@ function rollupProgress(
   // dentro de um Plano, a ocorrência dentro do molde recorrente) também cai
   // no caminho antigo — a régua de casas só faz sentido para uma etapa FOLHA,
   // com status próprio, não para um rollup que já devolve 0–100 sozinho.
-  const isFlow = task.payload?.[FLOW_PARENT_KEY] === true;
+  const isFlow = Boolean(task.workflow_version_id);
   const weighted = members.reduce((s, m) => {
     const pct = isFlow && !isRollupParent(m)
       ? flowMemberPct(m)

@@ -29,7 +29,6 @@ type AutomationConfig = {
   targetTaskId: string;
   performanceTemplateId: string | null;
   active: boolean;
-  lastRunDate: string | null;
   collectMetricKeys: string[] | null;
   dependsOnConfigId: string | null;
   // Resolved server-side (lib/supabase.ts listAutomationConfigs) — never
@@ -90,7 +89,7 @@ function blankSlot(): Slot {
 }
 
 // Automações (promovida de uma aba de Configurações para tela própria no menu
-// principal em 2026-08-21 — ver plan/AUTOMACOES-RELATORIO-TRAFEGO.md).
+// principal em 2026-08-21; o contrato atual está em docs/reporting/report-pipeline.md).
 // Grid de 2 colunas, cards compactos, revelação progressiva por etapa: só o
 // tipo de automação aparece de início; ao escolher, ele vira um chip
 // compacto e os dois campos seguintes (card-alvo + modelo de Performance)
@@ -320,7 +319,7 @@ function AutomationConfigCard({
                   <dt>Depende de</dt>
                   <dd>
                     {AUTOMATION_DEFINITIONS[def.dependsOn].label}
-                    {slot.id && !slot.dependsOnConfigId ? <span className="auto-meta-warn"> · não registrado neste card</span> : null}
+                    {slot.id && !slot.dependsOnConfigId ? <span className="auto-meta-warn"> · não registrado para este cliente</span> : null}
                   </dd>
                 </div>
               ) : null}

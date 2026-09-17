@@ -3,7 +3,7 @@
 // (POST /api/admin/automations/provision). Clones the chosen card to every
 // client with at least 1 task_metrics row, branching by the card's own shape
 // (task normal / rotina / plano de ação) — see
-// plan/AUTOMACOES-RELATORIO-TRAFEGO.md "Automação 2". The exact wording of
+// docs/reporting/report-pipeline.md. The exact wording of
 // the metrics summary comment, and how plan "itens atribuídos" get
 // redistributed per client, are explicitly left open by that plan for a
 // later pass — this only fixes the mechanism (clone + branch by format).

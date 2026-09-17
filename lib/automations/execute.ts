@@ -1,6 +1,6 @@
 // Automação 1 (relatorio_trafego_semanal) v2 — reacts to the admin-picked
 // target card's own due date instead of self-managing a synthetic card per
-// client (see plan/AUTOMACOES-RELATORIO-TRAFEGO.md "Automação 1 — 3
+// client (see docs/reporting/report-pipeline.md; the three
 // comportamentos por formato do card"). Branches by the target card's shape:
 //   - task comum: fills the card itself in place.
 //   - card recorrente: materializes a fresh occurrence each cycle (same
@@ -17,7 +17,8 @@ import { TASK_COLUMNS } from "@/lib/taskColumns";
 import type { TaskRecord } from "@/lib/validation";
 import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } from "@/lib/recurrence";
 import { recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "@/lib/recurrenceState";
-import { DEFERRED_TASK_FLAG, REPORT_CONVERSION_FLOW } from "@/lib/taskRelations";
+import { DEFERRED_TASK_FLAG } from "@/lib/taskRelations";
+import { publishedWorkflowForKind } from "@/lib/workflows";
 import { mergeAssigneeDisplay } from "@/lib/assignees";
 import { clonePlan } from "./provision";
 import { assignResponsibilityHolders } from "./responsibleOwners";
@@ -56,8 +57,8 @@ export async function materializeOccurrenceForReport(admin: AdminClient, parent:
   // arrives) finds the right date. No optimistic-concurrency guard here
   // (unlike completeTaskCycleForRequest, which faces concurrent human
   // clicks) — this automation is the sole writer of a given parent within a
-  // single cron tick, and automation_configs.last_run_date already prevents
-  // the same config from running twice in one day. A contains()-style guard
+  // single cron tick; `automation_runs` prevents the same action from
+  // succeeding twice. A contains()-style guard
   // keyed on the *current* cycle/revision would also silently no-op for any
   // parent whose payload doesn't literally carry those keys yet (e.g. cycle
   // 0 with no prior completed cycle) — real recurring tasks always get them
@@ -93,29 +94,27 @@ export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord,
   const found = await getAdminTask(admin, occId);
   if (found) return found;
 
+  const workflow = await publishedWorkflowForKind(admin, "automacao");
+  if (!workflow?.steps.length) throw new Error("O workflow publicado de Automação não está configurado.");
+
   const fields = recurringExecutionFields(mold, occId, today, cycle);
   const payload = { ...((fields.payload ?? {}) as Record<string, unknown>) };
   delete payload[DEFERRED_TASK_FLAG];
-  // M1 é tarefa recorrente comum — não carrega marcas de fluxo. A ocorrência é
-  // que vira o pai do fluxo desta semana.
-  payload.flow_parent = true;
-  // 3 etapas reais (trafego, feedback, conversao — ver conversionFlow.ts),
-  // cada uma com progress_weight 1 (default de ensureFlowStep). Congelado em 2
-  // a barra bateria 100% assim que trafego+feedback fechassem, com a etapa de
-  // conversão ainda por nascer.
-  payload.flow_total_weight = 3;
-  payload.flow_step_count = 3;
-  // A ocorrência é uma Entrega comum classificada como Relatório. O motor é
-  // identificado no payload para não acionar a cascata editorial padrão de
-  // criativo (roteiro → captação → edição → publicação).
-  const flowKind = "criativo";
-  payload.formato = "Relatório";
-  payload.automation_flow = REPORT_CONVERSION_FLOW;
   payload.automation_actor = AUTOMATION_ASSIGNEE;
 
   const { data, error } = await admin
     .from("tasks")
-    .insert({ ...fields, kind: flowKind, subtype: null, payload, status: "em_producao", assignee: AUTOMATION_ASSIGNEE })
+    .insert({
+      ...fields,
+      kind: "automacao",
+      subtype: null,
+      task_type_id: workflow.delivery_type_id,
+      workflow_version_id: workflow.id,
+      workflow_activated_at: null,
+      payload,
+      status: "backlog",
+      assignee: AUTOMATION_ASSIGNEE,
+    })
     .select(TASK_COLUMNS)
     .limit(1);
   if (error && (error as { code?: string }).code !== "23505") throw error;

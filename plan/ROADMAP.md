@@ -40,7 +40,8 @@ mobile gaveta; **cron real de automações ligado em prod** (R1.1 — segredo
 **save do conteúdo do portal deixou de apagar seções irmãs** (R1.2 — o editor
 monta o patch a partir do objeto salvo; `content.trilhas`/`content.documentos`
 aposentados); limpeza de comentários mortos citando `flow_template_id`
-(R1.5 — entrega hoje é marcada por `payload.flow_parent`, elos por `task_links`);
+(R1.5 — registro histórico; R0.6 substitui a marca de `payload` por FKs
+versionadas em `tasks` e `task_links`);
 **faxina das notificações** (2026-09-06 — decisão por lista branca de campos em
 `lib/notifiableChange.ts`, prazo com tipo próprio, "foi editado" nomeando os
 campos, ator propagado na cascata, autosave sem salvamento-fantasma, regras
@@ -68,7 +69,7 @@ card raiz reflete a ação aberta mais importante e o modal explica a árvore in
 | ID | Item | Critério de saída |
 |---|---|---|
 | R0.5 | **Modelo de relações familiares — entregue em produção (2026-09-17).** `20260917035220_task_link_relation_kinds` explicitou os elos; `20260917052549_reconcile_family_ownership` converteu os 3 vínculos históricos Reunião → entrega em `reference`, moveu Baita para Plano → Entrega → etapa, exigiu `relation_kind` em toda escrita e limitou `structural_member` a um pai por card. Resultado remoto validado: 39 estruturais, 9 `workflow_step`, 3 referências e zero card com dois pais estruturais. `workflow_step` permanece N:N explícito para a Diária de gravação. | Todo card tem localização estrutural canônica; referência não duplica progresso; `slot` nunca decide semântica. |
-| R0.6 | **Higiene de catálogo e automação — em andamento.** A correção de moldes de relatório e dos resíduos temporais foi entregue em produção (`20260917070000`, `20260917071500`, `20260917073000`): zero tipo de relatório legado, molde ativo = Tarefa recorrente, ocorrência = Entrega, nenhum ponteiro/cadência temporal inconsistente nem elo cross-client. Resta extrair o papel de workflow dos subtipos editoriais sem reclassificar cards. | Quatro tipos estruturais explícitos; papel de workflow separado do subtipo; compatibilidade temporal removida somente depois do novo leitor em lote (R0.7). |
+| R0.6 | **Motor único versionado — implementação pronta para cutover.** `workflow_versions`/`workflow_version_steps`, FKs em `tasks` e `task_links`, ledger `automation_runs`, preflight/postflight e reconciliação allowlisted estão versionados em `20260917120000` + `20260917121000`. Criativo e Automação usam o mesmo motor; o deploy/migration/E2E de produção ainda é o portão final. | Aplicar pelo runbook direto, validar os cinco clientes e só então atualizar o ledger remoto. |
 | R0.7 | **Backend familiar e rollups.** Endpoint/DTO em lote para raiz, caminho, ação atual, bloqueios, histórico e progresso derivado. | Sem escolha arbitrária de pai, sem N+1, operações idempotentes de concluir/reabrir/reagendar. |
 | R0.8 | **TaskModal Família + Kanban único.** Substituir caixas relacionais repetidas por uma seção Família e consolidar as quatro abas em uma projeção. | O portão de login (`e2e/auth-login.spec.ts`) continua verde; E2E autenticado de família cobre Tarefa, Plano, Entrega, recorrência, referência compartilhada e relatório com fixtures isoladas. |
 
@@ -156,43 +157,17 @@ Branch `feat/relatorio-conversao-vendas` mergeada na `main` em 2026-09-01
   Automação 2 reagir na hora; `e2e/relatorio-conversao.spec.ts` (Playwright);
   ingestão Meta de `followersGained` (a API não expõe).
 
-#### R0.4b — Fluxo de conversão reescrito (dinâmico) + ligado dormente — ⏳ PENDENTE: chave da Anthropic
+#### R0.4b — Histórico substituído pelo motor versionado
 
-**2026-09-02** (`e184037` → `245b89d`, ver `CHANGELOG.md` e memória
-[[fluxo-conversao-nao-ligado]]). O molde fixo `relatorio_conversao` foi
-aposentado; o fluxo virou **dinâmico e sem task_type**:
+> A descrição dinâmica abaixo foi absorvida por R0.6 e não é mais arquitetura
+> válida. O pipeline atual usa a Entrega `Automação`, passos por FK e aprovação
+> manual do Feedback; comentário não aprova. Aprovação determinística por
+> comentário do revisor permanece item futuro.
 
-- **Automação 1** (`relatorio_trafego_semanal`) — quando o card recorrente tem
-  uma Automação 2 ativa E há backend de IA, a ocorrência da semana vira pai de
-  fluxo (`flow_parent`), a etapa `trafego` recebe o PDF do Meta e vai a revisão.
-- **Automação 2** (`relatorio_vendas`, `lib/automations/conversionFlow.ts`) —
-  módulo genérico. Config = card alvo + `collect_metric_keys` (chips de tag
-  livre; default vendas/agendamentos/seguidores/receita). Posta o pedido, lê o
-  comentário do gestor com IA (`lib/ai/extractMetrics.ts`), grava `task_metrics`,
-  gera o **relatório de vendas** (seção por objetivo + fonte×objetivo + vendas
-  detalhadas + funil com seguidores; `lib/reports/salesReportPdf.tsx` +
-  `campaignBlockKpis.tsx`), fecha a ocorrência.
-- **IA**: `AI_CLI=1` (CLI `claude`) só dev/e2e. Prod usa a credencial `ai`
-  (vendor anthropic).
-- **Estado em prod (2026-09-02):** os **6 clientes** têm as 2 automações no card
-  "Relatório de anúncios" (métricas vendas/agendamentos/seguidores/receita). Os
-  6 cards "Relatório de anúncios — Topo de funil" (inertes) foram apagados.
-  Validado e2e ponta a ponta (karpinski/utzig/baita, 3 casos) — depois tudo
-  apagado, `task_metrics` em prod = 0.
-- **DORMENTE** — `conversionAiReady()` (`conversionFlow.ts`): sem credencial
-  `ai`, `runAutomations` pula as configs `relatorio_vendas`, `flowMode` da
-  Automação 1 fica `false` (relatório de tráfego sai normal, sem card de
-  feedback), o hook de comentário retorna cedo.
-
-  **➡️ PENDÊNCIA ÚNICA: cadastrar a chave da Anthropic** em Configurações ›
-  Integrações › Provedor de IA. No ciclo seguinte a Automação 2 ativa sozinha
-  nos 6 — sem semana quebrada no meio. (Alternativa: rodar o cron num runner
-  self-hosted com a CLI `claude`.)
-
-- **Follow-ups R0.4b:** `adSourceTags` — nenhum cliente marca criativos com
-  fonte #1/#2/#3, então "vendas/ROAS por objetivo" no PDF de vendas mostra só a
-  nota de como ligar; hardening do prompt de extração (few-shot para "orçamento
-  em aberto", aproximações de seguidores); `e2e/relatorio-conversao.spec.ts`.
+O registro anterior foi absorvido porque descrevia um fluxo dinâmico, sem
+`task_type`, que não deve voltar. A implementação canônica é a R0.6: anúncios,
+Feedback e conversão são passos da versão persistida da Entrega `Automação`;
+somente a aprovação manual avança a cadeia.
 
 ### R0.1 — Unificação total do botão e do modal de criação de tarefa — ✅ FEITO (2026-08-30)
 
@@ -363,7 +338,7 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 | R2.3 | **Fase 5 — Agendamento reverso a partir da data de publicação.** Dada a data de publicação, derivar para trás os prazos de Roteiro/Captação/Edição. | `fluxos-cascata` §backlog | Médio. Casa com R6.5 (calendário composto). |
 | R2.4 | **Performance das consultas SQL de fluxos.** `listParentCards` faz só 2 níveis de fetch; Plano aninhado em fluxo exigirá CTE recursivo. | `fluxos-cascata` | Médio. Só urgente se planos-em-fluxo virarem caso real. |
 | R2.5 | **Rótulo de card de origem no thread de comentários da família.** O modal de qualquer card de um plano/entrega já mostra os comentários de todos os cards da família mesclados por data (`mergeFamilyComments`, `FamilyComment.taskId` já vem pronto), mas sem dizer de qual card cada comentário veio. Adicionar um marcador discreto clicável por comentário (`· Captação`) e/ou um filtro por card. | esta rodada (`app/admin/TaskModal.tsx`, `lib/comments.ts`) | Pequeno-médio. Puramente de view. |
-| ~~R2.6~~ | **`StrategicView` cega para etapas não-materializadas. ✅ FEITO (2026-09-07).** A view mostrava toda entrega como "N atividades", então uma de quatro etapas com só o roteiro pronto parecia um plano de um item — completo. A contagem saiu de dentro do `ParentCardsBoard` para `app/admin/parentCounts.ts` (puro, 6 testes) e as duas telas passaram a dizer a mesma coisa sobre o mesmo card: entrega conta pelo **molde** (`etapa 2/4`, do instantâneo em `payload.flow_step_count`), plano conta o que tem. A Estratégica ganhou também a linha do que ainda vai nascer. Entrega vs plano é decidido **por card** (a marca `flow_parent` no payload), não por prop da tela — existem `criativo` legados que não são entrega. | `fluxos-cascata` | Feito. |
+| ~~R2.6~~ | **`StrategicView` cega para etapas não-materializadas. ✅ FEITO e normalizado por R0.6.** A contagem usa todos os passos de `workflow_version_steps`, inclusive os ainda não materializados; uma etapa existente nunca vira denominador do fluxo inteiro. Entrega é identificada por `workflow_version_id`, não por `payload`. | `docs/ARQUITETURA-TAREFAS.md` | Feito. |
 
 ---
 
@@ -386,7 +361,7 @@ inativos — deixar). **Cards de automação** viram frente própria: **R4.10**.
 ## Tier 4 — Épico: Harness de IA / automações configuráveis
 
 Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
-`AUTOMACOES-RELATORIO-TRAFEGO` (v2) foi entregue. Ordem pedida: shell admin
+O pipeline vigente está em `docs/reporting/report-pipeline.md`. Ordem pedida: shell admin
 (feito) → automações configuráveis → agentes.
 
 | ID | Item | Notas |
@@ -396,15 +371,15 @@ Documento guarda-chuva: `plan/AUTOMACOES-IA-HARNESS.md`. Só a fatia
 | R4.3 | **Plano de ação versionado por release da automação** (mudança de prompt = nova versão registrada). | |
 | R4.4 | **Loop de escrita da automação:** escreve nos campos de texto do card, reprocessa a partir de cada novo comentário, conclui quando aprovado; card mostra "em produção" no indicador de %. | |
 | R4.5 | **Agentes planejados:** **Bia — Copywriter** (dispara ao concluir card `criativo`, propõe legenda); **Social media plan** (dispara ao aprovar legenda, sugere data/hora e melhores horários). | Não implementados. |
-| R4.6 | **Modelo por provedor na tela de IA.** *(Reescrita 2026-09-06 — a entrada anterior pedia uma "migration do CHECK de `provider` para provedores nomeados" e chamava a tela de mock; as duas coisas estavam erradas.)* A migration foi **deliberadamente não feita**: `20260819000002` documenta que o vendor mora em `integration_credentials.meta.vendor` com um `provider='ai'` genérico, porque só um provedor de IA fica ativo por vez — não há CHECK a migrar. E a lista de modelos é real, não mock: `lib/aiProviders.ts` é fonte única compartilhada entre a tela e a validação do servidor (Anthropic/ChatGPT/DeepSeek com seus modelos). **O que de fato falta:** o modelo não é selecionável nem persistido — `AiProviderSettings` guarda só `{ apiKey, vendor }`, e `lib/ai/complete.ts` fixa `claude-sonnet-5` com override apenas por env `AI_MODEL`. Escolher o modelo na tela e gravá-lo junto do vendor é o item. | `20260819000002_ai_provider_credential.sql`, `lib/aiProviders.ts` | Pequeno. |
-| R4.7 | **Providers alternativos / Open API:** toggle de provedores oficiais, GET em sistemas externos (Google Maps, scraping autorizado), gateway multi-modelo. | Grande. |
+| R4.6 | **Política de modelo OpenAI.** OpenAI/GPT é o único provedor atual; a tela não seleciona vendor e o modelo é definido por política de servidor. | `lib/aiProviders.ts`, `lib/ai/complete.ts` | Pequeno. |
+| R4.7 | **OpenRouter como gateway multi-provider:** substituir chamadas diretas por API compatível, usar uma credencial OpenRouter, definir modelo principal e fallback por política, registrar provider/model efetivamente usados e preservar idempotência das automações. | Não implementar antes de decisão de produto. |
 | R4.8 | **Google Drive como integração real** (hoje mock no contexto de automação): preview de imagens/vídeos de pasta direto no card. Casa com R1.4. | |
 | R4.9 | **Fluxo de trabalho pedido pelo usuário:** desenho com Opus → execução com Sonnet → validação e2e com Opus alimentando fixes de volta para múltiplos agentes Sonnet, em loop. Ainda não montado. | `roadmap-2026-08-19` (memória). |
 | R4.11 | **NorthAi — harness completo (VPS/Docker).** O Estúdio (`/admin/northai`, 15/09) é **determinístico**: receitas guiadas → Blueprint → `POST /api/admin/northai/execute`. Falta para virar harness de IA: (a) LLM com tool-calling que produz as MESMAS operações do Blueprint (`lib/northai/blueprint.ts` é o contrato — o executor não muda); (b) sessões e memória do cliente ("DNA": identidade, linha editorial, decisões) no servidor, hoje o histórico mora no localStorage; (c) leitura semântica de roteiros e planilhas (hoje `scriptParser` separa por títulos/separadores/numeração); (d) voz; (e) biblioteca de aprovação (nada vira tarefa sem aprovação do cliente); (f) execução assíncrona em fila para Blueprints grandes; (g) rodar em Docker na VPS com os segredos fora da Vercel. | `lib/northai/`, `app/admin/northai/`, `docs/northai/skills/`. Grande. |
 | R4.12 | **GED no Drive da plataforma + migração dos links.** O GED (`lib/ged/`) grava hoje no Supabase Storage e só espelha no Drive se `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` + `GOOGLE_DRIVE_ROOT_FOLDER_ID` existirem (casa com R1.4). Falta: configurar a conta "protagonista" da plataforma; criar a árvore `Clientes/<nome> (<slug>)/…` também para os clientes já cadastrados; migrar os links colados em `client_drive_links` (brand/products/uploads) copiando os arquivos para o GED; e trocar os links antigos dos cards/comentários pelos do GED. | `docs/northai/skills/ged.md`. Médio. |
 | R4.14 | **Débitos conscientes do Estúdio (16/09).** (a) Histórico das conversas mora no navegador (`app/admin/northai/studio/useStudioSession.ts`, uma thread por cliente); o contrato `append`/`patch` é o que um armazenamento no servidor implementa — faz parte de R4.11. (b) Rotinas padrão de clientes cadastrados antes de 16/09 não têm `payload.routine_key`; só o título exato as reconhece. Backfill: gravar a chave nos cards cujo título bate com o catálogo (SQL a rodar pelo usuário). (c) A automação criada pelo Estúdio ainda aponta para uma rotina via `target_task_id` (R4.10 continua aberto; o Estúdio não criou dependência nova). (d) Status "Agendada" da captação (R4.13) caberia na captação compartilhada da diária sem mudar o modelo. (e) Não existe logo de cliente no cadastro: avatar e identidade usam monograma (`app/admin/northai/studio/ClientIdentity.tsx` é o único lugar a trocar quando existir). (f) O composer já entrega `{ text, mentions }` com @cliente estruturado; "/operação" e "+arquivo" entram no mesmo pacote no harness (R4.11). (g) Perguntas ("quais são as rotinas?") ainda não têm resposta — o modo atual só monta pedidos. | `lib/northai/`, `docs/northai/skills/receitas.md`. |
 | R4.13 | **Lacunas da jornada do cliente ponta a ponta.** Mapeadas contra a jornada interna (17 slides) em `docs/northai/JORNADA-PONTA-A-PONTA.md`: classificação Bronze/Prata/Ouro no lead, follow-up da proposta no 4º dia útil, SLA de kickoff 48h, status "Agendada" da gravação, jornada de 14 passos visível por cliente, ciclo mensal. | Priorização no próprio documento. |
-| R4.10 | **Automação ligada à família, não “vira card”.** Automação continua configuração + runs/artefatos; não cria um quinto `kind` nem reclassifica o alvo. R0.5/R0.6 definem FK entre configuração, molde/ocorrência e passos materializados. O molde de relatório é Tarefa recorrente; somente a ocorrência instancia Entrega · Relatório. | `docs/ARQUITETURA-TAREFAS.md`. Depende de R0.5/R0.6; casa com R6.6. |
+| R4.10 | **Automação ligada à família — resolvida por R0.6.** A configuração de anúncios aponta para uma Tarefa recorrente comum; a de conversão aponta para uma Entrega recorrente `Automação` e depende da primeira por FK. Ocorrências exibem `Entrega · Automação`; runs e artefatos continuam entidades próprias. | `docs/ARQUITETURA-TAREFAS.md`, `docs/reporting/report-pipeline.md`. Feito em código; falta o cutover de produção de R0.6. |
 
 ---
 
@@ -460,8 +435,8 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
 1. **Tier 0 (R0.1–R0.4) — CONCLUÍDO em código.** R0.4 mergeado em 2026-09-01
    (`cfd1a34`); o fluxo de conversão foi reescrito para dinâmico e ligado
    (dormente) nos 6 clientes em 2026-09-02 (R0.4b). **Única pendência aberta do
-   Tier 0: cadastrar a chave da Anthropic** — sem ela a Automação 2 não roda.
-   Não é código: é um campo em Configurações › Integrações.
+   Tier 0: concluir o cutover versionado de R0.6 e o E2E autenticado dos cinco
+   clientes. OpenAI já está configurada; IA não bloqueia o fluxo determinístico.
 2. **Tier 1** — R1.1, R1.2, R1.5 fechados (ver topo); R1.7 investigado e
    dissolvido (specs de aprovação/checkpoints já verdes; a lacuna de
    `metric-collection` é a R6.11, que é construção). Resta o operacional:
@@ -513,7 +488,8 @@ Tratar como "não confirmado — checar contra RLS/código atual". Fonte:
   portal do cliente está no ar mas sem cliente real. Na auditoria, R2.2 foi
   dissolvida, R3.1 dada como entregue (Fase B completa) e R3.9/R4.6/R7.2
   reescritas. Antes, 2026-09-02: R0.4b — fluxo de conversão reescrito dinâmico,
-  Automação 2 registrada nos 6 clientes mas DORMENTE até a chave da Anthropic;
+  Automação 2 antiga absorvida pelo motor versionado; OpenAI é somente fallback
+  explícito, não um pré-requisito de automação;
   cards "Topo de funil" apagados; relatório de vendas ganhou seção por objetivo
   + tabelas. Antes, 2026-09-01: R0.4 mergeado; R1.1 cron real ligado em prod;
   R1.2 perda de dado no save resolvida — resta só shape do `contentSchema`,

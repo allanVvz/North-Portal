@@ -125,6 +125,9 @@ export function recurringExecutionFields(parent: TaskRecord, id: string, occurre
   return {
     id,
     client_id: parent.client_id,
+    task_type_id: parent.task_type_id,
+    workflow_version_id: parent.workflow_version_id,
+    workflow_activated_at: null,
     kind: parent.kind,
     subtype: parent.subtype,
     title: parent.title,

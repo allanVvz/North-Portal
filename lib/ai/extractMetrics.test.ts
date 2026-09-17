@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { extractMetrics, parseMetricJson } from "./extractMetrics";
 
 const TAGS = ["vendas", "agendamentos", "seguidores", "receita"];
@@ -95,14 +95,14 @@ describe("extractMetrics", () => {
     expect(r.note).toBe("parser");
   });
 
-  it.skipIf(process.env.AI_CLI === "1" || process.env.COMMENT_AI_FALLBACK === "1")("o modelo do pedido é lido pelo parser", async () => {
+  it.skipIf(process.env.COMMENT_AI_FALLBACK === "1")("o modelo do pedido é lido pelo parser", async () => {
     const r = await extractMetrics("Vendas: 5\nAgendamentos: 8\nReceita: R$ 4.100\nSeguidores: 841\n#1 PPF frontal R$ 1.200", TAGS);
     expect(r.note).toBe("parser");
     expect(r.valores).toEqual({ vendas: 5, agendamentos: 8, seguidores: 841, receita: 4100 });
     expect(r.linhas).toHaveLength(1);
   });
 
-  it.skipIf(process.env.AI_CLI === "1" || process.env.COMMENT_AI_FALLBACK === "1")("fora do modelo e sem fallback: não chama IA, tudo null", async () => {
+  it.skipIf(process.env.COMMENT_AI_FALLBACK === "1")("fora do modelo e sem fallback: não chama IA, tudo null", async () => {
     // "Não sabemos" nunca vira "a semana foi zero"; o fluxo responde ao gestor
     // pedindo o modelo em vez de fechar a semana.
     const r = await extractMetrics("semana foi boa, cliente gostou bastante", TAGS);
@@ -110,15 +110,20 @@ describe("extractMetrics", () => {
     expect(Object.values(r.valores).every((v) => v === null)).toBe(true);
   });
 
-  it.skipIf(process.env.AI_CLI !== "1")("extração real pela CLI claude", async () => {
-    const r = await extractMetrics(
-      "Semana boa! Fechamos 3 vendas, uma de R$1.400 veio pela fonte #2. Ganhamos uns 45 seguidores novos, nenhum agendamento.",
-      TAGS,
-    );
-    expect(r.valores.vendas).toBe(3);
-    expect(r.valores.seguidores).toBe(45);
-    expect(r.valores.agendamentos).toBe(0);
-    expect(r.valores.receita).toBeGreaterThanOrEqual(1400);
-    expect(r.linhas.some((l) => l.fonte === "2" && l.status === "fechado")).toBe(true);
-  }, 120_000);
+  it.skipIf(process.env.COMMENT_AI_FALLBACK === "1")("AI_CLI não habilita rede nem altera o parser determinístico", async () => {
+    const prior = process.env.AI_CLI;
+    process.env.AI_CLI = "1";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const r = await extractMetrics("semana foi boa, cliente gostou bastante", TAGS);
+      expect(r.note).toBe("formato não reconhecido");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      if (prior === undefined) delete process.env.AI_CLI;
+      else process.env.AI_CLI = prior;
+      vi.unstubAllGlobals();
+    }
+  });
+
 });

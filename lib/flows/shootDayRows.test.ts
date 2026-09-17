@@ -5,6 +5,8 @@ import { shootDayRows } from "./shootDayRows";
 
 const step = (key: string, label: string, order_index: number, lead_days: number) => ({
   key, label, order_index, lead_days, progress_weight: 1, default_assignee: null, client_visible: false,
+  task_type_id: `type-${key}`,
+  workflow_step_id: `workflow-${key}`,
 });
 
 const entrega = {
@@ -13,6 +15,7 @@ const entrega = {
   label: "Entrega",
   order_index: 2,
   behavior: "entrega",
+  workflow_version_id: "workflow-v1",
   creatable: true,
   subtypes: [step("roteiro", "Roteiro", 1, 2), step("captacao", "Captação", 2, 3), step("edicao", "Edição", 3, 4), step("publicacao", "Publicação", 4, 2)],
 } as unknown as TaskTypeDef;
@@ -39,7 +42,7 @@ describe("shootDayRows", () => {
     const rows = shootDayRows(base);
     expect(rows.deliveries.map((d) => d.id)).toEqual(["d1", "d2", "d3"]);
     expect(rows.deliveries.map((d) => (d.payload as Record<string, unknown>).formato)).toEqual(["Reels vertical", "Carrossel", "Stories"]);
-    expect(rows.deliveries.every((d) => (d.payload as Record<string, unknown>).flow_parent === true)).toBe(true);
+    expect(rows.deliveries.every((d) => d.workflow_version_id === "workflow-v1")).toBe(true);
     expect(rows.deliveries[0].due_date).toBe("2026-09-28");
   });
 
@@ -49,8 +52,8 @@ describe("shootDayRows", () => {
     expect(rows.captacao.id).toBe(flowStepTaskId("d1", "captacao"));
     expect(rows.links).toHaveLength(6);
     for (const delivery of ["d1", "d2", "d3"]) {
-      expect(rows.links).toContainEqual({ parentId: delivery, childId: rows.roteiro.id, slot: "roteiro", position: 1 });
-      expect(rows.links).toContainEqual({ parentId: delivery, childId: rows.captacao.id, slot: "captacao", position: 2 });
+      expect(rows.links).toContainEqual({ parentId: delivery, childId: rows.roteiro.id, workflowStepId: "workflow-roteiro", slot: "roteiro", position: 1 });
+      expect(rows.links).toContainEqual({ parentId: delivery, childId: rows.captacao.id, workflowStepId: "workflow-captacao", slot: "captacao", position: 2 });
     }
   });
 

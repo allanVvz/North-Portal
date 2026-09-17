@@ -22,7 +22,7 @@ import { agencyToday } from "./recurringState";
 import { COLUMNS, PRIORITY_LABEL, STATUS_LABEL, commentsOf, taskTone, visibleColumnsFor } from "./kanbanShared";
 import { DEADLINE_LABEL, deadlineStateOf, type DeadlineState } from "./deadlineState";
 import { formatRelativeAge } from "@/lib/comments";
-import { FLOW_STEP_COUNT_KEY, kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
+import { kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
 import { belongsToTaskScreen, childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
@@ -331,7 +331,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     for (const delivery of tasks) {
       if (!isFlowDelivery(delivery)) continue;
       const steps = flowStepsOf(delivery.id, tasks);
-      const total = Number(delivery.payload?.[FLOW_STEP_COUNT_KEY]) || steps.length;
+      const total = delivery.workflow_version?.workflow_version_steps.length || steps.length;
       steps.forEach((step, index) => {
         badges.set(step.id, { step: index + 1, total, delivery: delivery.title });
       });

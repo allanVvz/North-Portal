@@ -57,24 +57,19 @@ Branch `fix/fluxos-revisao-e2e`, commits `0efc07c`→`519b7bb`, em produção.
   duas coisas particionadas.
 
 Pendente: as 4 specs em `e2e/` foram escritas mas dependem de execução manual.
-`plan/FLUXOS-COMPOSICAO.md` mapeia as composições ainda inexistentes — nenhuma
+`docs/ARQUITETURA-TAREFAS.md` define as composições suportadas — nenhuma
 precisa de migração, porque `task_links` não restringe tipo no schema.
 
-## 2 de setembro de 2026 — fluxo de conversão ligado (dormente) para os 6 clientes
+## 2 de setembro de 2026 — registro histórico do fluxo de conversão
 
 Commit `a059199` + configuração em produção.
 
 - **Automação 2 (`relatorio_vendas`) registrada nos 6 clientes** — no card
   recorrente "Relatório de anúncios", ao lado da Automação 1, com as métricas
   vendas / agendamentos / seguidores / receita.
-- **Fica DORMENTE sem backend de IA.** `conversionAiReady()` checa a credencial
-  `ai` (vendor anthropic) — ou `AI_CLI=1` em dev/e2e. Sem ela: `runAutomations`
-  pula as configs `relatorio_vendas`, `flowMode` da Automação 1 vira `false` (a
-  ocorrência não vira pai de fluxo, o relatório de tráfego sai normal, sem card
-  de feedback nem pedido de métricas ao cliente), e o hook de comentário
-  (`handleConversionComment`) retorna cedo. Ao cadastrar a chave da Anthropic
-  (Configurações › Integrações › Provedor de IA), o fluxo ativa sozinho no ciclo
-  seguinte — sem semana quebrada no meio.
+- **Substituído pelo motor versionado.** O parser determinístico é o caminho
+  normal; OpenAI é somente fallback explícito e sua indisponibilidade não
+  aprova, conclui ou duplica automações.
 - **Cards "Relatório de anúncios — Topo de funil" removidos** — os 6 eram moldes
   inertes (0 ocorrências / documentos / comentários), resto de configuração
   antiga. O recorte de topo de funil agora é escolha de template.
@@ -243,7 +238,7 @@ relatório PDF da automação para parecer o resumo que a equipe manda à mão, 
   (`ensureFlowOccurrenceForReport` / `advanceFlowMold`; guarda em
   `materializeFirstStep` contra molde recorrente).
 - **`lib/ai/`** — primeiro código que fala com um LLM no repo. `fetch` direto na
-  Messages API da Anthropic, sem SDK, sem deps. `getAiProviderSettingsService`
+  API compatível de Chat Completions da OpenAI, sem SDK, sem deps. `getAiProviderSettingsService`
   (leitura service-role da credencial `provider='ai'`), `aiComplete`,
   `extractConversionReport` (texto livre → linhas de conversão; pré-check regex
   para "N agendamentos"; **nunca lança** — sem chave / IA fora / resposta

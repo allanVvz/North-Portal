@@ -11,7 +11,7 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf, recurrenceStopped } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
+import { actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
 import { commentsOf, type TaskComment } from "./comments";
 import { appendCycleLog } from "./cycleLog";
 import { AGENCY_TIMEZONE, agencyToday } from "./time/agency";
@@ -57,11 +57,11 @@ import {
   type PerformanceTemplate,
   type PerformanceTemplateConfig,
 } from "./performanceTemplates";
-import { taskProgress, checkpointsProgress, dedupePlanMembers, isRollupParent, kindLabel, kindTone, subtypeLabel, FLOW_STEP_COUNT_KEY, FLOW_TOTAL_WEIGHT_KEY } from "./taskCatalog";
-import { deliveryTypeProblem, findType, isDeliveryType, listTaskTypes, typeTotalWeight, type TaskBehavior } from "./taskTypes";
-import { DELIVERY_INITIAL_STATUS } from "./flows/parentStatus";
+import { taskProgress, checkpointsProgress, dedupePlanMembers, isRollupParent, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
+import { deliveryTypeProblem, findType, isDeliveryType, listTaskTypes, type TaskBehavior } from "./taskTypes";
+import { publishedWorkflowForKind } from "./workflows";
 import { advanceFlowAfterUpdate } from "./flows/advance";
-import { flowStepFields } from "./flows/stepFields";
+import { flowStepTaskId } from "./flows/ids";
 import { averageProgress, isOverdue, plansInProgress, weekAhead } from "./adminHome";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
@@ -79,7 +79,7 @@ export { TASK_COLUMNS } from "./taskColumns";
 // of the bare TASK_COLUMNS so `assignee` always reflects linked accounts too.
 const TASK_ASSIGNEES_JOIN = "task_assignees(profile:profiles(id,full_name))";
 // !inner NÃO: um card sem pai nenhum é o caso comum e precisa vir mesmo assim.
-const TASK_LINKS_JOIN = "task_links!task_links_child_id_fkey(parent_id,relation_kind,slot,position)";
+const TASK_LINKS_JOIN = "task_links!task_links_child_id_fkey(parent_id,relation_kind,workflow_step_id,slot,position)";
 const TASK_AUTHOR_JOIN = "created_by_profile:profiles!tasks_created_by_fkey(full_name)";
 const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN},${TASK_AUTHOR_JOIN},${TASK_LINKS_JOIN}`;
 
@@ -92,7 +92,7 @@ type TaskAssigneesJoin = {
   // mesma consulta, como os responsáveis: todo o front trabalha com arrays de
   // TaskRecord e resolve pai/filho de forma síncrona (KanbanBoard, TaskModal,
   // portal). Buscar os elos à parte obrigaria a tornar assíncrono tudo isso.
-  task_links?: { parent_id: string; relation_kind: TaskParentLink["relation_kind"]; slot: string | null; position: number | null }[] | null;
+  task_links?: { parent_id: string; relation_kind: TaskParentLink["relation_kind"]; workflow_step_id: string | null; slot: string | null; position: number | null }[] | null;
 };
 
 // Merges linked-account names into the legacy free-text `assignee` column
@@ -117,7 +117,7 @@ function mergeTaskAssigneeRow<T extends { assignee: string | null } & TaskAssign
     assignee: mergeAssigneeDisplay(rest.assignee, linkedProfiles.map((p) => p.full_name)),
     assignee_profile_ids: linkedProfiles.map((p) => p.id),
     created_by_name: author?.full_name ?? null,
-    parents: (task_links ?? []).map((l) => ({ id: l.parent_id, relation_kind: l.relation_kind, slot: l.slot, position: l.position ?? 0 })),
+    parents: (task_links ?? []).map((l) => ({ id: l.parent_id, relation_kind: l.relation_kind, workflow_step_id: l.workflow_step_id, slot: l.slot, position: l.position ?? 0 })),
   };
 }
 
@@ -1512,7 +1512,7 @@ export async function listAllTasks(): Promise<BoardTask[]> {
 }
 
 // ---- Entregas de fluxo (admin) -----------------------------------------------
-// Uma entrega é o card com `payload.flow_parent = true`: ela agrega as etapas
+// Uma entrega é o card que possui `workflow_version_id`: ela agrega as etapas
 // da cascata pelos elos de `task_links`. Não aparece no quadro Tarefas
 // (belongsToTaskScreen a exclui — seu status é derivado dos filhos), então
 // esta é a lista onde ela existe.
@@ -1541,11 +1541,7 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
     .from("tasks")
     .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled,is_active)`)
     .order("updated_at", { ascending: false });
-  // Uma entrega é marcada no payload (`flow_parent`), NÃO inferida do tipo:
-  // existem cards `criativo` antigos que são trabalho comum, e o fluxo de
-  // feedback dinâmico usa uma ocorrência `operacional` como pai. Então o filtro
-  // de entrega é só o marcador; para plano, o kind.
-  if (behavior === "entrega") query = query.eq(`payload->>${FLOW_PARENT_KEY}`, "true");
+  if (behavior === "entrega") query = query.not("workflow_version_id", "is", null);
   else query = query.in("kind", types.map((t) => t.key));
   const { data, error } = await query;
   if (error) fail(error);
@@ -1648,7 +1644,30 @@ async function childIdsOf(supabase: SupabaseLike, parentIds: readonly string[]):
 export async function linkTasks(parentId: string, childId: string, slot: string | null, position: number, relationKind: TaskParentLink["relation_kind"]): Promise<void> {
   if (parentId === childId) throw new HttpError(400, "Um card nao pode ser pai de si mesmo.");
   const supabase = await createClient();
-  const { error } = await supabase.from("task_links").insert({ parent_id: parentId, child_id: childId, relation_kind: relationKind, slot, position });
+  let workflowStepId: string | null = null;
+  if (relationKind === "workflow_step") {
+    if (!slot) throw new HttpError(400, "Informe a etapa do workflow.");
+    const { data: parents, error: parentError } = await supabase
+      .from("tasks")
+      .select("workflow_version_id")
+      .eq("id", parentId)
+      .limit(1);
+    if (parentError) fail(parentError);
+    const workflowVersionId = (parents?.[0] as { workflow_version_id?: string | null } | undefined)?.workflow_version_id;
+    if (!workflowVersionId) throw new HttpError(409, "A Entrega não possui uma versão de workflow.");
+    const { data: steps, error: stepError } = await supabase
+      .from("workflow_version_steps")
+      .select("id,order_index")
+      .eq("workflow_version_id", workflowVersionId)
+      .eq("step_key", slot)
+      .limit(1);
+    if (stepError) fail(stepError);
+    const persistedStep = steps?.[0] as { id?: string; order_index?: number } | undefined;
+    if (!persistedStep?.id) throw new HttpError(409, "A etapa não pertence à versão desta Entrega.");
+    workflowStepId = persistedStep.id;
+    position = persistedStep.order_index ?? position;
+  }
+  const { error } = await supabase.from("task_links").insert({ parent_id: parentId, child_id: childId, relation_kind: relationKind, workflow_step_id: workflowStepId, slot, position });
   // 23505 = já ligado. Ligar duas vezes é a mesma coisa que ligar uma.
   if (error && (error as { code?: string }).code !== "23505") fail(error);
 }
@@ -1749,17 +1768,27 @@ async function currentUserId(): Promise<string | null> {
 
 export async function createTask(clientId: string | null, input: Record<string, unknown>): Promise<TaskRecord> {
   const supabase = await createClient();
+  let taskTypeId = typeof input.task_type_id === "string" ? input.task_type_id : null;
+  if (!taskTypeId) {
+    const kind = typeof input.kind === "string" ? input.kind : "operacional";
+    const subtype = typeof input.subtype === "string" && input.subtype ? input.subtype : null;
+    const type = findType(await listTaskTypes(supabase), kind);
+    taskTypeId = subtype
+      ? type?.subtypes.find((candidate) => candidate.key === subtype)?.task_type_id ?? null
+      : type?.id ?? null;
+    if (!taskTypeId) throw new HttpError(400, "Subtipo de tarefa não encontrado.");
+  }
   // Autoria carimbada aqui, no único funil de criação, e não em cada rota: os
   // cards nascidos de recorrência, checkpoint, kickoff e automação passam todos
   // por aqui. Sem sessão (cron/automação) fica null = criado pelo sistema.
   const author = await currentUserId();
   const { data, error } = await supabase
     .from("tasks")
-    .insert({ ...input, client_id: clientId, created_by: author })
+    .insert({ ...input, task_type_id: taskTypeId, client_id: clientId, created_by: author })
     .select(TASK_COLUMNS)
     .limit(1);
   if (error) fail(error);
-  const row = data?.[0] as TaskRecord | undefined;
+  const row = data?.[0] as unknown as TaskRecord | undefined;
   if (!row) throw new HttpError(503, "Nao foi possivel criar a tarefa.");
   return row;
 }
@@ -1794,7 +1823,7 @@ export async function createExplicitDateTaskGroup(clientId: string | null, input
 }
 
 // ---- Fluxos em cascata ---------------------------------------------------
-// Cria a ENTREGA (o card-pai, marcado por `payload.flow_parent = true`) junto
+// Cria a ENTREGA (o card-pai ligado a uma versão de workflow) junto
 // com a PRIMEIRA etapa, e devolve a etapa. Devolver a etapa e não a entrega é
 // deliberado e segue createRecurringTaskGroup, que devolve a primeira
 // execução: a entrega não ocupa coluna no quadro (status derivado dos
@@ -1812,40 +1841,34 @@ export async function createFlowDelivery(
   if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
   const problem = deliveryTypeProblem(type);
   if (problem) throw new HttpError(400, problem);
+  const workflow = await publishedWorkflowForKind(supabase, typeKey);
+  if (!workflow?.steps.length) throw new HttpError(409, "Este tipo não possui workflow publicado.");
 
   // Começar por uma etapa do meio é legítimo (a peça pode chegar com o roteiro
   // pronto de fora); as anteriores simplesmente nunca nascem e contam como
   // puladas no denominador.
   const startIndex = startAtSubtype ? type.subtypes.findIndex((sub) => sub.key === startAtSubtype) : 0;
-  const firstStep = type.subtypes[startIndex >= 0 ? startIndex : 0];
+  const firstStep = workflow.steps[startIndex >= 0 ? startIndex : 0];
 
   const delivery = await createTask(clientId, {
     ...input,
     kind: type.key,
+    task_type_id: workflow.delivery_type_id,
+    workflow_version_id: workflow.id,
+    workflow_activated_at: null,
     subtype: null,
     plan_id: null,
-    // Uma entrega existe porque o trabalho começou — e ela não aparece no
-    // quadro, então esperar em Entrada por um arrasto que ninguém vai dar
-    // deixaria o progresso preso em 0.
-    status: DELIVERY_INITIAL_STATUS,
+    status: "backlog",
     recurrence_cadence: null,
     recurrence_weekdays: [],
     recurrence_day_of_month: null,
-    payload: {
-      ...((input.payload ?? {}) as Record<string, unknown>),
-      [FLOW_PARENT_KEY]: true,
-      // Denominador congelado do progresso — ver FLOW_TOTAL_WEIGHT_KEY em
-      // lib/taskCatalog.ts. Sem ele a entrega marcaria 100% com só a primeira
-      // etapa pronta. Congelado também para que editar o tipo não reescreva o
-      // progresso de entregas em andamento.
-      [FLOW_TOTAL_WEIGHT_KEY]: typeTotalWeight(type),
-      [FLOW_STEP_COUNT_KEY]: type.subtypes.length,
-    },
+    payload: { ...((input.payload ?? {}) as Record<string, unknown>) },
   });
 
   try {
-    const step = await createTask(clientId, flowStepFields(delivery, firstStep, null));
-    await linkTasks(delivery.id, step.id, firstStep.key, firstStep.order_index, "workflow_step");
+    const step = await materializeFirstStep(createAdminClient(), delivery)
+      ?? await getTaskById(flowStepTaskId(delivery.id, firstStep.key));
+    if (!step) throw new HttpError(503, "Não foi possível materializar a primeira etapa.");
     // Os DOIS. Devolver só o passo fazia quem chamava tratá-lo como "o card
     // criado" — e ligar ao Plano de Ação o primeiro passo em vez da entrega.
     return { delivery, step };
@@ -1878,6 +1901,8 @@ export async function createRecurringFlowDelivery(
   if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
   const problem = deliveryTypeProblem(type);
   if (problem) throw new HttpError(400, problem);
+  const workflow = await publishedWorkflowForKind(supabase, typeKey);
+  if (!workflow?.steps.length) throw new HttpError(409, "Este tipo não possui workflow publicado.");
 
   const startDate = typeof input.start_date === "string" && input.start_date
     ? input.start_date
@@ -1890,25 +1915,30 @@ export async function createRecurringFlowDelivery(
     ...input,
     kind: type.key,
     subtype: null,
+    task_type_id: workflow.delivery_type_id,
+    workflow_version_id: workflow.id,
+    workflow_activated_at: null,
     plan_id: null,
-    status: DELIVERY_INITIAL_STATUS,
+    status: "backlog",
     due_date: startDate,
     start_date: startDate,
     end_date: typeof input.end_date === "string" && input.end_date >= startDate ? input.end_date : startDate,
-    payload: recurrenceParentPayload({
-      ...((input.payload ?? {}) as Record<string, unknown>),
-      [FLOW_PARENT_KEY]: true,
-      [FLOW_TOTAL_WEIGHT_KEY]: typeTotalWeight(type),
-      [FLOW_STEP_COUNT_KEY]: type.subtypes.length,
-    }),
+    payload: recurrenceParentPayload({ ...((input.payload ?? {}) as Record<string, unknown>) }),
   });
 
   try {
     const occurrenceId = recurringExecutionId(template.id, 0);
-    const occurrence = await createTask(clientId, currentRecurringExecutionFields(template, occurrenceId, startDate));
-    const firstStep = type.subtypes[0];
-    const step = await createTask(clientId, flowStepFields(occurrence, firstStep, null));
-    await linkTasks(occurrence.id, step.id, firstStep.key, firstStep.order_index, "workflow_step");
+    const occurrence = await createTask(clientId, {
+      ...currentRecurringExecutionFields(template, occurrenceId, startDate),
+      task_type_id: workflow.delivery_type_id,
+      workflow_version_id: workflow.id,
+      workflow_activated_at: null,
+      status: "backlog",
+    });
+    const firstStep = workflow.steps[0];
+    const step = await materializeFirstStep(createAdminClient(), occurrence)
+      ?? await getTaskById(flowStepTaskId(occurrence.id, firstStep.key));
+    if (!step) throw new HttpError(503, "Não foi possível materializar a primeira etapa.");
     return { delivery: occurrence, step };
   } catch (error) {
     await deleteTask(template.id).catch(() => undefined);
@@ -1925,7 +1955,7 @@ export async function createRecurringFlowDelivery(
  *
  * Reusa deliberadamente as MESMAS peças que `createFlowDelivery` usa para as
  * marcas de fluxo (`typeTotalWeight`, `DELIVERY_INITIAL_STATUS`,
- * `FLOW_PARENT_KEY`/`FLOW_TOTAL_WEIGHT_KEY`/`FLOW_STEP_COUNT_KEY`) — o mesmo
+ * vínculo por `workflow_version_id` — o mesmo
  * congelamento de peso, para não reescrever depois — e `materializeFirstStep`,
  * o motor que já resolve exatamente este problema para a ocorrência de uma
  * entrega recorrente que "nasce vazia" (ver lib/flows/advance.ts). Nenhuma
@@ -1942,9 +1972,14 @@ export async function promoteTaskToFlowDelivery(id: string, current: TaskRecord,
   if (!type || !isDeliveryType(type)) throw new HttpError(400, "Este tipo nao e uma entrega.");
   const problem = deliveryTypeProblem(type);
   if (problem) throw new HttpError(400, problem);
+  const workflow = await publishedWorkflowForKind(supabase, nextKind);
+  if (!workflow?.steps.length) throw new HttpError(409, "Este tipo não possui workflow publicado.");
 
   const promoted = await updateTask(id, {
     kind: type.key,
+    task_type_id: workflow.delivery_type_id,
+    workflow_version_id: workflow.id,
+    workflow_activated_at: null,
     // A troca de Tipo no modal já limpa o subtipo (ver TaskModal pickKind);
     // aqui é defesa: um subtipo do vocabulário ANTERIOR sobrevivendo à
     // promoção reprovaria no trigger de vocabulário (tasks_valida_vocabulario)
@@ -1953,13 +1988,8 @@ export async function promoteTaskToFlowDelivery(id: string, current: TaskRecord,
     // Mesma razão de createFlowDelivery: uma entrega existe porque o trabalho
     // começou, e ela não aparece no quadro — deixá-la em Backlog (o status que
     // a atividade comum já tinha) a prenderia num arrasto que ninguém vai dar.
-    status: DELIVERY_INITIAL_STATUS,
-    payload: {
-      ...(current.payload ?? {}),
-      [FLOW_PARENT_KEY]: true,
-      [FLOW_TOTAL_WEIGHT_KEY]: typeTotalWeight(type),
-      [FLOW_STEP_COUNT_KEY]: type.subtypes.length,
-    },
+    status: "backlog",
+    payload: { ...(current.payload ?? {}) },
   });
 
   // Best-effort, como a materialização da ocorrência recorrente: falhar aqui
@@ -1982,7 +2012,7 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
     .select(TASK_COLUMNS)
     .limit(1);
   if (error) fail(error);
-  const row = data?.[0] as TaskRecord | undefined;
+  const row = data?.[0] as unknown as TaskRecord | undefined;
   if (!row) throw new HttpError(404, "Tarefa nao encontrada.");
   return row;
 }
@@ -2215,7 +2245,7 @@ async function updateRecurrenceTemplate(current: TaskRecord, patch: Record<strin
     })
     .select(TASK_COLUMNS).limit(1);
   if (error) fail(error);
-  const updated = data?.[0] as TaskRecord | undefined;
+  const updated = data?.[0] as unknown as TaskRecord | undefined;
   if (updated) return updated;
   const refreshed = await getTaskById(current.id);
   if (!refreshed) throw new HttpError(404, "Tarefa não encontrada.");
@@ -2245,8 +2275,49 @@ async function routeTaskGroupUpdate(
   return updateTask(id, patch);
 }
 
+async function patchWithCanonicalClassification(
+  current: TaskRecord,
+  rawPatch: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const kindChanged = typeof rawPatch.kind === "string" && rawPatch.kind !== current.kind;
+  const subtypeChanged = rawPatch.subtype !== undefined && rawPatch.subtype !== current.subtype;
+  if (!kindChanged && !subtypeChanged) return rawPatch;
+
+  const lockedMessage = "Tipo e subtipo ficam bloqueados depois que a Entrega sai de Entrada.";
+  if (current.workflow_activated_at) throw new HttpError(409, lockedMessage);
+  const workflowParentIds = (current.parents ?? [])
+    .filter((parent) => parent.relation_kind === "workflow_step")
+    .map((parent) => parent.id);
+  const supabase = await createClient();
+  if (workflowParentIds.length) {
+    const { data, error } = await supabase.from("tasks")
+      .select("id,workflow_activated_at")
+      .in("id", workflowParentIds)
+      .not("workflow_activated_at", "is", null)
+      .limit(1);
+    if (error) fail(error);
+    if (data?.length) throw new HttpError(409, lockedMessage);
+  }
+
+  const nextKind = typeof rawPatch.kind === "string" ? rawPatch.kind : current.kind;
+  const nextSubtype = rawPatch.subtype === undefined ? current.subtype : rawPatch.subtype;
+  const type = findType(await listTaskTypes(supabase), nextKind);
+  const taskTypeId = typeof nextSubtype === "string"
+    ? type?.subtypes.find((subtype) => subtype.key === nextSubtype)?.task_type_id
+    : type?.id;
+  if (!taskTypeId) throw new HttpError(409, "A classificação escolhida não existe mais.");
+  const workflowPatch = type?.behavior === "entrega"
+    ? { workflow_version_id: type.workflow_version_id, workflow_activated_at: null }
+    : {};
+  if (type?.behavior === "entrega" && !type.workflow_version_id) {
+    throw new HttpError(409, "A Entrega escolhida não possui uma versão de workflow publicada.");
+  }
+  return { ...rawPatch, task_type_id: taskTypeId, ...workflowPatch };
+}
+
 export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch: Record<string, unknown>, actorId: string | null = null): Promise<TaskRecord> {
-  const patch = await patchWithTopPosition(id, current, rawPatch);
+  const classificationPatch = await patchWithCanonicalClassification(current, rawPatch);
+  const patch = await patchWithTopPosition(id, current, classificationPatch);
   const historical = current.payload?.[RECURRENCE_GROUP_KEY] === true;
   // A recurrence template always owns its executions. Ignore any stale
   // child-only payload reference so saving the parent cannot route it through
@@ -2291,7 +2362,7 @@ async function findRecurrenceExecutionByCycle(supabase: RecurrenceDbClient, temp
   const { data, error } = await supabase.from("tasks").select(TASK_COLUMNS)
     .eq("plan_id", templateId).contains("payload", { [RECURRENCE_CYCLE_KEY]: cycle }).limit(1);
   if (error) fail(error);
-  return (data?.[0] as TaskRecord | undefined) ?? null;
+  return (data?.[0] as unknown as TaskRecord | undefined) ?? null;
 }
 
 /** Materializa a execução de um ciclo, OU reaproveita a que já estiver lá
@@ -2310,11 +2381,11 @@ async function materializeOrReuseExecution(
     .insert(recurringExecutionFields(parent, executionId, occurrenceDate, cycle))
     .select(TASK_COLUMNS).limit(1);
   if (error && error.code !== "23505") fail(error);
-  let task = data?.[0] as TaskRecord | undefined;
+  let task = data?.[0] as unknown as TaskRecord | undefined;
   if (!task) {
     const { data: existing, error: readError } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", executionId).limit(1);
     if (readError) fail(readError);
-    task = existing?.[0] as TaskRecord | undefined;
+    task = existing?.[0] as unknown as TaskRecord | undefined;
   }
   if (!task) throw new HttpError(503, "Não foi possível materializar a execução.");
   return { task, created: Boolean(data?.length) };
@@ -2370,14 +2441,14 @@ async function advanceRecurrenceParent(
     [RECURRENCE_REVISION_KEY]: currentRevision,
   }).select(TASK_COLUMNS).limit(1);
   if (updateError) fail(updateError);
-  let updatedParent = advanced?.[0] as TaskRecord | undefined;
+  let updatedParent = advanced?.[0] as unknown as TaskRecord | undefined;
   if (!updatedParent) {
     // Outra chamada (o botão manual e a conclusão automática podem disparar
     // quase juntos) já avançou este ciclo entre a leitura e a escrita —
     // reaproveita o resultado dela em vez de tentar avançar de novo.
     const { data: refreshedRows, error: refreshError } = await supabase.from("tasks").select(TASK_COLUMNS).eq("id", parent.id).limit(1);
     if (refreshError) fail(refreshError);
-    const refreshed = refreshedRows?.[0] as TaskRecord | undefined;
+    const refreshed = refreshedRows?.[0] as unknown as TaskRecord | undefined;
     if (!refreshed) throw new HttpError(404, "Tarefa recorrente não encontrada.");
     const existing = await findRecurrenceExecutionByCycle(supabase, parent.id, recurrenceCycleOf(refreshed));
     if (!existing) throw new HttpError(503, "Não foi possível localizar a execução já criada.");
@@ -2464,7 +2535,7 @@ export async function advanceRecurrenceAfterUpdate(before: TaskRecord, after: Ta
   try {
     const { data, error } = await admin.from("tasks").select(TASK_COLUMNS).eq("id", templateId).limit(1);
     if (error) fail(error);
-    const parent = data?.[0] as TaskRecord | undefined;
+    const parent = data?.[0] as unknown as TaskRecord | undefined;
     if (!parent || !parent.recurrence_cadence || recurrenceStopped(parent.status)) return;
     if (recurrenceCycleOf(after) !== recurrenceCycleOf(parent)) return;
     const actor = actorId ? { id: actorId, name: (await getProfileName(actorId)) ?? "Alguém" } : null;
@@ -3217,7 +3288,7 @@ export async function saveWindsorSettings(patch: {
 // never reaches the browser. Only one AI vendor is ever active at a time —
 // which one is stored in `meta.vendor`, not as a separate provider row.
 
-type AiProviderMeta = { vendor?: AiVendor | null };
+type AiProviderMeta = { vendor?: AiVendor };
 type AiProviderCredentialRow = { id: string; vault_secret_id: string; meta: AiProviderMeta | null };
 
 async function getAiProviderRow(): Promise<AiProviderCredentialRow | null> {
@@ -3236,19 +3307,18 @@ export async function getAiProviderSettings(): Promise<AiProviderSettings> {
   const row = await getAiProviderRow();
   if (!row) return { ...AI_PROVIDER_SETTINGS_DEFAULT };
   const apiKey = await vaultRead(row.vault_secret_id);
-  return { apiKey, vendor: row.meta?.vendor ?? null };
+  return { apiKey, vendor: "openai" };
 }
 
 export async function saveAiProviderSettings(patch: {
   apiKey?: string;
   clearApiKey?: boolean;
-  vendor?: AiVendor | null;
 }): Promise<AiProviderSettings> {
   const supabase = await createClient();
   const row = await getAiProviderRow();
   const currentApiKey = row ? await vaultRead(row.vault_secret_id) : "";
   const nextApiKey = patch.clearApiKey ? "" : patch.apiKey ?? currentApiKey;
-  const nextVendor = patch.vendor !== undefined ? patch.vendor : row?.meta?.vendor ?? null;
+  const nextVendor: AiVendor = "openai";
   const nextMeta: AiProviderMeta = { vendor: nextVendor };
   const nextStatus = nextApiKey ? "connected" : "disconnected";
 
@@ -3278,7 +3348,7 @@ export async function saveAiProviderSettings(patch: {
 export type MaskedAiProviderSettings = {
   configured: boolean;
   apiKeyLast4: string;
-  vendor: AiVendor | null;
+  vendor: AiVendor;
 };
 
 export function maskAiProviderSettings(s: AiProviderSettings): MaskedAiProviderSettings {
@@ -3846,7 +3916,7 @@ export async function listApproverCandidates(clientId: string): Promise<Reviewer
 // ---- Automations (Configurações → Automações) ------------------------------------
 // v2: one row per registered automation instance, always bound to a target
 // card — cadence/execution date come from that card, not from this table.
-// See plan/AUTOMACOES-RELATORIO-TRAFEGO.md. Vocabulary lives in
+// See docs/reporting/report-pipeline.md. Vocabulary lives in
 // lib/automationCatalog.ts; this is only the instance CRUD.
 export type AutomationTargetTaskSummary = {
   id: string;
@@ -3863,11 +3933,10 @@ export type AutomationConfig = {
   targetTaskId: string;
   performanceTemplateId: string | null;
   active: boolean;
-  lastRunDate: string | null;
   /** Métricas (tags) que a automação pede/lê — `coleta_metrica_cliente` e `relatorio_vendas`. */
   collectMetricKeys: string[] | null;
   /** A automação da qual esta depende (`relatorio_vendas` → a de anúncios do
-   *  mesmo card). Resolvida no servidor ao salvar, nunca escolhida na tela. */
+   *  mesmo cliente). Resolvida no servidor ao salvar, nunca escolhida na tela. */
   dependsOnConfigId: string | null;
   // Resolved directly here (not left to the frontend to cross-reference
   // against GET /api/admin/tasks) because a recurring target card that has
@@ -3890,7 +3959,6 @@ function mapAutomationConfigRow(row: AutomationConfigJoinRow): AutomationConfig 
     targetTaskId: row.target_task_id as string,
     performanceTemplateId: (row.performance_template_id as string | null) ?? null,
     active: Boolean(row.active),
-    lastRunDate: (row.last_run_date as string | null) ?? null,
     collectMetricKeys: (row.collect_metric_keys as string[] | null) ?? null,
     dependsOnConfigId: (row.depends_on_config_id as string | null) ?? null,
     targetTask: task ? {
@@ -3916,7 +3984,7 @@ export async function listAutomationConfigs(): Promise<AutomationConfig[]> {
 
 /**
  * A dependência de uma automação, resolvida a partir do catálogo: se a chave
- * declara `dependsOn`, procura a automação daquele tipo no MESMO card. Sem ela,
+ * declara `dependsOn`, procura a automação daquele tipo no mesmo cliente. Sem ela,
  * recusa salvar — uma automação que depende de outra e não a tem não roda, e é
  * melhor dizer isso na hora de salvar do que descobrir no cron.
  */
@@ -3927,17 +3995,29 @@ async function resolveDependsOn(
 ): Promise<string | null> {
   const needed = isAutomationKey(automationKey) ? AUTOMATION_DEFINITIONS[automationKey].dependsOn : undefined;
   if (!needed) return null;
+  const { data: targetRows, error: targetError } = await supabase
+    .from("tasks")
+    .select("client_id")
+    .eq("id", targetTaskId)
+    .limit(1);
+  if (targetError) fail(targetError);
+  const clientId = (targetRows?.[0] as { client_id: string | null } | undefined)?.client_id;
+  if (!clientId) throw new HttpError(400, "O card recorrente precisa pertencer a um cliente.");
+
   const { data, error } = await supabase
     .from("automation_configs")
-    .select("id")
+    .select("id,tasks!automation_configs_target_task_id_fkey(client_id)")
     .eq("automation_key", needed)
-    .eq("target_task_id", targetTaskId)
-    .limit(1);
+    .order("created_at");
   if (error) fail(error);
-  const id = (data?.[0] as { id: string } | undefined)?.id;
+  const id = (data as Array<{ id: string; tasks: { client_id: string | null } | { client_id: string | null }[] | null }> | null)
+    ?.find((row) => {
+      const task = Array.isArray(row.tasks) ? row.tasks[0] : row.tasks;
+      return task?.client_id === clientId;
+    })?.id;
   if (!id) {
     const self = AUTOMATION_DEFINITIONS[automationKey as keyof typeof AUTOMATION_DEFINITIONS].label;
-    throw new HttpError(400, `${self} depende de "${AUTOMATION_DEFINITIONS[needed].label}" neste mesmo card — registre essa automação antes.`);
+    throw new HttpError(400, `${self} depende de "${AUTOMATION_DEFINITIONS[needed].label}" para o mesmo cliente — registre essa automação antes.`);
   }
   return id;
 }
@@ -3947,20 +4027,14 @@ export async function createAutomationConfig(
   createdBy: string,
 ): Promise<AutomationConfig> {
   const supabase = await createClient();
-  const dependsOn = await resolveDependsOn(supabase, input.automationKey, input.targetTaskId);
-  const { data, error } = await supabase
-    .from("automation_configs")
-    .insert({
-      automation_key: input.automationKey,
-      target_task_id: input.targetTaskId,
-      performance_template_id: input.performanceTemplateId ?? null,
-      active: input.active ?? true,
-      collect_metric_keys: input.collectMetricKeys ?? null,
-      depends_on_config_id: dependsOn,
-      created_by: createdBy,
-    })
-    .select("*")
-    .limit(1);
+  const { data, error } = await supabase.rpc("create_automation_config_with_dependency", {
+    p_automation_key: input.automationKey,
+    p_target_task_id: input.targetTaskId,
+    p_performance_template_id: input.performanceTemplateId ?? null,
+    p_active: input.active ?? true,
+    p_collect_metric_keys: input.collectMetricKeys ?? null,
+    p_created_by: createdBy,
+  });
   if (error) fail(error);
   return mapAutomationConfigRow(data![0]);
 }
@@ -3973,7 +4047,7 @@ export async function updateAutomationConfig(
   const fields: Record<string, unknown> = {};
   if (patch.targetTaskId !== undefined) {
     fields.target_task_id = patch.targetTaskId;
-    // Trocar o card troca a dependência: ela é "a automação daquele tipo NESTE card".
+    // Trocar o card re-resolve a dependência pelo cliente do novo alvo.
     const { data: current, error: currentError } = await supabase.from("automation_configs").select("automation_key").eq("id", id).limit(1);
     if (currentError) fail(currentError);
     const key = (current?.[0] as { automation_key: string } | undefined)?.automation_key;

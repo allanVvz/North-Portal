@@ -1,9 +1,8 @@
 // O vocabulário de tipos e subtipos, vindo de `task_types`.
 //
-// Uma tabela só, auto-referenciada: linha sem pai é um Tipo, linha com pai é um
-// Subtipo. Um fluxo É um tipo (behavior='entrega') e suas etapas SÃO os
-// subtipos dele, na ordem de order_index — não existe uma segunda lista de
-// "etapas" para manter em sincronia com a de subtipos.
+// Uma tabela só, auto-referenciada: as raízes canônicas são Tarefa, Entrega,
+// Plano e Checkpoint. Tarefa possui subtipos executáveis; Entrega possui as
+// variantes Criativo/Automação. A sequência pertence à versão do workflow.
 //
 // Divisão de responsabilidade com lib/taskCatalog.ts: esta tabela é a fonte do
 // VOCABULÁRIO (o que existe, em que ordem, com que comportamento) E do ícone/
@@ -21,6 +20,10 @@ import { HttpError } from "@/lib/validation";
 export type TaskBehavior = "entrega" | "plano" | "simples";
 
 export type TaskSubtypeDef = {
+  /** FK to the executable Task subtype. */
+  task_type_id?: string;
+  /** FK to the immutable step in a persisted workflow version. */
+  workflow_step_id?: string;
   key: string;
   label: string;
   order_index: number;
@@ -28,6 +31,7 @@ export type TaskSubtypeDef = {
   progress_weight: number;
   default_assignee: string | null;
   client_visible: boolean;
+  creation_trigger?: "delivery_created" | "ads_report_approved" | "feedback_approved" | "previous_step_approved";
 };
 
 /** As 5 tonalidades que já existem no design system (app/globals.css) — sem
@@ -47,6 +51,7 @@ export type TaskTypeDef = {
   icon: string | null;
   tone: TaskKindTone | null;
   show_in_performance: boolean;
+  workflow_version_id?: string;
   subtypes: TaskSubtypeDef[];
 };
 
@@ -80,21 +85,30 @@ type Row = {
  * declara quais subtipos de Tarefa podem ocupar seus slots, e em qual ordem. */
 type WorkflowStepRow = {
   delivery_type_id: string;
+  workflow_version_id: string;
   task_subtype_id: string;
+  workflow_step_id: string;
   order_index: number;
+  label: string;
+  lead_days: number;
+  progress_weight: number;
+  default_assignee: string | null;
+  client_visible: boolean;
+  creation_trigger: TaskSubtypeDef["creation_trigger"];
 };
 
 /** Monta a árvore a partir das linhas cruas. Separado da consulta porque o
  * editor de fluxos precisa da MESMA montagem sobre um conjunto maior de linhas
  * (as inativas inclusas) — duas montagens divergentes seriam duas verdades
  * sobre o que é a ordem de uma cascata. */
-function groupRows(rows: Row[]): TaskTypeEditorNode[] {
+function subtypeRows(rows: Row[]): Map<string, TaskTypeEditorSubtype[]> {
   const subtypesByParent = new Map<string, TaskTypeEditorSubtype[]>();
   for (const row of rows) {
     if (!row.parent_id) continue;
     const list = subtypesByParent.get(row.parent_id) ?? [];
     list.push({
       id: row.id,
+      task_type_id: row.id,
       key: row.key,
       label: row.label,
       order_index: row.order_index,
@@ -106,26 +120,53 @@ function groupRows(rows: Row[]): TaskTypeEditorNode[] {
     });
     subtypesByParent.set(row.parent_id, list);
   }
+  for (const list of subtypesByParent.values()) {
+    list.sort((a, b) => a.order_index - b.order_index || a.key.localeCompare(b.key));
+  }
+  return subtypesByParent;
+}
+
+function editorNode(row: Row, key: string, subtypes: TaskTypeEditorSubtype[]): TaskTypeEditorNode {
+  return {
+    id: row.id,
+    key,
+    label: row.label,
+    order_index: row.order_index,
+    behavior: row.behavior,
+    creatable: row.creatable,
+    active: row.active,
+    icon: row.icon,
+    tone: row.tone,
+    show_in_performance: row.show_in_performance,
+    subtypes,
+  };
+}
+
+function groupRows(rows: Row[]): TaskTypeEditorNode[] {
+  const subtypesByParent = subtypeRows(rows);
+  const deliveryRoot = rows.find((row) => !row.parent_id && row.key === "entrega");
+
+  if (deliveryRoot) {
+    const structuralKeyProjection: Record<string, string> = {
+      tarefa: "operacional",
+      plano: "plano_acao",
+      checkpoint: "checkpoint_comercial",
+    };
+    const nodes: TaskTypeEditorNode[] = [];
+    for (const row of rows) {
+      if (!row.parent_id && row.id !== deliveryRoot.id) {
+        nodes.push(editorNode(row, structuralKeyProjection[row.key] ?? row.key, subtypesByParent.get(row.id) ?? []));
+      }
+      if (row.parent_id === deliveryRoot.id) {
+        nodes.push(editorNode(row, row.key, []));
+      }
+    }
+    return nodes.sort((a, b) => a.order_index - b.order_index || a.key.localeCompare(b.key));
+  }
 
   return rows
     .filter((row) => !row.parent_id)
-    .map((row) => ({
-      id: row.id,
-      key: row.key,
-      label: row.label,
-      order_index: row.order_index,
-      behavior: row.behavior,
-      creatable: row.creatable,
-      active: row.active,
-      icon: row.icon,
-      tone: row.tone,
-      show_in_performance: row.show_in_performance,
-      // A ordem É a cascata. Empate cai na key para a sequência nunca depender
-      // da ordem em que o Postgres devolveu as linhas.
-      subtypes: (subtypesByParent.get(row.id) ?? []).sort(
-        (a, b) => a.order_index - b.order_index || a.key.localeCompare(b.key),
-      ),
-    }))
+    .map((row) => editorNode(row, row.key, subtypesByParent.get(row.id) ?? []))
     .sort((a, b) => a.order_index - b.order_index || a.key.localeCompare(b.key));
 }
 
@@ -146,18 +187,68 @@ function decorateWorkflowSteps<T extends TaskTypeEditorNode>(
     const subtypes = (mappingsByDelivery.get(type.id) ?? [])
       .slice()
       .sort((a, b) => a.order_index - b.order_index || a.task_subtype_id.localeCompare(b.task_subtype_id))
-      .map((mapping) => subtypeById.get(mapping.task_subtype_id))
-      .filter((step): step is TaskTypeEditorSubtype => Boolean(step));
-    return { ...type, subtypes } as T;
+      .map((mapping) => {
+        const subtype = subtypeById.get(mapping.task_subtype_id);
+        return subtype ? {
+          ...subtype,
+          task_type_id: mapping.task_subtype_id,
+          workflow_step_id: mapping.workflow_step_id,
+          label: mapping.label,
+          order_index: mapping.order_index,
+          lead_days: mapping.lead_days,
+          progress_weight: mapping.progress_weight,
+          default_assignee: mapping.default_assignee,
+          client_visible: mapping.client_visible,
+          creation_trigger: mapping.creation_trigger,
+        } : null;
+      })
+      .filter(Boolean) as (TaskTypeEditorSubtype & TaskSubtypeDef)[];
+    return {
+      ...type,
+      workflow_version_id: (mappingsByDelivery.get(type.id) ?? [])[0]?.workflow_version_id,
+      subtypes,
+    } as T;
   });
 }
 
 async function readWorkflowStepMappings(db: TypeReader): Promise<WorkflowStepRow[]> {
-  const { data, error } = await db
-    .from("task_type_workflow_steps")
-    .select("delivery_type_id,task_subtype_id,order_index");
-  if (error) throw error;
-  return (data ?? []) as WorkflowStepRow[];
+  const { data: versions, error: versionError } = await db
+    .from("workflow_versions")
+    .select("id,delivery_type_id")
+    .eq("status", "published");
+  if (versionError) throw versionError;
+  const versionRows = (versions ?? []) as { id: string; delivery_type_id: string }[];
+  if (!versionRows.length) return [];
+  const deliveryByVersion = new Map(versionRows.map((version) => [version.id, version.delivery_type_id]));
+  const { data: steps, error: stepError } = await db
+    .from("workflow_version_steps")
+    .select("id,workflow_version_id,task_type_id,label,order_index,lead_days,progress_weight,default_assignee,client_visible,creation_trigger")
+    .in("workflow_version_id", versionRows.map((version) => version.id));
+  if (stepError) throw stepError;
+  return ((steps ?? []) as Array<{
+    id: string;
+    workflow_version_id: string;
+    task_type_id: string;
+    label: string;
+    order_index: number;
+    lead_days: number;
+    progress_weight: number;
+    default_assignee: string | null;
+    client_visible: boolean;
+    creation_trigger: TaskSubtypeDef["creation_trigger"];
+  }>).map((step) => ({
+    delivery_type_id: deliveryByVersion.get(step.workflow_version_id)!,
+    workflow_version_id: step.workflow_version_id,
+    task_subtype_id: step.task_type_id,
+    workflow_step_id: step.id,
+    order_index: step.order_index,
+    label: step.label,
+    lead_days: step.lead_days,
+    progress_weight: Number(step.progress_weight) || 1,
+    default_assignee: step.default_assignee,
+    client_visible: step.client_visible,
+    creation_trigger: step.creation_trigger,
+  }));
 }
 
 /** Todo o vocabulário em UMA consulta — tipos e subtipos moram na mesma
@@ -457,13 +548,26 @@ export type TaskTypeCreateInput = {
 
 async function insertWorkflowStep(
   db: TypeWriter,
-  deliveryTypeId: string,
+  workflowVersionId: string,
   taskSubtypeId: string,
+  stepKey: string,
+  input: SubtypeInput,
   orderIndex: number,
 ): Promise<void> {
   const { error } = await db
-    .from("task_type_workflow_steps")
-    .insert({ delivery_type_id: deliveryTypeId, task_subtype_id: taskSubtypeId, order_index: orderIndex });
+    .from("workflow_version_steps")
+    .insert({
+      workflow_version_id: workflowVersionId,
+      task_type_id: taskSubtypeId,
+      step_key: stepKey,
+      label: input.label.trim(),
+      order_index: orderIndex,
+      lead_days: input.lead_days,
+      progress_weight: input.progress_weight,
+      default_assignee: input.default_assignee,
+      client_visible: input.client_visible,
+      creation_trigger: orderIndex === 10 ? "delivery_created" : "previous_step_approved",
+    });
   if (error) throw error;
 }
 
@@ -481,7 +585,13 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
 
   const key = slugifyTypeKey(input.label);
   if (!key) throw new HttpError(400, "O nome do tipo precisa ter ao menos uma letra ou numero.");
-  const { types: existingTypes } = await listTaskTypesForEditor(db);
+  const [{ types: existingTypes }, { data: catalogData, error: catalogError }] = await Promise.all([
+    listTaskTypesForEditor(db),
+    db.from("task_types").select(COLUMNS),
+  ]);
+  if (catalogError) throw catalogError;
+  const catalogRows = (catalogData ?? []) as Row[];
+  const deliveryRoot = catalogRows.find((row) => !row.parent_id && row.key === "entrega");
   if (existingTypes.some((t) => t.key === key)) {
     throw new HttpError(409, `Já existe um tipo com a chave "${key}".`);
   }
@@ -499,13 +609,16 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
     stepKeys.push(stepKey);
   }
 
+  const deliverySiblings = deliveryRoot
+    ? catalogRows.filter((row) => row.parent_id === deliveryRoot.id)
+    : existingTypes;
   const { data, error } = await db
     .from("task_types")
     .insert({
-      parent_id: null,
+      parent_id: deliveryRoot?.id ?? null,
       key,
       label: input.label.trim(),
-      order_index: nextOrderIndex(existingTypes),
+      order_index: nextOrderIndex(deliverySiblings),
       behavior: input.behavior,
       creatable: true,
       icon: input.icon,
@@ -519,9 +632,18 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
   if (!rootRow) throw new HttpError(503, "Não foi possível criar o tipo.");
 
   const createdCommonSubtypeIds: string[] = [];
+  let workflowVersionId: string | null = null;
   try {
     const subtypes: TaskTypeEditorSubtype[] = [];
     if (input.behavior === "entrega") {
+      const { data: versionRows, error: versionError } = await db
+        .from("workflow_versions")
+        .insert({ delivery_type_id: rootRow.id, version: 1, status: "draft", label: `${rootRow.label} v1`, published_at: null })
+        .select("id")
+        .limit(1);
+      if (versionError) throw versionError;
+      workflowVersionId = (versionRows?.[0] as { id?: string } | undefined)?.id ?? null;
+      if (!workflowVersionId) throw new HttpError(503, "Não foi possível versionar o fluxo.");
       const commonType = existingTypes.find((type) => type.key === "operacional");
       if (!commonType) throw new HttpError(503, "O tipo Tarefa nao esta configurado.");
       const commonByKey = new Map(commonType.subtypes.map((subtype) => [subtype.key, subtype]));
@@ -536,9 +658,14 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
         );
         if (!existing) createdCommonSubtypeIds.push(subtype.id);
         commonByKey.set(subtype.key, subtype);
-        await insertWorkflowStep(db, rootRow.id, subtype.id, (i + 1) * 10);
+        await insertWorkflowStep(db, workflowVersionId, subtype.id, subtype.key, input.steps[i], (i + 1) * 10);
         subtypes.push(subtype);
       }
+      const { error: publishError } = await db
+        .from("workflow_versions")
+        .update({ status: "published", published_at: new Date().toISOString() })
+        .eq("id", workflowVersionId);
+      if (publishError) throw publishError;
     } else {
       for (let i = 0; i < input.steps.length; i++) {
         subtypes.push(await insertSubtypeRow(db, rootRow.id, (i + 1) * 10, stepKeys[i], input.steps[i]));
@@ -560,6 +687,7 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
   } catch (stepError) {
     // Desfaz a raiz e seus elos. Etapas comuns já podem ser usadas por outros
     // fluxos, portanto somente as que esta tentativa acabou de criar saem.
+    if (workflowVersionId) await db.from("workflow_versions").delete().eq("id", workflowVersionId);
     await db.from("task_types").delete().eq("id", rootRow.id);
     for (const subtypeId of createdCommonSubtypeIds) {
       await db.from("task_types").delete().eq("id", subtypeId);
