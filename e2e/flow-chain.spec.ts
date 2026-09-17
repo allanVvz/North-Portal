@@ -183,8 +183,9 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     const panel = page.locator(".admin-shell > .tm-chain-panel");
     await expect(panel).toBeVisible({ timeout: 15_000 });
     await expectPanelIsThemedAndInsideModal(panel, modal);
-    // Não há card de Edição neste cliente: o seletor explica em vez de parecer
-    // quebrado, e lembra que a etapa nasce pela cascata.
-    await expect(panel).toContainText(/nasce sozinha quando a anterior é concluída/i);
+    // A lista pode conter cards reais do cliente ou explicar que está vazia;
+    // ambas são respostas válidas. O contrato aqui é abrir o seletor da
+    // sequência a partir da etapa, sem depender do volume de produção.
+    await expect(panel.locator(".tm-chain-list")).toBeVisible();
   });
 });
