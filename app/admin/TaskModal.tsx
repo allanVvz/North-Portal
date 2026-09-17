@@ -1716,21 +1716,22 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {/* O stepper editável (com 🔗 nos slots vazios, ✕ nos preenchidos)
-                aparece só no card da ENTREGA. Numa etapa, quem quer mexer na
-                corrente abre a entrega pela caixa "Faz parte de" acima. */}
-            {liveTask && isDelivery ? (
+            {/* A sequência é contexto da Entrega e também da sua etapa quando
+                ela participa de uma única Entrega. Em vínculo N:N, não há uma
+                sequência "principal" inventada: as relações continuam na
+                lista de contexto acima. */}
+            {liveTask && chainDelivery ? (
               <FlowStepsBox
                 type={deliveryType}
                 steps={chainSteps}
-                isReportFlow={isReportFlow}
+                isReportFlow={isReportFlowChain}
                 currentTaskId={liveTask.id}
                 candidatesFor={chainCandidates}
                 busy={busy}
                 canOpen={Boolean(onOpenRelatedTask)}
                 team={adminReviewers}
                 onOpenStep={(card) => void openRelatedTask(card)}
-                onUnlinkStep={(card) => void unlinkMember(card.id, liveTask.id)}
+                onUnlinkStep={(card) => void unlinkMember(card.id, chainDelivery.id)}
                 onLinkStep={(card, slot) => void linkStepCard(card, slot)}
                 onPatchStep={patchRelatedCard}
                 onCommentStep={commentRelatedCard}
