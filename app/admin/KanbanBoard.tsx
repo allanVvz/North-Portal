@@ -670,7 +670,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           {boardMode === "responsavel" ? <span className="kb-card-stage">{STATUS_LABEL[t.status]}</span> : null}
           <span className="kb-card-marks">
             {visible("client_visible") && t.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
-            {visible("plan_link") && parentIdsOf(t).length ? <span className="kb-plan-link" title="Vinculado a um pai (plano ou entrega)">◆</span> : null}
+            {visible("plan_link") && parentIdsOf(t).length ? <span className="kb-plan-link" title="Possui relação estrutural ou de fluxo">◆</span> : null}
             {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
           </span>
         </div>

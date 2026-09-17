@@ -60,10 +60,11 @@ function fakeAdmin(tables: Record<string, Row[]>) {
 }
 
 const TYPE_ROWS: Row[] = [
+  { id: "t0", parent_id: null, key: "operacional", label: "Tarefa", order_index: 10, behavior: "simples", creatable: true, active: true, lead_days: 0, progress_weight: 1, default_assignee: null, client_visible: false },
   { id: "t1", parent_id: null, key: "criativo", label: "Criativo", order_index: 20, behavior: "entrega", creatable: true, active: true, lead_days: 0, progress_weight: 1, default_assignee: null, client_visible: false },
-  { id: "s1", parent_id: "t1", key: "roteiro", label: "Roteiro", order_index: 10, behavior: "simples", creatable: true, active: true, lead_days: 2, progress_weight: 1, default_assignee: null, client_visible: false },
-  { id: "s2", parent_id: "t1", key: "captacao", label: "Captação", order_index: 20, behavior: "simples", creatable: true, active: true, lead_days: 3, progress_weight: 1, default_assignee: null, client_visible: false },
-  { id: "s3", parent_id: "t1", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
+  { id: "s1", parent_id: "t0", key: "roteiro", label: "Roteiro", order_index: 10, behavior: "simples", creatable: true, active: true, lead_days: 2, progress_weight: 1, default_assignee: null, client_visible: false },
+  { id: "s2", parent_id: "t0", key: "captacao", label: "Captação", order_index: 20, behavior: "simples", creatable: true, active: true, lead_days: 3, progress_weight: 1, default_assignee: null, client_visible: false },
+  { id: "s3", parent_id: "t0", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
 ];
 
 const base = {
@@ -185,8 +186,8 @@ describe("advanceFlow", () => {
 describe("diária de gravação compartilhada", () => {
   const TYPES_WITH_EDICAO: Row[] = [
     ...TYPE_ROWS.filter((row) => row.key !== "publicacao"),
-    { id: "s4", parent_id: "t1", key: "edicao", label: "Edição", order_index: 25, behavior: "simples", creatable: true, active: true, lead_days: 4, progress_weight: 1, default_assignee: null, client_visible: false },
-    { id: "s3", parent_id: "t1", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
+    { id: "s4", parent_id: "t0", key: "edicao", label: "Edição", order_index: 25, behavior: "simples", creatable: true, active: true, lead_days: 4, progress_weight: 1, default_assignee: null, client_visible: false },
+    { id: "s3", parent_id: "t0", key: "publicacao", label: "Publicação", order_index: 30, behavior: "simples", creatable: true, active: true, lead_days: 1, progress_weight: 1, default_assignee: null, client_visible: true },
   ];
 
   function shootDay() {

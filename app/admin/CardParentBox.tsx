@@ -20,11 +20,8 @@ const RELATION_DOT: Record<ParentRelation, string> = {
 // A caixa "Faz parte de" do modal de um card FILHO — etapa de uma entrega,
 // atividade de um plano ou execução de uma recorrência.
 //
-// Enxuta e só de navegação: uma linha com o card pai (clicável, com o progresso
-// dele) e um subtítulo dizendo qual é a relação. Sem lista de irmãos, sem 🔗,
-// sem ✕ — quem quer ver ou mexer nos irmãos abre o pai. É o mesmo desenho para
-// os três tipos de pai, no lugar dos dois boxes que a etapa de fluxo tinha e do
-// nada que a atividade de plano tinha.
+// Enxuta e só de navegação: uma linha com o card relacionado (clicável, com o
+// progresso quando houver rollup) e um subtítulo dizendo qual é a relação.
 export default function CardParentBox({
   parent,
   relation,

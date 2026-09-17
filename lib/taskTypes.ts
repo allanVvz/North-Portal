@@ -126,7 +126,13 @@ function groupRows(rows: Row[]): TaskTypeEditorNode[] {
 export async function listTaskTypes(db: TypeReader): Promise<TaskTypeDef[]> {
   const { data, error } = await db.from("task_types").select(COLUMNS).eq("active", true);
   if (error) throw error;
-  return groupRows((data ?? []) as Row[]);
+  const types = groupRows((data ?? []) as Row[]);
+  // Etapa é sempre uma especialização de Tarefa comum. A Entrega só declara
+  // que agrega uma sequência; ela não é dona do vocabulário das etapas.
+  // Para o motor existente, a sequência padrão de uma Entrega é a lista
+  // ordenada dos subtipos ativos de `operacional`.
+  const commonSteps = types.find((type) => type.key === "operacional")?.subtypes ?? [];
+  return types.map((type) => type.behavior === "entrega" ? { ...type, subtypes: commonSteps } : type);
 }
 
 export function findType(types: readonly TaskTypeDef[], key: string): TaskTypeDef | null {

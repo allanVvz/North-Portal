@@ -1405,9 +1405,9 @@ export default function TaskModal({
                     <span className="tm-head-sep">·</span>
                     <span
                       className="tm-headpick-label tm-head-parentflag"
-                      title="Este card é o pai da corrente: soma todas as etapas do fluxo abaixo."
+                      title="Esta Entrega agrega o progresso das etapas do fluxo abaixo."
                     >
-                      {typeLabelOf(draft.kind)}{isReportFlow ? ` · ${draft.formato || "Relatório"}` : ""} · card pai
+                      {typeLabelOf(draft.kind)}{isReportFlow ? ` · ${draft.formato || "Relatório"}` : ""} · fluxo de etapas
                     </span>
                   </>
                 ) : subtypeOptions.length ? (
@@ -1693,7 +1693,7 @@ export default function TaskModal({
             {pendingParentBox ? (
               <div className="tm-box tm-parentbox">
                 <p className="tm-box-label">Faz parte de</p>
-                <p className="admin-sub" style={{ margin: 0 }}>Carregando card pai…</p>
+                <p className="admin-sub" style={{ margin: 0 }}>Carregando relação…</p>
               </div>
             ) : null}
 

@@ -41,7 +41,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (relationKind !== "workflow_step" && slot !== null && slot !== undefined) {
       throw new HttpError(400, "Somente uma etapa de fluxo pode ter slot.");
     }
-    if (relationKind === "workflow_step" && child.subtype !== slot) throw new HttpError(400, "Este card nao e do subtipo desta etapa.");
+    if (relationKind === "workflow_step" && (child.kind !== "operacional" || child.subtype !== slot)) {
+      throw new HttpError(400, "Uma etapa de fluxo precisa ser uma Tarefa do subtipo correspondente.");
+    }
 
     // Uma etapa so aceita UM card. Sem esta trava, uma tela desatualizada
     // (mostrando o slot vazio depois de ja ter ligado algo) faz um segundo

@@ -34,7 +34,7 @@ describe("flowStepFields", () => {
   // A etapa é do mesmo TIPO da entrega — é o subtipo que diz qual etapa ela é.
   it("herda o tipo da entrega e recebe o subtipo da etapa", () => {
     const fields = flowStepFields(delivery, step, previous, "2026-08-28");
-    expect(fields.kind).toBe("criativo");
+    expect(fields.kind).toBe("operacional");
     expect(fields.subtype).toBe("captacao");
   });
 
