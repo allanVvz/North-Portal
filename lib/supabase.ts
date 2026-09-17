@@ -11,7 +11,7 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf, recurrenceStopped } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
+import { FLOW_PARENT_KEY, actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
 import { commentsOf, type TaskComment } from "./comments";
 import { appendCycleLog } from "./cycleLog";
 import { AGENCY_TIMEZONE, agencyToday } from "./time/agency";
@@ -489,17 +489,21 @@ type ListClientRow = {
 
 // Every picker/dropdown across the app (Kanban's Cliente filter, TaskModal's
 // Cliente select, Etapas, PlanSearchBar, Performance...) goes through this
-// function, so excluding disabled=true here by default is what makes "Remover
-// do sistema" (soft-delete) actually hide a client platform-wide. The
-// Clientes admin screen itself passes includeDisabled so it can still find
-// and re-enable them.
+// function, so excluding hidden clients here by default is what makes
+// "Remover do sistema" (soft-delete, `disabled`) actually hide a client
+// platform-wide — and, since 2026-09-16, `is_active = false` ("Inativo") too:
+// um cliente marcado só como Inativo (contrato encerrado/pausado, sem passar
+// pelo soft-delete) continuava aparecendo em todo filtro/quadro, porque só
+// `disabled` era checado (clientVisibleInOps unifica os dois). The Clientes
+// admin screen itself passes includeDisabled so it can still find and
+// re-enable them.
 export async function listClients(opts?: { includeDisabled?: boolean }): Promise<AdminClientSummary[]> {
   const supabase = await createClient();
   let query = supabase
     .from("clients")
     .select("id,slug,name,is_active,disabled,updated_at,briefing_answers(submitted)")
     .order("name");
-  if (!opts?.includeDisabled) query = query.eq("disabled", false);
+  if (!opts?.includeDisabled) query = query.eq("disabled", false).eq("is_active", true);
   const { data, error } = await query;
   if (error) fail(error);
   return ((data as ListClientRow[] | null) ?? []).map((row) => ({
@@ -1371,15 +1375,15 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled)`)
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled,is_active)`)
     .or("recurrence_cadence.not.is.null,payload->>recurrence_group.eq.true")
     .order("position")
     .order("due_date", { nullsFirst: false });
   if (error) fail(error);
-  type JoinedClient = { name: string; slug: string; disabled: boolean };
+  type JoinedClient = { name: string; slug: string; disabled: boolean; is_active: boolean };
   type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
   const parents = ((data as unknown as Row[] | null) ?? [])
-    .filter(({ clients }) => !(Array.isArray(clients) ? clients[0] : clients)?.disabled)
+    .filter(({ clients }) => clientVisibleInOps(Array.isArray(clients) ? clients[0] : clients))
     .map(mergeTaskAssigneeRow);
   const executionsByParent = new Map<string, TaskRecord[]>();
   if (parents.length) {
@@ -1478,16 +1482,16 @@ export async function listAllTasks(): Promise<BoardTask[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled)`)
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled,is_active)`)
     .order("position")
     .order("created_at");
   if (error) fail(error);
-  type JoinedClient = { name: string; slug: string; disabled: boolean };
+  type JoinedClient = { name: string; slug: string; disabled: boolean; is_active: boolean };
   type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
   return ((data as unknown as Row[] | null) ?? [])
-    // A disabled client's cards disappear from the shared board entirely —
-    // unassigned tasks (clients null) are never affected by this.
-    .filter(({ clients, ...task }) => visibleOnTaskBoard(task) && !(Array.isArray(clients) ? clients[0] : clients)?.disabled)
+    // Um cliente Desabilitado OU Inativo some do quadro compartilhado —
+    // unassigned tasks (clients null) nunca são afetadas por isto.
+    .filter(({ clients, ...task }) => visibleOnTaskBoard(task) && clientVisibleInOps(Array.isArray(clients) ? clients[0] : clients))
     .map(mergeTaskAssigneeRow)
     .map(({ clients, ...task }) => {
       const c = Array.isArray(clients) ? clients[0] : clients;
@@ -1523,7 +1527,7 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
 
   let query = supabase
     .from("tasks")
-    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug)`)
+    .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug,disabled,is_active)`)
     .order("updated_at", { ascending: false });
   // Uma entrega é marcada no payload (`flow_parent`), NÃO inferida do tipo:
   // existem cards `criativo` antigos que são trabalho comum, e o fluxo de
@@ -1534,10 +1538,15 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
   const { data, error } = await query;
   if (error) fail(error);
 
-  type JoinedClient = { name: string; slug: string };
+  type JoinedClient = { name: string; slug: string; disabled: boolean; is_active: boolean };
   type Row = TaskRecord & TaskAssigneesJoin & { clients: JoinedClient | JoinedClient[] | null };
   // Um template de recorrência é um pai de outra natureza e não entra aqui.
-  const rows = ((data as unknown as Row[] | null) ?? []).filter((t) => t.payload?.[RECURRENCE_GROUP_KEY] !== true);
+  // Um cliente Desabilitado ou Inativo não tem Entrega/Plano nesta tela —
+  // esta consulta nunca filtrava por cliente, era a única das quatro abas de
+  // Operação que não escondia nada.
+  const rows = ((data as unknown as Row[] | null) ?? [])
+    .filter((t) => t.payload?.[RECURRENCE_GROUP_KEY] !== true)
+    .filter((t) => clientVisibleInOps(Array.isArray(t.clients) ? t.clients[0] : t.clients));
   if (!rows.length) return [];
 
   const fetchChildren = async (parentIds: string[]) => {

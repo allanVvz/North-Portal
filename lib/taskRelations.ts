@@ -100,6 +100,22 @@ export function visibleOnTaskBoard<T extends Pick<TaskRecord, "payload">>(task: 
   return !isDeferredTask(task) && task.payload?.recurrence_group !== true;
 }
 
+/** Um cliente sai das telas operacionais do dia a dia (quadro Tarefas,
+ * Entregas, Rotinas, Plano de Ação, os filtros de cliente delas) por DOIS
+ * motivos independentes — `disabled` ("Desabilitado", oculta sem julgar o
+ * contrato) e `is_active` ("Inativo", contrato encerrado/pausado). As telas
+ * de gestão (`/admin/clientes`, `/admin/documentos`) continuam mostrando
+ * todos, para poder reativar — só as telas de trabalho diário filtram por
+ * isto. Antes só `disabled` era checado; um cliente marcado só como
+ * "Inativo" continuava aparecendo em tudo.
+ *
+ * `client` ausente (card sem cliente vinculado) sempre passa — a ausência de
+ * cliente nunca foi o que este filtro decide. */
+export function clientVisibleInOps(client: { disabled?: boolean | null; is_active?: boolean | null } | null | undefined): boolean {
+  if (!client) return true;
+  return !client.disabled && client.is_active !== false;
+}
+
 /** O quadro Tarefas mostra trabalho, nunca um pai.
  *
  * Entrega, Plano de Ação e template de recorrência ficam de fora pela mesma

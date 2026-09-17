@@ -4,6 +4,7 @@ import {
   belongsToTaskScreen,
   childrenByParent,
   childrenOf,
+  clientVisibleInOps,
   detachedRecurrencePatch,
   flowStepKeyOf,
   hasParent,
@@ -41,6 +42,15 @@ describe("relações entre tarefas", () => {
     const child = { parents: [], payload: { deferred_until_accessed: true } };
     expect(isDeferredTask(child)).toBe(true);
     expect(visibleOnTaskBoard(child)).toBe(false);
+  });
+
+  it("esconde cliente Desabilitado OU Inativo das telas operacionais, mas nunca um card sem cliente", () => {
+    expect(clientVisibleInOps({ disabled: false, is_active: true })).toBe(true);
+    expect(clientVisibleInOps({ disabled: true, is_active: true })).toBe(false);
+    expect(clientVisibleInOps({ disabled: false, is_active: false })).toBe(false);
+    expect(clientVisibleInOps({ disabled: true, is_active: false })).toBe(false);
+    expect(clientVisibleInOps(null)).toBe(true);
+    expect(clientVisibleInOps(undefined)).toBe(true);
   });
 
   it("materializa a tarefa no primeiro acesso sem perder seu payload", () => {
