@@ -29,6 +29,7 @@ import { logReportRun } from "./reportLog";
 import { ensureFlowStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
+import { REPORT_FLOW_STEPS } from "@/lib/taskRelations";
 import { commentsOf } from "@/lib/comments";
 import { markTaskParada } from "./errorHandling";
 import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
@@ -235,7 +236,8 @@ async function runOneReportAutomation(
     let occ: TaskRecord;
     try {
       occ = await ensureFlowOccurrence(admin, target, today);
-      card1 = await ensureFlowStep(admin, occ, "trafego", { title: "Relatório de anúncios", leadDays: 0, position: 10 }, today);
+      const trafegoStep = REPORT_FLOW_STEPS[0];
+      card1 = await ensureFlowStep(admin, occ, trafegoStep.key, { title: trafegoStep.label, leadDays: trafegoStep.lead_days, position: trafegoStep.order_index }, today);
     } catch (error) {
       const message = errorMessage(error);
       await markTaskParada(admin, target.id, `Falha ao preparar o fluxo do relatório de anúncios: ${message}`);

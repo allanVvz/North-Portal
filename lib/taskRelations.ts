@@ -1,4 +1,5 @@
 import type { TaskParentLink, TaskRecord } from "./validation";
+import type { TaskSubtypeDef } from "./taskTypes";
 
 export const DEFERRED_TASK_FLAG = "deferred_until_accessed";
 
@@ -17,6 +18,20 @@ export const REPORT_CONVERSION_FLOW = "report_conversion";
 export function isReportConversionFlow(task: Pick<TaskRecord, "payload">): boolean {
   return task.payload?.automation_flow === REPORT_CONVERSION_FLOW;
 }
+
+/** As 3 etapas do fluxo de relatório, na ordem — fonte única para quem CRIA
+ * cada uma (lib/automations/run.ts, conversionFlow.ts) e para quem MOSTRA a
+ * corrente planejada antes de qualquer etapa existir (FlowStepsBox). Nunca
+ * declarado em `task_types`: isso reacoplaria o motor genérico de cascata a
+ * um fluxo que só as automações administram (ver execute.ts). Formato
+ * TaskSubtypeDef só para reaproveitar a mesma UI/lógica da corrente
+ * declarada — os campos sem uso aqui (progress_weight, default_assignee,
+ * client_visible) ficam nos valores que a automação já cria hoje. */
+export const REPORT_FLOW_STEPS: readonly TaskSubtypeDef[] = [
+  { key: "trafego", label: "Relatório de anúncios", order_index: 10, lead_days: 0, progress_weight: 1, default_assignee: null, client_visible: false },
+  { key: "feedback", label: "Feedback da semana", order_index: 20, lead_days: 2, progress_weight: 1, default_assignee: null, client_visible: true },
+  { key: "conversao", label: "Relatório de conversão", order_index: 30, lead_days: 0, progress_weight: 1, default_assignee: null, client_visible: false },
+];
 
 /** A etapa anterior da corrente, para o editor conseguir voltar ao roteiro em
  * vez de caçá-lo. */

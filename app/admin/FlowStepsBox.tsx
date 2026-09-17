@@ -5,7 +5,7 @@ import TaskKindIcon from "./TaskKindIcon";
 import StepRow, { type StepPatch } from "./StepRow";
 import { STATUS_LABEL } from "./kanbanShared";
 import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "./FloatingPopover";
-import { flowStepKeyOf } from "@/lib/taskRelations";
+import { REPORT_FLOW_STEPS, flowStepKeyOf } from "@/lib/taskRelations";
 import { taskMatchesQuery } from "@/lib/taskSearch";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import type { TaskSubtypeDef, TaskTypeDef } from "@/lib/taskTypes";
@@ -133,19 +133,21 @@ export default function FlowStepsBox({
 }) {
   const current = currentFlowStepOf(steps);
 
-  // Fluxo DINÂMICO (tipo existe mas não tem subtipos — ex.: ocorrência
-  // `operacional` promovida a pai de fluxo): não há sequência pré-definida, só
-  // as etapas que existem.
-  // Uma Entrega de relatório tem etapas criadas pela automação, não pelo
-  // vocabulário estático — mesmo quando `kind` é um tipo declarado de verdade
-  // (ex.: "criativo", com sua própria corrente de Roteiro/Captação/Edição/
-  // Publicação), por isso `isReportFlow` entra OR'd aqui, não só o fallback
-  // de tipo nulo/sem subtipos. Quando o tipo não chegou (ou é legado
-  // inativo), os filhos ligados ainda são a fonte de verdade e nunca devem
-  // parecer loading.
-  const dynamic = isReportFlow || (type !== null && type.subtypes.length === 0) || (type === null && steps.length > 0);
-  if (dynamic) {
-    if (!steps.length) return null;
+  // A corrente PLANEJADA — quando se sabe de antemão quais etapas vão
+  // existir e em que ordem, mesmo antes de qualquer uma nascer. Um fluxo de
+  // relatório sempre tem as mesmas 3 (REPORT_FLOW_STEPS — nunca declaradas em
+  // task_types, ver o comentário lá); um tipo real com subtipos declarados
+  // usa os dele. Nenhum dos dois é "o tipo do kind" — para relatório, `type`
+  // chega com a corrente ERRADA de "criativo" (Roteiro/Captação/...), por
+  // isso `isReportFlow` decide primeiro.
+  const plannedSteps = isReportFlow ? REPORT_FLOW_STEPS : type && type.subtypes.length > 0 ? type.subtypes : null;
+
+  // Fluxo DINÂMICO de verdade (sem corrente conhecida — ex.: ocorrência
+  // `operacional` promovida a pai de fluxo antiga, sem tipo declarado): não
+  // há o que planejar, só as etapas que já existem. Quando o tipo ainda não
+  // chegou mas já existem etapas, mostra o que já existe em vez de "Carregando".
+  if (!plannedSteps) {
+    if (!steps.length) return type === null ? <div className="tm-box tm-planmembers"><p className="admin-sub" style={{ margin: 0 }}>Carregando etapas…</p></div> : null;
     return (
       <div className="tm-box tm-planmembers">
         <p className="tm-box-label">Etapas ({steps.length})</p>
@@ -173,10 +175,10 @@ export default function FlowStepsBox({
   return (
     <div className="tm-box tm-planmembers">
       <p className="tm-box-label">
-        Etapas{type ? ` · ${type.label}` : ""} ({steps.length}/{type?.subtypes.length ?? steps.length})
+        Etapas{isReportFlow ? " · Relatório" : type ? ` · ${type.label}` : ""} ({steps.length}/{plannedSteps.length})
       </p>
       <div className="tm-member-list">
-        {(type?.subtypes ?? []).map((step) => {
+        {plannedSteps.map((step) => {
           const card = steps.find((t) => flowStepKeyOf(t) === step.key) ?? null;
           if (card) {
             return (
@@ -209,7 +211,9 @@ export default function FlowStepsBox({
                 onPick={(task) => onLinkStep(task, step.key)}
               />
               <span className="tm-member-open tm-member-pending">
-                <TaskKindIcon kind={type?.key ?? "operacional"} size="sm" />
+                {/* Etapas de relatório nascem sempre `operacional` (ver
+                    ensureFlowStep) — nunca do kind da entrega ("criativo"). */}
+                <TaskKindIcon kind={isReportFlow ? "operacional" : (type?.key ?? "operacional")} size="sm" />
                 <span className="tm-member-title">{step.label}</span>
                 <span className="tm-member-status">
                   Nasce quando a anterior for concluída{step.lead_days ? ` · prazo de ${step.lead_days} dia${step.lead_days === 1 ? "" : "s"}` : ""}

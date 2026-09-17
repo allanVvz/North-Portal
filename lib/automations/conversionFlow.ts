@@ -27,6 +27,7 @@ import { commentsOf, type TaskComment } from "@/lib/comments";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { ensureFlowStep, settleTypelessFlow } from "@/lib/flows/advance";
 import { recurrenceStopped } from "@/lib/recurrenceState";
+import { REPORT_FLOW_STEPS } from "@/lib/taskRelations";
 import { mergeAssigneeDisplay } from "@/lib/assignees";
 import type { Period } from "@/app/admin/performance/insights";
 import { extractMetrics, type ConversionRow, type MetricExtract } from "@/lib/ai/extractMetrics";
@@ -65,7 +66,10 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // ficava dormente sem IA — e, com a chave da OpenAI cadastrada mas a organização
 // não verificada, acordava para chamar um modelo que devolvia 404. A IA virou um
 // fallback opcional (`COMMENT_AI_FALLBACK=1`, ver extractMetrics.ts).
-const FEEDBACK_LEAD_DAYS = 2;   // prazo do card de feedback = vencimento da ocorrência + 2
+// Prazo do card de feedback = vencimento da ocorrência + lead_days dele em
+// REPORT_FLOW_STEPS (fonte única, junto com o título e a posição — ver
+// lib/taskRelations.ts).
+const FEEDBACK_LEAD_DAYS = REPORT_FLOW_STEPS.find((s) => s.key === "feedback")!.lead_days;
 const TOLERANCIA_DIAS = 3;      // dias após o prazo antes de fechar com zeros
 
 // Descrição permanente do card — explica a FINALIDADE (por que responder
@@ -154,11 +158,12 @@ export async function ensureFeedbackCard(admin: AdminClient, occ: TaskRecord, to
   if (!config) return null; // cliente sem relatorio_vendas configurado: este fluxo não tem Feedback
 
   const tags = tagsOf(config);
-  const card = await ensureFlowStep(admin, occ, "feedback", {
-    title: "Feedback da semana",
-    leadDays: FEEDBACK_LEAD_DAYS,
-    clientVisible: true,
-    position: 20,
+  const feedbackStep = REPORT_FLOW_STEPS.find((s) => s.key === "feedback")!;
+  const card = await ensureFlowStep(admin, occ, feedbackStep.key, {
+    title: feedbackStep.label,
+    leadDays: feedbackStep.lead_days,
+    clientVisible: feedbackStep.client_visible,
+    position: feedbackStep.order_index,
     assignee: AUTOMATION_ASSIGNEE, // placeholder até o papel ser resolvido logo abaixo
     description: FEEDBACK_DESCRIPTION,
   }, today);
@@ -512,8 +517,9 @@ async function processOccurrence(
     occ = { ...occ, payload: occPayload };
 
     // O relatório de conversão é uma etapa própria; Feedback é só a coleta.
+    const conversaoStep = REPORT_FLOW_STEPS.find((s) => s.key === "conversao")!;
     let card3 = await getAdminTask(admin, flowStepTaskId(occ.id, "conversao"));
-    if (!card3) card3 = await ensureFlowStep(admin, occ, "conversao", { title: "Relatório de conversão", leadDays: 0, position: 30, assignee: AUTOMATION_ASSIGNEE }, today);
+    if (!card3) card3 = await ensureFlowStep(admin, occ, conversaoStep.key, { title: conversaoStep.label, leadDays: conversaoStep.lead_days, position: conversaoStep.order_index, assignee: AUTOMATION_ASSIGNEE }, today);
     const { error: c3Err } = await admin
       .from("tasks")
       .update({ status: "revisao", assignee: AUTOMATION_ASSIGNEE, payload: appendedCommentPayload(card3.payload, resumo) })
