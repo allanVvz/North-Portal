@@ -28,12 +28,11 @@
 // via RPC append_task_comment) e `app/api/client/[slug]/tasks/[id]/route.ts`
 // (o cliente, "Aprovar entrega"/"Solicitar ajustes", que monta
 // `payload.comments` à mão). Com a regra escrita só do lado do admin, o mesmo
-// comentário caía em cards diferentes conforme quem o escreveu — e o caso não
-// é hipotético: `deliveryStatusOnFinish` coloca a PRÓPRIA entrega em
-// `aprovacao` quando o cliente é aprovador e não há revisor, então é
-// exatamente numa entrega que o cliente clica "Solicitar ajustes". Um cliente
-// nunca é revisor/responsável vinculado de uma etapa interna, então a regra de
-// papel nunca dispara nessa porta — cai sempre no fallback, sem regressão.
+// comentário caía em cards diferentes conforme quem o escreveu. A rota de
+// cliente recusa alteração da Entrega-pai; este resolvedor ainda protege links
+// antigos, fazendo o comentário cair na etapa corrente. Um cliente nunca é
+// revisor/responsável vinculado de uma etapa interna, então a regra de papel
+// nunca dispara nessa porta — cai sempre no fallback, sem regressão.
 //
 // Sempre com o client de SERVIÇO: um dos chamadores é uma sessão de cliente, e
 // uma conta cliente não enxerga as etapas (a etapa raramente é

@@ -11,7 +11,7 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf, recurrenceStopped } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
+import { actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, currentRecurringExecutionOf, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
 import { commentsOf, type TaskComment } from "./comments";
 import { appendCycleLog } from "./cycleLog";
 import { AGENCY_TIMEZONE, agencyToday } from "./time/agency";
@@ -62,6 +62,7 @@ import { deliveryTypeProblem, findType, isDeliveryType, listTaskTypes, type Task
 import { publishedWorkflowForKind } from "./workflows";
 import { advanceFlowAfterUpdate } from "./flows/advance";
 import { flowStepTaskId } from "./flows/ids";
+import { projectParentStatus } from "./flows/parentStatus";
 import { averageProgress, isOverdue, plansInProgress, weekAhead } from "./adminHome";
 import { vaultDelete, vaultRead, vaultSet, vaultUpdate } from "./vault";
 import type { MetaAdAccount } from "./meta";
@@ -1432,6 +1433,17 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
         external_id: typeof payload.external_id === "string" ? payload.external_id : null,
         created_at: "",
         clientName: client?.name ?? "—", clientSlug: client?.slug ?? "",
+        // O molde representa somente o ciclo em aberto mais recente. Nunca
+        // usar o `status` histórico do molde, que pode ter sido criado meses
+        // antes de a execução atual.
+        status: projectParentStatus(
+          task,
+          (() => {
+            const executions = executionsByParent.get(task.id) ?? [];
+            const current = currentRecurringExecutionOf(task.id, executions);
+            return current ? [current] : [];
+          })(),
+        ),
         executions: executionsByParent.get(task.id) ?? [],
       };
     });
@@ -1598,12 +1610,14 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
       ? flowStepsOf(task.id, level1)
       : actionPlanMembersOf(task.id, level1);
     const counted = dedupePlanMembers(members, childrenOfParent);
+    const status = projectParentStatus(task, counted, childrenOfParent);
+    const projectedTask = { ...task, status };
     return {
-      ...task,
+      ...projectedTask,
       clientName: c?.name ?? "Outros",
       clientSlug: c?.slug ?? "",
       typeLabel: labelByKind.get(task.kind) ?? kindLabel(task.kind),
-      progress: taskProgress(task, counted, childrenOfParent),
+      progress: taskProgress(projectedTask, counted, childrenOfParent),
       activities: members.map((member) => ({
         ...member,
         progress: taskProgress(member, childrenOfParent.get(member.id) ?? [], childrenOfParent),
@@ -1861,7 +1875,7 @@ export async function createFlowDelivery(
 }
 
 /** Entrega recorrente. O MOLDE carrega ao mesmo tempo as marcas de fluxo
- * (flow_parent + peso congelado) e as de recorrência (recurrence_group). Cada
+ * (versão de workflow fixada) e as de recorrência (`recurrence_group`). Cada
  * ciclo materializa uma entrega-OCORRÊNCIA própria, que herda as marcas de
  * fluxo do molde e ganha a primeira etapa — então o rollup de progresso sempre
  * lê uma entrega concreta, nunca o molde, e não existe "pai de pai". A
@@ -1939,7 +1953,7 @@ export async function createRecurringFlowDelivery(
  * entrega recorrente que "nasce vazia" (ver lib/flows/advance.ts). Nenhuma
  * regra de cascata nova nasce aqui.
  *
- * Idempotente por construção: um card que já é `flow_parent` volta sem
+ * Idempotente por construção: um card que já é Entrega volta sem
  * mudança nenhuma — promover duas vezes (reenvio, corrida) não duplica etapa
  * nem reescreve o peso congelado.
  */
@@ -2765,7 +2779,7 @@ export async function listPublishedTasks(): Promise<PublishedTask[]> {
     .from("tasks")
     .select(`${TASK_COLUMNS_WITH_ASSIGNEES},clients(name,slug),task_metrics(metrics,source,updated_at)`)
     .eq("status", "aprovado")
-    .eq("kind", "criativo")
+    .eq("kind", "operacional")
     .eq("subtype", "publicacao")
     .order("updated_at", { ascending: false });
   if (error) fail(error);

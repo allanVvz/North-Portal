@@ -1,5 +1,21 @@
 # Changelog
 
+## 18 de setembro de 2026 — projeção canônica de pais e cascata estrita
+
+- Planos agora calculam estado e progresso somente pelos membros: itens podem
+  seguir em paralelo e o estado aberto de maior prioridade domina. A conclusão
+  só aparece quando todos terminam.
+- Entregas e moldes recorrentes não aceitam alteração manual de status. A
+  Entrega nasce com sua primeira Tarefa em Entrada, entra em Produção somente
+  quando ela começa e materializa cada próximo passo em cascata.
+- O banco passou a bloquear elos fora da sequência, troca de classificação após
+  ativação e Entrega sem primeira etapa no commit. O rollup é persistido apenas
+  pela projeção do banco; API e modal usam a mesma regra.
+- Reconciliação preservou os 304 cards existentes. Um único elo futuro inválido
+  de Entrega foi removido, mantendo seu card como Tarefa independente. Nenhum
+  PDF, documento, métrica, execução de automação ou relatório de conversão foi
+  criado nessa correção.
+
 ## 10 de setembro de 2026 — revisão de Fluxos: 4 bugs, um deles derrubava o portal
 
 Branch `fix/fluxos-revisao-e2e`, commits `0efc07c`→`519b7bb`, em produção.
@@ -20,8 +36,8 @@ Branch `fix/fluxos-revisao-e2e`, commits `0efc07c`→`519b7bb`, em produção.
   tipo-comum→Entrega só existia no POST (`createFlowDelivery`); o PATCH não
   tinha equivalente. Dentro de um Plano de Ação a única porta de criação cravava
   `kind: "operacional"`, então quem queria uma Entrega criava a atividade e
-  trocava o Tipo depois — e sobrava um `criativo` pelado, sem `flow_parent`, sem
-  peso congelado, sem etapa. Agora `promoteTaskToFlowDelivery` no PATCH
+  trocava o Tipo depois — e sobrava uma Entrega sem versão de workflow nem
+  etapa. Agora `promoteTaskToFlowDelivery` no PATCH
   (idempotente, reusa a cascata), o composer do plano oferece o vocabulário real
   de tipos, e o caminho inverso é recusado com 400 em vez de deixar etapas
   órfãs. **Backfill aplicado em produção** (migração `20260909180000`): 1 card.
@@ -44,9 +60,8 @@ Branch `fix/fluxos-revisao-e2e`, commits `0efc07c`→`519b7bb`, em produção.
   O status espelhado pode retroceder (a Entrada da segunda etapa); a barra não,
   porque soma casas acumuladas — a segunda entrada é a quinta casa de dezesseis.
 - **Comentário no card pai grava na etapa corrente**, nas duas portas. A do
-  portal do cliente gravava sempre no id da URL, e o caso não é hipotético:
-  `deliveryStatusOnFinish` põe a própria entrega em `aprovacao` quando o cliente
-  é aprovador e não há revisor. A regra virou `lib/flows/commentTarget.ts`, e
+  portal do cliente gravava sempre no id da URL; Entregas agora não recebem
+  aprovação direta e a regra virou `lib/flows/commentTarget.ts`, que
   roda com o client de serviço — a etapa raramente é `client_visible`, então
   lendo os elos com a sessão do cliente a corrente voltaria vazia e o desvio
   silenciosamente não aconteceria.

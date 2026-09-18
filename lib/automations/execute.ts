@@ -78,7 +78,7 @@ export async function materializeOccurrenceForReport(admin: AdminClient, parent:
 }
 
 // Fluxo de feedback DINÂMICO: a Automação 1 materializa a OCORRÊNCIA do ciclo
-// atual e a promove a pai de fluxo (`flow_parent`). As etapas (tráfego,
+// atual e a transforma em Entrega com versão fixada. As etapas (tráfego,
 // feedback) são criadas pelas automações via `ensureFlowStep`, não por um
 // task_type. Modelo LAZY — id determinístico por ciclo; o avanço do molde fica
 // em `advanceFlowMold`, chamado só depois do fill dar certo.

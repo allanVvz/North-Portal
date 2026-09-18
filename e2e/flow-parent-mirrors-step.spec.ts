@@ -5,7 +5,7 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 // ESTRATEGIA-FLUXOS.md — P1-C.
 //
 // Decisão do usuário: o status EXIBIDO da entrega deixa de ser um campo
-// próprio (hoje congelado em `DELIVERY_INITIAL_STATUS = "em_producao"` até a
+// próprio (antes congelado em Produção até a
 // ÚLTIMA etapa fechar — ver `lib/flows/parentStatus.ts` e `settleDelivery` em
 // `lib/flows/advance.ts`) e passa a ESPELHAR a etapa corrente: roteiro em
 // produção → pai em produção; roteiro em revisão → pai em revisão; roteiro
@@ -70,34 +70,13 @@ async function moveStepTo(page: Page, taskId: string, columnLabel: string): Prom
 test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca recua (P1-C)", () => {
   test.setTimeout(180_000);
   let sb: SupabaseClient;
-  let clientId = "";
   let deliveryId = "";
   let roteiroId = "";
 
   const deliveryTitle = `${PREFIX} Entrega espelhada`;
 
-  async function insert(fields: Record<string, unknown>): Promise<string> {
-    const { data, error } = await sb.from("tasks").insert(fields).select("id").single();
-    if (error || !data) throw new Error(`seed falhou: ${error?.message}`);
-    return data.id as string;
-  }
-
-  test.beforeAll(async () => {
+  test.beforeAll(() => {
     sb = serviceClient();
-    const { data: client, error } = await sb.from("clients").select("id").eq("slug", "karpinski").single();
-    if (error || !client) throw new Error(`cliente karpinski não encontrado: ${error?.message}`);
-    clientId = client.id as string;
-
-    deliveryId = await insert({
-      client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
-      status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
-    });
-    roteiroId = await insert({
-      client_id: clientId, kind: "criativo", subtype: "roteiro",
-      title: `${deliveryTitle} — Roteiro`, status: "backlog", position: 10,
-    });
-    const { error: linkErr } = await sb.from("task_links").insert({ parent_id: deliveryId, child_id: roteiroId, slot: "roteiro", position: 10 });
-    if (linkErr) throw new Error(`seed link falhou: ${linkErr.message}`);
   });
 
   test.afterAll(async () => {
@@ -109,6 +88,17 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
 
   test("roteiro percorre a corrente inteira; o pai acompanha e o progresso não recua", async ({ page }) => {
     await login(page);
+    const create = await page.request.post("/api/admin/tasks?scope=task", {
+      data: {
+        slug: "karpinski", title: deliveryTitle, kind: "criativo", subtype: null,
+        status: "backlog", priority: "media",
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+    const firstStep = await create.json();
+    roteiroId = firstStep.id;
+    deliveryId = (firstStep.parents ?? []).find((parent: { relation_kind?: string }) => parent.relation_kind === "workflow_step")?.id ?? "";
+    expect(deliveryId).toBeTruthy();
 
     const readings: { step: string; label: string; pct: number }[] = [];
     async function checkpoint(step: string, expectedLabel: string) {
@@ -119,9 +109,7 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
       expect(label, `status do pai em "${step}"`).toBe(expectedLabel);
     }
 
-    // 0) Recém-criada: roteiro ainda em Entrada. A entrega nasce direto em
-    //    "em_producao" (DELIVERY_INITIAL_STATUS) — aqui é onde o congelamento
-    //    mais destoa do espelhamento pedido.
+    // 0) Recém-criada: roteiro e Entrega estão em Entrada.
     await checkpoint("roteiro em Entrada", "Entrada");
 
     await moveStepTo(page, roteiroId, "Em produção");
@@ -138,7 +126,7 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
     await checkpoint("roteiro Concluído, captação recém-nascida em Entrada", "Entrada");
 
     const { data: captacaoRow, error: captacaoError } = await sb
-      .from("tasks").select("id").eq("client_id", clientId).eq("subtype", "captacao")
+      .from("tasks").select("id").eq("kind", "operacional").eq("subtype", "captacao")
       .like("title", `${deliveryTitle}%`).single();
     if (captacaoError || !captacaoRow) throw new Error(`captação não foi materializada: ${captacaoError?.message}`);
     const captacaoId = captacaoRow.id as string;

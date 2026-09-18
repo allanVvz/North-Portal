@@ -6,6 +6,7 @@ import { requireClientAccess } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { appendedCommentPayload, getAdminTask } from "@/lib/automations/taskAccess";
 import { flowCommentTargetId } from "@/lib/flows/commentTarget";
+import { isFlowDelivery } from "@/lib/taskRelations";
 import { clientApprovalActionSchema, HttpError, validateSlug } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -31,6 +32,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     const { action, comment } = clientApprovalActionSchema.parse(await request.json());
     const task = await getTaskById(id);
     if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
+    if (isFlowDelivery(task)) {
+      throw new HttpError(409, "A Entrega acompanha a etapa atual; aprove ou solicite ajustes nela.");
+    }
     const isOwnApprover = task.approver_id === session.userId;
     const isManager = session.level === "gerente";
     if (session.role === "client" && !isOwnApprover && !isManager) {
@@ -44,15 +48,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     }
     // O comentário do cliente segue a MESMA regra do lado admin: escrito num
     // card de entrega, ele é gravado na ETAPA CORRENTE, não no pai (ver
-    // lib/flows/commentTarget.ts). Não é um caso de canto: quando o cliente é
-    // o aprovador e não há revisor, `deliveryStatusOnFinish` põe a PRÓPRIA
-    // entrega em `aprovacao` — então "Solicitar ajustes" é clicado justamente
-    // sobre uma entrega, e sem este desvio o feedback caía no card pai
-    // enquanto o mesmo texto, escrito pelo admin, ia para a etapa.
+    // lib/flows/commentTarget.ts). A rota recusa alteração de Entrega-pai;
+    // esta proteção ainda cobre links antigos que abram o modal nela.
     //
-    // O STATUS continua sendo do pai: aprovar a entrega é aprovar a entrega.
-    // Só a escrita do comentário é que se desloca — por isso as duas coisas
-    // deixaram de viajar no mesmo `patch`.
+    // O status pertence à etapa. A própria Entrega já foi recusada acima;
+    // só a escrita do comentário pode ser deslocada para a etapa corrente.
     const admin = createAdminClient();
     const commentTargetId = await flowCommentTargetId(admin, task, session.userId);
     let commentAuthor: string | null = null;

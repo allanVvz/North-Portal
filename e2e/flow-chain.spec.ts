@@ -79,7 +79,7 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     // captação soltos — o segundo serve para provar que o slot não aceita dois.
     deliveryId = await insertTask(sb, {
       client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
-      status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
+      status: "backlog", payload: {},
     });
     roteiroId = await insertTask(sb, {
       client_id: clientId, kind: "operacional", subtype: "roteiro",

@@ -54,9 +54,9 @@ Cada linha diz o que foi decidido e por quê. O detalhe de implementação mora 
 
 | Data | Decisão | Por quê | Alternativa descartada |
 |---|---|---|---|
-| 15/09 | Relatórios toda **segunda às 9h** (cron 12:00 UTC), cobrindo segunda a domingo anteriores | Pedido do usuário; o dia da execução não pode entrar pela metade | Período terminando no dia do cron |
+| 17/09 | Relatórios às **08:00 BRT** (cron `0 11 * * *` em UTC), cobrindo o período configurado | Horário canônico da operação; a Entrega e o primeiro relatório permanecem em Entrada até a execução começar | Marcar o parent em produção antes de a primeira etapa iniciar |
 | 15/09 | Ocorrência do fluxo usa o ciclo seguinte ao do molde | O ciclo atual colidia com a ocorrência do modo normal da semana anterior | — |
-| 15/09 | Comentário de feedback com **modelo** e parser determinístico; IA só como fallback opcional (`COMMENT_AI_FALLBACK=1`) | OpenAI devolvia 404 (organização não verificada) e a semana virava "não informado"; custo zero | IA lendo texto livre como caminho padrão |
+| 17/09 | Comentário de Feedback usa **modelo** e parser determinístico; OpenAI é fallback opcional e explícito (`COMMENT_AI_FALLBACK=1`) | A automação normal não depende de IA. A credencial OpenAI é o único provider acionável hoje e sua falha nunca aprova, conclui ou duplica dados | IA lendo texto livre como caminho padrão ou fallback obrigatório |
 | 15/09 | Comentário fora do modelo recebe resposta com o modelo, uma vez por comentário | Fechar como "não informado" diria que ninguém respondeu | Fechar a semana com nulos |
 | 15/09 | Fluxo de exemplo (`payload.report_example`) não grava `task_metrics` | Números ilustrativos apareceriam como resultado real em Performance | — |
 | 14/09 | Gatilho do parser barato: R$ 10 devem gerar mais de 60 relatórios | Teto de custo explícito | — |
@@ -69,5 +69,6 @@ Par da semana sem IA ≈ US$ 0,0002 (≈ R$ 0,001). Com a IA lendo o comentário
 ## Pendências conhecidas
 
 - Resumo da automação no card escreve "Receita: 4100" sem formato de moeda.
-- IA de fallback só depois de a organização OpenAI ser verificada.
+- Aprovação determinística do Feedback por comentário de revisor (hoje a
+  aprovação continua manual).
 - Atribuição de receita por fonte no relatório de anúncios (hoje só no de resultados).

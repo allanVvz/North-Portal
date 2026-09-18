@@ -64,7 +64,7 @@ test.describe("Comentário no pai grava na etapa corrente (P1-D)", () => {
 
     deliveryId = await insert({
       client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
-      status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
+      status: "backlog", payload: {},
     });
     // Roteiro já aprovado (completed_at carimbado pelo trigger) — não é mais
     // a etapa corrente, e um comentário no pai não pode cair nele.
@@ -152,7 +152,7 @@ test.describe("Papel vence a corrente por posição no roteamento de comentário
 
     deliveryId = await insert({
       client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
-      status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
+      status: "backlog", payload: {},
     });
     // Captação: mais antiga por posição e ainda aberta — é ela que o fallback
     // por posição pura (currentFlowStepOf) escolheria, e é exatamente o card
@@ -230,7 +230,7 @@ test.describe("A caixa de família particiona Plano + Etapas quando a entrega é
     planoId = await insert({ client_id: clientId, kind: "plano_acao", title: planoTitle, status: "em_producao", payload: {} });
     deliveryId = await insert({
       client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
-      status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
+      status: "backlog", payload: {},
     });
     roteiroId = await insert({
       client_id: clientId, kind: "criativo", subtype: "roteiro",

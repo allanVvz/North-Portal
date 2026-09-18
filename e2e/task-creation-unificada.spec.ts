@@ -6,8 +6,8 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 // idêntico em toda tela; o que nasce é decidido pelo TIPO escolhido no modal.
 //
 // O backend (`POST /api/admin/tasks?scope=`) sempre foi a porta única; a novidade
-// é `scope=flow-step`: escolher um subtipo de Entrega em vez de "Fluxo completo"
-// cria SÓ aquele card, solto. Cada asserção aqui trava um caminho do modal.
+// é a separação de responsabilidades: escolher Entrega cria a corrente;
+// escolher uma Tarefa com subtipo cria só aquele card, solto.
 
 const RUN = Date.now();
 const PREFIX = `[e2e ${RUN}]`;
@@ -65,28 +65,28 @@ test.describe("Criação de tarefa unificada", () => {
     const step = await res.json();
     created.push(step.id);
 
-    // A resposta é a primeira ETAPA; o pai é uma entrega (flow_parent) ligada por slot.
+    // A resposta é a primeira ETAPA; o pai é uma Entrega ligada ao passo persistido.
     const parentId = (step.parents ?? []).find((p: { id: string }) => p.id)?.id;
     expect(parentId).toBeTruthy();
     created.push(parentId);
-    const { data: parent } = await sb.from("tasks").select("payload,kind").eq("id", parentId).single();
-    expect(parent?.payload?.flow_parent).toBe(true);
-    const { data: links } = await sb.from("task_links").select("slot").eq("parent_id", parentId);
-    expect((links ?? []).some((l) => l.slot)).toBeTruthy();
+    const { data: parent } = await sb.from("tasks").select("workflow_version_id,kind").eq("id", parentId).single();
+    expect(parent?.workflow_version_id).toBeTruthy();
+    const { data: links } = await sb.from("task_links").select("workflow_step_id").eq("parent_id", parentId);
+    expect((links ?? []).some((l) => l.workflow_step_id)).toBeTruthy();
   });
 
-  test("scope=flow-step cria só o card da etapa, sem entrega-pai", async ({ page }) => {
+  test("Tarefa com subtipo cria só o card executável, sem Entrega-pai", async ({ page }) => {
     await login(page);
-    const res = await page.request.post("/api/admin/tasks?scope=flow-step", {
-      data: { title: `${PREFIX} Só a edição`, kind: "criativo", subtype: "edicao", status: "backlog", priority: "media" },
+    const res = await page.request.post("/api/admin/tasks?scope=task", {
+      data: { title: `${PREFIX} Só a edição`, kind: "operacional", subtype: "edicao", status: "backlog", priority: "media" },
     });
     expect(res.ok()).toBeTruthy();
     const card = await res.json();
     created.push(card.id);
 
-    expect(card.kind).toBe("criativo");
+    expect(card.kind).toBe("operacional");
     expect(card.subtype).toBe("edicao");
-    expect(card.payload?.flow_parent ?? false).toBe(false);
+    expect(card.workflow_version_id).toBeNull();
     expect((card.parents ?? []).length).toBe(0);
     // Nenhum elo — nasce solto, para ser vinculado depois pelo botão de corrente.
     const { data: links } = await sb.from("task_links").select("id").eq("child_id", card.id);
@@ -124,7 +124,7 @@ test.describe("Criação de tarefa unificada", () => {
     await expect(recToggle).not.toBeChecked();
   });
 
-  test("Entrega pode ser recorrente: molde vira flow_parent + recurrence_group, ocorrência tem etapa", async ({ page }) => {
+  test("Entrega pode ser recorrente: molde fixa a versão + recurrence_group, ocorrência tem etapa", async ({ page }) => {
     await login(page);
     const res = await page.request.post("/api/admin/tasks?scope=task", {
       data: {
@@ -148,31 +148,26 @@ test.describe("Criação de tarefa unificada", () => {
     expect(occurrenceId).toBeTruthy();
     created.push(occurrenceId);
 
-    const { data: occurrence } = await sb.from("tasks").select("payload,kind,plan_id").eq("id", occurrenceId).single();
-    expect(occurrence?.payload?.flow_parent).toBe(true);
+    const { data: occurrence } = await sb.from("tasks").select("workflow_version_id,kind,plan_id").eq("id", occurrenceId).single();
+    expect(occurrence?.workflow_version_id).toBeTruthy();
     const templateId = occurrence?.plan_id as string;
     expect(templateId).toBeTruthy();
     created.push(templateId);
 
-    const { data: template } = await sb.from("tasks").select("payload,kind,recurrence_cadence,recurrence_weekdays").eq("id", templateId).single();
+    const { data: template } = await sb.from("tasks").select("payload,kind,workflow_version_id,recurrence_cadence,recurrence_weekdays").eq("id", templateId).single();
     expect(template?.kind).toBe("criativo");
-    expect(template?.payload?.flow_parent).toBe(true);
+    expect(template?.workflow_version_id).toBeTruthy();
     expect(template?.payload?.recurrence_group).toBe(true);
     expect(template?.recurrence_cadence).toBe("semanal");
     // Dia-da-semana ausente → fixado no dia da data de início (segunda = 1).
     expect(template?.recurrence_weekdays).toEqual([1]);
   });
 
-  test("scope=flow-step exige um subtipo e um tipo-entrega", async ({ page }) => {
+  test("uma Entrega não aceita subtipo de Tarefa", async ({ page }) => {
     await login(page);
-    const semSubtipo = await page.request.post("/api/admin/tasks?scope=flow-step", {
-      data: { title: `${PREFIX} inválida`, kind: "criativo", subtype: null, status: "backlog", priority: "media" },
+    const comSubtipo = await page.request.post("/api/admin/tasks?scope=task", {
+      data: { title: `${PREFIX} inválida`, kind: "criativo", subtype: "edicao", status: "backlog", priority: "media" },
     });
-    expect(semSubtipo.status()).toBe(400);
-
-    const naoEntrega = await page.request.post("/api/admin/tasks?scope=flow-step", {
-      data: { title: `${PREFIX} inválida 2`, kind: "operacional", subtype: "gestao", status: "backlog", priority: "media" },
-    });
-    expect(naoEntrega.status()).toBe(400);
+    expect(comSubtipo.status()).toBe(400);
   });
 });

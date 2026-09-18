@@ -4,28 +4,51 @@ import { currentFlowStepOf } from "./currentStep";
 import {
   DELIVERY_INITIAL_STATUS,
   deliveryIsFinished,
-  deliveryStatusOnFinish,
   mirroredParentAssignee,
   mirroredParentDate,
   mirroredParentStatus,
+  projectParentStatus,
+  type ParentStatusTask,
 } from "./parentStatus";
 
 describe("ciclo de vida do card-entrega", () => {
-  it("nasce em produção — ela não aparece no quadro para alguém arrastar", () => {
-    expect(DELIVERY_INITIAL_STATUS).toBe("em_producao");
+  it("nasce em Entrada junto da primeira etapa", () => {
+    expect(DELIVERY_INITIAL_STATUS).toBe("backlog");
+  });
+});
+
+describe("projectParentStatus — uma regra para Plano, Entrega e Rotina", () => {
+  let sequence = 0;
+  const child = (status: TaskStatus, completed = status === "aprovado") => ({
+    id: `child-${sequence++}`, kind: "operacional", status, completed_at: completed ? "2026-09-01T00:00:00Z" : null,
+    workflow_version_id: null, workflow_version: null, recurrence_cadence: null, payload: {},
+  });
+  const plan = { ...child("backlog", false), kind: "plano_acao" };
+
+  it("prioriza a pendência operacional mais relevante de itens paralelos", () => {
+    expect(projectParentStatus<ParentStatusTask>(plan, [child("backlog"), child("em_producao")])).toBe("em_producao");
+    expect(projectParentStatus<ParentStatusTask>(plan, [child("aprovacao"), child("revisao")])).toBe("revisao");
+    expect(projectParentStatus<ParentStatusTask>(plan, [child("parada"), child("revisao")])).toBe("parada");
   });
 
-  // Revisão antes de Aprovação porque as duas etapas têm donos diferentes:
-  // revisor é interno, aprovador é o cliente. Ir direto para Aprovação
-  // colocaria na frente do cliente material que ninguém da North olhou.
-  it("entra no funil de conferência se houver quem confira", () => {
-    expect(deliveryStatusOnFinish({ reviewer_id: "rev", approver_id: "apr" })).toBe("revisao");
-    expect(deliveryStatusOnFinish({ reviewer_id: null, approver_id: "apr" })).toBe("aprovacao");
-    expect(deliveryStatusOnFinish({ reviewer_id: "rev", approver_id: null })).toBe("revisao");
+  it("só conclui o plano quando todos os itens concluíram", () => {
+    expect(projectParentStatus<ParentStatusTask>(plan, [child("aprovado"), child("aprovado")])).toBe("aprovado");
+    expect(projectParentStatus<ParentStatusTask>(plan, [child("aprovado"), child("backlog")])).toBe("backlog");
+    expect(projectParentStatus<ParentStatusTask>({ ...plan, status: "aprovado" }, [])).toBe("backlog");
   });
 
-  it("encerra direto quando não há revisor nem aprovador", () => {
-    expect(deliveryStatusOnFinish({ reviewer_id: null, approver_id: null })).toBe("aprovado");
+  it("uma entrega espelha exclusivamente a etapa corrente", () => {
+    const delivery = {
+      ...child("backlog", false), kind: "criativo", workflow_version_id: "workflow-v1",
+      workflow_version: { id: "workflow-v1", workflow_version_steps: [{ id: "one", progress_weight: 1 }, { id: "two", progress_weight: 1 }] },
+    };
+    expect(projectParentStatus<ParentStatusTask>(delivery, [child("aprovado"), child("revisao")])).toBe("revisao");
+    expect(projectParentStatus<ParentStatusTask>(delivery, [child("aprovado")])).toBe("backlog");
+  });
+
+  it("rotina ignora histórico concluído e usa a ocorrência aberta atual", () => {
+    const routine = { ...child("backlog", false), recurrence_cadence: "semanal" as const, payload: { recurrence_group: true } };
+    expect(projectParentStatus<ParentStatusTask>(routine, [child("aprovado"), child("em_producao")])).toBe("em_producao");
   });
 });
 

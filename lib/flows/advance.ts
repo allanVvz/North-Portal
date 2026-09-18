@@ -22,7 +22,6 @@ import { notifyFromAutomation } from "@/lib/automations/notify";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { isFlowDelivery } from "@/lib/taskRelations";
 import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
-import { deliveryStatusOnFinish } from "./parentStatus";
 import type { TaskRecord } from "@/lib/validation";
 import { flowStepFields, todayIso } from "./stepFields";
 import { flowStepTaskId } from "./ids";
@@ -203,7 +202,7 @@ export async function ensureWorkflowStep(
  */
 export async function settleWorkflowDelivery(admin: AdminClient, parentId: string, actorId: string | null = null): Promise<boolean> {
   const parent = await getAdminTask(admin, parentId);
-  if (!parent || parent.completed_at || !isFlowDelivery(parent)) return false;
+  if (!parent || !isFlowDelivery(parent)) return false;
   if (!parent.workflow_version_id) return false;
   const workflow = await workflowByVersionId(admin, parent.workflow_version_id);
   if (!workflow?.steps.length) return false;
@@ -216,10 +215,10 @@ export async function settleWorkflowDelivery(admin: AdminClient, parentId: strin
   const completedSteps = (data ?? []) as { completed_at: string | null }[];
   if (!completedSteps.every((step) => Boolean(step.completed_at))) return false;
 
-  const nextStatus = parent.kind === "automacao" ? "aprovado" : deliveryStatusOnFinish(parent);
-  if (parent.status === nextStatus) return false;
-  const { error: updateError } = await admin.from("tasks").update({ status: nextStatus }).eq("id", parentId);
-  if (updateError) throw updateError;
+  // O banco projeta a conclusão do pai a partir de todas as etapas declaradas.
+  // Não escrever `tasks.status` aqui: uma escrita direta concorreria com essa
+  // projeção e faria Entregas com revisores ganharem um funil extra depois da
+  // última etapa, contrariando a cascata canônica.
   await notifyFromAutomation(admin, parentId, "task_status_changed", `"${parent.title}" foi concluído.`, actorId);
   return true;
 }

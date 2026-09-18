@@ -6,7 +6,7 @@ describe("flowDemotionProblem", () => {
     expect(flowDemotionProblem({ title: "Tarefa", payload: {}, workflow_version_id: null })).toBeNull();
   });
 
-  it("recusa despromover uma entrega (flow_parent) com um erro legível", () => {
+  it("recusa despromover uma Entrega versionada com um erro legível", () => {
     const problem = flowDemotionProblem({ title: 'Post "Evento 19/09"', payload: {}, workflow_version_id: "workflow-v1" });
     expect(problem).not.toBeNull();
     expect(problem).toContain("Evento 19/09");

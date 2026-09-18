@@ -16,8 +16,8 @@ determinístico (receitas); no roadmap (R4.11) um modelo lê este mesmo texto.
 |---|---|
 | Cliente | `clients` (slug é a URL do portal: `/<slug>`) |
 | Tarefa / demanda | card em `tasks`, tipo `operacional` ("Tarefa") |
-| Entrega / fluxo em cascata | card com `payload.flow_parent = true`, tipo com `behavior = 'entrega'`; cada etapa concluída cria a próxima (`lib/flows/advance.ts`) |
-| Etapa | card filho materializado da entrega; `relation_kind = 'workflow_step'`, com `slot` apenas como papel e ordem da etapa. Pode alimentar mais de uma Entrega quando o trabalho é realmente compartilhado. |
+| Entrega / fluxo em cascata | card com `workflow_version_id` e subtipo de Entrega; cada etapa concluída cria a próxima (`lib/flows/advance.ts`). O estado do pai é a projeção da etapa aberta. |
+| Etapa | Tarefa-filho materializada da Entrega; `relation_kind = 'workflow_step'` e `workflow_step_id` são a identidade e ordem da etapa. Pode alimentar mais de uma Entrega quando o trabalho é realmente compartilhado. |
 | Plano de ação | card `kind = 'plano_acao'`; atividades são membros estruturais (`relation_kind = 'structural_member'`). Cada card tem no máximo um pai estrutural. |
 | Rotina / recorrência | card molde com `recurrence_cadence` (`semanal`, `quinzenal`, `mensal`); cada ciclo concluído registra `payload.cycle_log` (data e quem) |
 | Diária de gravação | um roteiro e uma captação compartilhados por várias entregas (`lib/flows/shootDayRows.ts`) |

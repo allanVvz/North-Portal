@@ -266,7 +266,7 @@ async function runOneReportAutomation(
     try {
       const { fileName, url } = await fillReportCard(admin, card1, target, config, windsor, meta, today, occ.id);
       // Tudo o que o gestor vê vai na ETAPA `trafego` (visível no quadro); a
-      // ocorrência (flow_parent) é só o contêiner e não aparece em tela. O sinal
+      // A ocorrência é só o contêiner versionado e não aparece no quadro. O sinal
       // para a Automação 2 não é mais um marcador no payload: é a linha em
       // traffic_reports e o status dela.
       const { error: c1Error } = await admin

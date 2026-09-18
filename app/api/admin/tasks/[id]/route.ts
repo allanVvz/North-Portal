@@ -86,6 +86,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
+    // Plano, Entrega e molde recorrente não têm status editável: ele é a
+    // projeção dos cards abaixo. Aceitar o PATCH criaria outra fonte de verdade
+    // e voltaria a produzir pais congelados em Produção.
+    if (patch.status !== undefined && (isFlowDelivery(current) || current.kind === "plano_acao" || Boolean(current.recurrence_cadence))) {
+      throw new HttpError(409, "O status deste card-pai acompanha seus itens; altere a atividade atual.");
+    }
     const explicitDates = normalizeOccurrenceDates(patch.payload?.[EXPLICIT_DATES_KEY]);
     if (!current.recurrence_cadence && !recurrenceParentIdOf(current) && explicitDates.length > 1) {
       const rule = inferDateGroupRule(explicitDates);
@@ -154,7 +160,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // CRIAÇÃO (createFlowDelivery); o PATCH não tinha nada parecido, e trocar
     // o Tipo de uma atividade de plano para uma Entrega deixava o card com
     // `kind=criativo` e mais nada — confirmado em produção (card `04331233`,
-    // pelado: sem flow_parent, sem peso congelado, sem etapa). `baseTask` é o
+    // pelado: sem versão de workflow e sem etapa). `baseTask` é o
     // que `updateTaskGroup` abaixo vê como "current": depois da promoção ele
     // já reflete o status/payload novos, senão o resto deste mesmo patch
     // rotearia contra o card pré-promoção.

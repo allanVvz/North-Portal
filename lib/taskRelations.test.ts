@@ -5,6 +5,7 @@ import {
   childrenByParent,
   childrenOf,
   clientVisibleInOps,
+  currentRecurringExecutionOf,
   detachedRecurrencePatch,
   flowStepKeyOf,
   hasParent,
@@ -85,7 +86,7 @@ describe("relações de tarefa (task_links)", () => {
   const roteiro = { parents: [elo("entrega-a", "roteiro"), elo("entrega-b", "roteiro")] };
   const avulsa = { parents: [] };
 
-  it("mantém a leitura dos múltiplos donos legados até a reconciliação", () => {
+  it("mantém a leitura dos múltiplos consumidores de uma etapa compartilhada", () => {
     expect(parentIdsOf(roteiro)).toEqual(["entrega-a", "entrega-b"]);
     expect(hasParent(roteiro, "entrega-b")).toBe(true);
     expect(hasParent(avulsa, "entrega-a")).toBe(false);
@@ -103,6 +104,15 @@ describe("relações de tarefa (task_links)", () => {
     expect(slotOf(compartilhado, "p1")).toBe("roteiro");
     expect(slotOf(compartilhado, "p2")).toBeNull();
     expect(slotOf(compartilhado, "inexistente")).toBeNull();
+  });
+
+  it("usa somente a execução aberta mais recente de uma rotina", () => {
+    const tasks = [
+      { payload: { recurrence_parent_id: "routine" }, completed_at: "2026-09-01T12:00:00Z", due_date: "2026-09-01", created_at: "2026-09-01T00:00:00Z" },
+      { payload: { recurrence_parent_id: "routine" }, completed_at: null, due_date: "2026-09-08", created_at: "2026-09-08T00:00:00Z" },
+      { payload: { recurrence_parent_id: "routine" }, completed_at: null, due_date: "2026-09-15", created_at: "2026-09-15T00:00:00Z" },
+    ];
+    expect(currentRecurringExecutionOf("routine", tasks)).toBe(tasks[2]);
   });
 
   it("referência compartilhada não vira pertencimento nem entra no rollup", () => {
@@ -223,28 +233,25 @@ describe("resiliência a `parents` ausente (card não hidratado, ver P0-A)", () 
 });
 
 describe("entregas de fluxo", () => {
-  // A etapa que um card É vem do próprio subtipo: os subtipos de um
-  // tipo-entrega SÃO as etapas dele, sem segunda lista para sincronizar.
-  it("lê a etapa a partir do subtipo do card", () => {
+  // O papel vem do passo versionado no elo; o subtipo continua pertencendo à
+  // Tarefa executável, e não à Entrega.
+  it("lê a etapa a partir do passo versionado no elo", () => {
     expect(flowStepKeyOf({ parents: [{ id: "p1", relation_kind: "workflow_step", workflow_step_id: "step-captacao", slot: "captacao", position: 20 }] })).toBe("step-captacao");
     expect(flowStepKeyOf({ parents: [] })).toBeNull();
   });
 
-  // Marca explícita, e não inferida do tipo: há cards `criativo` legados que
-  // são trabalho comum e não podem virar pais de uma hora para outra.
-  it("reconhece a entrega pela marca no payload, não pelo tipo", () => {
+  it("reconhece a Entrega pela versão de workflow, não por payload", () => {
     expect(isFlowDelivery({ workflow_version_id: "workflow-v1" })).toBe(true);
     expect(isFlowDelivery({ workflow_version_id: null })).toBe(false);
   });
 
   it("mantém a entrega fora do quadro Tarefas e a etapa dentro", () => {
     const entrega = { kind: "criativo", recurrence_cadence: null, workflow_version_id: "workflow-v1", payload: {} } as const;
-    const etapa = { kind: "criativo", recurrence_cadence: null, workflow_version_id: null, payload: {} } as const;
-    const legado = { kind: "criativo", recurrence_cadence: null, workflow_version_id: null, payload: {} } as const;
+    const etapa = { kind: "operacional", recurrence_cadence: null, workflow_version_id: null, payload: {} } as const;
+    const tarefa = { kind: "operacional", recurrence_cadence: null, workflow_version_id: null, payload: {} } as const;
     expect(belongsToTaskScreen(entrega)).toBe(false);
     expect(belongsToTaskScreen(etapa)).toBe(true);
-    // O card criativo antigo continua sendo trabalho comum no quadro.
-    expect(belongsToTaskScreen(legado)).toBe(true);
+    expect(belongsToTaskScreen(tarefa)).toBe(true);
   });
 
   it("mantém plano e pai recorrente fora do quadro, como antes", () => {

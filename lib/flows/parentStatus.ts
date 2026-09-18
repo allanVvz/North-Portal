@@ -5,25 +5,11 @@
 
 import type { TaskRecord, TaskStatus } from "@/lib/validation";
 
-/** Uma entrega existe porque o trabalho começou — ela nasce direto em produção,
- * em vez de esperar em Entrada por um arrasto que ninguém vai dar (ela nem
- * aparece no quadro). */
-export const DELIVERY_INITIAL_STATUS: TaskStatus = "em_producao";
-
-/**
- * Para onde a entrega vai quando a ÚLTIMA etapa é concluída.
- *
- * Entra no funil de conferência se houver quem confira, e encerra se não
- * houver. Revisão antes de Aprovação porque as duas etapas existem e têm donos
- * diferentes — revisor é interno, aprovador é o cliente —, então mandar tudo
- * direto para Aprovação pularia a revisão da North e colocaria na frente do
- * cliente material que ninguém olhou.
- */
-export function deliveryStatusOnFinish(delivery: Pick<TaskRecord, "reviewer_id" | "approver_id">): TaskStatus {
-  if (delivery.reviewer_id) return "revisao";
-  if (delivery.approver_id) return "aprovacao";
-  return "aprovado";
-}
+/** Uma Entrega existe antes de o trabalho começar: pai e primeira etapa nascem
+ * em Entrada, e a projeção acompanha a etapa somente quando ela é iniciada. */
+// A Entrega e sua primeira etapa nascem juntas em Entrada. O pai só acompanha
+// Produção quando alguém (ou o cron) realmente inicia a etapa corrente.
+export const DELIVERY_INITIAL_STATUS: TaskStatus = "backlog";
 
 /** A entrega só encerra quando todas as etapas do molde existem E terminaram.
  * Uma etapa que ainda não nasceu conta como pendente — é o mesmo motivo pelo
@@ -65,6 +51,102 @@ export function mirroredParentStatus<T extends Pick<TaskRecord, "status">>(
   currentStep: T | null,
 ): TaskStatus | null {
   return currentStep?.status ?? null;
+}
+
+/**
+ * Regra única para o estado apresentado por qualquer card-pai.
+ *
+ * Entrega é serial: a primeira etapa ainda aberta é a corrente. Plano é
+ * paralelo: uma pendência de maior prioridade operacional domina o conjunto.
+ * Rotina recebe a ocorrência aberta mais recente como `members`, então o
+ * histórico concluído não contamina o ciclo que está acontecendo agora.
+ *
+ * O percentual continua em `taskProgress`; estado e percentual não são a
+ * mesma régua. Este resolvedor existe para não deixar cada tela voltar a ler o
+ * `tasks.status` antigo do pai e divergir do seu próprio conteúdo.
+ */
+export type ParentStatusTask = Pick<
+  TaskRecord,
+  "id" | "kind" | "status" | "completed_at" | "workflow_version_id" | "workflow_version" | "recurrence_cadence" | "payload"
+>;
+
+const OPEN_STATUS_PRIORITY: readonly TaskStatus[] = [
+  "parada",
+  "revisao",
+  "aprovacao",
+  "em_producao",
+  "backlog",
+];
+
+function isDelivery(task: ParentStatusTask): boolean {
+  return Boolean(task.workflow_version_id) && task.payload?.recurrence_group !== true;
+}
+
+function isRollup(task: ParentStatusTask): boolean {
+  return isDelivery(task) || task.kind === "plano_acao" || Boolean(task.recurrence_cadence);
+}
+
+function latestOpenOccurrence<T extends ParentStatusTask>(members: readonly T[]): T | null {
+  const open = members.filter((member) => !member.completed_at);
+  if (!open.length) return null;
+  // `due_date` is intentionally not required here: callers that do not have
+  // it still get deterministic order from their already ordered member list.
+  return open[open.length - 1] ?? null;
+}
+
+function combineOpenStatuses(statuses: readonly TaskStatus[]): TaskStatus {
+  for (const candidate of OPEN_STATUS_PRIORITY) {
+    if (statuses.includes(candidate)) return candidate;
+  }
+  return "aprovado";
+}
+
+/** Projects a parent state strictly from its descendants. */
+export function projectParentStatus<T extends ParentStatusTask>(
+  parent: T,
+  members: readonly T[] = [],
+  membersByParent?: ReadonlyMap<string, readonly T[]>,
+  seen = new Set<string>(),
+): TaskStatus {
+  if (parent.id && seen.has(parent.id)) return "backlog";
+  if (parent.id) seen.add(parent.id);
+
+  if (isDelivery(parent)) {
+    const current = currentStep(members);
+    if (current) return current.status;
+    const declared = parent.workflow_version?.workflow_version_steps.length ?? 0;
+    return declared > 0 && members.length >= declared && members.every((member) => Boolean(member.completed_at))
+      ? "aprovado"
+      : "backlog";
+  }
+
+  const effectiveMembers = parent.recurrence_cadence && parent.payload?.recurrence_group === true
+    ? (() => {
+        const current = latestOpenOccurrence(members);
+        return current ? [current] : [];
+      })()
+    : members;
+
+  // An active parent without a current child is waiting for its first item. A
+  // terminal routine is the only exception: it is intentionally stopped or
+  // ended. Plan/Delivery state is never inherited from an old stored value.
+  if (!effectiveMembers.length) {
+    const isRecurringTemplate = Boolean(parent.recurrence_cadence) && parent.payload?.recurrence_group === true;
+    return isRecurringTemplate && (parent.status === "parada" || parent.status === "aprovado")
+      ? parent.status
+      : "backlog";
+  }
+
+  const statuses = effectiveMembers.map((member) => {
+    if (!isRollup(member)) return member.status;
+    return projectParentStatus(member, membersByParent?.get(member.id) ?? [], membersByParent, seen);
+  });
+  return combineOpenStatuses(statuses);
+}
+
+function currentStep<T extends ParentStatusTask>(steps: readonly T[]): T | null {
+  if (!steps.length) return null;
+  return steps.find((step) => !step.completed_at) ?? null;
 }
 
 /** Mesma ideia de `mirroredParentStatus`, para as datas — o pai não tem data

@@ -54,14 +54,12 @@ describe("catálogo canônico de tipos", () => {
     expect(TASK_KIND_KEYS).not.toContain("gravacao");
   });
 
-  it("converte classificações legadas — inclusive os tipos aposentados", () => {
-    expect(canonicalTaskClassification("publicacao_recorrente")).toEqual({ kind: "criativo", subtype: null });
-    expect(canonicalTaskClassification("roteiro")).toEqual({ kind: "operacional", subtype: "roteiro" });
-    expect(canonicalTaskClassification("gravacao")).toEqual({ kind: "operacional", subtype: "gravacao" });
-    // Os dois tipos removidos: linha antiga não pode renderizar crua entre o
-    // deploy e a migração, nem depois se alguma escapar.
-    expect(canonicalTaskClassification("agendamento", "gravacao")).toEqual({ kind: "operacional", subtype: "gravacao" });
-    expect(canonicalTaskClassification("planejamento")).toEqual({ kind: "operacional", subtype: null });
+  it("não adapta classificações legadas silenciosamente", () => {
+    // O corte de banco já converteu todas as linhas. Uma corrupção futura deve
+    // ficar visível para reparo, não virar outro card ao ser aberto na UI.
+    expect(canonicalTaskClassification("publicacao_recorrente")).toEqual({ kind: "publicacao_recorrente", subtype: null });
+    expect(canonicalTaskClassification("roteiro")).toEqual({ kind: "roteiro", subtype: null });
+    expect(canonicalTaskClassification("agendamento", "gravacao")).toEqual({ kind: "agendamento", subtype: "gravacao" });
   });
 
   // 2026-09-13: um kind desconhecido (ex.: um tipo criado só pela tela de

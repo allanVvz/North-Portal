@@ -10,12 +10,11 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 // `kind: "operacional"` cravado; o usuário então troca o Tipo para Entrega no
 // modal aberto → isso vira um PATCH comum, que hoje só troca a coluna `kind` e
 // não materializa nada — reproduzindo a linha real de produção
-// (`04331233`: kind=criativo, flow_parent=NULL, sem etapa nenhuma).
+// (`04331233`: card criativo sem versão de workflow e sem etapa nenhuma).
 //
 // A correção esperada (item 2 de P0-B): um PATCH que muda `kind` de um tipo
 // comum para um tipo `behavior:'entrega'` PROMOVE o card em vez de só trocar
-// a coluna — marca `flow_parent`, congela `flow_total_weight`/`flow_step_count`
-// e materializa a primeira etapa (mesma forma que `createFlowDelivery`), de
+// a coluna — fixa uma versão de workflow e materializa a primeira etapa, de
 // modo IDEMPOTENTE.
 //
 // Este spec espera FALHAR até essa promoção existir: hoje o PATCH abaixo
@@ -82,7 +81,7 @@ test.describe("Entrega nasce igual, criada por dentro do plano ou pelo botão de
     await sb.from("tasks").delete().like("title", `${PREFIX}%`);
   });
 
-  test("PATCH que troca o Tipo para Entrega promove o card (marca de fluxo + 1ª etapa), sem duplicar ao repetir", async ({ page }) => {
+  test("PATCH que troca o Tipo para Entrega fixa a versão + 1ª etapa, sem duplicar ao repetir", async ({ page }) => {
     await login(page);
 
     // É exatamente a sequência do bug real: atividade comum, depois o Tipo é
@@ -93,16 +92,12 @@ test.describe("Entrega nasce igual, criada por dentro do plano ou pelo botão de
     expect(res.ok()).toBeTruthy();
     const promoted = await res.json();
 
-    // As marcas que `createFlowDelivery` grava — congeladas, não recalculadas
-    // a cada leitura.
-    expect(promoted.payload?.flow_parent).toBe(true);
-    expect(typeof promoted.payload?.flow_total_weight).toBe("number");
-    expect(promoted.payload?.flow_total_weight).toBeGreaterThan(0);
-    expect(promoted.status).toBe("em_producao"); // DELIVERY_INITIAL_STATUS
+    expect(promoted.workflow_version_id).toBeTruthy();
+    expect(promoted.status).toBe("backlog");
 
-    const { data: links } = await sb.from("task_links").select("child_id,slot,position").eq("parent_id", atividadeId);
+    const { data: links } = await sb.from("task_links").select("child_id,workflow_step_id,slot,position").eq("parent_id", atividadeId);
     expect(links).toHaveLength(1);
-    expect(links?.[0]?.slot).toBeTruthy();
+    expect(links?.[0]?.workflow_step_id).toBeTruthy();
 
     // O elo com o PLANO continua — ele apontava para este id desde o início, e
     // a promoção é in-place (não troca o id do card).
@@ -132,9 +127,9 @@ test.describe("Entrega nasce igual, criada por dentro do plano ou pelo botão de
     expect(entregaDiretaId).toBeTruthy();
     created.push(entregaDiretaId);
 
-    const { data: entrega } = await sb.from("tasks").select("payload,status").eq("id", entregaDiretaId).single();
-    expect(entrega?.payload?.flow_parent).toBe(true);
-    expect(entrega?.status).toBe("em_producao");
+    const { data: entrega } = await sb.from("tasks").select("workflow_version_id,status").eq("id", entregaDiretaId).single();
+    expect(entrega?.workflow_version_id).toBeTruthy();
+    expect(entrega?.status).toBe("backlog");
   });
 
   test("as duas entregas mostram a mesma caixa de Etapas no modal (mesma fração, mesmo peso congelado)", async ({ page }) => {

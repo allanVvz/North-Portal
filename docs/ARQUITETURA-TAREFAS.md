@@ -3,8 +3,8 @@
 ## Contrato canônico
 
 `public.tasks` continua sendo a única tabela de cards. A classificação
-persistida é `tasks.task_type_id`; `kind/subtype` existem apenas como projeção
-de compatibilidade durante o corte.
+persistida é `tasks.task_type_id`; `kind/subtype` são projeções de leitura para
+as superfícies existentes, nunca entrada estrutural para workflows.
 
 ```text
 task_types
@@ -44,18 +44,31 @@ na versão que recebeu ao nascer.
   desabilita o controle, a API devolve `409` e o banco impede bypass.
 - Conclusão compara os cards ligados com todos os passos declarados na versão;
   a ausência de um passo nunca significa conclusão.
-- `payload.flow_parent`, `automation_flow`, `flow_step_count`,
-  `flow_total_weight` e `flow_step_key` não carregam estrutura.
+- Nenhuma chave legada de `payload` carrega estrutura de workflow.
 - Não existe `relation_kind = família`. `structural_member`, `workflow_step`,
   `reference` e `dependency` mantêm seus papéis explícitos.
 
 ## Estado, prazo e progresso
 
 A Entrega é um rollup mecânico. Seu progresso usa o peso de todos os passos da
-versão, inclusive os ainda não materializados. O estado reflete a ação aberta
-mais importante. O prazo é o último prazo previsto do workflow; na Automação,
+versão, inclusive os ainda não materializados. Ela e a primeira etapa nascem
+em `Entrada`; só entram em `Em produção` quando essa etapa é iniciada. O estado
+é persistido exclusivamente como projeção da etapa aberta e não é editável. O
+prazo é o último prazo previsto do workflow; na Automação,
 antes de o Feedback existir, usa `prazo do relatório + 2 dias corridos`; depois,
 usa o prazo real do Feedback e das etapas seguintes.
+
+Plano, Entrega e Recorrência usam o mesmo resolvedor de pai:
+
+- Plano agrega membros em paralelo; o percentual é a média ponderada do avanço
+  de cada membro efetivo. `Parada → Revisão → Aprovação → Em produção → Entrada`
+  é a prioridade do estado exibido; só todos concluídos resultam em `Concluído`.
+- Entrega é estritamente serial: existe um prefixo concluído e, no máximo, uma
+  etapa aberta. Etapa futura não pode ser materializada antes da anterior.
+- O molde recorrente espelha somente a ocorrência aberta mais recente. Ciclos
+  concluídos são histórico, não progresso do ciclo atual.
+- Pai sem item aberto fica em `Entrada` e 0%, salvo rotina explicitamente
+  concluída ou parada.
 
 O molde recorrente não é uma ocorrência. Ele pode carregar a versão para que
 suas ocorrências a herdem, mas `recurrence_group` impede a criação de etapas no
@@ -66,30 +79,29 @@ próprio molde.
 - Cabeçalhos de parent: `Entrega · Criativo` e `Entrega · Automação`.
 - A caixa única é `Etapas (x/y)` e lê somente a versão persistida.
 - Passo ausente informa o gatilho que o criará.
-- O card-pai não tem status editável; o status acompanha a etapa corrente.
+- O card-pai não tem status editável; o banco e a interface exibem a mesma
+  projeção de seus descendentes.
 - Comentários em Feedback registram informação, mas não aprovam o card.
 
 ## Corte de produção
 
 As migrations `20260917120000_unify_versioned_delivery_workflows.sql` e
-`20260917121000_reconcile_report_automation_cutover.sql` formam uma única
-transação no runbook direto. A primeira expande/backfill/contrai o schema; a
-segunda aplica somente a allowlist auditada e materializa as cinco ocorrências
-de 18/09/2026.
+`20260917121000_reconcile_report_automation_cutover.sql` formaram o corte
+versionado. A correção complementar
+`20260918004358_parent_rollup_projection_and_cascade_integrity.sql` elimina
+rollups persistidos manualmente e reconcilia apenas elos futuros inválidos,
+preservando os cards-filho como Tarefas independentes.
 
 Sequência obrigatória:
 
-1. executar `supabase/preflight/20260917_unified_delivery_workflows.sql` e
-   `20260917_report_flow_shape.sql`;
-2. pausar o cron e remover pelo Storage API o único objeto allowlisted com
-   `node scripts/cleanup-report-cutover-storage.mjs --apply`;
-3. executar as duas migrations concatenadas na mesma conexão/transação, com
-   rollback em qualquer erro;
-4. executar `supabase/postflight/20260917_unified_delivery_workflows.sql`;
-5. somente após equivalência comprovada, inserir as duas versões no ledger
-   remoto;
-6. validar o fluxo autenticado em `https://northportal.vercel.app` e reativar o
-   cron `0 11 * * *` (08:00 BRT).
+1. registrar snapshot em
+   `supabase/preflight/20260918_parent_rollup_projection_summary.sql`;
+2. aplicar a migration em uma transação, com rollback automático em erro;
+3. executar `supabase/postflight/20260918_parent_rollup_projection_summary.sql`;
+4. somente após equivalência comprovada, inserir a versão correspondente no
+   ledger remoto;
+5. validar o fluxo autenticado em `https://northportal.vercel.app`, sem
+   disparar a conversão, e manter o cron `0 11 * * *` (08:00 BRT).
 
 Nunca usar `db push`, `migration repair` ou `db reset` neste projeto.
 
@@ -102,5 +114,5 @@ Nunca usar `db push`, `migration repair` ou `db reset` neste projeto.
 - Feedback vencido permanece aberto/atrasado;
 - aprovar Feedback materializa e executa Conversão;
 - aprovar Conversão conclui o parent e cria a próxima ocorrência em `Entrada`;
-- nenhum texto da interface chama a Automação de “Relatório” nem mostra
-  “fluxo de etapas”.
+- nenhum texto da interface chama a Automação de “Relatório” nem usa a
+  nomenclatura legada de workflow.

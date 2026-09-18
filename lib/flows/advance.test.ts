@@ -188,8 +188,10 @@ describe("advanceFlow", () => {
     const { admin } = fakeAdmin(state);
     const outcome = await advanceFlow(admin, doneStep("c3", "publicacao"));
     expect(outcome.finished).toEqual(["entrega"]);
-    // Sem revisor nem aprovador, encerra direto.
-    expect(state.tasks.find((t) => t.id === "entrega")?.status).toBe("aprovado");
+    // A projeção do status do pai é uma garantia do trigger Postgres. Este
+    // admin fake testa somente a cascata e não executa triggers; o contrato
+    // banco→pai é coberto pela migration/postflight de integração.
+    expect(state.tasks.find((t) => t.id === "entrega")?.status).toBe("backlog");
   });
 });
 
@@ -285,7 +287,7 @@ describe("materializeFirstStep", () => {
     expect(state.task_links.some((l) => l.parent_id === "occ" && l.slot === "roteiro")).toBe(true);
   });
 
-  it("NÃO materializa etapa num molde de recorrência (flow_parent + recurrence_group)", async () => {
+  it("NÃO materializa etapa num molde de recorrência versionado", async () => {
     const molde = { ...delivery("molde", "Rotina de vídeo"), payload: { [RECURRENCE_GROUP_KEY]: true } } as TaskRecord;
     const state = { tasks: [molde as unknown as Row], task_links: [] as Row[], task_types: [...TYPE_ROWS], workflow_versions: [...WORKFLOW_VERSION_ROWS], workflow_version_steps: [...WORKFLOW_STEP_ROWS] };
     const { admin, inserts } = fakeAdmin(state);

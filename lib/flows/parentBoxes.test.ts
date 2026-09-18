@@ -12,8 +12,8 @@ describe("relações de 'Faz parte de' de um card", () => {
   });
 
   // O caso que ninguém tinha testado: uma entrega-ocorrência de fluxo
-  // recorrente (createRecurringFlowDelivery) é flow_parent E filha do molde
-  // (recurrence_parent_id) ao mesmo tempo. Ela não é etapa de si mesma (sem
+  // recorrente (createRecurringFlowDelivery) é uma Entrega versionada E filha
+  // do molde (recurrence_parent_id) ao mesmo tempo. Ela não é etapa de si mesma (sem
   // "entrega"), mas PRECISA continuar podendo navegar até o molde da
   // recorrência (com "recorrencia") — e até um Plano de Ação, se o fluxo
   // tiver nascido de dentro de um (com "plano"). Excluir isDelivery de

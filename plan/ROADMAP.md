@@ -1,6 +1,6 @@
 # North Portal — Roadmap
 
-Fonte única de trabalho pendente. Atualizado em 2026-09-17 contra `main` /
+Fonte única de trabalho pendente. Atualizado em 2026-09-18 contra `main` /
 produção (`northportal.vercel.app`). Os arquivos `plan/*.md` individuais continuam
 como spec detalhada de cada item; este arquivo é o índice priorizado. A arquitetura
 canônica de cards e relações está em `docs/ARQUITETURA-TAREFAS.md`; quando houver
@@ -22,8 +22,11 @@ conflito, ela prevalece sobre descrições históricas deste backlog.
 > Agora diz: ver a seção "Portal do cliente" logo abaixo. Antes de tratar um
 > item do portal como urgente, olhar o portão.
 
-**Já entregue e EM PRODUÇÃO (não repetir):** fluxos em cascata / Entregas (motor,
-UI, 4 tipos estruturais, funil único, "Publicado" vira card, entrega recorrente); recorrência
+**Já entregue e EM PRODUÇÃO (não repetir):** motor único e versionado de Entregas
+(Criativo e Automação), com `workflow_versions`/`workflow_version_steps`, FK real
+em `tasks.task_type_id`, `tasks.workflow_version_id` e `task_links.workflow_step_id`;
+rollup transacional de status/progresso para Plano, Recorrência e Entrega; cascata
+estrita com primeira etapa criada em `Entrada`, e entrega recorrente; recorrência
 v2 (dia-da-semana opcional, sem data-limite, encerra só no molde `aprovado`/`parada`,
 TODA tarefa pode recorrer incl. Entrega); higiene do modelo de tarefas (trigger de
 vocabulário `kind`/`subtype`, `requires_review`/`_approval` amarrados à tela Etapas,
@@ -69,12 +72,12 @@ card raiz reflete a ação aberta mais importante e o modal explica a árvore in
 | ID | Item | Critério de saída |
 |---|---|---|
 | R0.5 | **Modelo de relações familiares — entregue em produção (2026-09-17).** `20260917035220_task_link_relation_kinds` explicitou os elos; `20260917052549_reconcile_family_ownership` converteu os 3 vínculos históricos Reunião → entrega em `reference`, moveu Baita para Plano → Entrega → etapa, exigiu `relation_kind` em toda escrita e limitou `structural_member` a um pai por card. Resultado remoto validado: 39 estruturais, 9 `workflow_step`, 3 referências e zero card com dois pais estruturais. `workflow_step` permanece N:N explícito para a Diária de gravação. | Todo card tem localização estrutural canônica; referência não duplica progresso; `slot` nunca decide semântica. |
-| R0.6 | **Motor único versionado — implementação pronta para cutover.** `workflow_versions`/`workflow_version_steps`, FKs em `tasks` e `task_links`, ledger `automation_runs`, preflight/postflight e reconciliação allowlisted estão versionados em `20260917120000` + `20260917121000`. Criativo e Automação usam o mesmo motor; o deploy/migration/E2E de produção ainda é o portão final. | Aplicar pelo runbook direto, validar os cinco clientes e só então atualizar o ledger remoto. |
-| R0.7 | **Backend familiar e rollups.** Endpoint/DTO em lote para raiz, caminho, ação atual, bloqueios, histórico e progresso derivado. | Sem escolha arbitrária de pai, sem N+1, operações idempotentes de concluir/reabrir/reagendar. |
+| R0.6 | **Motor único versionado — entregue em produção (2026-09-18).** `workflow_versions`/`workflow_version_steps`, FKs em `tasks` e `task_links`, ledger `automation_runs`, preflight/postflight e reconciliação mínima estão ativos. Criativo e Automação usam o mesmo motor; `20260918004358` acrescentou as garantias de cascata, ativação e projeção. | Nenhuma Entrega com primeira etapa ausente; um único passo aberto; passos futuros contam como pendentes; vínculo inválido é apenas desligado, nunca apaga histórico. |
+| R0.7 | **Rollups familiares — entregue em produção (2026-09-18).** Plano usa a maior prioridade entre membros abertos; Recorrência usa somente a ocorrência aberta vigente; Entrega acompanha estritamente a etapa corrente e só aprova quando todos os passos declarados terminarem. | Pais não aceitam status manual; banco e UI usam a mesma projeção; não há conclusão ou aprovação silenciosa. |
 | R0.8 | **TaskModal Família + Kanban único.** Substituir caixas relacionais repetidas por uma seção Família e consolidar as quatro abas em uma projeção. | O portão de login (`e2e/auth-login.spec.ts`) continua verde; E2E autenticado de família cobre Tarefa, Plano, Entrega, recorrência, referência compartilhada e relatório com fixtures isoladas. |
 
-Sequência obrigatória: R0.6 → R0.7 → R0.8. Não iniciar uma quinta tela de
-Operação nem ampliar o fluxo de automação antes de R0.6. Produção é o único
+R0.8 pode seguir como consolidação visual, sem criar uma segunda semântica de
+família. Produção é o único
 ambiente integrado: migrations devem preservar preflight, transação única,
 verificação de catálogo/dados e rollback.
 
@@ -84,12 +87,13 @@ trigger sem fallback por `slot`. E2E autenticado verde: login, três cenários d
 navegação do TaskModal/Operação e referência visual isolada. O runbook de acesso
 direto, TLS e ledger está em `AGENTS.md`.
 
-**Evidência R0.6 parcial (17/09):** preflight, transação e ledger remoto das
-migrations `20260917070000`, `20260917071500` e `20260917073000`. Auditoria
-final: 38 elos estruturais, 9 etapas de workflow e 4 referências; zero elo
-cross-client, ciclo, pai estrutural duplicado, slot inválido, tipo/subtipo de
-relatório legado, molde com pai temporal, execução com ponteiros divergentes
-ou molde recorrente aninhado.
+**Evidência R0.6/R0.7 (18/09):** preflight, transação, pós-validação e ledger
+remoto da migration `20260918004358`. Foram preservados 304 cards; a
+reconciliação desligou somente um vínculo futuro sequencial inválido. Pós-flight:
+12 vínculos de workflow, zero etapa aberta concorrente, zero divergência de
+projeção, zero payload estrutural legado, zero subtipo incompatível e zero Entrega
+sem primeira etapa. Nenhum relatório de conversão, documento, PDF, métrica ou
+`automation_run` foi materializado durante a validação.
 
 **Decisão consolidada:** a Diária de gravação é `workflow_step` N:N explícito,
 não exceção nem segundo pai estrutural. A regra de unicidade recai somente em
@@ -287,9 +291,9 @@ Quatro decisões do usuário sobre recorrência, todas em produção (commits
    `completeTaskCycleForRequest` → `409 recurrence_ended`, botão "Concluir ciclo"
    some, `listRecurringTasks().active` vira `false`, automação de relatório para.
 3. **Toda tarefa pode recorrer, Entrega inclusa** — `createRecurringFlowDelivery`:
-   o molde carrega `flow_parent` + `recurrence_group`, cada ciclo materializa uma
-   entrega-ocorrência própria com sua 1ª etapa. Rollup lê a ocorrência, nunca o
-   molde.
+   o molde fixa uma versão de workflow e `recurrence_group`; cada ciclo materializa
+   uma Entrega-ocorrência própria com sua 1ª etapa em `Entrada`. O rollup lê a
+   ocorrência vigente, nunca o status histórico do molde.
 4. **Dia-da-semana opcional** — `recurrenceWeekdays()` cai no dia da `start_date`;
    sem CHECK novo no banco (mais flexível, não menos).
 
@@ -375,11 +379,11 @@ O pipeline vigente está em `docs/reporting/report-pipeline.md`. Ordem pedida: s
 | R4.7 | **OpenRouter como gateway multi-provider:** substituir chamadas diretas por API compatível, usar uma credencial OpenRouter, definir modelo principal e fallback por política, registrar provider/model efetivamente usados e preservar idempotência das automações. | Não implementar antes de decisão de produto. |
 | R4.8 | **Google Drive como integração real** (hoje mock no contexto de automação): preview de imagens/vídeos de pasta direto no card. Casa com R1.4. | |
 | R4.9 | **Fluxo de trabalho pedido pelo usuário:** desenho com Opus → execução com Sonnet → validação e2e com Opus alimentando fixes de volta para múltiplos agentes Sonnet, em loop. Ainda não montado. | `roadmap-2026-08-19` (memória). |
-| R4.11 | **NorthAi — harness completo (VPS/Docker).** O Estúdio (`/admin/northai`, 15/09) é **determinístico**: receitas guiadas → Blueprint → `POST /api/admin/northai/execute`. Falta para virar harness de IA: (a) LLM com tool-calling que produz as MESMAS operações do Blueprint (`lib/northai/blueprint.ts` é o contrato — o executor não muda); (b) sessões e memória do cliente ("DNA": identidade, linha editorial, decisões) no servidor, hoje o histórico mora no localStorage; (c) leitura semântica de roteiros e planilhas (hoje `scriptParser` separa por títulos/separadores/numeração); (d) voz; (e) biblioteca de aprovação (nada vira tarefa sem aprovação do cliente); (f) execução assíncrona em fila para Blueprints grandes; (g) rodar em Docker na VPS com os segredos fora da Vercel. | `lib/northai/`, `app/admin/northai/`, `docs/northai/skills/`. Grande. |
+| R4.11 | **NorthAi — harness completo.** O Estúdio (`/admin/northai`, 15/09) é **determinístico**: receitas guiadas → Blueprint → `POST /api/admin/northai/execute`. Falta para virar harness de IA: (a) LLM com tool-calling que produz as MESMAS operações do Blueprint (`lib/northai/blueprint.ts` é o contrato — o executor não muda); (b) sessões e memória do cliente ("DNA": identidade, linha editorial, decisões) no servidor, hoje o histórico mora no localStorage; (c) leitura semântica de roteiros e planilhas (hoje `scriptParser` separa por títulos/separadores/numeração); (d) voz; (e) biblioteca de aprovação (nada vira tarefa sem aprovação do cliente); (f) execução assíncrona idempotente para Blueprints grandes usando a infraestrutura Vercel + Supabase Cloud. | `lib/northai/`, `app/admin/northai/`, `docs/northai/skills/`. Grande. |
 | R4.12 | **GED no Drive da plataforma + migração dos links.** O GED (`lib/ged/`) grava hoje no Supabase Storage e só espelha no Drive se `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` + `GOOGLE_DRIVE_ROOT_FOLDER_ID` existirem (casa com R1.4). Falta: configurar a conta "protagonista" da plataforma; criar a árvore `Clientes/<nome> (<slug>)/…` também para os clientes já cadastrados; migrar os links colados em `client_drive_links` (brand/products/uploads) copiando os arquivos para o GED; e trocar os links antigos dos cards/comentários pelos do GED. | `docs/northai/skills/ged.md`. Médio. |
-| R4.14 | **Débitos conscientes do Estúdio (16/09).** (a) Histórico das conversas mora no navegador (`app/admin/northai/studio/useStudioSession.ts`, uma thread por cliente); o contrato `append`/`patch` é o que um armazenamento no servidor implementa — faz parte de R4.11. (b) Rotinas padrão de clientes cadastrados antes de 16/09 não têm `payload.routine_key`; só o título exato as reconhece. Backfill: gravar a chave nos cards cujo título bate com o catálogo (SQL a rodar pelo usuário). (c) A automação criada pelo Estúdio ainda aponta para uma rotina via `target_task_id` (R4.10 continua aberto; o Estúdio não criou dependência nova). (d) Status "Agendada" da captação (R4.13) caberia na captação compartilhada da diária sem mudar o modelo. (e) Não existe logo de cliente no cadastro: avatar e identidade usam monograma (`app/admin/northai/studio/ClientIdentity.tsx` é o único lugar a trocar quando existir). (f) O composer já entrega `{ text, mentions }` com @cliente estruturado; "/operação" e "+arquivo" entram no mesmo pacote no harness (R4.11). (g) Perguntas ("quais são as rotinas?") ainda não têm resposta — o modo atual só monta pedidos. | `lib/northai/`, `docs/northai/skills/receitas.md`. |
+| R4.14 | **Débitos conscientes do Estúdio (16/09).** (a) Histórico das conversas mora no navegador (`app/admin/northai/studio/useStudioSession.ts`, uma thread por cliente); o contrato `append`/`patch` é o que um armazenamento no servidor implementa — faz parte de R4.11. (b) Rotinas padrão de clientes cadastrados antes de 16/09 não têm `payload.routine_key`; só o título exato as reconhece. Backfill: gravar a chave nos cards cujo título bate com o catálogo (SQL a rodar pelo usuário). (c) A automação criada pelo Estúdio ainda aponta para uma rotina via `target_task_id`; a arquitetura canônica de relatórios já usa as duas configurações dependentes de R4.10. (d) Status "Agendada" da captação (R4.13) caberia na captação compartilhada da diária sem mudar o modelo. (e) Não existe logo de cliente no cadastro: avatar e identidade usam monograma (`app/admin/northai/studio/ClientIdentity.tsx` é o único lugar a trocar quando existir). (f) O composer já entrega `{ text, mentions }` com @cliente estruturado; "/operação" e "+arquivo" entram no mesmo pacote no harness (R4.11). (g) Perguntas ("quais são as rotinas?") ainda não têm resposta — o modo atual só monta pedidos. | `lib/northai/`, `docs/northai/skills/receitas.md`. |
 | R4.13 | **Lacunas da jornada do cliente ponta a ponta.** Mapeadas contra a jornada interna (17 slides) em `docs/northai/JORNADA-PONTA-A-PONTA.md`: classificação Bronze/Prata/Ouro no lead, follow-up da proposta no 4º dia útil, SLA de kickoff 48h, status "Agendada" da gravação, jornada de 14 passos visível por cliente, ciclo mensal. | Priorização no próprio documento. |
-| R4.10 | **Automação ligada à família — resolvida por R0.6.** A configuração de anúncios aponta para uma Tarefa recorrente comum; a de conversão aponta para uma Entrega recorrente `Automação` e depende da primeira por FK. Ocorrências exibem `Entrega · Automação`; runs e artefatos continuam entidades próprias. | `docs/ARQUITETURA-TAREFAS.md`, `docs/reporting/report-pipeline.md`. Feito em código; falta o cutover de produção de R0.6. |
+| R4.10 | **Automação ligada à família — entregue em produção.** A configuração de anúncios aponta para uma Tarefa recorrente comum; a de conversão aponta para uma Entrega recorrente `Automação` e depende da primeira por FK. Ocorrências exibem `Entrega · Automação`; runs e artefatos continuam entidades próprias. | `docs/ARQUITETURA-TAREFAS.md`, `docs/reporting/report-pipeline.md`. A primeira etapa só entra em Produção quando a execução é disparada; a conversão continua dependente de aprovação manual do Feedback. |
 
 ---
 

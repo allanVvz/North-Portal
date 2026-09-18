@@ -63,7 +63,7 @@ test.describe("Entrega dentro de Plano de Ação", () => {
     // Entrega de 4 etapas, membro do plano (elo SEM slot).
     entregaId = await insert({
       client_id: clientId, kind: "criativo", subtype: null, title: entregaTitle, status: "em_producao",
-      payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
+      payload: {},
     });
     await sb.from("task_links").insert({ parent_id: planoId, child_id: entregaId, slot: null, position: 10 });
 
@@ -179,11 +179,11 @@ test.describe("Entrega dentro de Plano de Ação", () => {
   test("um Plano não pode virar entrega", async ({ page }) => {
     await login(page);
     const res = await page.request.patch(`/api/admin/tasks/${planoId}`, {
-      data: { payload: { flow_parent: true } },
+      data: { payload: {} },
     });
     expect(res.ok()).toBeFalsy();
 
-    const { data: plano } = await sb.from("tasks").select("payload").eq("id", planoId).single();
-    expect((plano?.payload as Record<string, unknown> | null)?.flow_parent).toBeUndefined();
+    const { data: plano } = await sb.from("tasks").select("workflow_version_id").eq("id", planoId).single();
+    expect(plano?.workflow_version_id).toBeNull();
   });
 });

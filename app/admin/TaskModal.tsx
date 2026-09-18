@@ -30,10 +30,10 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, currentRecurringExecutionOf, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf } from "@/lib/taskRelations";
 import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
-import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus } from "@/lib/flows/parentStatus";
+import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus, projectParentStatus } from "@/lib/flows/parentStatus";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { responsibilityForSubtype } from "@/lib/flows/responsibilityForSubtype";
@@ -366,9 +366,9 @@ export default function TaskModal({
 
   const kd = kindDef(draft.kind);
   const tone = kindTone(draft.kind);
-  // Um card já existente sempre mostra o próprio tipo, mesmo que ele seja
-  // oculto (uma etapa de fluxo é kind=criativo, que saiu do dropdown) — senão
-  // o pill viria vazio ou trocaria o tipo do card sozinho ao abrir.
+  // Um card existente sempre mostra o próprio tipo, mesmo que esteja inativo
+  // no catálogo. Etapa de fluxo é uma Tarefa comum e nunca pode parecer um
+  // subtipo de Entrega ao abrir o modal.
   // Uma porta só: na criação o dropdown de Tipo lista TUDO que se pode criar —
   // Tarefa, Plano de Ação, cada entrega, e a porta sintética Rotina. Escolher o
   // tipo é que decide o que nasce; nenhuma tela restringe mais essa lista. Fora
@@ -667,11 +667,20 @@ export default function TaskModal({
   const membersByParent = useMemo(() => childrenByParent(clientTasks), [clientTasks]);
   // Unsaved status changes are the task's current UI truth. Reading liveTask
   // here left the percentage frozen until Save, even while the stepper moved.
-  const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: draft.status } : null;
+  const currentRecurringExecution = liveTask && isRecurringParent
+    ? currentRecurringExecutionOf(liveTask.id, clientTasks)
+    : null;
+  const effectiveParentMembers = isRecurringParent
+    ? (currentRecurringExecution ? [currentRecurringExecution] : [])
+    : planMembers;
+  const projectedParentStatus = liveTask && (isDelivery || kd.isPlan || isRecurringParent)
+    ? projectParentStatus(liveTask, isDelivery ? flowSteps : effectiveParentMembers, membersByParent)
+    : null;
+  const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: projectedParentStatus ?? draft.status } : null;
   const headerPct = progressTask
     ? (isDelivery
         ? taskProgress(progressTask, flowSteps, membersByParent)
-        : kd.isPlan || isRecurringParent ? taskProgress(progressTask, planMembers, membersByParent) : taskProgress(progressTask))
+        : kd.isPlan || isRecurringParent ? taskProgress(progressTask, effectiveParentMembers, membersByParent) : taskProgress(progressTask))
     : 0;
   // A mesma barra representa contas diferentes conforme o card: numa Entrega
   // é a posição no funil da etapa corrente (inclui etapas que nem nasceram
@@ -679,8 +688,8 @@ export default function TaskModal({
   // fixo "Progresso" sugeria que "70%" quer dizer a mesma coisa nos dois —
   // não quer. A contagem ao lado tira a % de ter que ser tomada de fé.
   const headerProgressLabel = isDelivery ? "Progresso do fluxo" : kd.isPlan || isRecurringParent ? "Conclusão" : "Progresso";
-  const headerProgressCount = !isDelivery && (kd.isPlan || isRecurringParent) && planMembers.length
-    ? `${planMembers.filter((m) => m.status === "aprovado").length} de ${planMembers.length}`
+  const headerProgressCount = !isDelivery && (kd.isPlan || isRecurringParent) && effectiveParentMembers.length
+    ? `${effectiveParentMembers.filter((m) => m.status === "aprovado").length} de ${effectiveParentMembers.length}`
     : null;
   const linkableCandidates = liveTask
     // Ter uma entrega como pai não impede entrar num plano, e já pertencer a
@@ -717,7 +726,7 @@ export default function TaskModal({
   // pai…" (mais abaixo) repetiam cada uma a sua própria combinação de flags,
   // e as duas divergiram: a de recorrência excluía `isDelivery` aqui mas não
   // na condição do placeholder, o que deixava uma entrega-ocorrência de fluxo
-  // recorrente (flow_parent + recurrence_parent_id ao mesmo tempo) presa em
+  // recorrente (versão de workflow + recurrence_parent_id ao mesmo tempo) presa em
   // "Carregando card pai…" para sempre — o id da recorrência existia, mas
   // nenhuma caixa nascia para preenchê-lo. Com as duas nascendo do mesmo
   // `parentSlots`, não tem como voltar a divergir.
@@ -741,7 +750,16 @@ export default function TaskModal({
       id: recurrenceParentId,
       parent: recurrenceParent,
       subtitle: "Execução da recorrência",
-      progress: recurrenceParent ? taskProgress(recurrenceParent, recurrenceExecutionsOf(recurrenceParent.id, clientTasks), membersByParent) : 0,
+      progress: recurrenceParent
+        ? taskProgress(
+            recurrenceParent,
+            (() => {
+              const current = currentRecurringExecutionOf(recurrenceParent.id, clientTasks);
+              return current ? [current] : [];
+            })(),
+            membersByParent,
+          )
+        : 0,
     };
   };
   const hasPlanKind = parentRelationKinds.includes("plano");
@@ -915,7 +933,7 @@ export default function TaskModal({
   // cravado em "operacional" — era isso que fazia uma atividade "Entrega"
   // criada por dentro do plano nascer como Tarefa comum, e só quebrar de
   // verdade quando alguém trocava o Tipo depois num PATCH avulso (P0-B: o card
-  // ficava com `kind: criativo` mas sem `flow_parent`, sem peso congelado, sem
+  // ficava com `kind: criativo` mas sem versão de workflow e sem
   // etapa nenhuma). A porta é a mesma do NewTaskButton — POST
   // /api/admin/tasks?scope=task — então um tipo `behavior:'entrega'` já
   // cascateia sozinho (createFlowDelivery), sem lógica nova aqui.
@@ -1317,12 +1335,12 @@ export default function TaskModal({
   const mirroredStatus = mirroredParentStatus(currentChainStep);
   const mirroredDate = mirroredParentDate(currentChainStep);
   const mirroredAssignee = mirroredParentAssignee(currentChainStep);
-  const displayStatus = mirroredStatus ?? draft.status;
+  const displayStatus = projectedParentStatus ?? mirroredStatus ?? draft.status;
   // Só um card que tem status PRÓPRIO pode ter o status trocado pelo stepper.
   // Numa entrega espelhada, clicar ali escreveria na coluna do pai um valor
   // que a próxima etapa a mudar sobrescreveria na tela — um controle que não
   // controla nada.
-  const stepperEditable = mirroredStatus === null;
+  const stepperEditable = projectedParentStatus === null && mirroredStatus === null;
   const stepIdx = WORKFLOW_ORDER.indexOf(displayStatus);
 
   // Cor por papel no dropdown de responsável: o subtipo relevante é o da
@@ -1738,7 +1756,7 @@ export default function TaskModal({
                   <p className="tm-box-label">
                     {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
                     {!isRecurringParent && liveTask && planMembers.length ? (
-                      <span className="tm-box-label-sub"> · {planMembers.filter((m) => m.status === "aprovado").length} concluídas</span>
+                      <span className="tm-box-label-sub"> · {effectiveParentMembers.filter((m) => m.status === "aprovado").length} concluídas</span>
                     ) : null}
                   </p>
                   {isRecurringParent && liveTask ? (

@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
 // Read-only production regression: report templates are ordinary recurring
-// Tasks. Only their dated `flow_parent` occurrence is an Entrega.
+// Tasks. Only their dated occurrence is an Entrega.
 test("molde ativo de relatório abre como Tarefa recorrente, não Entrega", async ({ page }) => {
   test.setTimeout(90_000);
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -13,7 +13,7 @@ test("molde ativo de relatório abre como Tarefa recorrente, não Entrega", asyn
 
   const { data: config, error: configError } = await admin
     .from("automation_configs")
-    .select("target_task_id,tasks!automation_configs_target_task_id_fkey(kind,subtype,recurrence_cadence,payload)")
+    .select("target_task_id,tasks!automation_configs_target_task_id_fkey(kind,subtype,workflow_version_id,recurrence_cadence,payload)")
     .eq("automation_key", "relatorio_trafego_semanal")
     .eq("active", true)
     .limit(1)
@@ -23,13 +23,14 @@ test("molde ativo de relatório abre como Tarefa recorrente, não Entrega", asyn
   const target = config.tasks as unknown as {
     kind: string;
     subtype: string | null;
+    workflow_version_id: string | null;
     recurrence_cadence: string | null;
     payload: Record<string, unknown> | null;
   };
   expect(target.kind).toBe("operacional");
   expect(target.subtype).toBeNull();
   expect(target.recurrence_cadence).toBeTruthy();
-  expect(target.payload?.flow_parent).not.toBe(true);
+  expect(target.workflow_version_id).toBeNull();
 
   await page.goto("/login");
   await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);

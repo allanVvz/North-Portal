@@ -88,8 +88,8 @@ async function seed() {
 
   let mold = await findMold(client.id);
   if (!mold) {
-    // M1: tarefa recorrente COMUM (sem flow_parent). A ocorrência é que vira o
-    // pai do fluxo, criada pela Automação 1 no tique.
+    // M1: tarefa recorrente comum. A Automação 1 cria sua ocorrência; a
+    // configuração de conversão é que possui a Entrega versionada dependente.
     const { data, error } = await db.from("tasks").insert({
       client_id: client.id,
       kind: "operacional",

@@ -16,7 +16,7 @@ const delivery = {
   plan_id: null, parents: [], requires_review: true, requires_approval: true,
   due_date: null, start_date: null, end_date: null, scheduled_start_at: null, scheduled_end_at: null,
   progress_weight: 1, description: null, client_visible: false,
-  payload: { flow_parent: true }, position: 0,
+  payload: {}, position: 0,
   recurrence_cadence: null, recurrence_weekdays: [], recurrence_day_of_month: null,
   created_by: null, created_by_name: null, created_at: "", completed_at: null, updated_at: "",
 } as TaskRecord;

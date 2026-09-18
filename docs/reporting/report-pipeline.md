@@ -41,6 +41,11 @@ configuração dependida na mesma transação.
 7. Aprovar a Conversão conclui a Entrega e materializa a ocorrência seguinte
    com seu primeiro relatório em `Entrada`.
 
+O estado da Entrega é sempre a projeção da etapa aberta: antes do cron, ambos
+estão em `Entrada`; durante a execução do relatório, ambos estão em `Em
+produção`; em revisão, ambos mostram `Revisão`. Nenhuma tela usa um estado
+gravado manualmente no parent.
+
 Se um Feedback previamente ligado já estiver aprovado quando o relatório de
 anúncios for aprovado, o motor percorre imediatamente esse passo concluído,
 materializa a Conversão e inicia seu processamento.
@@ -72,8 +77,10 @@ materializa a Conversão e inicia seu processamento.
 ## Operação em produção
 
 Produção é o único ambiente integrado. O corte usa os preflights em
-`supabase/preflight`, as migrations `20260917120000` e `20260917121000`, o
-cleanup allowlisted de Storage e o postflight em `supabase/postflight`.
+`supabase/preflight`, as migrations `20260917120000`, `20260917121000` e
+`20260918004358`, o cleanup allowlisted de Storage e o postflight em
+`supabase/postflight`. A última migration projeta o estado do parent a partir
+da etapa aberta e mantém a cascata serial; ela não cria relatório de conversão.
 
 Se a publicação terminar depois de 18/09/2026 08:00 BRT, um administrador deve
 executar uma única chamada idempotente à rota de automações com `today =
@@ -85,3 +92,9 @@ ledger registra `scheduled_for = 2026-09-18T11:00:00Z` e impede repetição.
 Aprovação determinística do Feedback por comentário do revisor permanece
 futura. Até essa regra ter identidade de revisor, comando explícito e testes de
 idempotência, comentários são apenas conteúdo.
+
+No harness de IA, permanece futuro: **OpenRouter como gateway multi-provider**:
+substituir chamadas diretas por API compatível, usar uma credencial OpenRouter,
+definir modelo principal e fallback por política, registrar provider/model
+efetivamente usados e preservar a idempotência das automações. Não faz parte da
+operação atual, que usa somente OpenAI quando o fallback de IA for habilitado.

@@ -159,8 +159,8 @@ describe("familyThreadOf", () => {
     expect(familyThreadOf(plano, [plano, atividade]).map((c) => c.text)).toEqual(["escopo", "feito"]);
   });
 
-  // Um card comum não vira pai por acidente: `flow_parent` é marca explícita,
-  // e há cards `criativo` legados que são trabalho comum.
+  // Um card comum não vira pai por acidente: uma Entrega exige versão de
+  // workflow persistida; há cards criativos que são trabalho comum.
   it("card comum não mescla nada", () => {
     expect(isFamilyParent(avulso)).toBe(false);
     expect(familyThreadOf(avulso, quadro).map((c) => c.text)).toEqual(["nada a ver"]);
@@ -178,12 +178,10 @@ describe("familyThreadOf", () => {
   });
 
   // Mesma classe de bug, achada ao consertar a de cima: o MOLDE de uma
-  // entrega recorrente carrega `flow_parent: true` (as ocorrências herdam
-  // as marcas de fluxo dele — lib/taskCatalog.ts, flowTotalWeight), então
-  // `isFlowDelivery(molde)` também dá true. Checar isso antes de recorrência
-  // faria o molde procurar ETAPAS PRÓPRIAS (que não existem — só as
-  // ocorrências têm etapas) em vez dos ciclos.
-  it("um molde de entrega recorrente (flow_parent herdado) mostra os ciclos, não etapas próprias", () => {
+  // Entregas recorrentes guardam a versão no molde e cada ocorrência herda a
+  // versão. Checar Entrega antes de recorrência faria o molde procurar etapas
+  // próprias (que não existem — só as ocorrências têm etapas) em vez dos ciclos.
+  it("um molde de entrega recorrente mostra os ciclos, não etapas próprias", () => {
     const moldeEntrega = { ...card("molde-e", "criativo", []), workflow_version_id: "workflow-v1", recurrence_cadence: "semanal" as const };
     const execucao = card("exec-e", "criativo", [{ author: "A", text: "roteiro pronto", at: "2026-09-02T09:00:00Z" }], { recurrence_parent_id: "molde-e" });
     expect(familyThreadOf(moldeEntrega, [moldeEntrega, execucao]).map((c) => c.text)).toEqual(["roteiro pronto"]);

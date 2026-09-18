@@ -5,7 +5,7 @@
 // aparece — deleteTask desfaz a criação se a primeira etapa falhar). Trocar o
 // Tipo dela para um comportamento não-entrega deixaria essa(s) etapa(s) órfãs:
 // ligadas por task_links a um pai que parou de significar "corrente de fluxo",
-// com `flow_parent` e o peso congelado sobrando no payload. Em vez de tentar
+// com a versão de workflow e etapas sobrando no grafo. Em vez de tentar
 // desmontar a corrente inteira em silêncio (não pedido, e arriscado — a etapa
 // pode carregar comentários e a decisão de um revisor), a regra recusa a troca
 // com um erro legível. Desvincular as etapas à mão continua possível pela

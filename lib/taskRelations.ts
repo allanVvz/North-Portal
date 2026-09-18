@@ -227,6 +227,21 @@ export function recurrenceExecutionsOf<T extends Pick<TaskRecord, "payload">>(pa
   return tasks.filter((task) => recurrenceParentIdOf(task) === parentId);
 }
 
+/** The one execution that represents the present tense of a recurring card.
+ * Historical completed executions are evidence, never progress for the next
+ * cycle. Date is the business ordering; creation is a deterministic tie-break.
+ */
+export function currentRecurringExecutionOf<T extends Pick<TaskRecord, "payload" | "completed_at" | "due_date" | "created_at">>(
+  parentId: string,
+  tasks: readonly T[],
+): T | null {
+  const open = recurrenceExecutionsOf(parentId, tasks).filter((task) => !task.completed_at);
+  if (!open.length) return null;
+  return [...open].sort((a, b) =>
+    (a.due_date ?? "").localeCompare(b.due_date ?? "") || a.created_at.localeCompare(b.created_at),
+  ).at(-1) ?? null;
+}
+
 export function recurrenceParentOf<T extends Pick<TaskRecord, "id">>(parentId: string | null, tasks: readonly T[]): T | null {
   if (!parentId) return null;
   return tasks.find((task) => task.id === parentId) ?? null;

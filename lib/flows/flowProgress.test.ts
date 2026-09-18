@@ -13,10 +13,9 @@ const step = (
   id: string = status,
   progress_weight = 1,
   flags: { requires_review?: boolean; requires_approval?: boolean } = {},
-) => ({ id, kind: "criativo", status, progress_weight, payload: {}, ...flags });
+) => ({ id, kind: "operacional", status, progress_weight, payload: {}, ...flags });
 
-// A entrega é reconhecida pela marca no payload, não pelo tipo: existem cards
-// `criativo` legados que são trabalho comum e não podem virar pais.
+// A Entrega é reconhecida pela versão persistida, não pelo texto do tipo.
 const delivery = (totalWeight: number, flags: { requires_review?: boolean; requires_approval?: boolean } = {}) => ({
   id: "entrega",
   kind: "criativo",

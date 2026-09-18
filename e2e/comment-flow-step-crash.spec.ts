@@ -60,7 +60,7 @@ test.describe("Comentar numa etapa de fluxo não pode derrubar a árvore (P0-A)"
 
     deliveryId = await insert({
       client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
-      status: "em_producao", payload: { flow_parent: true, flow_total_weight: 4, flow_step_count: 4 },
+      status: "backlog", payload: {},
     });
     roteiroId = await insert({
       client_id: clientId, kind: "criativo", subtype: "roteiro",

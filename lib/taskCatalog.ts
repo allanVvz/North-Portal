@@ -112,27 +112,10 @@ export const SUBTYPE_LABEL: Record<string, string> = {
 
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];
 
-/** Compatibility at the read boundary while old rows are being migrated —
- * SÓ para strings mortas de verdade, de uma migração de schema antiga.
- *
- * `agendamento` e `planejamento` entram aqui porque deixaram de ser tipos: a
- * migração zera o kind das linhas, mas esta função é o que segura a tela entre
- * o deploy e a migração, e o que impede um card antigo de renderizar cru se
- * alguma linha escapar.
- *
- * Um `kind` que não é nenhuma dessas strings mortas E não está em
- * `TASK_KINDS` NÃO é mais coagido para `"operacional"` (2026-09-13) — antes
- * era, e isso quebrava um tipo criado só pela tela (Configurações › Tipos e
- * fluxos): `TaskModal.tsx` usa o `.kind` daqui pra montar o rascunho, e
- * salvar reescrevia o card como "Tarefa" pra sempre no primeiro save. Hoje um
- * kind desconhecido simplesmente passa adiante — `kindDef` (abaixo) é quem
- * decide o visual dele, olhando o cache ao vivo antes de cair no fallback
- * genérico. */
+/** The database is already on the canonical FK catalog. Unknown values pass
+ * through untouched so a corrupt row stays visible for repair instead of
+ * being silently rewritten as another type by the UI. */
 export function canonicalTaskClassification(kind: string, subtype?: string | null): { kind: string; subtype: string | null } {
-  if (kind === "publicacao_recorrente") return { kind: "criativo", subtype: subtype ?? null };
-  if (kind === "roteiro") return { kind: "operacional", subtype: subtype ?? "roteiro" };
-  if (kind === "gravacao") return { kind: "operacional", subtype: subtype ?? "gravacao" };
-  if (kind === "agendamento" || kind === "planejamento") return { kind: "operacional", subtype: subtype ?? null };
   return { kind, subtype: subtype ?? null };
 }
 
