@@ -433,6 +433,9 @@ async function processOccurrence(
   // instruções editoriais e é processado por `handleTrafficRevisionComment`.
   const since = laterOf(traffic.finalized_at, occPayload.feedback_source_at);
   const human = latestHumanComment([card2], since);
+  // Sem comentário posterior ao último relatório, um retry do hook/cron não
+  // cria uma nova reivindicação nem um PDF vazio.
+  if (!human && occPayload.sales_report_generated_at) return false;
 
   const ext: MetricExtract = human
     ? await extractMetrics(human.text, tags)
@@ -483,9 +486,10 @@ async function processOccurrence(
   });
   if (!claim) return false;
 
+  const occurrenceKey = `${occ.id}:${sourceCommentAt ?? "approved"}`;
   const { data: runRows, error: runError } = await admin.rpc("claim_automation_run", {
     p_config_id: config.id,
-    p_occurrence_key: occ.id,
+    p_occurrence_key: occurrenceKey,
     p_scheduled_for: `${occ.due_date ?? today}T11:00:00.000Z`,
     p_action: "conversion_report",
     p_occurrence_id: occ.id,
@@ -494,10 +498,24 @@ async function processOccurrence(
     await releaseConversionReport(admin, claim.id);
     throw runError;
   }
-  const automationRunId = (runRows?.[0] as { id?: string } | undefined)?.id;
+  let automationRunId = (runRows?.[0] as { id?: string } | undefined)?.id ?? null;
   if (!automationRunId) {
-    await releaseConversionReport(admin, claim.id);
-    return false;
+    // Um run marcado como succeeded pode ter ficado sem PDF depois de uma
+    // limpeza/rollback (Storage e Postgres são recursos separados). Se a
+    // reivindicação do relatório é nova, reutilizamos esse run como retry em
+    // vez de abandonar a reivindicação correta.
+    const { data: staleRows, error: staleError } = await admin.from("automation_runs")
+      .select("id,status").eq("config_id", config.id).eq("occurrence_key", occurrenceKey).eq("action", "conversion_report").limit(1);
+    if (staleError) throw staleError;
+    const stale = staleRows?.[0] as { id?: string; status?: string } | undefined;
+    if (stale?.id && stale.status === "succeeded") {
+      const { error: reopenError } = await admin.from("automation_runs").update({ status: "running", started_at: nowIso(), finished_at: null, last_error: null }).eq("id", stale.id);
+      if (reopenError) throw reopenError;
+      automationRunId = stale.id;
+    } else {
+      await releaseConversionReport(admin, claim.id);
+      return false;
+    }
   }
 
   let conversionTaskId: string | null = null;
