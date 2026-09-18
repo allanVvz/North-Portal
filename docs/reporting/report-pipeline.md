@@ -74,6 +74,107 @@ materializa a Conversão e inicia seu processamento.
 - O PDF de conversão só é anexado depois da reivindicação durável.
 - Falha parcial registra `failed`; o retry continua do ponto seguro.
 
+## Roteamento de comentários e escrita atômica
+
+A Entrega é o contêiner visual; as tarefas filhas (etapas) são a fonte de
+verdade das etapas e dos comentários. A leitura junta a família
+(`mergeFamilyComments`); a **escrita** vai sempre para uma etapa, nunca para o
+pai por a interface aberta ser a Entrega, e nunca replicada em pai e filho.
+
+### Regra de destino (`lib/flows/commentTarget.ts`)
+
+1. `stage_task_id` no corpo do POST é a etapa que a tela mostrava como corrente.
+   Precisa ser uma etapa (`workflow_step`) **desta** Entrega; senão
+   `409 COMMENT_STAGE_INVALID`. O id da própria Entrega não vale. Se essa etapa
+   já foi concluída e a Entrega avançou (tela desatualizada), o comentário vai
+   para a etapa aberta **agora**: o banco garante uma única etapa aberta por
+   Entrega, em ordem (trigger `workflow_link_is_strictly_sequential`). A linha de
+   cada etapa (`StepRow`) comenta pelo id dela e grava nela mesma, concluída ou não.
+2. Card que não é Entrega: o próprio card.
+3. Chamada antiga, sem `stage_task_id`: só há fallback se a etapa atual for
+   inequívoca — nenhuma etapa ainda (a própria Entrega), tudo concluído (a
+   última) ou **exatamente uma** aberta. Com várias abertas, o papel de quem
+   comentou desambigua se apontar exatamente uma (revisor de etapa em `revisao`,
+   depois responsável em `task_assignees`).
+4. Ainda ambíguo: `409 COMMENT_STAGE_AMBIGUOUS` com `candidates` (ids). Nada é
+   gravado.
+
+O destino é escolhido pelo **id** da etapa, nunca pelo nome textual dela.
+
+**Uso normal:** a pessoa só escreve no modal da Entrega e conclui as etapas por ele
+(o check da linha da etapa). O campo de comentário mostra em qual etapa o texto vai
+cair (`Comentar em "Feedback"…`). Ao concluir uma etapa, a próxima nasce sozinha e
+volta na resposta (`flow_next_task`); o comentário seguinte já vai para ela.
+
+### Idempotência do comentário humano
+
+`comment_id` (gerado pela interface, estável enquanto a mensagem está pendente —
+`app/admin/commentIds.ts`) chega em `append_task_comment_idempotent`. Reenviar o
+mesmo id devolve `inserted = false`: a rota responde 200 sem notificar, sem
+@menção e sem disparar os gatilhos abaixo de novo.
+
+Depois de gravar, a rota **responde na hora** e dispara, depois da resposta
+(`after`), `handleTrafficRevisionComment` (etapa de tráfego) e
+`recordFeedbackMetricComment` (etapa de Feedback). Regerar o PDF leva dezenas de
+segundos; esperar por ele fazia o comentário sumir da tela e a pessoa escrever de
+novo. A nova versão chega como um comentário da automação. Falha em qualquer um
+dos dois não se perde: a etapa é parada com um aviso (`markTaskParada`).
+
+- Comentário no tráfego pede uma nova revisão do PDF **enquanto a etapa não está
+  concluída**. Depois de concluída ele é só conversa: não regenera.
+- Nada interpreta "aprovado". Concluir uma etapa é sempre uma ação explícita
+  (status). `feedbackMetricApprovalProblem` só confere se o último comentário do
+  Feedback contém uma métrica que o parser lê — é uma guarda da conclusão do
+  Feedback, não uma leitura de frase.
+
+### Escrita da automação (`lib/automations/taskWrites.ts`)
+
+A automação nunca mais lê o `payload`, gera o relatório (segundos) e o regrava
+inteiro — isso apagava o comentário humano feito no intervalo.
+
+- `updateTaskPayload` chama `automation_task_payload_update`: **um** UPDATE sob
+  lock da linha que mescla só as chaves de `patch`, remove só as de `remove` e
+  acrescenta no máximo um comentário ao thread que está no banco *agora*.
+  `comments` nunca entra por `patch`/`remove`. Cada ação usa um id determinístico
+  (`ads-report:<card>:<revisão>`, `feedback-prompt:<card>`,
+  `conversion-summary:<card>:<claim>` …), então re-execução não repete o
+  comentário.
+- `transitionTaskStatus` é compare-and-set (`from` / `unless` / `open` no próprio
+  UPDATE). Uma execução atrasada devolve `null` em vez de rebaixar a etapa — o
+  trigger `tasks_sync_completed_at` limpa `completed_at` ao sair de `aprovado`,
+  então um UPDATE incondicional reabriria uma etapa concluída por uma pessoa.
+
+**O status de Entrega, molde recorrente e Plano de Ação nunca é escrito pela
+automação.** Ele é a projeção do primeiro passo aberto e o banco recusa a escrita
+direta (trigger `tasks_reject_manual_rollup_status`, `23514`). A Entrega vai a
+Revisão porque a etapa de conversão foi a Revisão. `markTaskParada` em um card-pai
+registra o erro como comentário, sem tentar mudar o status.
+
+Onde cada guarda vale: o início do relatório de anúncios só move de
+`backlog`/`parada`/`em_producao` (retry depois de um crash) e nunca de
+`revisao`/`aprovacao`/`aprovado`; o fim só move de `em_producao` para `revisao`;
+`markTaskParada` nunca para uma etapa `aprovado`; a regeneração de tráfego, a
+conversão e o reset de etapas seguintes só tocam etapas ainda abertas.
+
+### Avanço das etapas (`lib/flows/advance.ts`)
+
+Etapas nascem sob demanda quando a anterior é concluída: id determinístico
+`flowStepTaskId(entrega, etapa)`, `unique (parent_id, workflow_step_id)` e
+`23505` tolerado — concluir duas vezes, ou dois processos ao mesmo tempo, deixa
+uma tarefa só. `advanceFlow` relê a etapa concluída no banco e só avança se ela
+continua concluída (um retry antigo não avança uma etapa reaberta). A Entrega
+recorrente avança o molde uma vez por conclusão: se o molde já está no ciclo da
+ocorrência concluída, não avança de novo, e `advanceFlowMold` é compare-and-set
+no vencimento.
+
+### Ordem de aplicação
+
+A migration `20260918150000_atomic_task_comments.sql` é aditiva e precisa estar
+aplicada **antes** do deploy do código. `supabase/postflight/20260918_atomic_task_comments_smoke.sql`
+a confere dentro de uma transação com `rollback`. Se o código subir primeiro, só
+o campo de comentário humano cai para a RPC antiga (sem idempotência); as
+escritas das automações exigem a migration.
+
 ## Operação em produção
 
 Produção é o único ambiente integrado. O corte usa os preflights em
