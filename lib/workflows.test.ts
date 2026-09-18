@@ -19,7 +19,7 @@ function workflowReader(tables: Record<string, Row[]>): WorkflowReader {
       };
       return chain;
     },
-  } as WorkflowReader;
+  } as unknown as WorkflowReader;
 }
 
 describe("publishedWorkflowForKind", () => {
