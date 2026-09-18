@@ -72,10 +72,13 @@ export async function workflowByVersionId(db: WorkflowReader, versionId: string)
 }
 
 export async function publishedWorkflowForKind(db: WorkflowReader, kind: string): Promise<WorkflowVersionDef | null> {
+  // `criativo` e `automacao` são variantes-filhas da raiz estrutural
+  // `entrega`. Procurá-las como raiz fazia toda criação de Entrega em produção
+  // falhar apesar de a versão publicada existir. A versão é a prova de que o
+  // tipo encontrado é uma variante executável; o chamador já valida o behavior.
   const { data: typeRows, error: typeError } = await db
     .from("task_types")
     .select("id")
-    .is("parent_id", null)
     .eq("key", kind)
     .limit(1);
   if (typeError) throw typeError;

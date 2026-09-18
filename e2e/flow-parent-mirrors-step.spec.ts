@@ -94,7 +94,7 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
         status: "backlog", priority: "media",
       },
     });
-    expect(create.ok()).toBeTruthy();
+    expect(create.ok(), `criação da Entrega: ${await create.text()}`).toBeTruthy();
     const firstStep = await create.json();
     roteiroId = firstStep.id;
     deliveryId = (firstStep.parents ?? []).find((parent: { relation_kind?: string }) => parent.relation_kind === "workflow_step")?.id ?? "";
