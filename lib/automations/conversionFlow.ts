@@ -394,7 +394,7 @@ async function generateSalesReport(
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
     // 128 caracteres do id. (card, período) já identifica a conversão — o retry
     // que reencontra o documento já retorna antes de chegar aqui.
-    commentId: automationCommentId("sales-report", card2.id, period.to),
+    commentId: automationCommentId("sales-report", card2.id, fileName),
   });
   return (docRows?.[0] as { id: string } | undefined)?.id ?? null;
 }
@@ -731,10 +731,6 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
       text: `Relatório da métrica: +${parsed.seguidoresGanho} seguidores novos.`,
       commentId: automationCommentId("feedback-metric", card.id, comment.at),
       patch: { feedback_followers_gain: parsed.seguidoresGanho, feedback_format_warned_for: null },
-    });
-    await updateTaskPayload(admin, card.id, {
-      text: "Posso calcular a diferença e a porcentagem se você informar o total inicial de seguidores (por exemplo: de 829 para 876).",
-      commentId: automationCommentId("feedback-followers-comparison", card.id, comment.at),
     });
   } else if (parsed.valoresAnteriores?.seguidores != null && parsed.valores.seguidores != null) {
     const anterior = parsed.valoresAnteriores.seguidores;
