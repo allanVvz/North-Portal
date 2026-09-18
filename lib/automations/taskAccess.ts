@@ -14,6 +14,8 @@ export type AdminClient = ReturnType<typeof createAdminClient>;
 // account behind it, just a plain free-text label (same column humans use),
 // so the board always shows who/what is driving that card.
 export const AUTOMATION_ASSIGNEE = "North Ai";
+/** Autor gravado nos comentários que uma automação escreve. */
+export const AUTOMATION_AUTHOR = "Automação";
 
 // Rows read via the admin client never carry the task_assignees join
 // (mergeTaskAssigneeRow is a session-path concern) — assignee_profile_ids is

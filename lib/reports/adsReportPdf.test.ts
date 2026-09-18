@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderAdsReportPdf, type AdsReportInput } from "./adsReportPdf";
+import { renderAdsReportPdf, revisionAdjustments, type AdsReportInput } from "./adsReportPdf";
 import { BUILTIN_PERFORMANCE_TEMPLATES, DEFAULT_BUILTIN_TEMPLATE } from "@/lib/performanceTemplates";
 import { generateDemoPosts } from "@/app/admin/performance/demoData";
 import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
@@ -20,6 +20,11 @@ const base: AdsReportInput = {
 };
 
 const isPdf = (buf: Buffer) => buf.subarray(0, 5).toString("latin1") === "%PDF-";
+
+it("interpreta correção editorial explícita de alcance e campos a ocultar", () => {
+  expect(revisionAdjustments("Remova cliques, impressões e o numero correto de alcance é de 8681"))
+    .toEqual({ hideClicks: true, hideImpressions: true, reach: 8681 });
+});
 
 // PNG 1x1 transparente — miniatura de criativo já hidratada para data: URI.
 const PNG_1PX =

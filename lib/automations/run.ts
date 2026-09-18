@@ -32,7 +32,8 @@ import { recurrenceStopped } from "@/lib/recurrenceState";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } from "@/lib/automationWorkflow";
 import { commentsOf } from "@/lib/comments";
 import { markTaskParada } from "./errorHandling";
-import { appendedCommentPayload, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { automationCommentId, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import {
   adsAccountFor,
   getClientById,
@@ -215,7 +216,8 @@ async function fillReportCard(
 
 export type RunOutcome = "not_due" | "ran" | { error: string };
 
-async function runOneReportAutomation(
+// Exportada só para o teste de geração concorrente (trafficGeneration.test.ts).
+export async function runOneReportAutomation(
   admin: AdminClient,
   config: AutomationConfigRow,
   windsor: WindsorSettings,
@@ -252,35 +254,41 @@ async function runOneReportAutomation(
       card1 = await materializeFirstStep(admin, occ)
         ?? await getAdminTask(admin, flowStepTaskId(occ.id, ADS_REPORT_STEP_KEY))
         ?? (() => { throw new Error("A primeira etapa da Entrega de Automação não foi materializada."); })();
-      const { error: startError } = await admin.from("tasks").update({ status: "em_producao" }).eq("id", card1.id);
-      if (startError) throw startError;
+      // Compare-and-set: só inicia se a etapa ainda está em Entrada, parada por
+      // falha anterior, ou já em produção (retry depois de um crash no meio). Em
+      // revisão/aprovação/aprovado o relatório já foi gerado ou uma pessoa já agiu;
+      // regerar aqui rebaixaria a etapa (o trigger limpa `completed_at`).
+      const started = await transitionTaskStatus(admin, card1.id, { to: "em_producao", from: ["backlog", "parada", "em_producao"] });
+      if (!started) return "not_due";
+      // A ativação carimba uma vez; um retry não a reescreve.
       const { error: activationError } = await admin.from("tasks")
-        .update({ workflow_activated_at: new Date().toISOString(), status: "em_producao" })
-        .eq("id", occ.id);
+        .update({ workflow_activated_at: new Date().toISOString() })
+        .eq("id", occ.id)
+        .is("workflow_activated_at", null);
       if (activationError) throw activationError;
+      await transitionTaskStatus(admin, occ.id, { to: "em_producao", from: ["backlog", "parada"] });
     } catch (error) {
       const message = errorMessage(error);
       await markTaskParada(admin, target.id, `Falha ao preparar o fluxo do relatório de anúncios: ${message}`);
       return { error: message };
     }
     try {
-      const { fileName, url } = await fillReportCard(admin, card1, target, config, windsor, meta, today, occ.id);
+      const { fileName, url, report } = await fillReportCard(admin, card1, target, config, windsor, meta, today, occ.id);
       // Tudo o que o gestor vê vai na ETAPA `trafego` (visível no quadro); a
       // A ocorrência é só o contêiner versionado e não aparece no quadro. O sinal
       // para a Automação 2 não é mais um marcador no payload: é a linha em
       // traffic_reports e o status dela.
-      const { error: c1Error } = await admin
-        .from("tasks")
-        .update({
-          status: "revisao",
-          assignee: AUTOMATION_ASSIGNEE,
-          payload: appendedCommentPayload(
-            card1.payload,
-            `Relatório de anúncios gerado e anexado: [${fileName}](${url})\n\nComente aqui caso queira algum ajuste neste relatório de anúncios.`,
-          ),
-        })
-        .eq("id", card1.id);
-      if (c1Error) throw c1Error;
+      //
+      // O comentário entra por UPDATE atômico no thread que está no banco AGORA:
+      // a geração acima leva segundos e uma pessoa pode ter comentado nesse
+      // intervalo. Já o status é compare-and-set — se alguém moveu a etapa
+      // enquanto o PDF era gerado, o relatório continua salvo e comentado, mas a
+      // etapa não é rebaixada.
+      await updateTaskPayload(admin, card1.id, {
+        text: `Relatório de anúncios gerado e anexado: [${fileName}](${url})\n\nComente aqui caso queira algum ajuste neste relatório de anúncios.`,
+        commentId: automationCommentId("ads-report", card1.id, report.revision),
+      });
+      await transitionTaskStatus(admin, card1.id, { to: "revisao", from: ["em_producao"], extra: { assignee: AUTOMATION_ASSIGNEE } });
       // O molde avança depois de o PDF existir. A próxima Entrega só será
       // materializada quando a Conversão final for aprovada.
       await advanceFlowMold(admin, target, today);
@@ -313,13 +321,13 @@ async function runOneReportAutomation(
   }
 
   try {
-    const { fileName, url } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today, null);
-    const payload = appendedCommentPayload(actingTask.payload, `Relatório de anúncios gerado e anexado: [${fileName}](${url})`);
-    const { error: statusError } = await admin
-      .from("tasks")
-      .update({ status: "revisao", payload, assignee: AUTOMATION_ASSIGNEE })
-      .eq("id", actingTask.id);
-    if (statusError) throw statusError;
+    const { fileName, url, report } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today, null);
+    // Mesma regra do modo-fluxo: comentário atômico, status por compare-and-set.
+    await updateTaskPayload(admin, actingTask.id, {
+      text: `Relatório de anúncios gerado e anexado: [${fileName}](${url})`,
+      commentId: automationCommentId("ads-report", actingTask.id, report.revision),
+    });
+    await transitionTaskStatus(admin, actingTask.id, { to: "revisao", from: ["backlog", "em_producao", "parada"], extra: { assignee: AUTOMATION_ASSIGNEE } });
     await notifyFromAutomation(admin, actingTask.id, "task_commented", `Automação comentou em "${actingTask.title}".`);
     await notifyResponsibilityHolders(admin, actingTask.id, "gestor_trafego", "task_commented", `Relatório de tráfego pronto em "${actingTask.title}".`);
   } catch (error) {
@@ -426,6 +434,10 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
 export async function handleTrafficRevisionComment(admin: AdminClient, taskId: string): Promise<void> {
   const trafficTask = await getAdminTask(admin, taskId);
   if (!trafficTask || trafficTask.subtype !== ADS_REPORT_STEP_KEY) return;
+  // Etapa já concluída: uma pessoa a aprovou. Comentário depois disso é conversa;
+  // regenerar substituiria o relatório em que o Feedback e a Conversão já se
+  // apoiam, e o status `revisao` que a geração grava reabriria a etapa.
+  if (trafficTask.completed_at) return;
   const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", taskId).eq("relation_kind", "workflow_step").limit(1);
   const occurrenceId = (links?.[0] as { parent_id?: string } | undefined)?.parent_id;
   if (!occurrenceId) return;
@@ -434,32 +446,65 @@ export async function handleTrafficRevisionComment(admin: AdminClient, taskId: s
   if (!occ || !moldId) return;
   const mold = await getAdminTask(admin, moldId);
   if (!mold) return;
-  const { data: rows } = await admin.from("automation_configs").select("*")
+  // A etapa de anúncios pertence à Entrega, mas sua configuração pertence ao
+  // molde de anúncios. Os dois são ligados por `depends_on_config_id`; procurar
+  // a configuração diretamente no molde da Entrega só funciona em cadastros
+  // antigos em que os dois produtos compartilhavam o mesmo card.
+  const { data: directRows, error: directError } = await admin.from("automation_configs").select("*")
     .eq("target_task_id", moldId).eq("automation_key", "relatorio_trafego_semanal").eq("active", true).limit(1);
-  const config = rows?.[0] as AutomationConfigRow | undefined;
+  if (directError) throw directError;
+  let config = directRows?.[0] as AutomationConfigRow | undefined;
+  if (!config) {
+    const { data: conversionRows, error: conversionError } = await admin
+      .from("automation_configs")
+      .select("depends_on_config_id")
+      .eq("target_task_id", moldId)
+      .eq("automation_key", "relatorio_vendas")
+      .eq("active", true)
+      .not("depends_on_config_id", "is", null)
+      .limit(1);
+    if (conversionError) throw conversionError;
+    const trafficConfigId = (conversionRows?.[0] as { depends_on_config_id?: string | null } | undefined)?.depends_on_config_id;
+    if (trafficConfigId) {
+      const { data: trafficRows, error: trafficError } = await admin.from("automation_configs").select("*")
+        .eq("id", trafficConfigId).eq("automation_key", "relatorio_trafego_semanal").eq("active", true).limit(1);
+      if (trafficError) throw trafficError;
+      config = trafficRows?.[0] as AutomationConfigRow | undefined;
+    }
+  }
   if (!config) return;
   const instruction = [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
   if (!instruction) return;
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
   const today = occ.due_date ?? isoDay(new Date());
-  const { fileName, url } = await fillReportCard(admin, trafficTask, mold, config, windsor, meta, today, occ.id, instruction);
-  const { error } = await admin.from("tasks").update({
-    status: "revisao",
-    assignee: AUTOMATION_ASSIGNEE,
-    payload: {
-      ...appendedCommentPayload(trafficTask.payload, `North Ai aplicou a instrução de revisão e gerou uma nova versão: [${fileName}](${url})`),
-      traffic_revision_instruction: instruction,
-    },
-  }).eq("id", trafficTask.id);
-  if (error) throw error;
+  const { fileName, url, report } = await fillReportCard(admin, trafficTask, mold, config, windsor, meta, today, occ.id, instruction);
+  // A geração levou segundos: o comentário entra no thread que está no banco
+  // AGORA (nunca numa cópia lida antes) e o status é compare-and-set. Uma pessoa
+  // que concluiu a etapa nesse intervalo não tem a conclusão desfeita — o PDF
+  // novo fica salvo e comentado, e nada mais é resetado.
+  await updateTaskPayload(admin, trafficTask.id, {
+    text: `North Ai aplicou a instrução de revisão e gerou uma nova versão: [${fileName}](${url})`,
+    commentId: automationCommentId("ads-revision", trafficTask.id, report.revision),
+    patch: { traffic_revision_instruction: instruction },
+  });
+  const moved = await transitionTaskStatus(admin, trafficTask.id, {
+    to: "revisao",
+    from: ["backlog", "em_producao", "revisao", "parada"],
+    open: true,
+    extra: { assignee: AUTOMATION_ASSIGNEE },
+  });
+  if (!moved) return;
 
   // O relatório de conversão depende do snapshot de tráfego; uma revisão nova
   // torna a coleta e a conversão anteriores obsoletas e pede novo feedback.
-  const nextPayload = { ...(occ.payload ?? {}) } as Record<string, unknown>;
-  delete nextPayload.feedback_source_at;
-  delete nextPayload.sales_report_generated_at;
-  await admin.from("tasks").update({ payload: nextPayload, status: "em_producao" }).eq("id", occ.id);
+  await updateTaskPayload(admin, occ.id, { remove: ["feedback_source_at", "sales_report_generated_at"] });
+  // A Entrega é projeção de suas etapas: escrever seu status diretamente é
+  // recusado pelo trigger `tasks_project_parent_status`. A etapa de tráfego já
+  // está em Revisão acima; a projeção do pai acompanha esse estado.
   const feedbackId = flowStepTaskId(occ.id, FEEDBACK_STEP_KEY);
   const conversionId = flowStepTaskId(occ.id, CONVERSION_REPORT_STEP_KEY);
-  await admin.from("tasks").update({ status: "backlog" }).in("id", [feedbackId, conversionId]);
+  // Só etapas ainda abertas voltam para Entrada: uma etapa já concluída não é
+  // reaberta por uma regeneração (o trigger limparia o `completed_at`).
+  const { error: resetError } = await admin.from("tasks").update({ status: "backlog" }).in("id", [feedbackId, conversionId]).is("completed_at", null);
+  if (resetError) throw resetError;
 }
