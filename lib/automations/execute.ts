@@ -136,18 +136,23 @@ export async function advanceFlowMold(admin: AdminClient, mold: TaskRecord, toda
     dayOfMonth: mold.recurrence_day_of_month,
     startDate: mold.start_date ?? mold.due_date,
   });
-  const { data, error } = await admin
+  // Compare-and-set no vencimento que esta chamada leu: duas conclusões
+  // simultâneas da mesma Entrega (ou um retry) avançam o molde UMA vez. Sem o
+  // filtro, a segunda relia o molde já avançado e pulava um ciclo inteiro.
+  let update = admin
     .from("tasks")
     .update({
       due_date: nextDue,
       end_date: !mold.end_date || nextDue > mold.end_date ? nextDue : mold.end_date,
       payload: recurrenceParentPayload(mold.payload, nextCycle, revision),
     })
-    .eq("id", mold.id)
-    .select(TASK_COLUMNS)
-    .limit(1);
+    .eq("id", mold.id);
+  update = mold.due_date ? update.eq("due_date", mold.due_date) : update.is("due_date", null);
+  const { data, error } = await update.select(TASK_COLUMNS).limit(1);
   if (error) throw error;
-  return data?.[0] ? asTaskRecord(data[0]) : mold;
+  if (data?.[0]) return asTaskRecord(data[0]);
+  // Outro caminho avançou primeiro: devolve o molde como ele está agora.
+  return (await getAdminTask(admin, mold.id)) ?? mold;
 }
 
 // Plano de ação branch: clone the whole structure into a fresh instance

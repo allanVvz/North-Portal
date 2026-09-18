@@ -108,7 +108,15 @@ class Query implements PromiseLike<Result> {
     }
     return this;
   }
-  lt(column: string, value: number | string): this { this.filters.push((row) => Number(valueAt(row, column)) < Number(value)); return this; }
+  lt(column: string, value: number | string): this { this.filters.push((row) => this.compare(valueAt(row, column), value) < 0); return this; }
+  lte(column: string, value: number | string): this { this.filters.push((row) => this.compare(valueAt(row, column), value) <= 0); return this; }
+  gt(column: string, value: number | string): this { this.filters.push((row) => this.compare(valueAt(row, column), value) > 0); return this; }
+  gte(column: string, value: number | string): this { this.filters.push((row) => this.compare(valueAt(row, column), value) >= 0); return this; }
+  /** Números como números; datas ISO ('2026-09-20') e texto como texto. */
+  private compare(a: unknown, b: number | string): number {
+    if (typeof a === "number" || typeof b === "number") return Number(a) - Number(b);
+    return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
+  }
   order(column: string, options?: { ascending?: boolean }): this { this.orderBy = column; this.descending = options?.ascending === false; return this; }
   limit(count: number): this { this.max = count; return this; }
 
@@ -135,12 +143,21 @@ class Query implements PromiseLike<Result> {
         rows.push(row);
         this.db.inserts.push({ table: this.table, row });
         inserted.push(row);
+        // task_links_refresh_rollup_parent: ligar uma etapa reprojeta o pai.
+        if (this.table === "task_links" && row.relation_kind === "workflow_step") this.db.refreshParent(String(row.parent_id));
       }
       return { data: this.returning ? inserted.map((row) => ({ ...row })) : null, error: null };
     }
 
     if (this.mode === "update") {
       const targets = matching();
+      // Trigger tasks_reject_manual_rollup_status: uma escrita DIRETA de status em
+      // Entrega, Plano ou molde recorrente é recusada (o status deles é projetado).
+      // O statement falha inteiro, como no Postgres.
+      if (this.table === "tasks" && "status" in this.patch) {
+        const blocked = targets.find((row) => this.db.isProjectedParent(row) && row.status !== this.patch.status);
+        if (blocked) return { data: null, error: { code: "23514", message: "Parent card status is projected from descendants" } };
+      }
       for (const row of targets) {
         const before = { ...row };
         Object.assign(row, this.patch);
@@ -207,6 +224,12 @@ export class FakeTaskDb {
     if (table === "traffic_reports" && rows.some((existing) => existing.task_id === row.task_id && existing.revision === row.revision)) {
       return "duplicate key (traffic_reports task_id, revision)";
     }
+    if (table === "conversion_reports" && rows.some((existing) =>
+      existing.traffic_report_id === row.traffic_report_id
+      && existing.feedback_task_id === row.feedback_task_id
+      && (existing.source_comment_at ?? null) === (row.source_comment_at ?? null))) {
+      return "duplicate key (conversion_reports traffic_report_id, feedback_task_id, source_comment_at)";
+    }
     return null;
   }
 
@@ -234,7 +257,40 @@ export class FakeTaskDb {
     if (table === "tasks") {
       this.syncCompletedAt(row, before);
       row.updated_at = new Date().toISOString();
+      // tasks_refresh_rollup_parents: mudou o filho, o pai é reprojetado.
+      if (before.status !== row.status || before.completed_at !== row.completed_at) this.refreshParentsOf(String(row.id));
     }
+  }
+
+  /** Entrega, Plano de Ação e molde recorrente: o status vem dos descendentes. */
+  isProjectedParent(row: Row): boolean {
+    return Boolean(row.workflow_version_id || row.recurrence_cadence || row.kind === "plano_acao");
+  }
+
+  private refreshParentsOf(childId: string): void {
+    for (const link of this.table("task_links")) {
+      if (link.child_id === childId && link.relation_kind === "workflow_step") this.refreshParent(String(link.parent_id));
+    }
+  }
+
+  /** project_parent_status para uma Entrega versionada: o status do primeiro passo
+   * ainda aberto; todos concluídos = aprovado. Escreve como o refresh do banco
+   * (`north.rollup_refresh = on`), ou seja, sem passar pela recusa acima. */
+  refreshParent(parentId: string): void {
+    const parent = this.task(parentId);
+    if (!parent?.workflow_version_id) return;
+    const steps = this.table("task_links")
+      .filter((link) => link.parent_id === parentId && link.relation_kind === "workflow_step")
+      .sort((a, b) => Number(a.position ?? 0) - Number(b.position ?? 0))
+      .map((link) => this.task(String(link.child_id)))
+      .filter((step): step is Row => Boolean(step));
+    if (!steps.length) return;
+    const open = steps.find((step) => !step.completed_at);
+    const next = open ? String(open.status) : "aprovado";
+    if (parent.status === next) return;
+    const before = { ...parent };
+    parent.status = next;
+    this.syncCompletedAt(parent, before);
   }
 
   from(table: string): Query {
@@ -262,7 +318,28 @@ export class FakeTaskDb {
     this.rpcs.push({ name, args });
     if (name === "automation_task_payload_update") return this.automationPayloadUpdate(args);
     if (name === "append_task_comment_idempotent") return this.humanComment(args as unknown as HumanCommentArgs);
+    if (name === "claim_automation_run") return this.claimAutomationRun(args);
     return { data: null, error: null };
+  }
+
+  /** claim_automation_run: reivindica uma vez por (config, ocorrência, ação); só
+   * `failed`/`pending` (ou `running` velho) pode ser reivindicado de novo. */
+  private claimAutomationRun(args: Record<string, unknown>): { data: unknown; error: DbError | null } {
+    const runs = this.table("automation_runs");
+    const existing = runs.find((run) => run.config_id === args.p_config_id && run.occurrence_key === args.p_occurrence_key && run.action === args.p_action);
+    if (!existing) {
+      const row = this.normalize("automation_runs", {
+        config_id: args.p_config_id, occurrence_key: args.p_occurrence_key, action: args.p_action,
+        occurrence_id: args.p_occurrence_id ?? null, scheduled_for: args.p_scheduled_for, status: "running", attempts: 1,
+      });
+      runs.push(row);
+      return { data: [{ ...row }], error: null };
+    }
+    if (existing.status === "pending" || existing.status === "failed") {
+      Object.assign(existing, { status: "running", attempts: Number(existing.attempts ?? 0) + 1, last_error: null });
+      return { data: [{ ...existing }], error: null };
+    }
+    return { data: [], error: null };
   }
 
   private automationPayloadUpdate(args: Record<string, unknown>): { data: unknown; error: DbError | null } {

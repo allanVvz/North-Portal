@@ -21,7 +21,7 @@ import { asTaskRecord, errorMessage, getAdminTask, type AdminClient } from "@/li
 import { notifyFromAutomation } from "@/lib/automations/notify";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { isFlowDelivery } from "@/lib/taskRelations";
-import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
+import { RECURRENCE_GROUP_KEY, recurrenceCycleOf } from "@/lib/recurrenceState";
 import type { TaskRecord } from "@/lib/validation";
 import { flowStepFields, todayIso } from "./stepFields";
 import { flowStepTaskId } from "./ids";
@@ -234,6 +234,11 @@ export async function settleWorkflowDelivery(admin: AdminClient, parentId: strin
 export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord, actorId: string | null = null): Promise<AdvanceOutcome> {
   const outcome: AdvanceOutcome = { created: [], finished: [] };
   if (!completedStep.completed_at) return outcome;
+  // `completedStep` é o retrato do momento do PATCH. Um retry atrasado, ou uma
+  // pessoa que reabriu a etapa logo depois de concluí-la, não pode empurrar o
+  // fluxo: só avança se, no banco AGORA, a etapa continua concluída.
+  const current = await getAdminTask(admin, completedStep.id);
+  if (!current?.completed_at) return outcome;
 
   const parents = (await parentsOf(admin, completedStep.id)).filter(({ delivery }) => isFlowDelivery(delivery));
   if (!parents.length) return outcome;
@@ -329,7 +334,14 @@ export async function advanceFlowAfterUpdate(before: TaskRecord, after: TaskReco
       const { advanceFlowMold, ensureFlowOccurrence } = await import("@/lib/automations/execute");
       // A Entrega recorrente só avança quando o fluxo inteiro terminou. Assim
       // uma falha no Feedback/conversão não cria uma referência semanal falsa.
-      const advancedMold = await advanceFlowMold(admin, mold, mold.due_date ?? todayIso());
+      //
+      // A ocorrência concluída nasceu no ciclo (molde + 1); se o molde já está
+      // nesse ciclo, outra conclusão simultânea (ou retry) já o avançou e esta
+      // chamada não pode avançá-lo de novo. `advanceFlowMold` ainda é
+      // compare-and-set no vencimento, para a janela entre esta leitura e a escrita.
+      const advancedMold = recurrenceCycleOf(mold) >= recurrenceCycleOf(delivery)
+        ? mold
+        : await advanceFlowMold(admin, mold, mold.due_date ?? todayIso());
       const next = await ensureFlowOccurrence(admin, advancedMold, advancedMold.due_date ?? todayIso());
       await materializeFirstStep(admin, next, actorId);
     }

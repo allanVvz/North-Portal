@@ -21,6 +21,18 @@ export async function markTaskParada(admin: AdminClient, taskId: string, message
     if (!task) return;
     if (task.status === "parada") return; // already halted, don't stack duplicate comments/markers
 
+    // Entrega, molde recorrente e Plano de Ação não têm status próprio: ele é a
+    // projeção dos cards abaixo, e o banco recusa a escrita direta (trigger
+    // tasks_reject_manual_rollup_status). Tentar `parada` neles falhava calado e a
+    // explicação do erro nunca chegava a ninguém. Aqui o erro vira só um
+    // comentário visível no card — quem parou de verdade é a etapa, quando há uma.
+    const projected = Boolean(task.workflow_version_id || task.recurrence_cadence || task.kind === "plano_acao");
+    if (projected) {
+      await updateTaskPayload(admin, taskId, { text: message });
+      await notifyFromAutomation(admin, taskId, "task_commented", `Automação comentou em "${task.title}": ${message}`);
+      return;
+    }
+
     // Compare-and-set: uma falha atrasada nunca "para" uma etapa que um humano já
     // concluiu (ou que já parou) enquanto a automação ainda estava rodando.
     const halted = await transitionTaskStatus(admin, taskId, {

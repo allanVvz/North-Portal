@@ -163,6 +163,23 @@ describe("transitionTaskStatus — compare-and-set", () => {
   });
 });
 
+describe("markTaskParada em card-pai (Entrega, molde, plano)", () => {
+  // O status desses cards é projetado dos filhos e o banco recusa a escrita direta.
+  // Tentar `parada` neles falhava calado e a explicação do erro nunca chegava a
+  // ninguém; agora o erro vira comentário e o status fica como está.
+  it.each([
+    ["Entrega", { workflow_version_id: "wv" }],
+    ["molde recorrente", { recurrence_cadence: "semanal" }],
+    ["Plano de Ação", { kind: "plano_acao" }],
+  ])("%s: registra o erro em comentário e não tenta mudar o status", async (_label, flags) => {
+    const db = createFakeTaskDb({ tasks: [{ id: "pai", status: "em_producao", payload: { comments: [] }, ...flags }] });
+    await markTaskParada(db.asAdmin(), "pai", "Falha ao processar o feedback da semana: x");
+    expect(db.task("pai")!.status).toBe("em_producao");
+    expect(db.comments("pai").map((c) => c.text)).toEqual(["Falha ao processar o feedback da semana: x"]);
+    expect(db.updates.filter((u) => u.id === "pai" && "status" in u.patch)).toEqual([]);
+  });
+});
+
 describe("markTaskParada", () => {
   it("para uma etapa em andamento, comenta e guarda o status anterior", async () => {
     const db = world();

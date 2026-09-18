@@ -27,7 +27,8 @@ import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
 import { loadStoredPreviews } from "./creativeAssets";
 import { assignResponsibilityHolders } from "./responsibleOwners";
-import { appendedCommentPayload, asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { automationCommentId, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { getClientById } from "./serviceIntegrations";
 import { reportPeriodFor, resolveTemplateConfig } from "./reportData";
@@ -130,12 +131,9 @@ export async function prepareFeedbackCard(admin: AdminClient, occ: TaskRecord): 
   const alreadyPrompted = typeof card.payload?.feedback_prompted_at === "string";
   const openedOn = agencyToday();
   const feedbackDue = addDaysIso(openedOn, 2);
-  const nextPayload = alreadyPrompted
-    ? card.payload
-    : {
-        ...appendedCommentPayload(card.payload, pedidoDe(tags)),
-        feedback_prompted_at: nowIso(),
-      };
+  // Colunas escalares primeiro, comentário depois: se algo falhar no meio, o
+  // retry reencontra `feedback_prompted_at` ausente e refaz os dois — as datas
+  // saem iguais (mesmo dia) e o comentário é idempotente pelo id.
   const { error } = await admin
     .from("tasks")
     .update({
@@ -144,7 +142,6 @@ export async function prepareFeedbackCard(admin: AdminClient, occ: TaskRecord): 
       assignee: holderNames ? null : AUTOMATION_ASSIGNEE,
       requires_review: false,
       description: FEEDBACK_DESCRIPTION,
-      payload: nextPayload,
       ...(!alreadyPrompted && !card.completed_at
         ? { start_date: openedOn, due_date: feedbackDue, end_date: feedbackDue }
         : {}),
@@ -157,6 +154,15 @@ export async function prepareFeedbackCard(admin: AdminClient, occ: TaskRecord): 
       .update({ due_date: feedbackDue, end_date: feedbackDue })
       .eq("id", occ.id);
     if (parentError) throw parentError;
+  }
+  if (!alreadyPrompted) {
+    // O pedido e o marcador entram por UPDATE atômico no thread do banco; o id
+    // garante um único pedido mesmo com duas conclusões/retries concorrentes.
+    await updateTaskPayload(admin, card.id, {
+      text: pedidoDe(tags),
+      commentId: automationCommentId("feedback-prompt", card.id),
+      patch: { feedback_prompted_at: nowIso() },
+    });
   }
   return (await getAdminTask(admin, card.id)) ?? card;
 }
@@ -380,12 +386,14 @@ async function generateSalesReport(
     throw docError;
   }
 
-  const fresh = (await getAdminTask(admin, card2.id))?.payload ?? card2.payload;
-  const { error: updErr } = await admin
-    .from("tasks")
-    .update({ payload: appendedCommentPayload(fresh, `Relatório de vendas gerado e anexado: [${fileName}](${urlData.publicUrl})`) })
-    .eq("id", card2.id);
-  if (updErr) throw updErr;
+  // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
+  await updateTaskPayload(admin, card2.id, {
+    text: `Relatório de vendas gerado e anexado: [${fileName}](${urlData.publicUrl})`,
+    // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
+    // 128 caracteres do id. (card, período) já identifica a conversão — o retry
+    // que reencontra o documento já retorna antes de chegar aqui.
+    commentId: automationCommentId("sales-report", card2.id, period.to),
+  });
   return (docRows?.[0] as { id: string } | undefined)?.id ?? null;
 }
 
@@ -400,7 +408,7 @@ async function processOccurrence(
 ): Promise<boolean> {
   const startedAt = Date.now();
   const tags = tagsOf(config);
-  let occPayload = (occ.payload ?? {}) as OccPayload;
+  const occPayload = (occ.payload ?? {}) as OccPayload;
 
   const card1 = await linkedCardForStep(admin, occ, ADS_REPORT_STEP_KEY);
   if (!card1) return false; // espera a Automação 1
@@ -450,6 +458,12 @@ async function processOccurrence(
   };
   const mode = conversionModeOf(informed, ext.linhas);
   const sourceCommentAt = human?.at ?? null;
+
+  // Uma conversão já concluída ou entregue para aprovação não é regerada por
+  // esta execução: reabri-la desfaria uma decisão humana mais recente do que o
+  // comentário que a motivou.
+  const existingConversion = await linkedCardForStep(admin, occ, CONVERSION_REPORT_STEP_KEY);
+  if (existingConversion && (existingConversion.completed_at || existingConversion.status === "aprovacao")) return false;
 
   // Reivindica ANTES de qualquer escrita, com chave única por (etapa de
   // feedback, revisão do tráfego, comentário): retry de worker, cron em dobro ou
@@ -512,34 +526,37 @@ async function processOccurrence(
       ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.${ext.problemas?.length ? ` Deixei de fora: ${ext.problemas.join("; ")}.` : ""}`
       : `Feedback aprovado sem métricas informadas; o relatório registra os campos como não informados.`;
 
-    // Pai: só o estado + os marcadores estruturais (sem comentário — invisível).
-    occPayload = { ...occPayload, feedback_source_at: sourceAt };
-    const { error: occErr } = await admin.from("tasks").update({ payload: occPayload, status: "em_producao" }).eq("id", occ.id);
-    if (occErr) throw occErr;
-    occ = { ...occ, payload: occPayload };
+    // Pai: só os marcadores estruturais (sem comentário — invisível). O status do
+    // pai NUNCA é escrito aqui: ele é a projeção da etapa aberta (o banco recusa
+    // escrita direta — trigger tasks_reject_manual_rollup_status) e acompanha o
+    // card de conversão sozinho. O marcador entra por patch atômico: o pai pode
+    // ter recebido comentário ou outro marcador desde que `occ` foi lido.
+    const marked = await updateTaskPayload(admin, occ.id, { patch: { feedback_source_at: sourceAt } });
+    occ = marked?.task ?? occ;
 
     // O relatório de conversão é uma etapa própria; Feedback é só a coleta.
     let card3 = await linkedCardForStep(admin, occ, CONVERSION_REPORT_STEP_KEY);
     if (!card3) throw new Error("A etapa Relatório de conversão não foi materializada.");
     conversionTaskId = card3.id;
-    const { error: c3Err } = await admin
-      .from("tasks")
-      .update({ status: "em_producao", assignee: AUTOMATION_ASSIGNEE, payload: appendedCommentPayload(card3.payload, resumo) })
-      .eq("id", card3.id);
-    if (c3Err) throw c3Err;
+    await updateTaskPayload(admin, card3.id, {
+      text: resumo,
+      commentId: automationCommentId("conversion-summary", card3.id, claim.id),
+    });
+    // Compare-and-set: uma decisão humana mais recente (aprovado/aprovação) não é
+    // desfeita por esta execução.
+    const started = await transitionTaskStatus(admin, card3.id, {
+      to: "em_producao",
+      from: ["backlog", "parada", "em_producao", "revisao"],
+      extra: { assignee: AUTOMATION_ASSIGNEE },
+    });
+    if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
     const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period);
     await attachConversionDocument(admin, claim.id, documentId);
-    const { error: reviewError } = await admin.from("tasks").update({ status: "revisao" }).eq("id", card3.id);
-    if (reviewError) throw reviewError;
-    const { error: parentReviewError } = await admin.from("tasks").update({ status: "revisao" }).eq("id", occ.id);
-    if (parentReviewError) throw parentReviewError;
+    // A Entrega passa a Revisão sozinha, projetada desta etapa.
+    await transitionTaskStatus(admin, card3.id, { to: "revisao", from: ["em_producao"] });
 
-    const { error: markErr } = await admin
-      .from("tasks")
-      .update({ payload: { ...((await getAdminTask(admin, occ.id))?.payload ?? {}), sales_report_generated_at: nowIso() } })
-      .eq("id", occ.id);
-    if (markErr) throw markErr;
+    await updateTaskPayload(admin, occ.id, { patch: { sales_report_generated_at: nowIso() } });
   } catch (error) {
     // Sem isto a reivindicação ficaria órfã e bloquearia o retry do mesmo
     // comentário para sempre.
@@ -687,12 +704,13 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
   if (!hasMetric) {
     const marker = (card.payload as Record<string, unknown> | null)?.feedback_format_warned_for;
     if (marker !== comment.at) {
-      await admin.from("tasks").update({
-        payload: {
-          ...appendedCommentPayload(card.payload, `Não consegui identificar uma métrica. ${pedidoDe(tagsOf(config))}`),
-          feedback_format_warned_for: comment.at,
-        },
-      }).eq("id", card.id);
+      // `extractMetrics` acima pode chamar um modelo (segundos): o aviso entra
+      // por UPDATE atômico, não regravando o payload lido antes dessa espera.
+      await updateTaskPayload(admin, card.id, {
+        text: `Não consegui identificar uma métrica. ${pedidoDe(tagsOf(config))}`,
+        commentId: automationCommentId("feedback-format", card.id, comment.at),
+        patch: { feedback_format_warned_for: comment.at },
+      });
     }
     return;
   }

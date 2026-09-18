@@ -266,7 +266,7 @@ export async function runOneReportAutomation(
         .eq("id", occ.id)
         .is("workflow_activated_at", null);
       if (activationError) throw activationError;
-      await transitionTaskStatus(admin, occ.id, { to: "em_producao", from: ["backlog", "parada"] });
+      // O status da Entrega não é escrito: ele acompanha a etapa aberta (acima).
     } catch (error) {
       const message = errorMessage(error);
       await markTaskParada(admin, target.id, `Falha ao preparar o fluxo do relatório de anúncios: ${message}`);
