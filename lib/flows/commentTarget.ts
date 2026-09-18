@@ -1,38 +1,41 @@
-// ONDE um comentário feito num card de entrega é gravado — a regra completa,
-// em um lugar só, para as duas portas de comentário responderem a mesma coisa.
+// ONDE um comentário feito numa entrega é gravado — a regra completa, em um
+// lugar só, para as duas portas de comentário responderem a mesma coisa.
 //
-// A regra base (P1-D): comentar no card PAI grava na ETAPA CORRENTE, não no
-// pai. "Se o card estiver em edição, o comentário feito no pai comenta no
-// card de edição." A LEITURA do thread não muda — mergeFamilyComments já
-// junta a família inteira no pai — só o destino da ESCRITA.
+// A Entrega é o contêiner visual; as tarefas filhas (etapas) são a fonte de
+// verdade dos comentários. Comentar "na Entrega" nunca grava no pai e nunca
+// replica o texto em pai e filho: a leitura junta a família
+// (`mergeFamilyComments`), a ESCRITA vai para uma etapa só.
 //
-// Regra de papel (2026-09-12, por cima da base): quando quem comenta tem um
-// PAPEL numa etapa aberta específica, o comentário cai nela em vez de na
-// corrente pura por posição — é assim que "captação ainda aberta, edição já
-// em revisão" deixa de desviar o comentário pra etapa errada (o card que
-// motivou esta regra: edição tem revisor próprio, mas a corrente por posição
-// apontava pra captação). Precedência, entre as etapas ABERTAS:
-//   1. Existe uma etapa em `status: 'revisao'` cujo `reviewer_id` é quem
-//      comentou? Ela vence — revisor tem prioridade sobre responsável.
-//   2. Senão, existe uma etapa (a mais antiga por posição, se houver mais de
-//      uma) onde quem comentou está entre os `task_assignees` vinculados?
-//      Ela vence.
-//   3. Senão, cai no fallback de sempre: `currentFlowStepOf` (a mais antiga
-//      etapa aberta por posição).
-// Identidade sempre por vínculo ESTRUTURADO (`reviewer_id`, `task_assignees`)
-// — nunca pelo texto livre do campo `assignee`; quem só tem nome digitado à
-// mão nunca aciona esta regra, cai direto no fallback.
+// Precedência (a primeira que se aplica vence):
+//   1. `stageTaskId` explícito — a interface diz qual etapa mostrava como corrente.
+//      Precisa ser uma etapa (`workflow_step`) DESTA entrega; senão 409
+//      COMMENT_STAGE_INVALID. Nunca é escolhido pelo nome textual da etapa. Se a
+//      etapa informada já foi concluída e a Entrega avançou (tela desatualizada),
+//      o comentário vai para a etapa aberta AGORA (via `stage_advanced`): o banco
+//      garante uma única etapa aberta por Entrega, em ordem.
+//   2. O card não é uma entrega (tarefa comum, etapa, Plano de Ação): o próprio
+//      card. Plano de Ação fica de fora de propósito — ali o comentário continua
+//      no plano; um plano não tem "etapa corrente", tem atividades paralelas.
+//   3. Sem `stageTaskId` (chamadas antigas), só se houver UMA etapa atual
+//      inequívoca:
+//        - nenhuma etapa ainda (recém-criada, esperando `materializeFirstStep`):
+//          a própria entrega — não há para onde desviar;
+//        - todas concluídas: a última (a corrente nunca "acaba");
+//        - exatamente uma aberta: ela;
+//        - várias abertas: o PAPEL de quem comentou desambigua, e só se apontar
+//          exatamente uma — revisor de etapa em `revisao` primeiro, responsável
+//          vinculado (`task_assignees`, nunca o texto livre `assignee`) depois.
+//   4. Ainda ambíguo: 409 COMMENT_STAGE_AMBIGUOUS com os ids candidatos. Gravar
+//      numa tarefa arbitrária é pior do que pedir que a interface diga a etapa.
 //
 // Existe como módulo próprio porque há DUAS portas de comentário, e elas já
 // divergiram uma vez: `app/api/admin/tasks/[id]/comments/route.ts` (o admin,
-// via RPC append_task_comment) e `app/api/client/[slug]/tasks/[id]/route.ts`
+// via RPC append_task_comment_idempotent) e `app/api/client/[slug]/tasks/[id]/route.ts`
 // (o cliente, "Aprovar entrega"/"Solicitar ajustes", que monta
-// `payload.comments` à mão). Com a regra escrita só do lado do admin, o mesmo
-// comentário caía em cards diferentes conforme quem o escreveu. A rota de
-// cliente recusa alteração da Entrega-pai; este resolvedor ainda protege links
-// antigos, fazendo o comentário cair na etapa corrente. Um cliente nunca é
-// revisor/responsável vinculado de uma etapa interna, então a regra de papel
-// nunca dispara nessa porta — cai sempre no fallback, sem regressão.
+// `payload.comments` à mão). A rota de cliente recusa alteração da
+// Entrega-pai; este resolvedor ainda protege links antigos, fazendo o comentário
+// cair na etapa corrente. Um cliente nunca é revisor/responsável vinculado de
+// uma etapa interna, então a regra de papel nunca dispara nessa porta.
 //
 // Sempre com o client de SERVIÇO: um dos chamadores é uma sessão de cliente, e
 // uma conta cliente não enxerga as etapas (a etapa raramente é
@@ -44,8 +47,11 @@
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, type AdminClient } from "@/lib/automations/taskAccess";
 import { isFlowDelivery, stepOrderOf } from "@/lib/taskRelations";
-import type { TaskRecord } from "@/lib/validation";
+import { HttpError, type TaskRecord } from "@/lib/validation";
 import { currentFlowStepOf } from "./currentStep";
+
+export const COMMENT_STAGE_INVALID = "COMMENT_STAGE_INVALID";
+export const COMMENT_STAGE_AMBIGUOUS = "COMMENT_STAGE_AMBIGUOUS";
 
 /** As etapas de uma entrega, na ordem da corrente, lidas com o client de
  * serviço. A ordem vem do `position` do ELO, não da posição do card no quadro
@@ -92,44 +98,94 @@ async function adminTaskAssigneesOf(admin: AdminClient, stepIds: string[]): Prom
   return byStep;
 }
 
+export type CommentTargetVia =
+  | "explicit"
+  | "stage_advanced"
+  | "own"
+  | "no_steps"
+  | "last_completed"
+  | "sole_open"
+  | "reviewer"
+  | "assignee";
+
+export type CommentTarget = { targetId: string; via: CommentTargetVia };
+
+function ambiguous(deliveryId: string, candidates: TaskRecord[]): HttpError {
+  return new HttpError(
+    409,
+    "Esta entrega tem mais de uma etapa aberta. Escreva o comentário dentro da etapa desejada.",
+    { code: COMMENT_STAGE_AMBIGUOUS, delivery_id: deliveryId, candidates: candidates.map((step) => step.id) },
+  );
+}
+
 /**
- * O card que de fato recebe um comentário escrito em `task`.
+ * O card que de fato recebe um comentário escrito em `task`, e por qual regra.
  *
- * - `task` não é uma entrega (tarefa comum, etapa, Plano de Ação): o próprio
- *   card. Plano de Ação fica de fora de propósito — ali o comentário continua
- *   no plano; um plano não tem "etapa corrente", tem atividades paralelas.
- * - `task` é uma entrega com corrente e `commenterId` tem um papel numa etapa
- *   ABERTA específica: essa etapa vence (ver a regra de papel no cabeçalho do
- *   módulo) — revisor de uma etapa em revisão primeiro, responsável vinculado
- *   depois.
- * - Senão, `task` é uma entrega com corrente: a etapa corrente
- *   (`currentFlowStepOf` — a mais antiga sem `completed_at`, ou a última
- *   quando tudo terminou).
- * - `task` é uma entrega ainda SEM etapa nenhuma (recém-criada, esperando
- *   `materializeFirstStep`): a própria entrega. Não há para onde desviar, e
- *   perder o comentário seria pior do que gravá-lo no pai.
+ * `commenterId` é o id de perfil de quem está comentando — `null`/omitido pula
+ * a regra de papel (ex.: um caminho que não sabe quem comentou).
+ * `stageTaskId` é a etapa que a interface informou.
  *
- * `commenterId` é o id de perfil de quem está comentando — `null`/omitido
- * pula direto pro fallback (ex.: um caminho que não sabe quem comentou).
+ * Lança `HttpError` 409 (com `details.code`) quando a etapa informada não
+ * pertence à entrega ou quando o destino é ambíguo.
  */
+export async function resolveFlowCommentTarget(
+  admin: AdminClient,
+  task: TaskRecord,
+  options: { commenterId?: string | null; stageTaskId?: string | null } = {},
+): Promise<CommentTarget> {
+  const { commenterId = null, stageTaskId = null } = options;
+
+  if (!isFlowDelivery(task)) {
+    if (stageTaskId && stageTaskId !== task.id) {
+      throw new HttpError(409, "Essa etapa não pertence a este card. Atualize a página e tente de novo.", { code: COMMENT_STAGE_INVALID, stage_task_id: stageTaskId });
+    }
+    return { targetId: task.id, via: "own" };
+  }
+
+  const steps = await adminFlowStepsOf(admin, task.id);
+
+  if (stageTaskId) {
+    const chosen = steps.find((step) => step.id === stageTaskId);
+    if (!chosen) {
+      throw new HttpError(409, "Essa etapa não pertence a esta entrega. Atualize a página e tente de novo.", { code: COMMENT_STAGE_INVALID, stage_task_id: stageTaskId, delivery_id: task.id });
+    }
+    // A tela manda a etapa que mostrava como corrente. Se ela já foi concluída e a
+    // Entrega avançou (outra aba, o cliente aprovando no portal, a conclusão logo
+    // antes de o comentário sair), o comentário é da etapa de AGORA: a Entrega tem
+    // sempre uma única etapa aberta, e comentar "na Entrega" é comentar nela.
+    if (chosen.completed_at) {
+      const open = steps.filter((step) => !step.completed_at);
+      if (open.length === 1) return { targetId: open[0].id, via: "stage_advanced" };
+    }
+    return { targetId: stageTaskId, via: "explicit" };
+  }
+
+  if (!steps.length) return { targetId: task.id, via: "no_steps" };
+
+  const openSteps = steps.filter((step) => !step.completed_at);
+  if (!openSteps.length) return { targetId: currentFlowStepOf(steps)!.id, via: "last_completed" };
+  if (openSteps.length === 1) return { targetId: openSteps[0].id, via: "sole_open" };
+
+  if (commenterId) {
+    const reviewerSteps = openSteps.filter((step) => step.status === "revisao" && step.reviewer_id === commenterId);
+    if (reviewerSteps.length === 1) return { targetId: reviewerSteps[0].id, via: "reviewer" };
+    if (reviewerSteps.length > 1) throw ambiguous(task.id, reviewerSteps);
+
+    const assigneesByStep = await adminTaskAssigneesOf(admin, openSteps.map((step) => step.id));
+    const assigneeSteps = openSteps.filter((step) => assigneesByStep.get(step.id)?.has(commenterId));
+    if (assigneeSteps.length === 1) return { targetId: assigneeSteps[0].id, via: "assignee" };
+    if (assigneeSteps.length > 1) throw ambiguous(task.id, assigneeSteps);
+  }
+
+  throw ambiguous(task.id, openSteps);
+}
+
+/** Só o id do destino — para os chamadores que não precisam saber a regra. */
 export async function flowCommentTargetId(
   admin: AdminClient,
   task: TaskRecord,
   commenterId: string | null = null,
+  stageTaskId: string | null = null,
 ): Promise<string> {
-  if (!isFlowDelivery(task)) return task.id;
-  const steps = await adminFlowStepsOf(admin, task.id);
-
-  if (commenterId) {
-    const openSteps = steps.filter((step) => !step.completed_at);
-    const assigneesByStep = await adminTaskAssigneesOf(admin, openSteps.map((step) => step.id));
-
-    const reviewerStep = openSteps.find((step) => step.status === "revisao" && step.reviewer_id === commenterId);
-    if (reviewerStep) return reviewerStep.id;
-
-    const assigneeStep = openSteps.find((step) => assigneesByStep.get(step.id)?.has(commenterId));
-    if (assigneeStep) return assigneeStep.id;
-  }
-
-  return currentFlowStepOf(steps)?.id ?? task.id;
+  return (await resolveFlowCommentTarget(admin, task, { commenterId, stageTaskId })).targetId;
 }

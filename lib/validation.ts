@@ -166,6 +166,9 @@ const subtypeSchema = z.string().max(40);
 const isoDate = z.string().max(40); // 'YYYY-MM-DD' or ISO timestamp
 const taskTone = z.enum(["green", "gold", "blue", "purple", "neutral"]);
 const taskCommentSchema = z.object({
+  // Sem isto o zod (strip) descartaria a chave idempotente quando um PATCH
+  // humano devolve o thread inteiro.
+  id: z.string().max(128).optional(),
   author: z.string().max(80),
   text: z.string().max(2000),
   at: z.string(),
@@ -285,7 +288,15 @@ export const taskPatchSchema = taskFieldsShape.partial().omit({ slug: true }).ex
   }).strict().optional(),
 });
 
-export const taskCommentCreateSchema = z.object({ text: z.string().trim().min(1).max(2000) });
+export const taskCommentCreateSchema = z.object({
+  text: z.string().trim().min(1).max(2000),
+  /** Chave idempotente gerada pela interface: retry e clique duplo com o mesmo
+   *  id gravam um comentário só. */
+  comment_id: z.string().min(8).max(64).optional(),
+  /** Etapa (tarefa filha) em que a pessoa comentou. Quando presente, é o
+   *  destino do comentário — nunca uma heurística. Ver lib/flows/commentTarget.ts. */
+  stage_task_id: z.string().uuid().optional(),
+});
 
 // `introducesInvalidPublishedState` morava aqui. Ela existia para impedir que
 // um card que não fosse Criativo entrasse em "Publicado" — uma regra que só

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { apiError } from "@/lib/api";
 import { appendTaskComment, deleteTaskComment, editTaskComment, getProfileName, getTaskById, listTeamMembers, mentionsName } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
@@ -7,7 +7,9 @@ import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommen
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleTrafficRevisionComment } from "@/lib/automations/run";
 import { recordFeedbackMetricComment } from "@/lib/automations/conversionFlow";
-import { flowCommentTargetId } from "@/lib/flows/commentTarget";
+import { markTaskParada } from "@/lib/automations/errorHandling";
+import { errorMessage } from "@/lib/automations/taskAccess";
+import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
 export const runtime = "nodejs";
@@ -19,16 +21,22 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID inválido.");
-    const { text } = taskCommentCreateSchema.parse(await request.json());
-    // Comentar no card PAI (a entrega) grava o comentário na ETAPA CORRENTE,
-    // não no pai — a LEITURA não muda (mergeFamilyComments já junta tudo no
-    // pai), só o destino da ESCRITA (P1-D). A regra inteira mora em
-    // lib/flows/commentTarget.ts porque a outra porta de comentário (o portal
-    // do cliente) precisa responder exatamente a mesma coisa; ver o cabeçalho
-    // daquele módulo.
+    const { text, comment_id: commentId, stage_task_id: stageTaskId } = taskCommentCreateSchema.parse(await request.json());
+    // Comentar no card PAI (a entrega) grava o comentário na ETAPA em que a
+    // pessoa estava (`stage_task_id`) — ou, em chamada antiga sem ele, na única
+    // etapa atual inequívoca; ambíguo é 409, nunca um palpite. A LEITURA não
+    // muda (mergeFamilyComments já junta tudo no pai), só o destino da ESCRITA.
+    // A regra inteira mora em lib/flows/commentTarget.ts porque a outra porta
+    // de comentário (o portal do cliente) precisa responder exatamente a mesma
+    // coisa; ver o cabeçalho daquele módulo.
     const parent = await getTaskById(id);
-    const targetId = parent ? await flowCommentTargetId(createAdminClient(), parent, session.userId) : id;
-    const task = await appendTaskComment(targetId, session.userId, text);
+    const targetId = parent
+      ? (await resolveFlowCommentTarget(createAdminClient(), parent, { commenterId: session.userId, stageTaskId })).targetId
+      : id;
+    const { task, inserted } = await appendTaskComment(targetId, session.userId, text, commentId ?? null);
+    // Reenvio do mesmo comentário (retry, clique duplo): já foi gravado e já
+    // disparou seus efeitos — não notifica, não menciona e não regenera de novo.
+    if (!inserted) return NextResponse.json(task);
     // As notificações leem o id EFETIVO (a etapa), não o da URL.
     const authorName = (await getProfileName(session.userId)) ?? session.email ?? "Alguém";
     await notifyTaskParticipants(targetId, "task_commented", taskCommentedMessage(task.title, authorName));
@@ -44,8 +52,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     // Um comentário no tráfego pede revisão editorial; no Feedback, uma métrica
     // válida atualiza a referência histórica, mas a aprovação continua humana.
-    await handleTrafficRevisionComment(createAdminClient(), targetId);
-    await recordFeedbackMetricComment(createAdminClient(), targetId);
+    //
+    // Isso roda DEPOIS da resposta (`after`): regerar o PDF leva dezenas de
+    // segundos, e esperar por ele fazia o comentário sumir da tela até acabar —
+    // a pessoa achava que tinha se perdido e escrevia de novo. Agora o comentário
+    // aparece na hora e a nova versão chega como um comentário da automação.
+    // Uma falha aqui não pode se perder calada: vira o mesmo aviso que as
+    // automações usam — a etapa `parada` com um comentário explicando.
+    const admin = createAdminClient();
+    after(async () => {
+      try {
+        await handleTrafficRevisionComment(admin, targetId);
+        await recordFeedbackMetricComment(admin, targetId);
+      } catch (hookError) {
+        console.error("comment hook failed", { taskId: targetId, hookError });
+        await markTaskParada(admin, targetId, `Falha ao processar o comentário: ${errorMessage(hookError)}`);
+      }
+    });
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }

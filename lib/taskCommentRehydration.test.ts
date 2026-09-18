@@ -66,27 +66,53 @@ beforeEach(() => {
 describe("appendTaskComment re-hidrata antes de devolver ao chamador", () => {
   it("devolve o card com `parents` preenchido, não a linha crua da RPC", async () => {
     const { appendTaskComment } = await import("./supabase");
-    rpcMock.mockResolvedValue({ data: [RAW_RPC_ROW], error: null });
+    rpcMock.mockResolvedValue({ data: { inserted: true, task: RAW_RPC_ROW }, error: null });
     fromMock.mockReturnValueOnce(selectBuilder({ data: [HYDRATED_ROW], error: null }));
 
-    const result = await appendTaskComment("task-1", "author-1", "novo comentário");
+    const result = await appendTaskComment("task-1", "author-1", "novo comentário", "comment-0001");
 
-    expect(rpcMock).toHaveBeenCalledWith("append_task_comment", {
-      p_task_id: "task-1", p_author_id: "author-1", p_text: "novo comentário",
+    expect(rpcMock).toHaveBeenCalledWith("append_task_comment_idempotent", {
+      p_task_id: "task-1", p_author_id: "author-1", p_text: "novo comentário", p_comment_id: "comment-0001",
     });
-    expect(result.parents).toEqual([{ id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }]);
+    expect(result.inserted).toBe(true);
+    expect(result.task.parents).toEqual([{ id: "entrega-1", relation_kind: "workflow_step", slot: "roteiro", position: 10 }]);
   });
 
   it("cai para a linha crua da RPC quando o re-fetch falha — incompleta é melhor que 500 numa ação já persistida", async () => {
     const { appendTaskComment } = await import("./supabase");
-    rpcMock.mockResolvedValue({ data: [RAW_RPC_ROW], error: null });
+    rpcMock.mockResolvedValue({ data: { inserted: true, task: RAW_RPC_ROW }, error: null });
     // getTaskById -> fail() -> lança HttpError; rehydrateOrRaw absorve com .catch.
     fromMock.mockReturnValueOnce(selectBuilder({ data: null, error: { message: "conexão caiu" } }));
 
     const result = await appendTaskComment("task-1", "author-1", "novo comentário");
 
-    expect(result).toBe(RAW_RPC_ROW);
-    expect((result as { parents?: unknown }).parents).toBeUndefined();
+    expect(result.task).toBe(RAW_RPC_ROW);
+    expect((result.task as { parents?: unknown }).parents).toBeUndefined();
+  });
+
+  it("reenvio do mesmo comment_id volta inserted=false (a rota não repete os efeitos)", async () => {
+    const { appendTaskComment } = await import("./supabase");
+    rpcMock.mockResolvedValue({ data: { inserted: false, task: RAW_RPC_ROW }, error: null });
+    fromMock.mockReturnValueOnce(selectBuilder({ data: [HYDRATED_ROW], error: null }));
+
+    const result = await appendTaskComment("task-1", "author-1", "novo comentário", "comment-0001");
+    expect(result.inserted).toBe(false);
+  });
+
+  it("migration ainda não aplicada (PGRST202): usa a RPC antiga, o campo de comentário não quebra", async () => {
+    const { appendTaskComment } = await import("./supabase");
+    rpcMock
+      .mockResolvedValueOnce({ data: null, error: { code: "PGRST202", message: "Could not find the function" } })
+      .mockResolvedValueOnce({ data: [RAW_RPC_ROW], error: null });
+    fromMock.mockReturnValueOnce(selectBuilder({ data: [HYDRATED_ROW], error: null }));
+
+    const result = await appendTaskComment("task-1", "author-1", "novo comentário", "comment-0001");
+
+    expect(rpcMock).toHaveBeenNthCalledWith(2, "append_task_comment", {
+      p_task_id: "task-1", p_author_id: "author-1", p_text: "novo comentário",
+    });
+    expect(result.inserted).toBe(true);
+    expect(result.task.parents).toHaveLength(1);
   });
 });
 

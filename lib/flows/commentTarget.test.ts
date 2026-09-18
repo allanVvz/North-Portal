@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { flowCommentTargetId } from "./commentTarget";
+import { COMMENT_STAGE_AMBIGUOUS, COMMENT_STAGE_INVALID, flowCommentTargetId, resolveFlowCommentTarget } from "./commentTarget";
+import { HttpError } from "@/lib/validation";
 import type { AdminClient } from "@/lib/automations/taskAccess";
 import type { TaskRecord } from "@/lib/validation";
 
@@ -45,6 +46,15 @@ const step = (
   extra: { reviewer_id?: string | null; status?: string } = {},
 ) => ({ id, kind: "criativo", payload: {}, completed_at: completed, reviewer_id: extra.reviewer_id ?? null, status: extra.status ?? "em_producao" });
 
+async function expectAmbiguous(promise: Promise<unknown>, candidates: string[]) {
+  const error = await promise.then(() => null, (e: unknown) => e);
+  expect(error).toBeInstanceOf(HttpError);
+  const http = error as HttpError;
+  expect(http.status).toBe(409);
+  expect(http.details?.code).toBe(COMMENT_STAGE_AMBIGUOUS);
+  expect([...(http.details?.candidates as string[])].sort()).toEqual([...candidates].sort());
+}
+
 describe("flowCommentTargetId — onde um comentário no card pai é gravado", () => {
   it("desvia para a primeira etapa ainda aberta", async () => {
     const admin = fakeAdmin(
@@ -61,14 +71,16 @@ describe("flowCommentTargetId — onde um comentário no card pai é gravado", (
   // devolveu as linhas — é o mesmo erro que já pôs a etapa de edição como 1/4
   // em produção (ver stepOrderOf).
   it("ordena pela posição do elo, não pela ordem de retorno da consulta", async () => {
+    // Tudo concluído: o destino é a ÚLTIMA da corrente — e "última" é a de maior
+    // posição no elo, mesmo que a consulta devolva a linha dela primeiro.
     const admin = fakeAdmin(
       [
-        { child_id: "edicao", slot: "edicao", position: 30 },
         { child_id: "roteiro", slot: "roteiro", position: 10 },
+        { child_id: "publicacao", slot: "publicacao", position: 40 },
       ],
-      [step("edicao", null), step("roteiro", null)],
+      [step("publicacao", "2026-09-02T00:00:00Z"), step("roteiro", "2026-09-01T00:00:00Z")],
     );
-    expect(await flowCommentTargetId(admin, delivery())).toBe("roteiro");
+    expect(await flowCommentTargetId(admin, delivery())).toBe("publicacao");
   });
 
   it("cai na última etapa quando a corrente inteira terminou", async () => {
@@ -125,23 +137,96 @@ describe("flowCommentTargetId — precedência de papel por cima da corrente por
     expect(await flowCommentTargetId(admin, delivery(), "allan")).toBe("edicao");
   });
 
-  it("nenhum papel em etapa nenhuma: cai no fallback de sempre (a mais antiga aberta)", async () => {
+  it("nenhum papel em etapa nenhuma: ambíguo, 409 com os candidatos (nunca um palpite)", async () => {
     const tasks = [step("captacao", null), step("edicao", null, { status: "revisao", reviewer_id: "outra-pessoa" })];
     const admin = fakeAdmin(links, tasks);
-    expect(await flowCommentTargetId(admin, delivery(), "allan")).toBe("captacao");
+    await expectAmbiguous(flowCommentTargetId(admin, delivery(), "allan"), ["captacao", "edicao"]);
   });
 
-  it("commenterId nulo (não informado): cai no fallback de sempre, sem consultar papéis", async () => {
+  it("commenterId nulo (não informado): sem papel a consultar, duas abertas é ambíguo", async () => {
     const tasks = [step("captacao", null), step("edicao", null, { status: "revisao", reviewer_id: "allan" })];
     const admin = fakeAdmin(links, tasks);
-    expect(await flowCommentTargetId(admin, delivery())).toBe("captacao");
+    await expectAmbiguous(flowCommentTargetId(admin, delivery()), ["captacao", "edicao"]);
   });
 
   it("responsável só por nome livre (sem task_assignees) nunca aciona a regra de papel", async () => {
     // "allan" aparece como texto no assignee (fora do escopo deste módulo,
-    // que só lê task_assignees) — sem vínculo estruturado, cai no fallback.
+    // que só lê task_assignees) — sem vínculo estruturado, segue ambíguo.
     const tasks = [step("captacao", null), step("edicao", null)];
     const admin = fakeAdmin(links, tasks, []);
-    expect(await flowCommentTargetId(admin, delivery(), "allan")).toBe("captacao");
+    await expectAmbiguous(flowCommentTargetId(admin, delivery(), "allan"), ["captacao", "edicao"]);
+  });
+
+  it("papel que aponta DUAS etapas abertas continua ambíguo", async () => {
+    const tasks = [step("captacao", null), step("edicao", null)];
+    const admin = fakeAdmin(links, tasks, [
+      { task_id: "captacao", profile_id: "allan" },
+      { task_id: "edicao", profile_id: "allan" },
+    ]);
+    await expectAmbiguous(flowCommentTargetId(admin, delivery(), "allan"), ["captacao", "edicao"]);
+  });
+});
+
+// Entrega de Automação: tráfego → feedback → conversão, uma etapa por vez.
+describe("resolveFlowCommentTarget — etapa explícita e etapa única", () => {
+  const links = [
+    { child_id: "trafego", slot: "relatorio_anuncios", position: 10 },
+    { child_id: "feedback", slot: "feedback", position: 20 },
+    { child_id: "conversao", slot: "relatorio_conversao", position: 30 },
+  ];
+
+  it("com stage_task_id de uma etapa ainda aberta, o comentário vai para ela", async () => {
+    const admin = fakeAdmin(links.slice(0, 1), [step("trafego", null, { status: "revisao" })]);
+    expect(await resolveFlowCommentTarget(admin, delivery(), { stageTaskId: "trafego" })).toEqual({ targetId: "trafego", via: "explicit" });
+  });
+
+  // Comentar "na Entrega" é comentar na etapa de AGORA. A tela pode estar um passo
+  // atrás (outra aba, o cliente aprovando, a conclusão logo antes de enviar).
+  it("etapa informada já concluída e o fluxo avançou (tela desatualizada): vai para a etapa aberta agora", async () => {
+    const tasks = [step("trafego", "2026-09-21T12:00:00Z"), step("feedback", null)];
+    const admin = fakeAdmin(links.slice(0, 2), tasks);
+    expect(await resolveFlowCommentTarget(admin, delivery(), { stageTaskId: "trafego" })).toEqual({ targetId: "feedback", via: "stage_advanced" });
+  });
+
+  it("tudo concluído: mantém a etapa informada (não há etapa aberta para onde redirecionar)", async () => {
+    const tasks = [step("trafego", "2026-09-21T12:00:00Z"), step("feedback", "2026-09-22T12:00:00Z")];
+    const admin = fakeAdmin(links.slice(0, 2), tasks);
+    expect(await resolveFlowCommentTarget(admin, delivery(), { stageTaskId: "trafego" })).toEqual({ targetId: "trafego", via: "explicit" });
+  });
+
+  it("stage_task_id vence a regra de papel", async () => {
+    const tasks = [step("trafego", null), step("feedback", null, { status: "revisao", reviewer_id: "allan" })];
+    const admin = fakeAdmin(links.slice(0, 2), tasks);
+    expect((await resolveFlowCommentTarget(admin, delivery(), { commenterId: "allan", stageTaskId: "trafego" })).targetId).toBe("trafego");
+  });
+
+  it("stage_task_id que não é etapa DESTA entrega → 409 COMMENT_STAGE_INVALID (nunca grava em outro card)", async () => {
+    const admin = fakeAdmin(links.slice(0, 1), [step("trafego", null)]);
+    const error = await resolveFlowCommentTarget(admin, delivery(), { stageTaskId: "de-outra-entrega" }).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(HttpError);
+    expect((error as HttpError).status).toBe(409);
+    expect((error as HttpError).details?.code).toBe(COMMENT_STAGE_INVALID);
+  });
+
+  it("o id da própria entrega não é um destino válido: comentário nunca cai no pai", async () => {
+    const admin = fakeAdmin(links.slice(0, 1), [step("trafego", null)]);
+    await expect(resolveFlowCommentTarget(admin, delivery("entrega"), { stageTaskId: "entrega" })).rejects.toBeInstanceOf(HttpError);
+  });
+
+  it("sem stage_task_id: exatamente uma etapa aberta (tráfego) é o destino", async () => {
+    const admin = fakeAdmin(links.slice(0, 1), [step("trafego", null, { status: "revisao" })]);
+    expect(await resolveFlowCommentTarget(admin, delivery())).toEqual({ targetId: "trafego", via: "sole_open" });
+  });
+
+  it("sem stage_task_id: tráfego concluído, feedback aberto → feedback", async () => {
+    const tasks = [step("trafego", "2026-09-21T12:00:00Z"), step("feedback", null)];
+    const admin = fakeAdmin(links.slice(0, 2), tasks);
+    expect(await resolveFlowCommentTarget(admin, delivery())).toEqual({ targetId: "feedback", via: "sole_open" });
+  });
+
+  it("card que não é entrega + stage_task_id de outro card → 409; o próprio id é aceito", async () => {
+    const plano = { id: "plano", kind: "plano_acao", payload: {} } as unknown as TaskRecord;
+    await expect(resolveFlowCommentTarget(fakeAdmin([], []), plano, { stageTaskId: "outro" })).rejects.toBeInstanceOf(HttpError);
+    expect(await resolveFlowCommentTarget(fakeAdmin([], []), plano, { stageTaskId: "plano" })).toEqual({ targetId: "plano", via: "own" });
   });
 });

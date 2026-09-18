@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CalendarPicker from "./CalendarPicker";
+import { createCommentIdRegistry } from "./commentIds";
 import MentionTextarea from "./MentionTextarea";
 import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
@@ -53,6 +54,8 @@ export default function TaskDetailPanel({
   onChanged: (updated: TaskRecord) => void;
 }) {
   const [comment, setComment] = useState("");
+  const commentIds = useRef(createCommentIdRegistry()).current;
+  const [commentError, setCommentError] = useState("");
   const [description, setDescription] = useState(task.description ?? "");
   const { name: currentUserName } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
@@ -107,11 +110,22 @@ export default function TaskDetailPanel({
     const text = comment.trim();
     if (!text) return;
     setComment("");
+    setCommentError("");
     try {
-      const res = await fetch(`/api/admin/tasks/${task.id}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-      if (!res.ok) throw new Error();
+      // `comment_id` estável enquanto a mensagem está pendente: retry e clique
+      // duplo gravam um comentário só (ver app/admin/commentIds.ts).
+      const res = await fetch(`/api/admin/tasks/${task.id}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, comment_id: commentIds.idFor(task.id, text) }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
+      commentIds.settle(task.id, text);
       onChanged(await res.json());
-    } catch { setComment(text); }
+    } catch (e) {
+      // O texto volta para a caixa e a pessoa é avisada do motivo — antes a falha era silenciosa.
+      setComment(text);
+      setCommentError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário.");
+    }
   }
 
   const coverCandidates = taskCoverCandidates(task);
@@ -282,6 +296,7 @@ export default function TaskDetailPanel({
           />
           <button className="admin-btn ghost" onClick={sendComment} disabled={!comment.trim() || busy}>Enviar</button>
         </div>
+        {commentError ? <p className="admin-error">{commentError}</p> : null}
       </div>
     </aside>
   );

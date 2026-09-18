@@ -8,6 +8,10 @@ import { actionPlanMembersOf, flowStepsOf, isFlowDelivery, recurrenceExecutionsO
 import type { TaskRecord } from "./validation";
 
 export type TaskComment = {
+  /** Chave idempotente do comentário (gerada por quem envia). Reenviar o mesmo
+   *  id não grava outro comentário — ver `append_task_comment_idempotent` e
+   *  `automation_task_payload_update`. Ausente nos comentários antigos. */
+  id?: string;
   /** Nome do autor, congelado no momento do comentário. Sempre presente — é
    *  ele que mantém o comentário legível depois que a conta é apagada, e é o
    *  único autor que um comentário de automação tem. */

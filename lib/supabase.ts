@@ -2688,13 +2688,41 @@ export async function deleteTaskComment(taskId: string, index: number, expectedA
   return rehydrateOrRaw(taskId, row as TaskRecord);
 }
 
-export async function appendTaskComment(taskId: string, authorId: string, text: string): Promise<TaskRecord> {
+/** PostgREST devolve PGRST202 quando a função chamada não existe no schema —
+ * aqui, a migration 20260918150000 ainda não foi aplicada ao banco. */
+function isMissingRpc(error: { code?: string } | null): boolean {
+  return error?.code === "PGRST202";
+}
+
+/**
+ * Grava um comentário humano no card `taskId` (quem decide QUAL card é
+ * `resolveFlowCommentTarget`). Com `commentId`, reenviar a mesma chamada — retry
+ * de rede, clique duplo — não grava outro comentário: `inserted` volta `false` e
+ * quem chama pula os efeitos colaterais (notificação, @menção, gatilhos).
+ */
+export async function appendTaskComment(
+  taskId: string,
+  authorId: string,
+  text: string,
+  commentId: string | null = null,
+): Promise<{ task: TaskRecord; inserted: boolean }> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("append_task_comment", { p_task_id: taskId, p_author_id: authorId, p_text: text });
+  const { data, error } = await supabase.rpc("append_task_comment_idempotent", {
+    p_task_id: taskId, p_author_id: authorId, p_text: text, p_comment_id: commentId,
+  });
+  if (isMissingRpc(error)) {
+    // Deploy chegou antes da migration: o campo de comentário não pode quebrar.
+    // Perde só a idempotência até a migration ser aplicada.
+    const legacy = await supabase.rpc("append_task_comment", { p_task_id: taskId, p_author_id: authorId, p_text: text });
+    if (legacy.error) fail(legacy.error);
+    const row = Array.isArray(legacy.data) ? legacy.data[0] : legacy.data;
+    if (!row) throw new HttpError(404, "Tarefa não encontrada.");
+    return { task: await rehydrateOrRaw(taskId, row as TaskRecord), inserted: true };
+  }
   if (error) fail(error);
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) throw new HttpError(404, "Tarefa não encontrada.");
-  return rehydrateOrRaw(taskId, row as TaskRecord);
+  const result = data as { inserted?: boolean; task?: TaskRecord } | null;
+  if (!result?.task) throw new HttpError(404, "Tarefa não encontrada.");
+  return { task: await rehydrateOrRaw(taskId, result.task), inserted: Boolean(result.inserted) };
 }
 
 // ---- Revisões & Aprovações (admin) -------------------------------------------

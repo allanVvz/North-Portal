@@ -35,6 +35,7 @@ import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurren
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus, projectParentStatus } from "@/lib/flows/parentStatus";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
+import { createCommentIdRegistry } from "./commentIds";
 import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { responsibilityForSubtype } from "@/lib/flows/responsibilityForSubtype";
 import { ROLE_LABEL, REVISOR_LABEL, roleTone } from "@/lib/flows/roleTone";
@@ -534,6 +535,8 @@ export default function TaskModal({
   }
   const onTaskPatchedRef = useRef(onTaskPatched);
   useEffect(() => { onTaskPatchedRef.current = onTaskPatched; }, [onTaskPatched]);
+  // Chave idempotente dos comentários pendentes (retry / clique duplo = 1 comentário).
+  const commentIds = useRef(createCommentIdRegistry()).current;
 
   useEffect(() => {
     if (!recurrenceParentId) { setRecurrenceParent(null); return; }
@@ -1016,10 +1019,13 @@ export default function TaskModal({
   async function commentRelatedCard(card: TaskRecord, text: string) {
     setError("");
     try {
+      // O id da etapa já é o da URL: o comentário vai para ELA, sem heurística.
       const res = await fetch(`/api/admin/tasks/${card.id}/comments`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, comment_id: commentIds.idFor(card.id, text) }),
       });
       if (!res.ok) throw new Error();
+      commentIds.settle(card.id, text);
       onTaskPatched?.(await res.json() as TaskRecord);
     } catch {
       setError("Não foi possível comentar na etapa.");
@@ -1100,15 +1106,25 @@ export default function TaskModal({
     }
   }
 
+  // Na Entrega só se comenta no pai: o comentário é gravado na etapa aberta AGORA
+  // (o servidor decide pela ordem e pelo estado real; ver lib/flows/commentTarget.ts).
+  // A tela informa a etapa que mostra como corrente — se ela já avançou, o servidor
+  // corrige para a etapa atual. Aqui só se avisa a pessoa de onde o texto vai cair.
+  const commentStep = isDelivery ? currentFlowStepOf(flowSteps) : null;
+  const commentStepLabel = commentStep && !commentStep.completed_at ? subtypeLabelOf(commentStep.subtype ?? "") || "etapa atual" : null;
+
   async function sendComment() {
     if (!liveTask || !comment.trim()) return;
     const text = comment.trim();
+    const stageTaskId = commentStep?.id ?? null;
     setComment("");
     try {
       const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, comment_id: commentIds.idFor(liveTask.id, text), ...(stageTaskId ? { stage_task_id: stageTaskId } : {}) }),
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
+      commentIds.settle(liveTask.id, text);
       const updated = await res.json() as TaskRecord;
       // Comentar no PAI grava na etapa corrente (ver lib/flows/currentStep.ts
       // + a rota) — o servidor pode devolver um card DIFERENTE do que está
@@ -1119,7 +1135,7 @@ export default function TaskModal({
       // comentava, porque `updated` passava a ser o card errado.
       if (updated.id === liveTask.id) setLiveTask(updated);
       onTaskPatched?.(updated);
-    } catch { setComment(text); setError("Não foi possível enviar o comentário."); }
+    } catch (e) { setComment(text); setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
   }
 
   async function completeCycle(retried = false, cycleTask = liveTask): Promise<void> {
@@ -2067,7 +2083,7 @@ export default function TaskModal({
                     value={comment}
                     onChange={setComment}
                     onSubmit={() => void sendComment()}
-                    placeholder="Escrever comentário… use @ para chamar alguém"
+                    placeholder={commentStepLabel ? `Comentar em "${commentStepLabel}"… use @ para chamar alguém` : "Escrever comentário… use @ para chamar alguém"}
                   />
                   <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim()}>Enviar</button>
                 </div>
