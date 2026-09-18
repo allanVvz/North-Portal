@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
-import { factualRoutineEvents } from "../app/admin/operacao/operationItems";
+import { DEFAULT_OPERATION_FILTERS, factualRoutineEvents } from "../app/admin/operacao/operationItems";
 import type { RecurringTask } from "../lib/supabase";
 
 async function login(page: Page) {
@@ -49,7 +49,10 @@ test.describe("Operação simplificada em duas áreas (somente leitura)", () => 
     expect(response.ok()).toBe(true);
     const body = await response.json() as { tasks: RecurringTask[] };
     const month = new Date().toISOString().slice(0, 7);
-    const expected = factualRoutineEvents(body.tasks).filter((event) => event.date.startsWith(month));
+    // A tela abre com o filtro padrão de Status (tudo menos Concluído): uma
+    // rotina encerrada (molde `aprovado`) fica fora do calendário também.
+    const openStatuses = new Set(DEFAULT_OPERATION_FILTERS.map((filter) => filter.value));
+    const expected = factualRoutineEvents(body.tasks.filter((routine) => openStatuses.has(routine.status))).filter((event) => event.date.startsWith(month));
 
     await page.getByRole("button", { name: "Calendário", exact: true }).click();
     await expect(page.locator(".rec-calendar")).toBeVisible();

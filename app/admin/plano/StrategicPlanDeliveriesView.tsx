@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { STATUS_LABEL } from "../kanbanShared";
+import { DEADLINE_LABEL, deadlineStateOf } from "../deadlineState";
+import { agencyToday } from "../recurringState";
 import TaskKindIcon from "../TaskKindIcon";
 import { fmtDate } from "./StrategicView";
 import { taskMatchesQuery } from "@/lib/taskSearch";
@@ -12,6 +14,16 @@ import { EMPTY_STRATEGIC_FILTER, isFilterActive, matchesWhen, matchesWho, matche
 function cardMatches(card: ParentCard, query: string) {
   if (taskMatchesQuery(card, query, { clientName: card.clientName, typeLabel: card.typeLabel })) return true;
   return card.activities.some((activity) => taskMatchesQuery(activity, query, { clientName: card.clientName }));
+}
+
+/** Mesmos selos da Lista: tipo (Plano/Entrega) + situação do prazo. A cor do
+ * cartão (is-atrasada/-parada/-concluida) segue a mesma situação. */
+function stateOf(card: ParentCard) {
+  return card.completed_at ? "concluida" : deadlineStateOf(card, agencyToday());
+}
+
+function BranchTags({ label, state }: { label: "Plano" | "Entrega"; state: ReturnType<typeof stateOf> }) {
+  return <span className="plan-acc-tags"><span className="parent-kind-badge">{label}</span><span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span></span>;
 }
 
 function DeliveryBranch({
@@ -31,13 +43,15 @@ function DeliveryBranch({
   const delivery = node.card as FlowDelivery;
   // Uma busca por etapa só é útil se a etapa aparecer sem um clique extra.
   const open = manualOpen || (query.trim().length > 0 && cardMatches(delivery, query));
+  const state = stateOf(delivery);
   return (
-    <article className={`plan-strat-card plan-delivery-branch ${nested ? "nested" : ""} ${open ? "open" : ""}`}>
+    <article className={`plan-strat-card plan-delivery-branch is-${state} ${nested ? "nested" : ""} ${open ? "open" : ""}`}>
       <div className="plan-strat-headrow">
         <button type="button" className="plan-strat-headtoggle" aria-expanded={open} onClick={() => setManualOpen((value) => !value)}>
           <span className={`plan-acc-caret ${open ? "on" : ""}`} aria-hidden>▸</span>
           <span className="plan-strat-headtext">
-            <span className="plan-card-titleline"><span className="parent-kind-badge">Entrega</span><TaskKindIcon kind={delivery.kind} size="lg" /><strong>{delivery.title}</strong></span>
+            <BranchTags label="Entrega" state={state} />
+            <span className="plan-card-titleline"><TaskKindIcon kind={delivery.kind} /><strong>{delivery.title}</strong></span>
             <span className="plan-strat-count">{delivery.activities.length} etapa{delivery.activities.length === 1 ? "" : "s"}</span>
           </span>
         </button>
@@ -77,14 +91,18 @@ function PlanBranch({
   const nestedIds = new Set(node.deliveries.map((delivery) => delivery.card.id));
   const simpleActivities = plan.activities.filter((activity) => !nestedIds.has(activity.id));
   const open = manualOpen || (query.trim().length > 0 && (cardMatches(plan, query) || node.deliveries.some((delivery) => cardMatches(delivery.card, query))));
+  const state = stateOf(plan);
   return (
-    <article className={`plan-strat-card plan-root-branch ${open ? "open" : ""}`}>
+    <article className={`plan-strat-card plan-root-branch is-${state} ${open ? "open" : ""}`}>
       <div className="plan-strat-headrow">
         <button type="button" className="plan-strat-headtoggle" aria-expanded={open} onClick={() => setManualOpen((value) => !value)}>
           <span className={`plan-acc-caret ${open ? "on" : ""}`} aria-hidden>▸</span>
           <span className="plan-strat-headtext">
-            <span className="plan-card-titleline"><span className="parent-kind-badge">Plano</span><TaskKindIcon kind={plan.kind} size="lg" /><strong>{plan.title}</strong></span>
-            <span className="plan-strat-description">{plan.description || "Sem descrição."}</span>
+            <BranchTags label="Plano" state={state} />
+            <span className="plan-card-titleline"><TaskKindIcon kind={plan.kind} /><strong>{plan.title}</strong></span>
+            {/* Sem descrição, nada: "Sem descrição." repetido em cada cartão
+                lia como conteúdo, não como campo vazio. */}
+            {plan.description ? <span className="plan-strat-description">{plan.description}</span> : null}
           </span>
         </button>
         <span className="plan-strat-progress"><span className="plan-strat-bar"><span className="plan-strat-fill" style={{ width: `${plan.progress}%` }} /></span><b>{plan.progress}%</b></span>

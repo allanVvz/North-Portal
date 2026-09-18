@@ -42,7 +42,7 @@ export default function OperacaoWorkspace({
     router.push(`${pathname}?${params.toString()}`, { scroll: false });
   }
 
-  return <section className="admin-page kb-wide clients-workspace">
+  return <section className="admin-page kb-wide clients-workspace op-page">
     <header className="admin-head"><div><h1 className="admin-title">Operação</h1><p className="admin-sub">Tarefas do dia a dia, rotinas, planos e entregas.</p></div></header>
     <nav className="clients-section-tabs" aria-label="Áreas da operação">
       <button type="button" className={area === "tarefas-rotinas" ? "on" : ""} onClick={() => setArea("tarefas-rotinas")}>Tarefas e Rotinas</button>

@@ -33,6 +33,10 @@ export default function HScrollRail({ targetRef }: { targetRef: RefObject<HTMLDi
     el.addEventListener("scroll", update);
     const ro = new ResizeObserver(update);
     ro.observe(el);
+    // Um quadro com trilho interno (.op-board-track) muda de largura sem o
+    // contêiner mudar de tamanho — trocar o agrupamento, por exemplo. Observar
+    // o filho também mantém a régua certa nesses casos.
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
     window.addEventListener("resize", update);
     return () => {
       el.removeEventListener("scroll", update);

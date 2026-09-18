@@ -89,7 +89,8 @@ function ParentColumn({
                     <span className={`plan-acc-caret ${open ? "on" : ""}`}>▸</span>
                   </button>
                   <button type="button" className="plan-acc-title" onClick={() => onOpen(card)}>
-                    <span className="plan-card-titleline"><span className="parent-kind-badge">{title === "Planos" ? "Plano" : "Entrega"}</span><span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span><TaskKindIcon kind={card.kind} size="lg" /><strong>{card.title}</strong></span>
+                    <span className="plan-acc-tags"><span className="parent-kind-badge">{title === "Planos" ? "Plano" : "Entrega"}</span><span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span></span>
+                    <span className="plan-card-titleline"><TaskKindIcon kind={card.kind} /><strong>{card.title}</strong></span>
                     <em>{card.clientName}{current ? ` · ${subtypeLabel(current.subtype) || current.title} · ${STATUS_LABEL[current.status]}` : ""}</em>
                     {card.description ? <span className="plan-acc-description">{card.description}</span> : null}
                   </button>

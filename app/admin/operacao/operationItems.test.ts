@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compatibleSubtypes, factualDateOf, factualRoutineEvents, normalizeOperationItems, operationMatchesFilters } from "./operationItems";
+import { DEFAULT_OPERATION_FILTERS, compatibleSubtypes, factualDateOf, factualRoutineEvents, normalizeOperationItems, operationMatchesFilters } from "./operationItems";
 
 const base = {
   client_id: null, kind: "operacional", subtype: null, title: "Card", description: null,
@@ -36,6 +36,25 @@ describe("operation collection", () => {
     const filters = [{ attr: "tipo", value: "rotina", label: "Rotina" }, { attr: "tipo", value: "automacao", label: "Automação" }] as const;
     expect(items.filter((item) => operationMatchesFilters(item, filters, "2026-09-18")).map((item) => item.id)).toEqual(["auto"]);
     expect(compatibleSubtypes(items, ["rotina", "automacao"])).toEqual(["relatorio_trafego"]);
+  });
+
+  it("default filter hides finished cards and closed routines, keeps everything alive", () => {
+    const items = normalizeOperationItems(
+      [task("entrada"), task("revisao", { status: "revisao" }), task("parada", { status: "parada" }), task("feito", { status: "aprovado" })],
+      [routine("rotina-viva"), routine("rotina-encerrada", [], { status: "aprovado" })],
+    );
+    expect(items.filter((item) => operationMatchesFilters(item, DEFAULT_OPERATION_FILTERS, "2026-09-18")).map((item) => item.id))
+      .toEqual(["entrada", "revisao", "parada", "rotina-viva"]);
+  });
+
+  it("ORs Status values but still ANDs them with other attributes", () => {
+    const items = normalizeOperationItems([task("a", { status: "backlog", priority: "alta" }), task("b", { status: "revisao", priority: "baixa" }), task("c", { status: "revisao", priority: "alta" })], []);
+    const filters = [
+      { attr: "status", value: "backlog", label: "Entrada" },
+      { attr: "status", value: "revisao", label: "Revisão" },
+      { attr: "prioridade", value: "alta", label: "Alta" },
+    ] as const;
+    expect(items.filter((item) => operationMatchesFilters(item, filters, "2026-09-18")).map((item) => item.id)).toEqual(["a", "c"]);
   });
 
   it("uses only materialized current and completed executions in the calendar", () => {

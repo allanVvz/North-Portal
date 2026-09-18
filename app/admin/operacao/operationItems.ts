@@ -14,8 +14,24 @@ export type OperationItem = {
   routine: boolean;
 };
 
-export type OperationFilterAttr = "tipo" | "subtipo" | "situacao" | "cliente" | "frequencia" | "prioridade" | "responsavel";
+export type OperationFilterAttr = "status" | "tipo" | "subtipo" | "situacao" | "cliente" | "frequencia" | "prioridade" | "responsavel";
 export type OperationFilter = { attr: OperationFilterAttr; value: string; label: string };
+
+/** Atributos que aceitam vários valores ao mesmo tempo. Status soma (OU —
+ * "Entrada ou Revisão"); Tipo intersecta (E — "Rotina e Automação"). Os
+ * demais trocam o valor anterior. */
+export const MULTI_VALUE_ATTRS: readonly OperationFilterAttr[] = ["status", "tipo"];
+
+/** A tela abre mostrando só o que ainda está vivo: tudo menos Concluído. Era
+ * a regra implícita do quadro antigo ("concluídas ficam ocultas"), agora
+ * explícita e removível como qualquer outro filtro. */
+export const DEFAULT_OPERATION_FILTERS: readonly OperationFilter[] = [
+  { attr: "status", value: "backlog", label: "Entrada" },
+  { attr: "status", value: "em_producao", label: "Em produção" },
+  { attr: "status", value: "revisao", label: "Revisão" },
+  { attr: "status", value: "aprovacao", label: "Aprovação" },
+  { attr: "status", value: "parada", label: "Parada" },
+];
 
 /**
  * The daily surface has exactly two identities: an ordinary executable card,
@@ -73,9 +89,15 @@ export function operationSituation(item: OperationItem, today: string): string {
 }
 
 /** Different attributes AND together. Multiple Tipo chips also AND together,
- * which is what makes `Rotina` + `Automação` a precise intersection. */
+ * which is what makes `Rotina` + `Automação` a precise intersection. Multiple
+ * Status chips OR together — a card has one status, so AND would be empty.
+ * For a routine the status is its template's: an `aprovado` template is a
+ * closed routine, hidden by the default filter like any finished card. */
 export function operationMatchesFilters(item: OperationItem, filters: readonly OperationFilter[], today: string): boolean {
+  const statuses = filters.filter((filter) => filter.attr === "status").map((filter) => filter.value);
+  if (statuses.length && !statuses.includes(item.task.status)) return false;
   return filters.every((filter) => {
+    if (filter.attr === "status") return true;
     if (filter.attr === "tipo") return itemTypeTags(item).includes(filter.value);
     if (filter.attr === "subtipo") return item.task.subtype === filter.value;
     if (filter.attr === "situacao") return operationSituation(item, today) === filter.value;
