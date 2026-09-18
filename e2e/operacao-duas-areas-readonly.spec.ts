@@ -67,7 +67,10 @@ test.describe("Operação simplificada em duas áreas (somente leitura)", () => 
     await page.goto(`/admin/operacao?area=tarefas-rotinas&task=${execution.id}`);
     await expect(page.locator(".tm")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "Voltar para o card anterior" })).toBeVisible();
-    await expect(page.locator(".op-card", { hasText: execution.title })).toHaveCount(0);
+    // Molde e execução podem compartilhar o mesmo título. O molde continua
+    // visível como Rotina; o que não pode existir é um card top-level de Tarefa
+    // para a execução materializada.
+    await expect(page.getByRole("button", { name: `Abrir tarefa ${execution.title}`, exact: true })).toHaveCount(0);
   });
 
   test("Back e Forward restauram a área pela URL", async ({ page }) => {
