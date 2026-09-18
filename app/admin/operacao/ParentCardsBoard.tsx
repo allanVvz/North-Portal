@@ -9,6 +9,7 @@ import SortMenu from "../SortMenu";
 import { STATUS_LABEL } from "../kanbanShared";
 import PlanSearchBar from "../plano/PlanSearchBar";
 import StrategicView from "../plano/StrategicView";
+import PlansAndDeliveriesBoard from "../plano/PlansAndDeliveriesBoard";
 import { sortItems } from "../taskSort";
 import { useSortPref, type SortScope } from "../taskSortPrefs";
 import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
@@ -17,7 +18,7 @@ import { partsLabel, pendingLabel } from "../parentCounts";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { DEADLINE_LABEL, deadlineStateOf } from "../deadlineState";
 import { agencyToday } from "../recurringState";
-import type { ParentCard } from "@/lib/supabase";
+import type { ActionPlan, FlowDelivery, ParentCard } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
 
 // O acordeão de PAIS — um componente, duas abas.
@@ -43,6 +44,20 @@ export type ParentBoardTexts = {
   descriptionHint: string;
 };
 
+type ParentCardsBoardSingleProps = {
+  variant?: "single";
+  initial: ParentCard[];
+  texts: ParentBoardTexts;
+  sortScope: SortScope;
+  showStepCount: boolean;
+};
+
+export type ParentCardsBoardProps = ParentCardsBoardSingleProps | {
+  variant: "combined";
+  plans: ActionPlan[];
+  deliveries: FlowDelivery[];
+};
+
 // A busca do card-pai é a busca de tarefa canônica (lib/taskSearch.ts) aplicada
 // ao pai OU a qualquer atividade filha: um termo casa se aparece no haystack do
 // pai ou no de uma etapa. Termos múltiplos são E, mas cada um pode casar num
@@ -57,7 +72,13 @@ function parentMatches(d: ParentCard, query: string): boolean {
   return terms.every((term) => haystack.includes(term));
 }
 
-export default function ParentCardsBoard({
+/** Compatível com a leitura isolada antiga e a nova área combinada. */
+export default function ParentCardsBoard(props: ParentCardsBoardProps) {
+  if (props.variant === "combined") return <PlansAndDeliveriesBoard plans={props.plans} deliveries={props.deliveries} />;
+  return <SingleParentCardsBoard {...props} />;
+}
+
+function SingleParentCardsBoard({
   initial,
   texts,
   sortScope,

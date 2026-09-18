@@ -11,7 +11,9 @@ export async function GET() {
   try {
     await requireAdmin();
     const routines = await listRecurringTasks();
-    return NextResponse.json({ tasks: routines.filter((routine) => routine.active).map((routine) => ({ ...routine, executions: [] })) });
+    // The client needs the actual child records to render a factual calendar.
+    // Do not remove inactive templates: historical routines remain inspectable.
+    return NextResponse.json({ tasks: routines });
   } catch (error) {
     return apiError(error);
   }

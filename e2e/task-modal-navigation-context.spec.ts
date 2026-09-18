@@ -75,13 +75,14 @@ test.describe("Abrir um card não pode trocar o módulo ativo da sidebar", () =>
     await expect(page.locator(".clients-section-tabs")).toBeVisible();
   });
 
-  test("link novo /admin/operacao?task=: abre, tira só o task da URL, mantém situacao", async ({ page }) => {
+  test("link novo /admin/operacao?task=: abre e preserva task, area e situacao", async ({ page }) => {
     await login(page);
-    await page.goto(`/admin/operacao?situacao=atrasada&task=${taskId}`);
+    await page.goto(`/admin/operacao?area=tarefas-rotinas&situacao=atrasada&task=${taskId}`);
     await expect(page.locator(".tm")).toBeVisible({ timeout: 20_000 });
     await expect(activeNavHref(page)).resolves.toBe("/admin/operacao");
 
-    await expect.poll(() => new URL(page.url()).searchParams.get("task")).toBeNull();
+    expect(new URL(page.url()).searchParams.get("task")).toBe(taskId);
+    expect(new URL(page.url()).searchParams.get("area")).toBe("tarefas-rotinas");
     expect(new URL(page.url()).searchParams.get("situacao")).toBe("atrasada");
     expect(new URL(page.url()).pathname).toBe("/admin/operacao");
 

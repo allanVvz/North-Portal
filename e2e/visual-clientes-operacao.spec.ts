@@ -50,7 +50,7 @@ test.describe("Captura visual — Clientes e Operação", () => {
     await setTheme(page, "dark");
     await page.screenshot({ path: "e2e/__screenshots__/clientes-escuro.png" });
 
-    // ---- Operação, as três abas -------------------------------------------
+    // ---- Operação, as duas áreas ------------------------------------------
     await setTheme(page, "light");
     await page.goto("/admin/operacao");
     await expect(page.locator(".admin-page")).toBeVisible({ timeout: 30_000 });
@@ -59,7 +59,7 @@ test.describe("Captura visual — Clientes e Operação", () => {
     await page.screenshot({ path: "e2e/__screenshots__/operacao-tarefas-claro.png" });
     await page.locator(".admin-page").screenshot({ path: "e2e/__screenshots__/operacao-tarefas-conteudo.png" });
 
-    for (const [aba, arquivo] of [["Entregas", "entregas"], ["Rotinas", "rotinas"]] as const) {
+    for (const [aba, arquivo] of [["Planos e Entregas", "planos-entregas"]] as const) {
       const botao = page.getByRole("button", { name: new RegExp(`^${aba}`) }).first();
       if (await botao.count()) {
         await botao.click();

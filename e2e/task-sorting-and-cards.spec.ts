@@ -171,17 +171,15 @@ test.describe("Ordenação e cards minimizados (e2e contra o backend real)", () 
     await expect(page.locator(".kb-sort-btn")).toHaveCount(0);
   });
 
-  test("Rotinas tem o menu de ordenação e ordena as rotinas", async ({ page }) => {
+  test("Tarefas e Rotinas tem o menu de ordenação e ordena a lista unificada", async ({ page }) => {
     await login(page);
-    // Rotinas saiu da tela de Clientes e agora é uma aba de /admin/operacao.
-    await page.goto("/admin/operacao");
-    await page.getByRole("button", { name: /^Rotinas/ }).click();
+    await page.goto("/admin/operacao?area=tarefas-rotinas");
     await expect(page.locator(".rec-board, .rec-empty")).toBeVisible();
 
     const sortBtn = page.locator(".kb-sort-btn");
     await expect(sortBtn).toBeVisible();
     await sortBtn.click();
-    // Agrupado por prazo, o padrão é o prazo mais próximo no topo.
+    // Agrupado por Responsável, o padrão é o prazo mais próximo no topo.
     await expect(page.locator(".kb-sortmenu-row.on")).toContainText("Data (prazo)");
     await expect(page.locator(".kb-sortmenu-dirs button.on")).toContainText("Ascendente");
     // "Manual" só existe onde arrastar grava position — não aqui.

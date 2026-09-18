@@ -8,7 +8,7 @@ import {
   recurringExecutionFields,
   recurringExecutionId,
 } from "./recurrence";
-import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf, recurrenceStopped } from "./recurrenceState";
+import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, isRecurrenceTemplate, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf, recurrenceStopped } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
 import { actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, currentRecurringExecutionOf, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
@@ -1381,6 +1381,8 @@ export type RecurringTask = TaskRecord & Omit<RecurringTaskRecord, "id" | "clien
   clientName: string;
   clientSlug: string;
   executions: TaskRecord[];
+  /** Persisted template status, separate from the projected current child. */
+  template_status?: TaskRecord["status"];
 };
 
 /** Cross-client recurring routine feed. Deliberately independent of ActionPlan. */
@@ -1436,6 +1438,7 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
         // O molde representa somente o ciclo em aberto mais recente. Nunca
         // usar o `status` histórico do molde, que pode ter sido criado meses
         // antes de a execução atual.
+        template_status: task.status,
         status: projectParentStatus(
           task,
           (() => {
@@ -1565,7 +1568,7 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
   // esta consulta nunca filtrava por cliente, era a única das quatro abas de
   // Operação que não escondia nada.
   const rows = ((data as unknown as Row[] | null) ?? [])
-    .filter((t) => t.payload?.[RECURRENCE_GROUP_KEY] !== true)
+    .filter((t) => !isRecurrenceTemplate(t))
     .filter((t) => clientVisibleInOps(Array.isArray(t.clients) ? t.clients[0] : t.clients));
   if (!rows.length) return [];
 
@@ -1583,7 +1586,12 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
     return ((data as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []);
   };
 
-  const level1 = (await fetchChildren(rows.map((r) => r.id))).map(mergeTaskAssigneeRow);
+  // Molde recorrente pertence exclusivamente à leitura de Rotinas, inclusive
+  // quando um legado o ligou como membro de Plano/Entrega. Filtrar também os
+  // membros evita que ele reapareça aqui como uma atividade simples.
+  const level1 = (await fetchChildren(rows.map((r) => r.id)))
+    .map(mergeTaskAssigneeRow)
+    .filter((task) => !isRecurrenceTemplate(task));
   // DOIS níveis, e o segundo não é luxo: um membro que é ele mesmo um pai de
   // rollup — uma Entrega dentro de um Plano — calcula o próprio progresso a
   // partir dos FILHOS dele. Sem buscar os netos, `taskProgress` recebe uma
@@ -1595,7 +1603,9 @@ async function listParentCards(behavior: TaskBehavior): Promise<ParentCard[]> {
   // a rolar 0 — a hora de trocar `childIdsOf` por um CTE recursivo é quando
   // essa forma existir, não antes.
   const nested = level1.filter((t) => isRollupParent(t)).map((t) => t.id);
-  const level2 = (await fetchChildren(nested)).map(mergeTaskAssigneeRow);
+  const level2 = (await fetchChildren(nested))
+    .map(mergeTaskAssigneeRow)
+    .filter((task) => !isRecurrenceTemplate(task));
   // Deduplicar por id antes de agrupar. Um card que é etapa de uma Entrega E
   // membro do Plano aparece nos DOIS níveis, e `childrenByParent` o colocaria
   // duas vezes no balde da entrega — que passaria a somar a mesma etapa duas

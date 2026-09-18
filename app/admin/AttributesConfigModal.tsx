@@ -7,12 +7,15 @@ export default function AttributesConfigModal({
   initial,
   onClose,
   onSave,
+  allowedKeys,
 }: {
   initial: Record<string, boolean>;
   onClose: () => void;
   onSave: (map: Record<string, boolean>) => void;
+  allowedKeys?: readonly string[];
 }) {
   const [map, setMap] = useState<Record<string, boolean>>(initial);
+  const definitions = allowedKeys ? ATTR_DEFS.filter((attribute) => allowedKeys.includes(attribute.key)) : ATTR_DEFS;
 
   function toggle(key: string) {
     setMap((m) => ({ ...m, [key]: !isAttrVisible(m, key) }));
@@ -33,7 +36,7 @@ export default function AttributesConfigModal({
         </div>
 
         <div className="attrcfg-list">
-          {ATTR_DEFS.map((a) => (
+          {definitions.map((a) => (
             <div className="attrcfg-row" key={a.key}>
               <span className="attrcfg-handle" aria-hidden title="Ordem fixa">⋮⋮</span>
               <span className="attrcfg-ico" aria-hidden>{KIND_ICON[a.kind]}</span>

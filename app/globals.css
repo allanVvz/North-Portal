@@ -3600,6 +3600,47 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .plan-acc-status { font-size: 12px; color: var(--a-muted); }
 .plan-acc-actpct { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--a-sec); min-width: 38px; text-align: right; }
 
+/* Planos e Entregas dividem a lista em duas leituras deliberadas do mesmo
+   trabalho. A grade não cria uma rolagem horizontal estrutural: no celular os
+   Planos vêm primeiro e as Entregas continuam logo abaixo. */
+.parent-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.parent-column { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.parent-column-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--a-border); }
+.parent-column-head h2 { margin: 0; color: var(--a-ink); font-size: 18px; font-weight: 700; }
+.parent-column-head span { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--a-inset); color: var(--a-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.parent-column-empty { margin: 0; min-height: 72px; }
+.parent-kind-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 7px; background: var(--a-inset); color: var(--a-sec); font-size: 10px; line-height: 1.3; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.plan-strat-children { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 0 24px; padding-left: 14px; border-left: 2px solid var(--a-border); }
+.plan-delivery-branch { box-shadow: none; }
+.plan-delivery-branch.nested { padding: 12px 14px; border-radius: 13px; background: var(--a-inset); }
+.plan-delivery-branch .plan-strat-headtoggle { min-width: 140px; }
+.plan-delivery-steps { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 0 28px; }
+.plan-delivery-step { display: flex; align-items: center; gap: 8px; width: 100%; border: none; border-radius: 8px; background: transparent; color: var(--a-ink); cursor: pointer; font: inherit; font-size: 13px; padding: 7px 8px; text-align: left; }
+.plan-delivery-step:hover { background: var(--a-hover); }
+.plan-delivery-step > span { flex: 1; min-width: 0; }
+.plan-delivery-step small { color: var(--a-muted); font-size: 11px; white-space: nowrap; }
+.plan-simple-activities { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 0 24px; }
+.plan-simple-activities button { display: flex; align-items: center; gap: 8px; width: 100%; border: none; border-radius: 8px; background: transparent; color: var(--a-ink); cursor: pointer; font: inherit; font-size: 13px; padding: 7px 8px; text-align: left; }
+.plan-simple-activities button:hover { background: var(--a-hover); }
+.plan-simple-activities button span { flex: 1; }
+.plan-simple-activities button small { color: var(--a-muted); font-size: 11px; }
+.plan-combined-filterbar { display: grid; grid-template-columns: 1fr 1.35fr 1fr auto; gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-inset); }
+.plan-combined-filterbar label { display: flex; flex-direction: column; gap: 4px; color: var(--a-teal-text); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.plan-combined-filterbar label > input, .plan-combined-filterbar label > span input { min-width: 0; border: 1px solid var(--a-border); border-radius: 8px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 13px; letter-spacing: 0; padding: 7px 9px; text-transform: none; }
+.plan-combined-filterbar label > span { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+@media (max-width: 1150px) {
+  .parent-columns { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .plan-combined-filterbar { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .plan-strat-children { margin-left: 8px; padding-left: 8px; }
+  .plan-delivery-steps { margin-left: 4px; }
+  .plan-delivery-step { align-items: flex-start; flex-wrap: wrap; }
+  .plan-delivery-step small { width: 100%; margin-left: 22px; white-space: normal; }
+}
+
 /* Plano de Ação — view estratégica: agrupada por CLIENTE (título do grupo,
    vem antes do plano), um card por plano dentro do grupo, atividades em
    raias por Responsável (quem), cada raia com o que/quando. Quebra de linha
@@ -4646,6 +4687,11 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    período, não um ponto. Herdar a cor do estado deixaria o período vermelho
    junto com a data atrasada. */
 .rec-list-period { display: block; margin-top: 2px; color: var(--a-muted); font-size: 10px; font-weight: 400; }
+.op-list .rec-list-head, .op-list .rec-list-row { grid-template-columns: minmax(200px, 1.65fr) minmax(110px, .8fr) minmax(150px, 1fr) 105px minmax(130px, .9fr) 90px minmax(130px, .9fr); }
+.op-list .rec-list-row-wrap { grid-template-columns: minmax(0, 1fr) 132px; }
+.op-card.is-routine { border-left: 4px solid var(--a-teal); }
+.op-routine-mark { color: var(--a-teal-text); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.op-filter { flex: 0 0 auto; }
 
 .rec-calendar { overflow: hidden; border: 1px solid var(--a-border); border-radius: 14px; background: var(--a-surface); }
 .rec-calendar-weekdays, .rec-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(105px, 1fr)); }
@@ -4698,6 +4744,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   .rec-stats > div, .rec-stats > .rec-stat-btn { border-bottom: 1px solid var(--a-border); }
   .rec-list { overflow-x: auto; }
   .rec-list-head, .rec-list-row { min-width: 780px; }
+  .op-list .rec-list-head, .op-list .rec-list-row { min-width: 1120px; }
   .rec-calendar { overflow-x: auto; }
   .rec-calendar-weekdays, .rec-calendar-grid { min-width: 760px; }
 }

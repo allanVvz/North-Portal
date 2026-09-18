@@ -98,7 +98,7 @@ describe("tarefas recorrentes de clientes", () => {
 
 describe("estado da recorrência", () => {
   it("marca como parada apenas quando o prazo já passou no fuso da rotina", () => {
-    expect(recurringState(make({ next_due_date: "2026-07-19" }), "2026-07-20")).toBe("parada");
+    expect(recurringState(make({ next_due_date: "2026-07-19" }), "2026-07-20")).toBe("atrasada");
     expect(recurringState(make({ next_due_date: "2026-07-20" }), "2026-07-20")).toBe("ativa");
   });
 
@@ -126,6 +126,18 @@ describe("estado da recorrência", () => {
   it("trata pausada e sem data como sem agenda, pois as duas fontes divergem", () => {
     expect(recurringState(make({ active: false }), "2026-07-20")).toBe("sem_agenda");
     expect(recurringState(make({ next_due_date: null }), "2026-07-20")).toBe("sem_agenda");
+  });
+
+  it("separa parada deliberada, atraso, histÃ³rico e falta de agenda", () => {
+    expect(recurringState(make({ status: "parada", next_due_date: "2026-07-27" }), "2026-07-20")).toBe("parada");
+    expect(recurringState(make({ status: "backlog", next_due_date: "2026-07-19" }), "2026-07-20")).toBe("atrasada");
+    expect(recurringState(make({ status: "aprovado", active: false }), "2026-07-20")).toBe("historico");
+    expect(recurringState(make({ status: "backlog", next_due_date: null }), "2026-07-20")).toBe("sem_agenda");
+  });
+
+  it("preserva o terminal do molde quando o filho projetado continua aberto", () => {
+    expect(recurringState(make({ status: "backlog", template_status: "parada", active: false }), "2026-07-20")).toBe("parada");
+    expect(recurringState(make({ status: "backlog", template_status: "aprovado", active: false }), "2026-07-20")).toBe("historico");
   });
 
   it("usa o menor intervalo real entre dias da semana", () => {

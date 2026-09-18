@@ -17,32 +17,36 @@ import type { RecurringTask } from "@/lib/supabase";
 // "parada", não "atrasada": uma rotina cuja próxima execução ficou para trás
 // não está com uma entrega atrasada — ela parou de girar. O vocabulário de
 // atraso pertence às tarefas.
-export type RecurringState = "parada" | "ativa" | "concluida" | "sem_agenda";
+export type RecurringState = "parada" | "atrasada" | "ativa" | "concluida" | "historico" | "sem_agenda";
 
 // Rótulo segue o vocabulário da ATA de 14/09 para TODAS as tarefas: data
 // prevista vencida é "Atrasada". A chave interna continua `parada` (filtros e
 // testes dependem dela); "Parada" como rótulo fica para o molde que foi parado
 // de propósito (status `parada`), decidido no card — ver OperacaoWorkspace.
 export const RECURRING_STATE_LABEL: Record<RecurringState, string> = {
-  parada: "Atrasada",
+  parada: "Parada",
+  atrasada: "Atrasada",
   ativa: "Ativa",
   concluida: "Ciclo concluído",
+  historico: "Histórico",
   sem_agenda: "Sem agenda",
 };
 
 /** Matches the `.rec-state.*` / `.rec-pulse-fill.*` tones in globals.css. */
 export const RECURRING_STATE_TONE: Record<RecurringState, string> = {
-  parada: "overdue",
+  parada: "paused",
+  atrasada: "overdue",
   ativa: "active",
   concluida: "complete",
+  historico: "paused",
   sem_agenda: "paused",
 };
 
-export const RECURRING_STATES = ["parada", "ativa", "concluida", "sem_agenda"] as const;
+export const RECURRING_STATES = ["parada", "atrasada", "ativa", "concluida", "historico", "sem_agenda"] as const;
 
 type StateInput = Pick<
   RecurringTask,
-  "active" | "cadence" | "weekdays" | "next_due_date" | "last_completed_at" | "timezone" | "template_payload"
+  "active" | "cadence" | "weekdays" | "next_due_date" | "last_completed_at" | "timezone" | "template_payload" | "status" | "template_status"
 >;
 
 // "Hoje" mora em lib/time/agency.ts (uma fonte para telas, rotas e casos de
@@ -67,6 +71,9 @@ function addDays(isoDate: string, days: number): string {
 }
 
 export function recurringState(task: StateInput, today?: string): RecurringState {
+  const templateStatus = task.template_status ?? task.status;
+  if (templateStatus === "parada") return "parada";
+  if (templateStatus === "aprovado") return "historico";
   if (!task.active || !task.next_due_date) return "sem_agenda";
 
   // Trello's own "due complete" checkbox — a persistent flag on the card.
@@ -82,5 +89,5 @@ export function recurringState(task: StateInput, today?: string): RecurringState
   }
 
   const reference = today ?? todayInTimezone(task.timezone);
-  return task.next_due_date < reference ? "parada" : "ativa";
+  return task.next_due_date < reference ? "atrasada" : "ativa";
 }
