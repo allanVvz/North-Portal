@@ -26,6 +26,7 @@ export type ParsedRow = {
 export type ParsedComment = {
   state: ParseState;
   valores: Record<string, number | null>;
+  valoresAnteriores: Record<string, number | null>;
   linhas: ParsedRow[];
   /** O que foi deixado de fora, em frase curta para o gestor corrigir. */
   problemas: string[];
@@ -96,7 +97,7 @@ function parseRow(fonte: "1" | "2" | "3", rest: string): ParsedRow {
 
 // ---- trechos de métrica -------------------------------------------------------------
 
-type Acc = { found: Map<string, number[]>; problemas: string[]; precisaIa: boolean };
+type Acc = { found: Map<string, number[]>; previousFound: Map<string, number[]>; problemas: string[]; precisaIa: boolean };
 
 function readChunk(original: string, tags: string[], acc: Acc) {
   const base = fold(original);
@@ -137,8 +138,17 @@ function readChunk(original: string, tags: string[], acc: Acc) {
   if (tags.includes("seguidores")) {
     const L = labelAlt("seguidores");
     const TO = String.raw`\s*(?:para|pra|->|→|ate|a)\s*`;
-    take(new RegExp(String.raw`\b${L}\b\s*[:=\-]?\s*(?:de\s+)?${NUM}${TO}${NUM}`), (m) => add("seguidores", m[2]));
-    take(new RegExp(String.raw`(?:de\s+)?${NUM}${TO}${NUM}\s+(?:de\s+)?${L}\b`), (m) => add("seguidores", m[2]));
+    const addPair = (m: RegExpExecArray) => {
+      const previous = parseAmount(m[1]);
+      if (previous !== null) {
+        const list = acc.previousFound.get("seguidores") ?? [];
+        list.push(previous);
+        acc.previousFound.set("seguidores", list);
+      }
+      add("seguidores", m[2]);
+    };
+    take(new RegExp(String.raw`\b${L}\b\s*[:=\-]?\s*(?:de\s+)?${NUM}${TO}${NUM}`), addPair);
+    take(new RegExp(String.raw`(?:de\s+)?${NUM}${TO}${NUM}\s+(?:de\s+)?${L}\b`), addPair);
   }
 
   // 3. rótulo e número. A ordem do trecho decide qual lado é o rótulo de cada
@@ -175,7 +185,7 @@ function readChunk(original: string, tags: string[], acc: Acc) {
 // ---- entrada -------------------------------------------------------------------------
 
 export function parseFeedbackComment(text: string, tags: string[]): ParsedComment {
-  const acc: Acc = { found: new Map(), problemas: [], precisaIa: false };
+  const acc: Acc = { found: new Map(), previousFound: new Map(), problemas: [], precisaIa: false };
   const rich = needsRichExtraction(tags);
   const linhas: ParsedRow[] = [];
 
@@ -192,6 +202,7 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
   }
 
   const valores: Record<string, number | null> = Object.fromEntries(tags.map((t) => [t, null]));
+  const valoresAnteriores: Record<string, number | null> = Object.fromEntries(tags.map((t) => [t, null]));
   let conflito = false;
   for (const tag of tags) {
     const distinct = [...new Set(acc.found.get(tag) ?? [])];
@@ -199,6 +210,15 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
     else if (distinct.length > 1) {
       conflito = true;
       acc.problemas.push(`${tag} aparece com valores diferentes (${distinct.join(" e ")})`);
+    }
+  }
+
+  for (const tag of tags) {
+    const distinct = [...new Set(acc.previousFound.get(tag) ?? [])];
+    if (distinct.length === 1) valoresAnteriores[tag] = distinct[0];
+    else if (distinct.length > 1) {
+      conflito = true;
+      acc.problemas.push(`${tag} anterior aparece com valores diferentes (${distinct.join(" e ")})`);
     }
   }
 
@@ -214,7 +234,7 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
 
   const algo = Object.values(valores).some((v) => v !== null) || linhas.length > 0;
   const state: ParseState = conflito ? "AMBIGUOUS" : !algo ? "INVALID" : tags.every((t) => valores[t] !== null) ? "PARSED_OK" : "PARTIAL";
-  return { state, valores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa };
+  return { state, valores, valoresAnteriores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa };
 }
 
 // ---- o modelo do comentário ----------------------------------------------------------

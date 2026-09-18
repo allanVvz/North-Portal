@@ -6,6 +6,7 @@ import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleTrafficRevisionComment } from "@/lib/automations/run";
+import { recordFeedbackMetricComment } from "@/lib/automations/conversionFlow";
 import { flowCommentTargetId } from "@/lib/flows/commentTarget";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
@@ -41,9 +42,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         await notifyProfiles(mentioned, targetId, "task_mentioned", `${authorName} mencionou você em "${task.title}".`);
       }
     }
-    // Comentários podem pedir revisão editorial do relatório de anúncios, mas
-    // nunca aprovam Feedback. A conversão só parte da aprovação manual.
+    // Um comentário no tráfego pede revisão editorial; no Feedback, uma métrica
+    // válida atualiza a referência histórica, mas a aprovação continua humana.
     await handleTrafficRevisionComment(createAdminClient(), targetId);
+    await recordFeedbackMetricComment(createAdminClient(), targetId);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }

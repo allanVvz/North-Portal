@@ -19,9 +19,7 @@ import { nextRecurringDueDate, recurringExecutionFields, recurringExecutionId } 
 import { recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import { DEFERRED_TASK_FLAG } from "@/lib/taskRelations";
 import { publishedWorkflowForKind } from "@/lib/workflows";
-import { mergeAssigneeDisplay } from "@/lib/assignees";
 import { clonePlan } from "./provision";
-import { assignResponsibilityHolders } from "./responsibleOwners";
 import { asTaskRecord, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 
 // Advances the recurring parent forward (due_date → next occurrence, cycle+1)
@@ -120,15 +118,6 @@ export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord,
   if (error && (error as { code?: string }).code !== "23505") throw error;
   const occurrence = data?.[0] ? asTaskRecord(data[0]) : await getAdminTask(admin, occId);
   if (!occurrence) throw new Error("Não foi possível materializar a ocorrência do fluxo de relatório.");
-  // Quem "é dono" do relatório é quem está marcado como gestor de tráfego em
-  // Configurações › Equipe & papéis (hoje Allan e Luiza) — não um nome
-  // craveado no código. AUTOMATION_ASSIGNEE (o rótulo de sistema) continua
-  // visível junto, mesclado, porque não existe uma conta "automação" para
-  // virar task_assignees de verdade.
-  const holderNames = await assignResponsibilityHolders(admin, occurrence.id, "gestor_trafego");
-  if (holderNames) {
-    await admin.from("tasks").update({ assignee: mergeAssigneeDisplay(AUTOMATION_ASSIGNEE, [holderNames]) }).eq("id", occurrence.id);
-  }
   return occurrence;
 }
 

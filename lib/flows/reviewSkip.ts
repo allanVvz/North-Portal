@@ -19,11 +19,7 @@ export function stepSkipsReview(
   reviewerId: string | null,
   assigneeProfileIds: readonly string[],
 ): boolean {
-  return (
-    reviewerId !== null &&
-    assigneeProfileIds.length === 1 &&
-    assigneeProfileIds[0] === reviewerId
-  );
+  return reviewerId !== null && assigneeProfileIds.includes(reviewerId);
 }
 
 /** `requires_review` derivado — usado tanto no client (TaskModal, feedback

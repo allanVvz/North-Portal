@@ -1,6 +1,6 @@
 // Quem é responsável por um card que uma automação cria (ATA 14/09).
 //
-// As etapas do fluxo de relatório nasciam com o responsável "North ai" — o
+// As etapas do fluxo de relatório nasciam com o responsável "North Ai" — o
 // autor da automação, não uma pessoa. Resultado: o card não aparecia na Home de
 // ninguém, e quem executa (a Luiza, que cuida do tráfego) só sabia dele pelo
 // sino. Agora a etapa nasce com quem está marcado na frente em Configurações ›

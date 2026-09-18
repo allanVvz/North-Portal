@@ -66,8 +66,12 @@ describe("parseFeedbackComment — texto natural", () => {
   });
 
   it("seguidores de X para Y é o total Y", () => {
-    expect(parseFeedbackComment("seguidores de 829 pra 841", TAGS).valores.seguidores).toBe(841);
-    expect(parseFeedbackComment("foi de 829 para 841 seguidores", TAGS).valores.seguidores).toBe(841);
+    const first = parseFeedbackComment("seguidores de 829 pra 841", TAGS);
+    expect(first.valores.seguidores).toBe(841);
+    expect(first.valoresAnteriores.seguidores).toBe(829);
+    const second = parseFeedbackComment("foi de 829 para 841 seguidores", TAGS);
+    expect(second.valores.seguidores).toBe(841);
+    expect(second.valoresAnteriores.seguidores).toBe(829);
   });
 
   it("ganho de seguidores não vira total", () => {

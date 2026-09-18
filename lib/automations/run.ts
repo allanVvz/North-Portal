@@ -447,7 +447,7 @@ export async function handleTrafficRevisionComment(admin: AdminClient, taskId: s
     status: "revisao",
     assignee: AUTOMATION_ASSIGNEE,
     payload: {
-      ...appendedCommentPayload(trafficTask.payload, `Northia aplicou a instrução de revisão e gerou uma nova versão: [${fileName}](${url})`),
+      ...appendedCommentPayload(trafficTask.payload, `North Ai aplicou a instrução de revisão e gerou uma nova versão: [${fileName}](${url})`),
       traffic_revision_instruction: instruction,
     },
   }).eq("id", trafficTask.id);

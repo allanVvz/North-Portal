@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { flowDemotionProblem } from "@/lib/flows/demotion";
 import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
+import { feedbackMetricApprovalProblem } from "@/lib/automations/conversionFlow";
 import { flowStepKeyOf } from "@/lib/taskRelations";
 import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
 import { notifyProfiles, notifyTaskParticipants } from "@/lib/notifications";
@@ -86,6 +87,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
+    if (patch.status === "aprovado" && !current.completed_at) {
+      const feedbackProblem = await feedbackMetricApprovalProblem(createAdminClient(), current.id);
+      if (feedbackProblem) throw new HttpError(409, feedbackProblem);
+    }
     // Plano, Entrega e molde recorrente não têm status editável: ele é a
     // projeção dos cards abaixo. Aceitar o PATCH criaria outra fonte de verdade
     // e voltaria a produzir pais congelados em Produção.

@@ -65,7 +65,7 @@ describe("flowStepFields", () => {
   it("prefere o responsável do subtipo, cai no da etapa anterior e só então no rótulo da automação", () => {
     expect(flowStepFields(delivery, { ...step, default_assignee: "Editor" }, previous, "2026-08-28").assignee).toBe("Editor");
     expect(flowStepFields(delivery, step, previous, "2026-08-28").assignee).toBe("Bruno");
-    expect(flowStepFields(delivery, step, null, "2026-08-28").assignee).toBe("North ai");
+    expect(flowStepFields(delivery, step, null, "2026-08-28").assignee).toBe("North Ai");
   });
 
   it("usa a visibilidade declarada no subtipo, não a da entrega", () => {

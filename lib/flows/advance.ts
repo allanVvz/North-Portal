@@ -326,8 +326,11 @@ export async function advanceFlowAfterUpdate(before: TaskRecord, after: TaskReco
       if (!moldId) continue;
       const mold = await getAdminTask(admin, moldId);
       if (!mold) continue;
-      const { ensureFlowOccurrence } = await import("@/lib/automations/execute");
-      const next = await ensureFlowOccurrence(admin, mold, mold.due_date ?? todayIso());
+      const { advanceFlowMold, ensureFlowOccurrence } = await import("@/lib/automations/execute");
+      // A Entrega recorrente só avança quando o fluxo inteiro terminou. Assim
+      // uma falha no Feedback/conversão não cria uma referência semanal falsa.
+      const advancedMold = await advanceFlowMold(admin, mold, mold.due_date ?? todayIso());
+      const next = await ensureFlowOccurrence(admin, advancedMold, advancedMold.due_date ?? todayIso());
       await materializeFirstStep(admin, next, actorId);
     }
   } catch (error) {

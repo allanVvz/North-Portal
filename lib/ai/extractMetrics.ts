@@ -27,6 +27,8 @@ export type MetricExtract = {
    *  `task_metrics` virou série temporal — envenena a comparação da semana
    *  seguinte ("receita caiu 100%"). */
   valores: Record<string, number | null>;
+  /** Valores anteriores explícitos no comentário, para iniciar a série temporal. */
+  valoresAnteriores?: Record<string, number | null>;
   /** Linhas de venda detalhadas — só quando pedido e o texto tem o detalhe. */
   linhas: ConversionRow[];
   /** "parser" | "llm" | "formato não reconhecido" | "comentário ambíguo" | "comentário vazio" | "IA indisponível: …" */
@@ -141,7 +143,7 @@ export async function extractMetrics(commentText: string, tags: string[]): Promi
   const lido = parsed.state === "PARSED_OK" || parsed.state === "PARTIAL";
   const fallback = aiFallbackEnabled();
   if (lido && !(parsed.precisaIa && fallback)) {
-    return { valores: parsed.valores, linhas: parsed.linhas, note: "parser", problemas: parsed.problemas };
+    return { valores: parsed.valores, valoresAnteriores: parsed.valoresAnteriores, linhas: parsed.linhas, note: "parser", problemas: parsed.problemas };
   }
   if (!fallback) {
     return {

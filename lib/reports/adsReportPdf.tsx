@@ -49,7 +49,7 @@ export type AdsReportInput = {
   trendPosts?: MetaPost[];
   /** Por adId: miniatura já embutível e link do post. */
   previews?: Record<string, PreviewAsset>;
-  /** Instrução humana aplicada pela Northia nesta revisão. */
+  /** Instrução humana aplicada pela North Ai nesta revisão. */
   revisionInstruction?: string | null;
   generatedAt: Date;
 };

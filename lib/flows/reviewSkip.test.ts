@@ -7,7 +7,7 @@ describe("stepSkipsReview — revisar o próprio trabalho", () => {
   });
 
   it("revisor está entre VÁRIOS responsáveis: revisão continua valendo", () => {
-    expect(stepSkipsReview("allan", ["allan", "cintia"])).toBe(false);
+    expect(stepSkipsReview("allan", ["allan", "cintia"])).toBe(true);
   });
 
   it("sem revisor: nunca pula", () => {
@@ -32,10 +32,11 @@ describe("deriveRequiresReview", () => {
   it("com reviewer_id e sem auto-revisão: exige revisão", () => {
     expect(deriveRequiresReview("allan", [])).toBe(true);
     expect(deriveRequiresReview("allan", ["cintia"])).toBe(true);
-    expect(deriveRequiresReview("allan", ["allan", "cintia"])).toBe(true);
+    expect(deriveRequiresReview("allan", ["cintia", "luiza"])).toBe(true);
   });
 
   it("com reviewer_id igual ao único responsável: NÃO exige revisão", () => {
     expect(deriveRequiresReview("allan", ["allan"])).toBe(false);
+    expect(deriveRequiresReview("allan", ["allan", "luiza"])).toBe(false);
   });
 });

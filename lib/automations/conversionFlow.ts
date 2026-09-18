@@ -18,7 +18,6 @@ import { addDaysIso, agencyToday } from "@/lib/time/agency";
 import { recurrenceStopped } from "@/lib/recurrenceState";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } from "@/lib/automationWorkflow";
 import { workflowByVersionId, workflowStepByKey } from "@/lib/workflows";
-import { mergeAssigneeDisplay } from "@/lib/assignees";
 import type { Period } from "@/app/admin/performance/insights";
 import { extractMetrics, type ConversionRow, type MetricExtract } from "@/lib/ai/extractMetrics";
 import { feedbackTemplate } from "@/lib/ai/commentParser";
@@ -47,6 +46,7 @@ import {
   type TrafficReportRow,
 } from "./reportEntities";
 import { logReportRun } from "./reportLog";
+import { followerSeries, recordFollowerSnapshots } from "./clientMetricSeries";
 import type { AutomationConfigRow, RunOutcome } from "./run";
 
 const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
@@ -139,7 +139,9 @@ export async function prepareFeedbackCard(admin: AdminClient, occ: TaskRecord): 
   const { error } = await admin
     .from("tasks")
     .update({
-      assignee: holderNames ? mergeAssigneeDisplay(null, [holderNames]) : AUTOMATION_ASSIGNEE,
+      // Os gestores ficam exclusivamente em task_assignees; o texto livre seria
+      // mesclado pela UI e voltaria a duplicar Allan/Luiza.
+      assignee: holderNames ? null : AUTOMATION_ASSIGNEE,
       requires_review: false,
       description: FEEDBACK_DESCRIPTION,
       payload: nextPayload,
@@ -303,11 +305,17 @@ async function generateSalesReport(
   const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews } = traffic.snapshot ?? {};
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
-  const [prevTotals, history, previews] = await Promise.all([
+  const [prevTotals, history, previews, followers] = await Promise.all([
     previousPeriodTotals(admin, clientId, period.from),
     conversionHistory(admin, clientId, period.to),
     loadStoredPreviews(admin, storedPreviews),
+    followerSeries(admin, clientId, period.to),
   ]);
+  const previousFollowers = followers.filter((point) => point.period_to < period.to).at(-1) ?? null;
+  const effectivePrevTotals: SalesPrevTotals | null = prevTotals || previousFollowers
+    ? { vendas: prevTotals?.vendas ?? null, agendamentos: prevTotals?.agendamentos ?? null, receita: prevTotals?.receita ?? null, seguidores: prevTotals?.seguidores ?? previousFollowers?.value ?? null, from: prevTotals?.from ?? previousFollowers?.period_from ?? null, to: prevTotals?.to ?? previousFollowers?.period_to ?? null }
+    : null;
+  const historyWithFollowers = history.map((point) => ({ ...point, seguidores: followers.find((f) => f.period_to === point.periodTo)?.value ?? point.seguidores }));
 
   const pdf = await renderSalesReportPdf({
     clientName: client.name,
@@ -324,8 +332,8 @@ async function generateSalesReport(
     vendasTotal: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,
     agendamentosTotal: typeof ext.valores.agendamentos === "number" ? ext.valores.agendamentos : null,
     seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
-    prevTotals,
-    history,
+    prevTotals: effectivePrevTotals,
+    history: historyWithFollowers,
     generatedAt: new Date(),
   });
 
@@ -426,7 +434,10 @@ async function processOccurrence(
   // comentário corrigido regera tudo dias depois. Calculado uma vez aqui e
   // passado adiante pro PDF, em vez de recomputado lá dentro.
   const cadence: RecurringCadence = mold.recurrence_cadence ?? "semanal";
-  const period = reportPeriodFor(cadence, occ.due_date ?? today);
+  // O vencimento do pai pode ser estendido até o prazo do Feedback. A série e
+  // ambos os PDFs precisam usar o dia original da ocorrência.
+  const occurrenceDay = typeof occ.payload?.occurrence_date === "string" ? occ.payload.occurrence_date : occ.due_date ?? today;
+  const period = reportPeriodFor(cadence, occurrenceDay);
 
   // O que o feedback trouxe, contado num lugar só (lib/reports/conversionMode.ts)
   // — o mesmo modo e a mesma cobertura de atribuição que o PDF desenha.
@@ -485,6 +496,15 @@ async function processOccurrence(
         { onConflict: "task_id" },
       );
       if (metricsErr) throw metricsErr;
+      await recordFollowerSnapshots(admin, {
+        clientId: occ.client_id!,
+        taskId: card2.id,
+        periodFrom: period.from,
+        periodTo: period.to,
+        current: ext.valores.seguidores ?? null,
+        previous: ext.valoresAnteriores?.seguidores ?? null,
+        sourceCommentAt,
+      });
     }
 
     const sourceAt = sourceCommentAt ?? card2.completed_at;
@@ -614,4 +634,82 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
   } catch (error) {
     await markTaskParada(admin, occId, `Falha ao processar o feedback da semana: ${errorMessage(error)}`);
   }
+}
+
+/**
+ * Comentários de Feedback alimentam a série temporal imediatamente, inclusive
+ * se a etapa falhar depois. Eles não aprovam o card: aprovar ou devolver para
+ * produção continua uma decisão humana genérica do revisor na interface.
+ */
+export async function feedbackMetricApprovalProblem(admin: AdminClient, taskId: string): Promise<string | null> {
+  const card = await getAdminTask(admin, taskId);
+  if (!card || card.subtype !== FEEDBACK_STEP_KEY) return null;
+  const { data: linkRows, error: linkError } = await admin.from("task_links")
+    .select("parent_id").eq("child_id", card.id).eq("relation_kind", "workflow_step").limit(1);
+  if (linkError) throw linkError;
+  const occurrenceId = (linkRows?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (!occurrenceId) return "O Feedback não está vinculado à entrega da automação.";
+  const occurrence = await getAdminTask(admin, occurrenceId);
+  const moldId = typeof occurrence?.payload?.recurrence_parent_id === "string" ? occurrence.payload.recurrence_parent_id : null;
+  if (!moldId) return "Não encontrei a configuração desta automação.";
+  const { data: configRows, error: configError } = await admin.from("automation_configs").select("*")
+    .eq("target_task_id", moldId).eq("automation_key", "relatorio_vendas").eq("active", true).limit(1);
+  if (configError) throw configError;
+  const config = configRows?.[0] as AutomationConfigRow | undefined;
+  if (!config) return "A automação de relatório de conversão não está ativa.";
+  const comment = [...commentsOf(card.payload)].reverse().find((item) => !AUTOMATION_AUTHORS.has(item.author));
+  if (!comment) return `Antes de aprovar, informe pelo menos uma métrica. ${pedidoDe(tagsOf(config))}`;
+  const parsed = await extractMetrics(comment.text, tagsOf(config));
+  const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0;
+  return hasMetric ? null : `Não consegui identificar uma métrica no último comentário. ${pedidoDe(tagsOf(config))}`;
+}
+
+export async function recordFeedbackMetricComment(admin: AdminClient, taskId: string): Promise<void> {
+  const card = await getAdminTask(admin, taskId);
+  if (!card || card.subtype !== FEEDBACK_STEP_KEY) return;
+  const { data: linkRows, error: linkError } = await admin.from("task_links")
+    .select("parent_id").eq("child_id", card.id).eq("relation_kind", "workflow_step").limit(1);
+  if (linkError) throw linkError;
+  const occurrenceId = (linkRows?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (!occurrenceId) return;
+  const occurrence = await getAdminTask(admin, occurrenceId);
+  const moldId = typeof occurrence?.payload?.recurrence_parent_id === "string" ? occurrence.payload.recurrence_parent_id : null;
+  if (!occurrence || !moldId) return;
+  const { data: configRows, error: configError } = await admin.from("automation_configs").select("*")
+    .eq("target_task_id", moldId).eq("automation_key", "relatorio_vendas").eq("active", true).limit(1);
+  if (configError) throw configError;
+  const config = configRows?.[0] as AutomationConfigRow | undefined;
+  if (!config) return;
+  const comment = [...commentsOf(card.payload)].reverse().find((item) => !AUTOMATION_AUTHORS.has(item.author));
+  if (!comment) return;
+  const parsed = await extractMetrics(comment.text, tagsOf(config));
+  const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0;
+  if (!hasMetric) {
+    const marker = (card.payload as Record<string, unknown> | null)?.feedback_format_warned_for;
+    if (marker !== comment.at) {
+      await admin.from("tasks").update({
+        payload: {
+          ...appendedCommentPayload(card.payload, `Não consegui identificar uma métrica. ${pedidoDe(tagsOf(config))}`),
+          feedback_format_warned_for: comment.at,
+        },
+      }).eq("id", card.id);
+    }
+    return;
+  }
+  if (!occurrence.client_id) return;
+  const mold = await getAdminTask(admin, moldId);
+  if (!mold) return;
+  const occurrenceDay = typeof occurrence.payload?.occurrence_date === "string"
+    ? occurrence.payload.occurrence_date
+    : occurrence.due_date ?? agencyToday();
+  const period = reportPeriodFor(mold.recurrence_cadence ?? "semanal", occurrenceDay);
+  await recordFollowerSnapshots(admin, {
+    clientId: occurrence.client_id,
+    taskId: card.id,
+    periodFrom: period.from,
+    periodTo: period.to,
+    current: parsed.valores.seguidores ?? null,
+    previous: parsed.valoresAnteriores?.seguidores ?? null,
+    sourceCommentAt: comment.at,
+  });
 }
