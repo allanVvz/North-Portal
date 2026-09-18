@@ -455,7 +455,11 @@ async function processOccurrence(
   // O que o feedback trouxe, contado num lugar só (lib/reports/conversionMode.ts)
   // — o mesmo modo e a mesma cobertura de atribuição que o PDF desenha.
   const metrics = metricsParaBanco(ext.valores, tags);
-  if (ext.seguidoresGanho != null) delete metrics.seguidores;
+  if (ext.seguidoresGanho != null) {
+    delete metrics.seguidores;
+    metrics.seguidores_novos = String(ext.seguidoresGanho);
+    if (ext.seguidoresGanhoAnterior != null) metrics.seguidores_novos_anterior = String(ext.seguidoresGanhoAnterior);
+  }
   const informed = {
     vendas: ext.valores.vendas ?? null,
     agendamentos: ext.valores.agendamentos ?? null,
@@ -543,8 +547,11 @@ async function processOccurrence(
     }
 
     const sourceAt = sourceCommentAt ?? card2.completed_at;
+    const ganhoComparativo = ext.seguidoresGanho != null && ext.seguidoresGanhoAnterior != null
+      ? ` Comparação de seguidores novos: ${ext.seguidoresGanho} contra ${ext.seguidoresGanhoAnterior} (${ext.seguidoresGanho - ext.seguidoresGanhoAnterior >= 0 ? "+" : ""}${ext.seguidoresGanho - ext.seguidoresGanhoAnterior}; ${ext.seguidoresGanhoAnterior === 0 ? "sem base percentual" : `${((ext.seguidoresGanho - ext.seguidoresGanhoAnterior) / ext.seguidoresGanhoAnterior * 100).toFixed(2).replace(".", ",")}%`}).`
+      : "";
     const resumo = human
-      ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.${ext.problemas?.length ? ` Deixei de fora: ${ext.problemas.join("; ")}.` : ""}`
+      ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.${ganhoComparativo}${ext.problemas?.length ? ` Deixei de fora: ${ext.problemas.join("; ")}.` : ""}`
       : `Feedback aprovado sem métricas informadas; o relatório registra os campos como não informados.`;
 
     // Pai: só os marcadores estruturais (sem comentário — invisível). O status do
