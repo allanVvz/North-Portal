@@ -298,6 +298,7 @@ async function generateSalesReport(
   traffic: TrafficReportRow,
   cadence: RecurringCadence,
   period: Period,
+  sourceCommentAt: string | null,
 ): Promise<string | null> {
   const clientId = occ.client_id;
   if (!clientId) throw new Error("A ocorrência não pertence a nenhum cliente.");
@@ -318,8 +319,8 @@ async function generateSalesReport(
     followerSeries(admin, clientId, period.to),
   ]);
   const previousFollowers = followers.filter((point) => point.period_to < period.to).at(-1) ?? null;
-  const effectivePrevTotals: SalesPrevTotals | null = prevTotals || previousFollowers
-    ? { vendas: prevTotals?.vendas ?? null, agendamentos: prevTotals?.agendamentos ?? null, receita: prevTotals?.receita ?? null, seguidores: prevTotals?.seguidores ?? previousFollowers?.value ?? null, from: prevTotals?.from ?? previousFollowers?.period_from ?? null, to: prevTotals?.to ?? previousFollowers?.period_to ?? null }
+  const effectivePrevTotals: SalesPrevTotals | null = prevTotals || previousFollowers || ext.seguidoresGanhoAnterior != null
+    ? { vendas: prevTotals?.vendas ?? null, agendamentos: prevTotals?.agendamentos ?? null, receita: prevTotals?.receita ?? null, seguidores: ext.seguidoresGanhoAnterior ?? prevTotals?.seguidores ?? previousFollowers?.value ?? null, from: prevTotals?.from ?? previousFollowers?.period_from ?? null, to: prevTotals?.to ?? previousFollowers?.period_to ?? null }
     : null;
   const historyWithFollowers = history.map((point) => ({ ...point, seguidores: followers.find((f) => f.period_to === point.periodTo)?.value ?? point.seguidores }));
 
@@ -344,7 +345,8 @@ async function generateSalesReport(
   });
 
   // Nome versionado: um comentário corrigido regera o PDF sem colidir no storage.
-  const fileName = `relatorio-vendas-${period.to}.pdf`;
+  const version = sourceCommentAt ? sourceCommentAt.replace(/\D/g, "").slice(-14) : "initial";
+  const fileName = `relatorio-vendas-${period.to}-${version}.pdf`;
   // A claim may be retried after a crash between document creation and the
   // final task update. Reuse that persisted artifact instead of creating a
   // second PDF/object for the same conversion card and period.
@@ -450,6 +452,7 @@ async function processOccurrence(
   // O que o feedback trouxe, contado num lugar só (lib/reports/conversionMode.ts)
   // — o mesmo modo e a mesma cobertura de atribuição que o PDF desenha.
   const metrics = metricsParaBanco(ext.valores, tags);
+  if (ext.seguidoresGanho != null) delete metrics.seguidores;
   const informed = {
     vendas: ext.valores.vendas ?? null,
     agendamentos: ext.valores.agendamentos ?? null,
@@ -515,7 +518,7 @@ async function processOccurrence(
         taskId: card2.id,
         periodFrom: period.from,
         periodTo: period.to,
-        current: ext.valores.seguidores ?? null,
+        current: ext.seguidoresGanho == null ? (ext.valores.seguidores ?? null) : null,
         previous: ext.valoresAnteriores?.seguidores ?? null,
         sourceCommentAt,
       });
@@ -551,7 +554,7 @@ async function processOccurrence(
     });
     if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period);
+    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt);
     await attachConversionDocument(admin, claim.id, documentId);
     // A Entrega passa a Revisão sozinha, projetada desta etapa.
     await transitionTaskStatus(admin, card3.id, { to: "revisao", from: ["em_producao"] });
@@ -677,7 +680,7 @@ export async function feedbackMetricApprovalProblem(admin: AdminClient, taskId: 
   const comment = [...commentsOf(card.payload)].reverse().find((item) => !AUTOMATION_AUTHORS.has(item.author));
   if (!comment) return `Antes de aprovar, informe pelo menos uma métrica. ${pedidoDe(tagsOf(config))}`;
   const parsed = await extractMetrics(comment.text, tagsOf(config));
-  const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0;
+  const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0 || parsed.seguidoresGanho != null;
   return hasMetric ? null : `Não consegui identificar uma métrica no último comentário. ${pedidoDe(tagsOf(config))}`;
 }
 
@@ -714,7 +717,16 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
     }
     return;
   }
-  if (parsed.seguidoresGanho != null) {
+  const previousFollowerGain = parsed.seguidoresGanhoAnterior ?? null;
+  if (parsed.seguidoresGanho != null && previousFollowerGain != null) {
+    const difference = parsed.seguidoresGanho - previousFollowerGain;
+    const percentage = previousFollowerGain === 0 ? null : (difference / previousFollowerGain) * 100;
+    await updateTaskPayload(admin, card.id, {
+      text: `Relatório da métrica: ${parsed.seguidoresGanho} seguidores novos; diferença de ${difference >= 0 ? "+" : ""}${difference}${percentage == null ? "" : ` (${percentage >= 0 ? "+" : ""}${percentage.toFixed(2).replace(".", ",")}%)`} em relação aos ${previousFollowerGain} anteriores.`,
+      commentId: automationCommentId("feedback-metric-comparison", card.id, comment.at),
+      patch: { feedback_followers_gain: parsed.seguidoresGanho, feedback_followers_gain_previous: previousFollowerGain, feedback_format_warned_for: null },
+    });
+  } else if (parsed.seguidoresGanho != null) {
     await updateTaskPayload(admin, card.id, {
       text: `Relatório da métrica: +${parsed.seguidoresGanho} seguidores novos.`,
       commentId: automationCommentId("feedback-metric", card.id, comment.at),
@@ -750,4 +762,32 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
     previous: parsed.valoresAnteriores?.seguidores ?? null,
     sourceCommentAt: comment.at,
   });
+
+  // Feedback vÃ¡lido Ã© a decisÃ£o do revisor: sai de Entrada e fica publicado
+  // automaticamente. A cascata canÃ´nica materializa a etapa de conversÃ£o e
+  // chama a geraÃ§Ã£o do primeiro PDF; um comentÃ¡rio posterior reabre somente a
+  // conversÃ£o para revisÃ£o e gera a nova versÃ£o.
+  const completed = await transitionTaskStatus(admin, card.id, {
+    to: "aprovado",
+    from: ["backlog", "em_producao", "revisao"],
+    open: true,
+  });
+  if (completed) {
+    const { advanceFlowAfterUpdate } = await import("@/lib/flows/advance");
+    await advanceFlowAfterUpdate(card, completed);
+  } else {
+    const conversion = await linkedCardForStep(admin, occurrence, CONVERSION_REPORT_STEP_KEY);
+    if (conversion && conversion.status !== "revisao" && !conversion.completed_at) {
+      await transitionTaskStatus(admin, conversion.id, {
+        to: "revisao",
+        from: ["backlog", "em_producao", "aprovacao"],
+      });
+    } else if (conversion?.completed_at || conversion?.status === "aprovacao") {
+      await transitionTaskStatus(admin, conversion.id, {
+        to: "revisao",
+        from: ["aprovado", "aprovacao"],
+      });
+    }
+    await processConversionFeedback(admin, occurrenceId);
+  }
 }

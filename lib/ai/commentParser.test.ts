@@ -92,6 +92,16 @@ describe("parseFeedbackComment — texto natural", () => {
     expect(r.seguidoresGanho).toBe(47);
   });
 
+  it("extrai ganhos do período anterior e do atual", () => {
+    const r = parseFeedbackComment(
+      "No período anterior a campanha gerou 90 seguidores novos. No período de 11 a 17/09 gerou 47.",
+      TAGS,
+    );
+    expect(r.valores.seguidores).toBe(47);
+    expect(r.seguidoresGanho).toBe(47);
+    expect(r.seguidoresGanhoAnterior).toBe(90);
+  });
+
   it("agendamento nunca abaixo de venda", () => {
     expect(parseFeedbackComment("Vendas: 6\nAgendamentos: 2", TAGS).valores.agendamentos).toBe(6);
   });

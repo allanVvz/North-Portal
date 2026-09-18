@@ -35,6 +35,8 @@ export type ParsedComment = {
   precisaIa: boolean;
   /** Ganho informado (ex.: "+47 novos"), sem tratar o ganho como total. */
   seguidoresGanho?: number | null;
+  /** Ganho do período anterior quando o comentário traz uma comparação textual. */
+  seguidoresGanhoAnterior?: number | null;
 };
 
 // Rótulos já sem acento e em minúsculas (o texto é comparado dobrado).
@@ -99,7 +101,20 @@ function parseRow(fonte: "1" | "2" | "3", rest: string): ParsedRow {
 
 // ---- trechos de métrica -------------------------------------------------------------
 
-type Acc = { found: Map<string, number[]>; previousFound: Map<string, number[]>; problemas: string[]; precisaIa: boolean; seguidoresGanho: number | null };
+type Acc = { found: Map<string, number[]>; previousFound: Map<string, number[]>; problemas: string[]; precisaIa: boolean; seguidoresGanho: number | null; seguidoresGanhoAnterior: number | null };
+
+function followerGainComparison(text: string): { previous: number; current: number } | null {
+  const base = fold(text);
+  const previous = /(?:periodo|semana)\s+(?:anterior|passada)[\s\S]{0,120}?([\d.,]+)\s+seguidores?\s+nov\w*/i.exec(base);
+  if (!previous || previous.index === undefined) return null;
+  const after = base.slice(previous.index + previous[0].length);
+  if (!/(?:periodo|semana)\b/i.test(after)) return null;
+  const numbers = [...after.matchAll(/\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?/g)]
+    .map((m) => parseAmount(m[0]))
+    .filter((n): n is number => n !== null);
+  const current = numbers.at(-1);
+  return current === undefined ? null : { previous: parseAmount(previous[1]) ?? 0, current };
+}
 
 function readChunk(original: string, tags: string[], acc: Acc) {
   const base = fold(original);
@@ -187,7 +202,12 @@ function readChunk(original: string, tags: string[], acc: Acc) {
 // ---- entrada -------------------------------------------------------------------------
 
 export function parseFeedbackComment(text: string, tags: string[]): ParsedComment {
-  const acc: Acc = { found: new Map(), previousFound: new Map(), problemas: [], precisaIa: false, seguidoresGanho: null };
+  const acc: Acc = { found: new Map(), previousFound: new Map(), problemas: [], precisaIa: false, seguidoresGanho: null, seguidoresGanhoAnterior: null };
+  const gainComparison = followerGainComparison(text);
+  if (gainComparison && tags.includes("seguidores")) {
+    acc.seguidoresGanho = gainComparison.current;
+    acc.seguidoresGanhoAnterior = gainComparison.previous;
+  }
   const rich = needsRichExtraction(tags);
   const linhas: ParsedRow[] = [];
 
@@ -215,6 +235,13 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
     }
   }
 
+  // Comparação textual de ganhos ("período anterior: 90 seguidores novos; neste
+  // período: 47") vence os números intermediários de datas e mantém os dois
+  // valores disponíveis para o relatório de revisão.
+  if (gainComparison && tags.includes("seguidores")) {
+    valores.seguidores = gainComparison.current;
+  }
+
   for (const tag of tags) {
     const distinct = [...new Set(acc.previousFound.get(tag) ?? [])];
     if (distinct.length === 1) valoresAnteriores[tag] = distinct[0];
@@ -234,9 +261,14 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
     valores.agendamentos = valores.vendas;
   }
 
+  if (gainComparison && tags.includes("seguidores")) {
+    acc.seguidoresGanho = gainComparison.current;
+    acc.seguidoresGanhoAnterior = gainComparison.previous;
+  }
+
   const algo = Object.values(valores).some((v) => v !== null) || linhas.length > 0;
   const state: ParseState = conflito ? "AMBIGUOUS" : !algo ? "INVALID" : tags.every((t) => valores[t] !== null) ? "PARSED_OK" : "PARTIAL";
-  return { state, valores, valoresAnteriores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa, seguidoresGanho: acc.seguidoresGanho };
+  return { state, valores, valoresAnteriores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa, seguidoresGanho: acc.seguidoresGanho, seguidoresGanhoAnterior: acc.seguidoresGanhoAnterior };
 }
 
 // ---- o modelo do comentário ----------------------------------------------------------
