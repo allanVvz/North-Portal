@@ -304,10 +304,11 @@ export default function TaskModal({
   const [flowDeliveries, setFlowDeliveries] = useState<TaskRecord[]>([]);
   // A entrega de verdade por trás do card aberto — ela mesma quando o card
   // aberto É a entrega, o pai buscado à parte quando o card aberto é uma
-  // etapa. A versão persistida no pai é a autoridade da corrente.
+  // etapa. A versão persistida no pai é a autoridade para o contexto
+  // ascendente da etapa; a lista e os controles da corrente ficam só nela.
   // Uma etapa compartilhada pode alimentar várias Entregas. Ela não ganha um
-  // "primeiro pai" arbitrário: só há uma corrente editável quando existe uma
-  // única Entrega ligada; caso contrário o modal mostra todos os contextos.
+  // "primeiro pai" arbitrário: uma única Entrega basta para calcular o resumo
+  // ascendente; caso contrário o modal mostra todos os contextos.
   const chainDelivery = isDelivery ? liveTask : flowDeliveries.length === 1 ? flowDeliveries[0] : null;
   // Os Planos de Ação a que este card pertence (pode ser mais de um) — não
   // aparecem no quadro, então quase sempre precisam ser buscados por id
@@ -708,10 +709,9 @@ export default function TaskModal({
   const recurrenceLinkCandidates = liveTask && isRecurringParent
     ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id)
     : [];
-  // As etapas da corrente a que este card pertence — as do próprio card quando
-  // ele é a entrega, as do pai quando ele é uma etapa. `chainDelivery` (a
-  // entrega a que a caixa de etapas se refere) já foi calculado mais acima,
-  // junto da versão persistida da Entrega.
+  // As etapas são lidas para o próprio card Entrega e para compor o resumo
+  // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
+  // renderizada no primeiro caso; `chainDelivery` já traz sua versão persistida.
   const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
   const deliveryClassificationLocked = Boolean(chainDelivery && chainSteps.some((step) => step.status !== "backlog"));
 
@@ -1714,7 +1714,10 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {flowNext ? (
+            {/* A próxima etapa é irmã da etapa que acabou de avançar. Ela só
+                pode aparecer na Entrega operacional, nunca numa etapa nem no
+                molde de recorrência, que lista somente suas execuções. */}
+            {isDelivery && !isRecurringParent && flowNext ? (
               <div className="tm-box tm-flownext">
                 <p className="tm-box-label">Próxima etapa criada</p>
                 <div className="tm-member-list">
@@ -1730,11 +1733,13 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {/* A sequência é contexto da Entrega e também da sua etapa quando
-                ela participa de uma única Entrega. Em vínculo N:N, não há uma
-                sequência "principal" inventada: as relações continuam na
-                lista de contexto acima. */}
-            {liveTask && chainDelivery ? (
+            {/* A sequência é contexto e controle exclusivos da Entrega
+                operacional. O molde recorrente mostra somente suas execuções;
+                cada execução abre como Entrega e mostra as próprias etapas.
+                Uma etapa vê somente as caixas ascendentes "Faz parte de" —
+                inclusive todas as Entregas legítimas quando for compartilhada
+                — e nunca a lista, editor ou comentários de seus irmãos. */}
+            {liveTask && isDelivery && !isRecurringParent ? (
               <FlowStepsBox
                 type={deliveryType}
                 steps={chainSteps}
@@ -1744,7 +1749,7 @@ export default function TaskModal({
                 canOpen={Boolean(onOpenRelatedTask)}
                 team={adminReviewers}
                 onOpenStep={(card) => void openRelatedTask(card)}
-                onUnlinkStep={(card) => void unlinkMember(card.id, chainDelivery.id)}
+                onUnlinkStep={(card) => void unlinkMember(card.id, liveTask.id)}
                 onLinkStep={(card, workflowStepId) => void linkStepCard(card, workflowStepId)}
                 onPatchStep={patchRelatedCard}
                 onCommentStep={commentRelatedCard}

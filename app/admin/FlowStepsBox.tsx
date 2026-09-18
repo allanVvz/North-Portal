@@ -12,9 +12,9 @@ import type { ReviewerCandidate, TaskRecord } from "@/lib/validation";
 
 // A corrente de uma entrega, com o botão de corrente nas etapas vazias.
 //
-// Um componente só, usado tanto no card da ENTREGA quanto no card de uma
-// ETAPA: quem abre uma etapa pelo quadro precisa enxergar e mexer na corrente
-// sem antes descobrir que existe uma tela de Entregas.
+// Este é contexto e controle exclusivos do card agregador ENTREGA. Uma etapa
+// mostra apenas seus pais em "Faz parte de" no TaskModal: não pode listar,
+// editar, comentar, vincular ou desvincular os próprios irmãos.
 //
 // A lista vem do TIPO, não dos cards — numa cascata as etapas seguintes ainda
 // não existem, e mostrar só o que já nasceu esconderia justamente o que falta.

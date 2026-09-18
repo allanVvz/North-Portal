@@ -63,11 +63,14 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
   let sb: SupabaseClient;
   let clientId = "";
   let deliveryId = "";
+  let sharedDeliveryId = "";
   let roteiroId = "";
   let captacaoA = "";
   let captacaoB = "";
+  let captacaoWorkflowStepId = "";
 
   const deliveryTitle = `${PREFIX} Entrega corrente`;
+  const sharedDeliveryTitle = `${PREFIX} Outra entrega compartilhada`;
 
   test.beforeAll(async () => {
     sb = serviceClient();
@@ -75,32 +78,76 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     if (error || !client) throw new Error(`cliente karpinski não encontrado: ${error?.message}`);
     clientId = client.id as string;
 
-    // Uma entrega com o Roteiro ocupado e a Captação vaga, mais DOIS cards de
-    // captação soltos — o segundo serve para provar que o slot não aceita dois.
+    // O catálogo é a fonte de classificação desde a migration de workflows:
+    // não semear `kind`/`subtype` legados, que o trigger agora recusa sem o FK.
+    const { data: types, error: typesError } = await sb
+      .from("task_types")
+      .select("id,key")
+      .in("key", ["criativo", "captacao"]);
+    if (typesError || !types) throw new Error(`tipos do fixture não encontrados: ${typesError?.message}`);
+    const creativeType = types.find((type) => type.key === "criativo");
+    const captacaoType = types.find((type) => type.key === "captacao");
+    if (!creativeType || !captacaoType) throw new Error("fixture exige os tipos Criativo e Captação.");
+
+    const { data: workflow, error: workflowError } = await sb
+      .from("workflow_versions")
+      .select("id")
+      .eq("delivery_type_id", creativeType.id)
+      .eq("status", "published")
+      .single();
+    if (workflowError || !workflow) throw new Error(`workflow Criativo publicado não encontrado: ${workflowError?.message}`);
+
+    const { data: workflowSteps, error: stepsError } = await sb
+      .from("workflow_version_steps")
+      .select("id,step_key")
+      .eq("workflow_version_id", workflow.id);
+    if (stepsError || !workflowSteps) throw new Error(`etapas do workflow não encontradas: ${stepsError?.message}`);
+    captacaoWorkflowStepId = workflowSteps.find((step) => step.step_key === "captacao")?.id ?? "";
+    if (!captacaoWorkflowStepId) throw new Error("workflow Criativo não possui a etapa Captação.");
+
+    // Criar a Entrega materializa o primeiro passo pelo trigger de produção.
+    // Assim o fixture respeita a constraint de que uma Entrega versionada não
+    // pode existir sem o primeiro elo do workflow.
     deliveryId = await insertTask(sb, {
-      client_id: clientId, kind: "criativo", subtype: null, title: deliveryTitle,
-      status: "backlog", payload: {},
+      client_id: clientId, task_type_id: creativeType.id, workflow_version_id: workflow.id,
+      title: deliveryTitle, status: "backlog", payload: {},
     });
-    roteiroId = await insertTask(sb, {
-      client_id: clientId, kind: "operacional", subtype: "roteiro",
-      title: `${deliveryTitle} — Roteiro`, status: "backlog", position: 10,
+    sharedDeliveryId = await insertTask(sb, {
+      client_id: clientId, task_type_id: creativeType.id, workflow_version_id: workflow.id,
+      title: sharedDeliveryTitle, status: "backlog", payload: {},
     });
+
+    const { data: firstLink, error: firstLinkError } = await sb
+      .from("task_links")
+      .select("child_id,workflow_step_id")
+      .eq("parent_id", deliveryId)
+      .eq("relation_kind", "workflow_step")
+      .single();
+    if (firstLinkError || !firstLink?.workflow_step_id) throw new Error(`primeira etapa não foi materializada: ${firstLinkError?.message}`);
+    roteiroId = firstLink.child_id as string;
+
+    // A segunda Entrega nasce com um Roteiro próprio. Substituímos apenas esse
+    // elo pelo mesmo Roteiro da primeira, formando o caso N:N real que o modal
+    // precisa apresentar como dois pais, sem uma lista de irmãos.
+    const { error: shareLinkError } = await sb
+      .from("task_links")
+      .update({ child_id: roteiroId })
+      .eq("parent_id", sharedDeliveryId)
+      .eq("workflow_step_id", firstLink.workflow_step_id);
+    if (shareLinkError) throw new Error(`não foi possível compartilhar Roteiro: ${shareLinkError.message}`);
+
     captacaoA = await insertTask(sb, {
-      client_id: clientId, kind: "operacional", subtype: "captacao",
-      title: `${PREFIX} Captação A`, status: "backlog", position: 20,
+      client_id: clientId, task_type_id: captacaoType.id,
+      title: `${PREFIX} Captação A`, status: "backlog", position: 20, payload: {},
     });
     captacaoB = await insertTask(sb, {
-      client_id: clientId, kind: "operacional", subtype: "captacao",
-      title: `${PREFIX} Captação B`, status: "backlog", position: 20,
+      client_id: clientId, task_type_id: captacaoType.id,
+      title: `${PREFIX} Captação B`, status: "backlog", position: 20, payload: {},
     });
-    const { error: linkErr } = await sb
-      .from("task_links")
-      .insert({ parent_id: deliveryId, child_id: roteiroId, relation_kind: "workflow_step", slot: "roteiro", position: 10 });
-    if (linkErr) throw new Error(`seed link failed: ${linkErr.message}`);
   });
 
   test.afterAll(async () => {
-    const ids = [deliveryId, roteiroId, captacaoA, captacaoB].filter(Boolean);
+    const ids = [deliveryId, sharedDeliveryId, roteiroId, captacaoA, captacaoB].filter(Boolean);
     if (ids.length) await sb.from("tasks").delete().in("id", ids);
     // Etapas criadas pela cascata durante o teste, se houver.
     await sb.from("tasks").delete().like("title", `${PREFIX}%`);
@@ -152,7 +199,7 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     // rota direto com a tela desatualizada. Foi assim que a entrega
     // "criativo fluxo" acabou com dois cards no slot de edição em produção.
     const second = await page.request.post(`/api/admin/tasks/${deliveryId}/relations`, {
-      data: { child_id: captacaoB, slot: "captacao", relation_kind: "workflow_step" },
+      data: { child_id: captacaoB, workflow_step_id: captacaoWorkflowStepId, relation_kind: "workflow_step" },
     });
     expect(second.status()).toBe(409);
     const { data: afterLinks } = await sb
@@ -163,29 +210,24 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
     expect(afterLinks).toHaveLength(1);
   });
 
-  test("o mesmo seletor funciona a partir do card de uma ETAPA", async ({ page }) => {
+  test("uma ETAPA mostra apenas a Entrega-pai, sem a corrente ou controles dos irmãos", async ({ page }) => {
     await login(page);
 
-    // O usuário foi procurar o 🔗 aqui — no card que aparece no quadro — e não
-    // achava, porque a caixa só existia na entrega.
     await page.goto(`/admin/kanban?task=${roteiroId}`);
     const modal = page.locator(".tm");
     await expect(modal).toBeVisible({ timeout: 20_000 });
 
-    // A caixa "Entrega" continua, como link para o pai...
-    await expect(modal.locator(".tm-planmembers", { hasText: "Entrega" })).toBeVisible({ timeout: 20_000 });
-    // ...e a corrente inteira também aparece, com a etapa atual marcada.
-    const stepsBox = modal.locator(".tm-planmembers", { hasText: "Etapas" });
-    await expect(stepsBox).toBeVisible({ timeout: 20_000 });
-    await expect(stepsBox).toContainText("você está aqui");
+    // Uma etapa compartilhada preserva TODAS as relações ascendentes, sem
+    // inventar uma corrente principal nem revelar os irmãos de nenhuma delas.
+    const parentBoxes = modal.locator(".tm-box.tm-parentbox", { hasText: "Faz parte de" });
+    await expect(parentBoxes).toHaveCount(2, { timeout: 20_000 });
+    await expect(parentBoxes.filter({ hasText: deliveryTitle })).toBeVisible();
+    await expect(parentBoxes.filter({ hasText: sharedDeliveryTitle })).toBeVisible();
 
-    await stepsBox.getByRole("button", { name: /Ligar um card existente à etapa Edição/ }).click();
-    const panel = page.locator(".admin-shell > .tm-chain-panel");
-    await expect(panel).toBeVisible({ timeout: 15_000 });
-    await expectPanelIsThemedAndInsideModal(panel, modal);
-    // A lista pode conter cards reais do cliente ou explicar que está vazia;
-    // ambas são respostas válidas. O contrato aqui é abrir o seletor da
-    // sequência a partir da etapa, sem depender do volume de produção.
-    await expect(panel.locator(".tm-chain-list")).toBeVisible();
+    // A etapa não enxerga nem controla irmãos pela caixa exclusiva da Entrega.
+    const stepsBox = modal.locator(".tm-planmembers", { hasText: "Etapas" });
+    await expect(stepsBox).toHaveCount(0);
+    await expect(modal.getByRole("button", { name: /Ligar um card existente à etapa/ })).toHaveCount(0);
+    await expect(modal.getByText("Próxima etapa criada", { exact: true })).toHaveCount(0);
   });
 });
