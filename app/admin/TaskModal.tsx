@@ -976,11 +976,13 @@ export default function TaskModal({
     setBusy(false);
   }
 
-  // Board feeds intentionally omit future recurring executions. Fetching the
-  // direct relation here keeps the parent modal complete without slowing the
-  // Tasks screen or making the future card visible there.
+  // Board feeds can be older than a deep link (for example, an Entrega just
+  // created in another tab). Fetch direct children for every parent kind so a
+  // parent modal never projects an empty family while its current stage exists.
+  // This does not put future cards on the Tasks screen; it only completes the
+  // modal's local family view.
   useEffect(() => {
-    if (!liveTask || (!kindDef(liveTask.kind).isPlan && !liveTask.recurrence_cadence)) return;
+    if (!liveTask || (!isFlowDelivery(liveTask) && !kindDef(liveTask.kind).isPlan && !liveTask.recurrence_cadence)) return;
     let cancelled = false;
     fetch(`/api/admin/tasks?parentId=${encodeURIComponent(liveTask.id)}`)
       .then((response) => response.ok ? response.json() : null)
@@ -1321,10 +1323,9 @@ export default function TaskModal({
   // uma ENTREGA é o espelho da etapa corrente (lib/flows/parentStatus.ts).
   //
   // A entrega não é arrastada por ninguém — o status dela na coluna `status` é
-  // só o carimbo que a cascata deixou (nasce em `em_producao`, vai para
-  // revisão/aprovação quando a última etapa fecha). Entre esses dois momentos
-  // ele ficava CONGELADO enquanto as etapas andavam, e era isso que fazia o
-  // card pai mentir: roteiro em revisão, pai ainda dizendo "Em produção".
+  // só a projeção dos descendentes (pai e primeira etapa nascem em Entrada).
+  // Sem essa leitura a interface congelava enquanto as etapas andavam, e era
+  // isso que fazia o card pai mentir: roteiro em revisão, pai em Entrada.
   // Espelhado, e não persistido, pelo mesmo motivo do progresso — ver o
   // comentário de `mirroredParentStatus`.
   //

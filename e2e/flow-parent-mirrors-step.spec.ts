@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
+import type { TaskStatus } from "@/lib/validation";
 
 // ESTRATEGIA-FLUXOS.md — P1-C.
 //
@@ -19,13 +20,16 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 // observáveis, sem fixar a fórmula exata de porcentagem (não é o papel do
 // e2e travar a matemática — isso é dos testes unitários de quem implementa).
 //
-// Esperado FALHAR hoje: o rótulo do stepper no card da entrega fica preso em
-// "Em produção" (o valor congelado na criação) independente do que a etapa
-// realmente está fazendo — só por coincidência bate quando a etapa também
-// está "Em produção".
-
 const RUN = Date.now();
 const PREFIX = `[e2e ${RUN}]`;
+
+const STATUS_BY_LABEL: Record<string, TaskStatus> = {
+  "Entrada": "backlog",
+  "Em produção": "em_producao",
+  "Revisão": "revisao",
+  "Aprovação": "aprovacao",
+  "Concluído": "aprovado",
+};
 
 function serviceClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,11 +49,15 @@ async function login(page: Page) {
 /** Lê o rótulo do passo marcado "current" no header da entrega e o
  *  percentual da barra — os dois pontos observáveis pela pessoa que abre o
  *  card, não implementação. */
-async function readDeliveryHeader(page: Page, deliveryId: string): Promise<{ label: string; pct: number }> {
+async function readDeliveryHeader(page: Page, deliveryId: string, expectedLabel: string): Promise<{ label: string; pct: number }> {
   await page.goto(`/admin/kanban?task=${deliveryId}`);
   const modal = page.locator(".tm");
   await expect(modal).toBeVisible({ timeout: 20_000 });
-  const label = (await modal.locator(".tm-step.current .tm-step-label").innerText()).trim();
+  const currentLabel = modal.locator(".tm-step.current .tm-step-label");
+  // Um deep link pode chegar antes do feed do Kanban. O modal busca então os
+  // filhos diretos; aguardar a projeção evita validar o estado transitório.
+  await expect(currentLabel).toHaveText(expectedLabel, { timeout: 20_000 });
+  const label = (await currentLabel.innerText()).trim();
   const pctText = (await modal.locator(".tm-head-progress b").innerText()).trim();
   const pct = Number(pctText.replace("%", ""));
   expect(Number.isNaN(pct)).toBe(false);
@@ -88,6 +96,13 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
 
   test("roteiro percorre a corrente inteira; o pai acompanha e o progresso não recua", async ({ page }) => {
     await login(page);
+    // A preferência de atributos é individual e pode ocultar a caixa de
+    // progresso. Este spec mede o percentual, portanto fixa a visualização
+    // antes de abrir a Entrega e não depende de estado deixado por outro E2E.
+    await page.evaluate(() => {
+      localStorage.setItem("kb-attr-visible", JSON.stringify({ progress: true }));
+      window.dispatchEvent(new Event("kb-attr-visible-change"));
+    });
     const create = await page.request.post("/api/admin/tasks?scope=task", {
       data: {
         slug: "karpinski", title: deliveryTitle, kind: "criativo", subtype: null,
@@ -102,10 +117,18 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
 
     const readings: { step: string; label: string; pct: number }[] = [];
     async function checkpoint(step: string, expectedLabel: string) {
-      const { label, pct } = await readDeliveryHeader(page, deliveryId);
+      const expectedStatus = STATUS_BY_LABEL[expectedLabel];
+      expect(expectedStatus, `status esperado não mapeado: ${expectedLabel}`).toBeTruthy();
+      // A trigger de projeção é a autoridade: confirmar no banco antes de
+      // conferir a leitura visual evita que um cache da tela mascare um pai
+      // persistido incorretamente.
+      await expect.poll(async () => {
+        const { data, error } = await sb.from("tasks").select("status").eq("id", deliveryId).single();
+        if (error) throw error;
+        return data.status;
+      }, { timeout: 20_000 }).toBe(expectedStatus);
+      const { label, pct } = await readDeliveryHeader(page, deliveryId, expectedLabel);
       readings.push({ step, label, pct });
-      // Cada checagem individual aparece no relatório com o nome do passo —
-      // mais fácil de ler que um "expected X received Y" solto.
       expect(label, `status do pai em "${step}"`).toBe(expectedLabel);
     }
 
