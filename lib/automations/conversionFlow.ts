@@ -257,6 +257,7 @@ async function previousPeriodTotals(
     agendamentos: num("agendamentos"),
     receita: num("receita"),
     seguidores: num("seguidores"),
+    seguidoresNovos: num("seguidores_novos"),
     // O PDF usa isto na legenda "comparado com X a Y" — o período real da linha,
     // que não é sempre o de calendário anterior (uma semana sem relatório deixa
     // um buraco na série).
@@ -285,7 +286,7 @@ async function conversionHistory(admin: AdminClient, clientId: string, periodTo:
       const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
       return Number.isFinite(n) ? n : null;
     };
-    return { periodTo: row.period_to, vendas: read("vendas"), agendamentos: read("agendamentos"), receita: read("receita"), seguidores: read("seguidores") };
+    return { periodTo: row.period_to, vendas: read("vendas"), agendamentos: read("agendamentos"), receita: read("receita"), seguidores: read("seguidores"), seguidoresGanho: read("seguidores_novos") };
   });
 }
 
@@ -320,7 +321,7 @@ async function generateSalesReport(
   ]);
   const previousFollowers = followers.filter((point) => point.period_to < period.to).at(-1) ?? null;
   const effectivePrevTotals: SalesPrevTotals | null = prevTotals || previousFollowers || ext.seguidoresGanhoAnterior != null
-    ? { vendas: prevTotals?.vendas ?? null, agendamentos: prevTotals?.agendamentos ?? null, receita: prevTotals?.receita ?? null, seguidores: ext.seguidoresGanhoAnterior ?? prevTotals?.seguidores ?? previousFollowers?.value ?? null, from: prevTotals?.from ?? previousFollowers?.period_from ?? null, to: prevTotals?.to ?? previousFollowers?.period_to ?? null }
+    ? { vendas: prevTotals?.vendas ?? null, agendamentos: prevTotals?.agendamentos ?? null, receita: prevTotals?.receita ?? null, seguidores: prevTotals?.seguidores ?? previousFollowers?.value ?? null, seguidoresNovos: ext.seguidoresGanhoAnterior ?? prevTotals?.seguidoresNovos ?? null, from: prevTotals?.from ?? previousFollowers?.period_from ?? null, to: prevTotals?.to ?? previousFollowers?.period_to ?? null }
     : null;
   const historyWithFollowers = history.map((point) => ({ ...point, seguidores: followers.find((f) => f.period_to === point.periodTo)?.value ?? point.seguidores }));
 
@@ -338,7 +339,12 @@ async function generateSalesReport(
     receitaTotal: typeof ext.valores.receita === "number" ? ext.valores.receita : null,
     vendasTotal: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,
     agendamentosTotal: typeof ext.valores.agendamentos === "number" ? ext.valores.agendamentos : null,
-    seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
+    // Ganho e total do perfil são grandezas diferentes. Quando o comentário
+    // diz "47 seguidores novos", não trate 47 como total e não o subtraia da
+    // base anterior; o ganho vai explicitamente para a figura de conversão.
+    seguidores: ext.seguidoresGanho == null && typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
+    seguidoresNovos: ext.seguidoresGanho ?? null,
+    prevSeguidoresNovos: ext.seguidoresGanhoAnterior ?? effectivePrevTotals?.seguidoresNovos ?? null,
     prevTotals: effectivePrevTotals,
     history: historyWithFollowers,
     generatedAt: new Date(),

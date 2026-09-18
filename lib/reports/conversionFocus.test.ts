@@ -34,6 +34,21 @@ describe("figura principal por modo", () => {
     expect(h.value).toBe("1.214");
   });
 
+  it("ganho informado diretamente: valor principal é o ganho, comparação fica na legenda", () => {
+    const h = heroFor(ctx({
+      kind: "seguidores",
+      cur: { ...nada, seguidores: null, seguidoresGanho: 47 },
+      media: baitaMedia,
+      followersGain: 47,
+      prevFollowersGain: 90,
+      prevFollowersTotal: null,
+    }));
+    expect(h.label).toBe("seguidores ganhos na semana");
+    expect(h.value).toBe("+47");
+    expect(h.caption).toContain("−43");
+    expect(h.caption).toContain("−47,78%");
+  });
+
   it("vendas com receita: receita é a figura", () => {
     expect(heroFor(ctx({ cur: { ...nada, receita: 4100, vendas: 5, agendamentos: 8 } })).label).toBe("Receita da semana");
   });

@@ -19,7 +19,7 @@ export type FocusKind = "vendas" | "agendamentos" | "seguidores" | "midia";
 export function focusOf(t: InformedTotals): FocusKind {
   if (t.vendas !== null || t.receita !== null) return "vendas";
   if (t.agendamentos !== null) return "agendamentos";
-  if (t.seguidores !== null) return "seguidores";
+  if (t.seguidores !== null || t.seguidoresGanho != null) return "seguidores";
   return "midia";
 }
 
@@ -72,7 +72,7 @@ export function heroFor(x: FocusContext): Hero {
     return { label: "Agendamentos", value: num(cur.agendamentos), caption: media.conversations !== null ? `${num(media.conversations)} conversas pela mídia` : "", delta: prev?.agendamentos != null ? up(cur.agendamentos, prev.agendamentos) : null };
   }
   if (x.kind === "seguidores") {
-    if (x.followersGain !== null && x.prevFollowersTotal !== null) {
+    if (x.followersGain !== null && x.cur.seguidores !== null && x.prevFollowersTotal !== null) {
       const growth = pctChange(cur.seguidores, x.prevFollowersTotal) ?? 0;
       return {
         label: "seguidores na semana",
@@ -80,6 +80,12 @@ export function heroFor(x: FocusContext): Hero {
         caption: `O perfil passou de ${num(x.prevFollowersTotal)} para ${num(cur.seguidores)} e cresceu ${pctText(growth)}.`,
         delta: null,
       };
+    }
+    if (x.followersGain !== null) {
+      const comparison = x.prevFollowersGain !== null
+        ? `Comparação com o período anterior: ${signed(x.followersGain - x.prevFollowersGain)} (${x.prevFollowersGain === 0 ? "sem base percentual" : `${x.followersGain >= x.prevFollowersGain ? "+" : "−"}${pctText(((x.followersGain - x.prevFollowersGain) / x.prevFollowersGain) * 100)}`}).`
+        : "Total do perfil não informado; o valor acima é o ganho declarado no feedback.";
+      return { label: "seguidores ganhos na semana", value: signed(x.followersGain), caption: comparison, delta: null };
     }
     return { label: "seguidores no perfil", value: num(cur.seguidores), caption: "Primeira semana registrada — o crescimento aparece a partir da próxima.", delta: null };
   }
@@ -168,6 +174,7 @@ export type HistoryPoint = {
   agendamentos: number | null;
   receita: number | null;
   seguidores: number | null;
+  seguidoresGanho?: number | null;
 };
 
 export type HistorySeries = { key: string; label: string; values: (number | null)[] };

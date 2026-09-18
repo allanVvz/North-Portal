@@ -21,6 +21,8 @@ export type InformedTotals = {
   agendamentos: number | null;
   receita: number | null;
   seguidores: number | null;
+  /** Ganho de seguidores declarado no período. Não é o total do perfil. */
+  seguidoresGanho?: number | null;
 };
 
 export type SourceTotals = { vendas: number; receita: number | null };
@@ -40,7 +42,7 @@ export type Attribution = {
 export function conversionModeOf(totals: InformedTotals, linhas: readonly ConversionRow[]): ConversionMode {
   const comercial = totals.vendas !== null || totals.agendamentos !== null || totals.receita !== null;
   if (comercial) return linhas.some((l) => l.fonte !== null) ? "sales_segmented" : "sales_summary";
-  return totals.seguidores !== null ? "followers_only" : "no_data";
+  return totals.seguidores !== null || totals.seguidoresGanho != null ? "followers_only" : "no_data";
 }
 
 /** Uma linha conta como VENDA quando não está marcada como só agendada — o

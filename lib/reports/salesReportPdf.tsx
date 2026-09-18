@@ -51,6 +51,10 @@ export type SalesReportInput = {
   agendamentosTotal?: number | null;
   /** Total de seguidores do perfil ao fim do período (snapshot, não o ganho). */
   seguidores?: number | null;
+  /** Seguidores ganhos no período, informados diretamente no feedback. */
+  seguidoresNovos?: number | null;
+  /** Ganho de seguidores do período anterior, quando informado. */
+  prevSeguidoresNovos?: number | null;
   prevTotals?: SalesPrevTotals | null;
   /** Série da conversão, semanas anteriores E a atual. */
   history?: HistoryPoint[] | null;
@@ -63,6 +67,7 @@ export type SalesPrevTotals = {
   agendamentos: number | null;
   receita: number | null;
   seguidores: number | null;
+  seguidoresNovos?: number | null;
   from?: string | null;
   to?: string | null;
 };
@@ -88,6 +93,7 @@ function SalesReportDocument(input: SalesReportInput) {
     agendamentos: agendados !== null && vendas !== null ? Math.max(agendados, vendas) : agendados,
     receita: input.receitaTotal ?? (temLinhas && linhas.receita > 0 ? linhas.receita : null),
     seguidores: input.seguidores ?? null,
+    seguidoresGanho: input.seguidoresNovos ?? null,
   };
   const prevLinhas = prevConversoes?.length ? totalsOf(prevConversoes) : null;
   const prev: InformedTotals | null = prevTotals || prevLinhas
@@ -96,6 +102,7 @@ function SalesReportDocument(input: SalesReportInput) {
         agendamentos: prevTotals?.agendamentos ?? prevLinhas?.agendamentos ?? null,
         receita: prevTotals?.receita ?? (prevLinhas && prevLinhas.receita > 0 ? prevLinhas.receita : null),
         seguidores: prevTotals?.seguidores ?? null,
+        seguidoresGanho: prevTotals?.seguidoresNovos ?? null,
       }
     : null;
 
@@ -104,10 +111,17 @@ function SalesReportDocument(input: SalesReportInput) {
   if (!series.some((h) => h.periodTo === period.to)) series.push({ periodTo: period.to, ...cur });
   const idx = series.findIndex((h) => h.periodTo === period.to);
   const prevFollowersTotal = prevTotals?.seguidores ?? (idx > 0 ? series[idx - 1].seguidores : null);
-  const followersGain = cur.seguidores !== null && prevFollowersTotal !== null ? cur.seguidores - prevFollowersTotal : null;
-  const prevFollowersGain = idx >= 2 && series[idx - 1].seguidores !== null && series[idx - 2].seguidores !== null
+  // Um feedback no formato "47 seguidores novos" já informa a conversão
+  // diretamente. Nunca subtraia esse ganho de uma base anterior: a subtração
+  // só vale quando os dois valores são snapshots do total do perfil.
+  const followersGain = input.seguidoresNovos != null
+    ? input.seguidoresNovos
+    : cur.seguidores !== null && prevFollowersTotal !== null
+      ? cur.seguidores - prevFollowersTotal
+      : null;
+  const prevFollowersGain = input.prevSeguidoresNovos ?? prevTotals?.seguidoresNovos ?? (idx >= 2 && series[idx - 1].seguidores !== null && series[idx - 2].seguidores !== null
     ? (series[idx - 1].seguidores as number) - (series[idx - 2].seguidores as number)
-    : null;
+    : null);
 
   const focus = focusOf(cur);
   const media = mediaTotals(campaignPosts);
