@@ -714,6 +714,26 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
     }
     return;
   }
+  if (parsed.seguidoresGanho != null) {
+    await updateTaskPayload(admin, card.id, {
+      text: `Relatório da métrica: +${parsed.seguidoresGanho} seguidores novos.`,
+      commentId: automationCommentId("feedback-metric", card.id, comment.at),
+      patch: { feedback_followers_gain: parsed.seguidoresGanho, feedback_format_warned_for: null },
+    });
+    await updateTaskPayload(admin, card.id, {
+      text: "Posso calcular a diferença e a porcentagem se você informar o total inicial de seguidores (por exemplo: de 829 para 876).",
+      commentId: automationCommentId("feedback-followers-comparison", card.id, comment.at),
+    });
+  } else if (parsed.valoresAnteriores?.seguidores != null && parsed.valores.seguidores != null) {
+    const anterior = parsed.valoresAnteriores.seguidores;
+    const atual = parsed.valores.seguidores;
+    const diferenca = atual - anterior;
+    const porcentagem = anterior === 0 ? null : (diferenca / anterior) * 100;
+    await updateTaskPayload(admin, card.id, {
+      text: `Relatório da métrica: ${atual} seguidores (${diferenca >= 0 ? "+" : ""}${diferenca}${porcentagem == null ? "" : `; ${porcentagem >= 0 ? "+" : ""}${porcentagem.toFixed(2).replace(".", ",")}%`}).`,
+      commentId: automationCommentId("feedback-metric", card.id, comment.at),
+    });
+  }
   if (!occurrence.client_id) return;
   const mold = await getAdminTask(admin, moldId);
   if (!mold) return;
@@ -726,7 +746,7 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
     taskId: card.id,
     periodFrom: period.from,
     periodTo: period.to,
-    current: parsed.valores.seguidores ?? null,
+    current: parsed.seguidoresGanho == null ? (parsed.valores.seguidores ?? null) : null,
     previous: parsed.valoresAnteriores?.seguidores ?? null,
     sourceCommentAt: comment.at,
   });

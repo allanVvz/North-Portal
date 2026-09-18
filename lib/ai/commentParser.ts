@@ -33,6 +33,8 @@ export type ParsedComment = {
   /** Algo que só uma leitura em linguagem natural resolveria (origem no meio da
    *  frase, ganho de seguidores sem o total). Decide o fallback de IA, quando ligado. */
   precisaIa: boolean;
+  /** Ganho informado (ex.: "+47 novos"), sem tratar o ganho como total. */
+  seguidoresGanho?: number | null;
 };
 
 // Rótulos já sem acento e em minúsculas (o texto é comparado dobrado).
@@ -97,7 +99,7 @@ function parseRow(fonte: "1" | "2" | "3", rest: string): ParsedRow {
 
 // ---- trechos de métrica -------------------------------------------------------------
 
-type Acc = { found: Map<string, number[]>; previousFound: Map<string, number[]>; problemas: string[]; precisaIa: boolean };
+type Acc = { found: Map<string, number[]>; previousFound: Map<string, number[]>; problemas: string[]; precisaIa: boolean; seguidoresGanho: number | null };
 
 function readChunk(original: string, tags: string[], acc: Acc) {
   const base = fold(original);
@@ -165,10 +167,10 @@ function readChunk(original: string, tags: string[], acc: Acc) {
     if (tag === "seguidores") {
       const before = base.slice(Math.max(0, m.index - 20), m.index);
       const after = base.slice(m.index + m[0].length, m.index + m[0].length + 12);
-      if (m[1] || /ganh\w*\s*(?:uns|umas|cerca de|mais)?\s*$/.test(before) || /^\s*(?:novos|a mais)/.test(after)) {
-        acc.precisaIa = true;
-        acc.problemas.push("seguidores informados como ganho — informe o total do perfil (ex.: Seguidores: 841)");
-        return;
+      if (m[1]
+        || /(?:ganh\w*|nov\w*|aument\w*|cres[cç]\w*)\s*(?:uns|umas|cerca de|mais)?\s*[:=]?\s*$/.test(before)
+        || /^\s*(?:novos|a mais|ganhos?)/.test(after)) {
+        acc.seguidoresGanho = parseAmount(m[2]);
       }
     }
     add(tag, m[2]);
@@ -185,7 +187,7 @@ function readChunk(original: string, tags: string[], acc: Acc) {
 // ---- entrada -------------------------------------------------------------------------
 
 export function parseFeedbackComment(text: string, tags: string[]): ParsedComment {
-  const acc: Acc = { found: new Map(), previousFound: new Map(), problemas: [], precisaIa: false };
+  const acc: Acc = { found: new Map(), previousFound: new Map(), problemas: [], precisaIa: false, seguidoresGanho: null };
   const rich = needsRichExtraction(tags);
   const linhas: ParsedRow[] = [];
 
@@ -234,7 +236,7 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
 
   const algo = Object.values(valores).some((v) => v !== null) || linhas.length > 0;
   const state: ParseState = conflito ? "AMBIGUOUS" : !algo ? "INVALID" : tags.every((t) => valores[t] !== null) ? "PARSED_OK" : "PARTIAL";
-  return { state, valores, valoresAnteriores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa };
+  return { state, valores, valoresAnteriores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa, seguidoresGanho: acc.seguidoresGanho };
 }
 
 // ---- o modelo do comentário ----------------------------------------------------------

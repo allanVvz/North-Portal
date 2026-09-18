@@ -35,6 +35,8 @@ export type MetricExtract = {
   note: string;
   /** O que o parser deixou de fora, em frase para o gestor corrigir. */
   problemas?: string[];
+  /** Ganho de seguidores informado sem total (ex.: "47 novos"). */
+  seguidoresGanho?: number | null;
 };
 
 function buildSystem(tags: string[], rich: boolean): string {
@@ -143,7 +145,7 @@ export async function extractMetrics(commentText: string, tags: string[]): Promi
   const lido = parsed.state === "PARSED_OK" || parsed.state === "PARTIAL";
   const fallback = aiFallbackEnabled();
   if (lido && !(parsed.precisaIa && fallback)) {
-    return { valores: parsed.valores, valoresAnteriores: parsed.valoresAnteriores, linhas: parsed.linhas, note: "parser", problemas: parsed.problemas };
+    return { valores: parsed.valores, valoresAnteriores: parsed.valoresAnteriores, linhas: parsed.linhas, note: "parser", problemas: parsed.problemas, seguidoresGanho: parsed.seguidoresGanho };
   }
   if (!fallback) {
     return {

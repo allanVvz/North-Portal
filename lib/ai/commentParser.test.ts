@@ -74,11 +74,22 @@ describe("parseFeedbackComment — texto natural", () => {
     expect(second.valoresAnteriores.seguidores).toBe(829);
   });
 
-  it("ganho de seguidores não vira total", () => {
+  it("aceita ganho de seguidores sem confundir com total", () => {
     const r = parseFeedbackComment("Vendas: 2, ganhamos 17 seguidores", TAGS);
-    expect(r.valores.seguidores).toBeNull();
-    expect(r.precisaIa).toBe(true);
-    expect(r.problemas.join()).toContain("ganho");
+    expect(r.valores.seguidores).toBe(17);
+    expect(r.seguidoresGanho).toBe(17);
+    expect(r.precisaIa).toBe(false);
+  });
+
+  it.each([
+    "Seguidores: 47 novos",
+    "+47 seguidores",
+    "novos seguidores: 47",
+    "crescemos 47 seguidores",
+  ])("aceita variação de ganho: %s", (text) => {
+    const r = parseFeedbackComment(text, TAGS);
+    expect(r.valores.seguidores).toBe(47);
+    expect(r.seguidoresGanho).toBe(47);
   });
 
   it("agendamento nunca abaixo de venda", () => {
