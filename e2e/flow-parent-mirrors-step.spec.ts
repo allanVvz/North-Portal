@@ -22,6 +22,10 @@ import type { TaskStatus } from "@/lib/validation";
 //
 const RUN = Date.now();
 const PREFIX = `[e2e ${RUN}]`;
+// Produção mantém Revisão habilitada neste cliente e Aprovação desabilitada.
+// O E2E respeita a configuração real: não altera flags de cliente só para
+// atravessar uma coluna que aquele cliente deliberadamente não usa.
+const E2E_CLIENT_SLUG = "north";
 
 const STATUS_BY_LABEL: Record<string, TaskStatus> = {
   "Entrada": "backlog",
@@ -94,7 +98,7 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
     await sb.from("tasks").delete().like("title", `${deliveryTitle}%`);
   });
 
-  test("roteiro percorre a corrente inteira; o pai acompanha e o progresso não recua", async ({ page }) => {
+  test("etapas habilitadas percorrem a corrente; o pai acompanha e o progresso não recua", async ({ page }) => {
     await login(page);
     // A preferência de atributos é individual e pode ocultar a caixa de
     // progresso. Este spec mede o percentual, portanto fixa a visualização
@@ -105,7 +109,7 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
     });
     const create = await page.request.post("/api/admin/tasks?scope=task", {
       data: {
-        slug: "karpinski", title: deliveryTitle, kind: "criativo", subtype: null,
+        slug: E2E_CLIENT_SLUG, title: deliveryTitle, kind: "criativo", subtype: null,
         status: "backlog", priority: "media",
       },
     });
@@ -140,9 +144,6 @@ test.describe("O status da entrega espelha a etapa corrente, e o progresso nunca
 
     await moveStepTo(page, roteiroId, "Revisão");
     await checkpoint("roteiro em Revisão", "Revisão");
-
-    await moveStepTo(page, roteiroId, "Aprovação");
-    await checkpoint("roteiro em Aprovação", "Aprovação");
 
     // Fecha o roteiro — a cascata materializa a Captação (nasce em Entrada).
     await moveStepTo(page, roteiroId, "Concluído");
