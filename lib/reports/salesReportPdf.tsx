@@ -28,10 +28,11 @@ import {
 } from "./adsInsights";
 import { costLadder, focusOf, heroFor, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
+import type { ReportContext } from "./conversionReportPlanning";
 import { creativeCardView, fullDay, shortDay, type TrafficFinalView } from "./adsReportPdf";
 import {
   AnalysisList, CreativeCards, DataTable, FigureRow, Footer, Headline, HeroFigure,
-  PageHeader, ProportionalFunnel, RankBars, Section, T, W,
+  PageHeader, ProportionalFunnel, RankBars, Section, T, W, type LayoutPlan,
 } from "./reportBlocks";
 
 registerReportFonts();
@@ -64,6 +65,10 @@ export type SalesReportInput = {
   adaptiveContext?: AdaptiveInterpretation;
   /** Finalized view from the technical ads report. */
   trafficFinalView?: TrafficFinalView | null;
+  reportContext?: ReportContext;
+  layoutPlan?: LayoutPlan;
+  /** Optional renderer plan; omitted callers retain the legacy layout. */
+  layout?: LayoutPlan;
   generatedAt: Date;
 };
 
@@ -180,7 +185,7 @@ function SalesReportDocument(input: SalesReportInput) {
     : highlights.length > 1 ? "Os criativos que mais contribuíram" : "O criativo que mais contribuiu";
 
   const creativeSection = highlights.length ? (
-    <Section title={creativeSectionTitle} lead={<CreativeCards items={highlights.map((h) => creativeCardView(h.row, h.badges, outcome, previews))} />} />
+    <Section title={creativeSectionTitle} lead={<CreativeCards items={highlights.map((h) => creativeCardView(h.row, h.badges, outcome, previews))} layout={input.layout?.creativeCards} />} />
   ) : null;
 
   const mediaSection = objectives.length ? (
@@ -229,7 +234,14 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null; */
 
-  const conversionNarrative = focus === "seguidores" && followersGain !== null ? (
+  const aiNarrative = (input.reportContext?.narrative ?? [])
+    .filter((item) => item.text.trim())
+    .slice(0, 6);
+  const conversionNarrative = aiNarrative.length ? (
+    <Section title="Leitura do período">
+      {aiNarrative.map((item, index) => <Text key={`${item.kind}:${index}`} style={T.analysisText}>{item.text}</Text>)}
+    </Section>
+  ) : focus === "seguidores" && followersGain !== null ? (
     <Section title="Leitura do período">
       <Text style={T.analysisText}>
         {num(followersGain)} seguidores adquiridos no período. {prevFollowersGain !== null

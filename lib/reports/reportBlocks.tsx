@@ -128,9 +128,9 @@ export function Section({ title, aside, lead, children, wrap = true, breakBefore
       {aside ? <Text style={T.sectionAside}>{aside}</Text> : null}
     </View>
   );
-  return (
-    <View style={T.section} wrap={wrap} break={breakBefore}>
-      {lead ? <View wrap={false}>{head}{lead}</View> : head}
+      return (
+        <View style={T.section} wrap={wrap} break={breakBefore}>
+          {lead ? <><View wrap={false}>{head}</View>{lead}</> : head}
       {children}
     </View>
   );
@@ -370,26 +370,44 @@ export type CreativeCardView = {
   permalink: string | null;
 };
 
+export type LayoutPlan = {
+  creativeCards?: {
+    columns?: 1 | 2;
+    maxLines?: number;
+    minWidth?: number;
+  };
+};
+
+function clampCardName(value: string, maxLines: number): string {
+  const limit = Math.max(1, maxLines) * 28;
+  return value.length <= limit ? value : `${value.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
+}
+
 /** 1 criativo → cartão largo; 2 → metades; 3 → terços; 4 → 2×2. */
-export function CreativeCards({ items }: { items: CreativeCardView[] }) {
+export function CreativeCards({ items, layout }: { items: CreativeCardView[]; layout?: LayoutPlan["creativeCards"] }) {
   if (!items.length) return null;
   const n = items.length;
-  const cols = n === 4 ? 2 : Math.min(n, 3);
-  const cardW = (W - 8 * (cols - 1)) / cols;
+  // A planned layout may force a conservative one/two-column grid. The
+  // legacy heuristic remains the fallback for existing callers.
+  const cols = layout?.columns ?? (n === 4 ? 2 : Math.min(n, 3));
+  const gap = 8;
+  const cardW = Math.max(layout?.minWidth ?? 0, (W - gap * (cols - 1)) / cols);
   const wide = n === 1;
-  const img = wide ? 110 : cols === 2 ? 84 : 64;
+  const horizontal = wide || cols <= 2;
+  const img = wide ? 110 : horizontal ? 84 : 64;
+  const maxLines = layout?.maxLines ?? 2;
   return (
-    <View style={T.cardRow}>
+    <View style={[T.cardRow, { gap, width: W }]} wrap>
       {items.map((c) => (
-        <View key={c.name} style={[T.card, { width: cardW, flexDirection: wide || cols === 2 ? "row" : "column" }]} wrap={false}>
-          <Thumb src={c.preview} size={wide || cols === 2 ? img : cardW - 18} kind={c.objectType} />
+        <View key={c.name} style={[T.card, { width: cardW, minWidth: layout?.minWidth ?? 0, maxWidth: cardW, flexDirection: horizontal ? "row" : "column" }]} wrap>
+          <Thumb src={c.preview} size={horizontal ? img : cardW - 18} kind={c.objectType} />
           {/* Em linha o texto ocupa o resto da largura; em coluna (3 cartões) `flex: 1`
               sem altura no pai encolhia o bloco a zero e sumia com nome e números. */}
-          <View style={wide || cols === 2 ? { flex: 1, gap: 4 } : { gap: 4 }}>
+          <View style={horizontal ? { flex: 1, gap: 4, minWidth: 0 } : { gap: 4 }}>
             {c.badges.map((b) => (
               <Text key={b.label} style={[T.cardBadge, { color: b.tone === "bad" ? C.danger : b.tone === "good" ? C.tealText : SEC }]}>{b.label}</Text>
             ))}
-            <Text style={T.cardName}>{c.name}</Text>
+            <Text style={T.cardName}>{clampCardName(c.name, maxLines)}</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
               {c.metrics.map((m) => (
                 <View key={m.label}>

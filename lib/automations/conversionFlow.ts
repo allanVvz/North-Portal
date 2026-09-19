@@ -51,6 +51,7 @@ import {
 import { logReportRun } from "./reportLog";
 import { followerSeries, recordFollowerSnapshots } from "./clientMetricSeries";
 import type { AutomationConfigRow, RunOutcome } from "./run";
+import { buildNorthAIContext, buildReportContext, planWithNorthAI } from "@/lib/reports/conversionReportPlanning";
 
 const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 
@@ -324,6 +325,37 @@ async function generateSalesReport(
     : null;
   const historyWithFollowers = history.map((point) => ({ ...point, seguidores: followers.find((f) => f.period_to === point.periodTo)?.value ?? point.seguidores }));
 
+  const reportContext = buildReportContext({
+    period,
+    metrics: {
+      vendas: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,
+      agendamentos: typeof ext.valores.agendamentos === "number" ? ext.valores.agendamentos : null,
+      receita: typeof ext.valores.receita === "number" ? ext.valores.receita : null,
+      seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
+      seguidoresNovos: ext.seguidoresGanho ?? null,
+    },
+    conversions: conversoes,
+    campaigns: campaignPosts,
+    ads: adPosts,
+    interpretation: ext.interpretation,
+    parser: ext.note,
+    sourceFingerprint,
+  });
+  // NorthAI builds the client-facing context and Dashboard Architect chooses a
+  // bounded visual plan. Both calls fall back to the deterministic plan.
+  const planned = await planWithNorthAI({
+    context: reportContext,
+    northAIContext: buildNorthAIContext({
+      client: { id: clientId, slug: client.slug, name: client.name },
+      context: reportContext,
+      adsFinal: traffic.status === "finalized",
+      adsRevision: traffic.revision,
+      editorialInstruction: trafficFinalView?.instruction ?? null,
+    }),
+  });
+  const layoutPlan = planned.layout;
+  reportContext.narrative = planned.narrative;
+
   const pdf = await renderSalesReportPdf({
     clientName: client.name,
     period,
@@ -348,6 +380,8 @@ async function generateSalesReport(
     history: historyWithFollowers,
     adaptiveContext: ext.interpretation,
     trafficFinalView: trafficFinalView ?? null,
+    reportContext,
+    layout: { creativeCards: planned.layout.creativeCards },
     generatedAt: new Date(),
   });
 
@@ -398,11 +432,11 @@ async function generateSalesReport(
   // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
   await replaceAutomaticReportAttachment(admin, card2.id, {
     reportKind: "conversion",
-    text: `Relatório de conversão gerado e anexado: [${fileName}](${urlData.publicUrl})`,
+    text: `Relatório de conversão atualizado — leitura e layout revisados para o período. [${fileName}](${urlData.publicUrl})`,
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
     // 128 caracteres do id. (card, período) já identifica a conversão — o retry
     // que reencontra o documento já retorna antes de chegar aqui.
-    commentId: automationCommentId("conversion-report", card2.id, fileName),
+    commentId: automationCommentId("conversion-report", card2.id, layoutPlan.fingerprint.slice(0, 16), fileName),
   });
   return (docRows?.[0] as { id: string } | undefined)?.id ?? null;
 }

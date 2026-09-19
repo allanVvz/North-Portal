@@ -19,7 +19,7 @@ type OpenAiResponse = {
 
 // GPT-5 uses `max_completion_tokens`. The caller parses the JSON-shaped text,
 // keeping this small transport layer independent from a specific workflow.
-async function completeOpenAi(apiKey: string, system: string, user: string, maxTokens: number): Promise<string> {
+async function completeOpenAi(apiKey: string, system: string, user: string, maxTokens: number, model?: string): Promise<string> {
   const res = await fetch(OPENAI_URL, {
     method: "POST",
     headers: {
@@ -27,7 +27,7 @@ async function completeOpenAi(apiKey: string, system: string, user: string, maxT
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL,
+      model: model ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL,
       max_completion_tokens: maxTokens,
       messages: [
         { role: "system", content: system },
@@ -44,12 +44,13 @@ async function completeOpenAi(apiKey: string, system: string, user: string, maxT
   return typeof choice?.message?.content === "string" ? choice.message.content : "";
 }
 
-export async function aiComplete({ system, user, maxTokens = 1024 }: {
+export async function aiComplete({ system, user, maxTokens = 1024, model }: {
   system: string;
   user: string;
   maxTokens?: number;
+  model?: string;
 }): Promise<string> {
   const settings = await getAiProviderSettingsService();
   if (!settings?.apiKey) throw new AiNotConfiguredError();
-  return completeOpenAi(settings.apiKey, system, user, maxTokens);
+  return completeOpenAi(settings.apiKey, system, user, maxTokens, model);
 }

@@ -45,6 +45,24 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
     expect(buf.byteLength).toBeGreaterThan(3000);
   });
 
+  it("aceita plano AI de uma coluna e narrativa estruturada sem colidir", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      layout: { creativeCards: { columns: 1, maxLines: 3, minWidth: 0 } },
+      reportContext: {
+        period,
+        metrics: { vendas: 5, agendamentos: 8, receita: 4100, seguidores: 8000, seguidoresNovos: 47 },
+        conversions: conversoes,
+        media: { campaigns: base.campaignPosts, ads: adPosts },
+        interpretation: { sourceFingerprint: "a".repeat(64), comments: [], claims: [], context: [], decision: "", tradeoffs: [] },
+        parser: "parser",
+        sourceFingerprint: "a".repeat(64),
+        narrative: [{ kind: "fact", text: "A mídia alcançou 8.681 pessoas e gerou 432 visitas ao perfil." }],
+      },
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
   // --- foco na conversão principal + histórico -----------------------------
   it("foco em vendas com histórico de duas semanas não lança", async () => {
     const buf = await renderSalesReportPdf({
