@@ -35,6 +35,7 @@ import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurren
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus, projectParentStatus } from "@/lib/flows/parentStatus";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
+import { cycleLogOf } from "@/lib/cycleLog";
 import { createCommentIdRegistry } from "./commentIds";
 import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { responsibilityForSubtype } from "@/lib/flows/responsibilityForSubtype";
@@ -1806,7 +1807,10 @@ export default function TaskModal({
               <div className={`tm-box tm-planmembers${isRecurringParent ? " tm-cycles" : ""}`}>
                 <div className="tm-box-head">
                   <p className="tm-box-label">
-                    {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
+                    {isRecurringParent ? "Execuções materializadas" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
+                    {isRecurringParent && liveTask && cycleLogOf(liveTask.payload).length ? (
+                      <span className="tm-box-label-sub"> · {cycleLogOf(liveTask.payload).length} ciclos concluídos no histórico</span>
+                    ) : null}
                     {!isRecurringParent && liveTask && planMembers.length ? (
                       <span className="tm-box-label-sub"> · {effectiveParentMembers.filter((m) => m.status === "aprovado").length} concluídas</span>
                     ) : null}
