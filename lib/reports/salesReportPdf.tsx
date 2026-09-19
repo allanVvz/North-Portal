@@ -234,16 +234,24 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null; */
 
+  const narrativePlan = input.layout?.narrative ?? { placement: "next_page" as const, maxParagraphs: 1, maxChars: 720 };
+  const clipNarrative = (text: string) => {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    return normalized.length <= (narrativePlan.maxChars ?? 720)
+      ? normalized
+      : `${normalized.slice(0, Math.max(1, (narrativePlan.maxChars ?? 720) - 1)).trimEnd()}…`;
+  };
   const aiNarrative = (input.reportContext?.narrative ?? [])
     .filter((item) => item.text.trim())
-    .slice(0, 6);
+    .slice(0, narrativePlan.maxParagraphs ?? 1)
+    .map((item) => ({ ...item, text: clipNarrative(item.text) }));
   const conversionNarrative = aiNarrative.length ? (
-    <Section title="Leitura do período">
-      {aiNarrative.map((item, index) => <Text key={`${item.kind}:${index}`} style={T.analysisText}>{item.text}</Text>)}
+    <Section title="Leitura do período" breakBefore={narrativePlan.placement === "next_page"}>
+      {aiNarrative.map((item, index) => <Text key={`${item.kind}:${index}`} style={T.narrativeText}>{item.text}</Text>)}
     </Section>
   ) : focus === "seguidores" && followersGain !== null ? (
-    <Section title="Leitura do período">
-      <Text style={T.analysisText}>
+    <Section title="Leitura do período" breakBefore={narrativePlan.placement === "next_page"}>
+      <Text style={T.narrativeText}>
         {num(followersGain)} seguidores adquiridos no período. {prevFollowersGain !== null
           ? `Em comparação à referência anterior de ${num(prevFollowersGain)} seguidores, a variação foi de ${signed(followersGain - prevFollowersGain)} (${((followersGain - prevFollowersGain) / prevFollowersGain * 100).toFixed(2).replace("-", "−")}%). `
           : "A comparação com o período anterior não foi informada. "}
@@ -333,7 +341,7 @@ function SalesReportDocument(input: SalesReportInput) {
 
         {funnel.stages.length ? (
           <Section title={focus === "seguidores" ? "Do alcance ao perfil" : focus === "midia" ? "Do alcance às conversas" : "Do alcance à venda"}>
-            <View style={T.twoCol} wrap={false}>
+            <View style={T.twoCol}>
               <ProportionalFunnel width={analysis.insights.length ? 290 : W} stages={funnel.stages.map((s) => ({ label: `${s.label} · ${s.source === "feedback" ? "resultado informado" : "mídia"}`, value: s.key === "seguidores_novos" ? `+${num(s.value)}` : num(s.value), numeric: s.value, base: s.base }))} gaps={focus === "seguidores" ? [] : funnel.gaps} />
               {analysis.insights.length ? (
                 <View style={{ flex: 1, justifyContent: "center" }}>
@@ -357,7 +365,7 @@ function SalesReportDocument(input: SalesReportInput) {
             {ladder.length || origins.length ? (
               // A taxa agendamento → venda já está no funil; aqui fica o custo e a origem.
               <Section title={origins.length ? "Custo e origem das vendas" : "Custo de mídia por etapa"}>
-                <View style={T.twoCol} wrap={false}>
+                <View style={T.twoCol}>
                   <View style={{ flex: 1 }}>
                     {ladder.length ? (
                       <View style={{ flexDirection: "row", gap: 12 }}>

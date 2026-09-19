@@ -48,7 +48,10 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
   it("aceita plano AI de uma coluna e narrativa estruturada sem colidir", async () => {
     const buf = await renderSalesReportPdf({
       ...base,
-      layout: { creativeCards: { columns: 1, maxLines: 3, minWidth: 0 } },
+      layout: {
+        creativeCards: { columns: 1, maxLines: 3, minWidth: 0 },
+        narrative: { placement: "next_page", maxParagraphs: 1, maxChars: 240 },
+      },
       reportContext: {
         period,
         metrics: { vendas: 5, agendamentos: 8, receita: 4100, seguidores: 8000, seguidoresNovos: 47 },

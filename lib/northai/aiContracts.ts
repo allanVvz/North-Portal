@@ -81,6 +81,11 @@ export const layoutPlanSchema = z.object({
     maxLines: z.number().int().min(1).max(4).default(3),
     minWidth: z.number().finite().min(0).max(531).default(0),
   }).default({}),
+  narrativeLayout: z.object({
+    placement: z.enum(["first_page", "next_page"]).default("next_page"),
+    maxParagraphs: z.number().int().min(1).max(3).default(1),
+    maxChars: z.number().int().min(240).max(1200).default(720),
+  }).default({}),
 }).superRefine((plan, ctx) => {
   const keys = new Set<string>();
   for (const section of plan.sections) {

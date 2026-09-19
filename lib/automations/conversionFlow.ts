@@ -401,7 +401,9 @@ async function generateSalesReport(
     adaptiveContext: ext.interpretation,
     trafficFinalView: trafficFinalView ?? null,
     reportContext,
-    layout: { creativeCards: planned.layout.creativeCards },
+    // Passe o plano inteiro ao renderer: a posição e o limite da narrativa
+    // também fazem parte da decisão visual do Dashboard Architect.
+    layout: planned.layout,
     generatedAt: new Date(),
   });
 
@@ -450,9 +452,12 @@ async function generateSalesReport(
   }
 
   // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
+  const layoutNote = layoutPlan.narrative.placement === "next_page"
+    ? "leitura técnica separada em página própria"
+    : "leitura técnica reorganizada";
   await replaceAutomaticReportAttachment(admin, card2.id, {
     reportKind: "conversion",
-    text: `Relatório de conversão atualizado — leitura e layout revisados para o período. [${fileName}](${urlData.publicUrl})`,
+    text: `Relatório de conversão atualizado — ${layoutNote}. [${fileName}](${urlData.publicUrl})`,
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
     // 128 caracteres do id. (card, período) já identifica a conversão — o retry
     // que reencontra o documento já retorna antes de chegar aqui.
@@ -624,15 +629,7 @@ async function processOccurrence(
     const ganhoComparativo = ext.seguidoresGanho != null && ext.seguidoresGanhoAnterior != null
       ? ` Comparação de seguidores novos: ${ext.seguidoresGanho} contra ${ext.seguidoresGanhoAnterior} (${ext.seguidoresGanho - ext.seguidoresGanhoAnterior >= 0 ? "+" : ""}${ext.seguidoresGanho - ext.seguidoresGanhoAnterior}; ${ext.seguidoresGanhoAnterior === 0 ? "sem base percentual" : `${((ext.seguidoresGanho - ext.seguidoresGanhoAnterior) / ext.seguidoresGanhoAnterior * 100).toFixed(2).replace(".", ",")}%`}).`
       : "";
-    const precisions = [...new Set(ext.interpretation.claims.map((claim) => claim.precision).filter((precision) => precision !== "exata"))];
-    const contextNote = ext.interpretation.context.length
-      ? ` Contexto considerado: ${ext.interpretation.context.map((item) => item.text).join(" · ")}.`
-      : "";
-    const tradeoffNote = ext.interpretation.tradeoffs.length
-      ? ` Decisão e trade-off: ${ext.interpretation.tradeoffs.join(" ")}`
-      : "";
-    const decision = ext.interpretation.decision.replace(/[.]+$/, "");
-    const resumo = `North IA consolidou o período — ${resumoDe(ext.valores, tags)}.${ganhoComparativo} ${decision}.${precisions.length ? ` Valores ${precisions.join(" e ")} foram mantidos com essa etiqueta no relatório.` : ""}${contextNote}${tradeoffNote}${ext.problemas?.length ? ` Pontos não interpretados: ${ext.problemas.join("; ")}.` : ""}`;
+    const resumo = `Contexto do período atualizado — ${resumoDe(ext.valores, tags)}.${ganhoComparativo}`;
 
     // Pai: só os marcadores estruturais (sem comentário — invisível). O status do
     // pai NUNCA é escrito aqui: ele é a projeção da etapa aberta (o banco recusa

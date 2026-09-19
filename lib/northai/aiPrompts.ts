@@ -13,7 +13,7 @@ export function buildLayoutPlanPrompt(input: NorthAIContext, document: "ads" | "
       "NorthAI já forneceu os fatos; escolha hierarquia, ordem e densidade, sem alterar valores.",
       "Use apenas fatos presentes no contexto; null significa não informado e não pode virar zero.",
       "Não invente causalidade, taxas ou métricas. Respeite reports.hiddenFields.",
-      `${JSON_RULE} O objeto deve conter document, title, period, sections, narrative e hiddenFields.`,
+      `${JSON_RULE} O objeto deve conter document, title, period, sections, narrative, hiddenFields, creativeCards e narrativeLayout.`,
     ].join(" "),
     user: JSON.stringify({ document, context }),
     maxTokens: 3000,

@@ -68,6 +68,7 @@ export const T = StyleSheet.create({
   analysisRow: { flexDirection: "row", gap: 6 },
   analysisDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: TEAL.d3, marginTop: 4 },
   analysisText: { fontSize: 9, color: INK, lineHeight: 1.35, flex: 1 },
+  narrativeText: { fontSize: 9, color: INK, lineHeight: 1.45, marginBottom: 4 },
 
   twoCol: { flexDirection: "row", gap: 16 },
 
@@ -375,6 +376,11 @@ export type LayoutPlan = {
     columns?: 1 | 2;
     maxLines?: number;
     minWidth?: number;
+  };
+  narrative?: {
+    placement?: "first_page" | "next_page";
+    maxParagraphs?: number;
+    maxChars?: number;
   };
 };
 

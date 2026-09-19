@@ -92,7 +92,7 @@ describe("conversão depois do Feedback concluído", () => {
     expect(db.table("conversion_reports")).toHaveLength(1);
     expect(db.table("conversion_report_snapshots")).toHaveLength(1);
     expect(conversaoTexts()).toEqual([
-      expect.stringContaining("North IA consolidou o período"),
+      expect.stringContaining("Contexto do período atualizado"),
       expect.stringContaining("Relatório de conversão atualizado"),
     ]);
     const occPayload = db.task(OCC)!.payload as Row;
@@ -163,7 +163,7 @@ describe("conversão depois do Feedback concluído", () => {
     expect(db.table("conversion_reports")).toHaveLength(2);
     expect(db.table("conversion_report_snapshots")).toHaveLength(2);
     expect(db.task(CONVERSAO)!.status).toBe("revisao");
-    expect(conversaoTexts().some((text) => text.includes("North IA consolidou"))).toBe(true);
+    expect(conversaoTexts().some((text) => text.includes("Contexto do período atualizado"))).toBe(true);
   });
 
   it("falha ao gerar o PDF: a reivindicação é liberada (o retry funciona) e o erro fica visível", async () => {

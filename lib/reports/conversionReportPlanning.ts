@@ -21,6 +21,7 @@ export type ConversionLayoutPlan = {
   sections: { result: true; indicators: true; funnel: true; technicalReading: true; adContribution: true; conversionHistory: boolean; commercial: boolean };
   hideTrendCharts: true;
   creativeCards: { columns: 1 | 2; maxLines: number; minWidth: number };
+  narrative: { placement: "first_page" | "next_page"; maxParagraphs: number; maxChars: number };
   fingerprint: string;
 };
 
@@ -91,7 +92,7 @@ export function buildNorthAIContext(input: {
 
 export function buildLayoutPlan(context: ReportContext): ConversionLayoutPlan {
   const commercial = context.metrics.vendas !== null || context.metrics.receita !== null || context.metrics.agendamentos !== null || context.conversions.length > 0;
-  const shape = { sections: { result: true, indicators: true, funnel: true, technicalReading: true, adContribution: true, conversionHistory: context.metrics.seguidoresNovos !== null || commercial, commercial }, hideTrendCharts: true, creativeCards: { columns: 1 as const, maxLines: 3, minWidth: 0 }, sourceFingerprint: context.sourceFingerprint } as const;
+  const shape = { sections: { result: true, indicators: true, funnel: true, technicalReading: true, adContribution: true, conversionHistory: context.metrics.seguidoresNovos !== null || commercial, commercial }, hideTrendCharts: true, creativeCards: { columns: 1 as const, maxLines: 3, minWidth: 0 }, narrative: { placement: "next_page" as const, maxParagraphs: 1, maxChars: 720 }, sourceFingerprint: context.sourceFingerprint } as const;
   return { ...shape, fingerprint: fingerprint(shape) };
 }
 
@@ -115,6 +116,15 @@ export async function planWithNorthAI(input: {
           columns: remoteLayout.creativeCards.columns,
           maxLines: remoteLayout.creativeCards.maxLines,
           minWidth: remoteLayout.creativeCards.minWidth,
+        },
+        narrative: {
+          // A long narrative is never allowed to compete with the KPI block
+          // on page one, even if a model chooses first_page.
+          placement: remoteLayout.narrativeLayout.placement === "first_page" && remoteLayout.narrativeLayout.maxChars <= 560
+            ? "first_page"
+            : "next_page",
+          maxParagraphs: remoteLayout.narrativeLayout.maxParagraphs,
+          maxChars: remoteLayout.narrativeLayout.maxChars,
         },
         fingerprint: fingerprint({ fallback, remoteLayout }),
       },
