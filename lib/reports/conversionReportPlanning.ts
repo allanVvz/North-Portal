@@ -100,9 +100,9 @@ export function buildLayoutPlan(context: ReportContext): ConversionLayoutPlan {
 export async function planWithNorthAI(input: {
   context: ReportContext;
   northAIContext: NorthAIContext;
-}): Promise<{ layout: ConversionLayoutPlan; narrative: Array<{ kind: string; text: string }>; aiUsed: boolean }> {
+}): Promise<{ layout: ConversionLayoutPlan; narrative: Array<{ kind: string; text: string }>; aiUsed: boolean; aiError: string | null }> {
   const fallback = buildLayoutPlan(input.context);
-  if (process.env.NORTHAI_REPORT_PLANNER === "0" || process.env.NODE_ENV === "test") return { layout: fallback, narrative: [], aiUsed: false };
+  if (process.env.NORTHAI_REPORT_PLANNER === "0" || process.env.NODE_ENV === "test") return { layout: fallback, narrative: [], aiUsed: false, aiError: null };
   try {
     const [remoteLayout, narrative] = await Promise.all([
       generateLayoutPlan(input.northAIContext, "conversion"),
@@ -120,8 +120,11 @@ export async function planWithNorthAI(input: {
       },
       narrative,
       aiUsed: true,
+      aiError: null,
     };
-  } catch {
-    return { layout: fallback, narrative: [], aiUsed: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 300) : "falha desconhecida";
+    console.error("northai report planning failed", { message });
+    return { layout: fallback, narrative: [], aiUsed: false, aiError: message };
   }
 }

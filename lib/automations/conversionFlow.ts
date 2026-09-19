@@ -370,6 +370,7 @@ async function generateSalesReport(
         narrative: planned.narrative,
         layoutPlan,
         aiUsed: planned.aiUsed,
+        aiError: planned.aiError,
       },
     },
   }).eq("id", conversionReportId);
