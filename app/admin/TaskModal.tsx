@@ -661,6 +661,13 @@ export default function TaskModal({
   const planMembers = liveTask
     ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
+  // Uma rotina pode ter dois eixos independentes: ocorrências materializadas
+  // (a caixa acima) e planos estruturais que compõem sua pauta. Não misture os
+  // dois: `recurrenceExecutionsOf` deve continuar contando somente entregas,
+  // mas os planos vinculados também precisam ser navegáveis no modal.
+  const routinePlanMembers = liveTask && isRecurringParent
+    ? actionPlanMembersOf(liveTask.id, clientTasks).filter((task) => kindDef(task.kind).isPlan)
+    : [];
   const flowSteps = liveTask && isDelivery ? flowStepsOf(liveTask.id, clientTasks) : [];
   // Sem isto, um membro que é ele mesmo um pai (a ocorrência de uma
   // recorrência de Plano, ex. "REUNIÃO ROTINA - ALLAN" — herda o `kind`
@@ -1914,6 +1921,31 @@ export default function TaskModal({
                     }}
                   />
                 )}
+              </div>
+            ) : null}
+
+            {isRecurringParent && liveTask && routinePlanMembers.length ? (
+              <div className="tm-box tm-planmembers tm-routine-plans">
+                <div className="tm-box-head">
+                  <p className="tm-box-label">Planos vinculados à rotina ({routinePlanMembers.length})</p>
+                </div>
+                <div className="tm-member-list">
+                  {routinePlanMembers.map((plan) => (
+                    <StepRow
+                      key={plan.id}
+                      card={plan}
+                      label={plan.title}
+                      team={adminReviewers}
+                      busy={busy}
+                      canOpen={Boolean(onOpenRelatedTask)}
+                      onOpen={() => void openRelatedTask(plan)}
+                      onUnlink={() => void unlinkMember(plan.id, liveTask.id)}
+                      unlinkTitle={`Remover ligação com ${plan.title}`}
+                      onPatch={patchRelatedCard}
+                      onComment={commentRelatedCard}
+                    />
+                  ))}
+                </div>
               </div>
             ) : null}
 
