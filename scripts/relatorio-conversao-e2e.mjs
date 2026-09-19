@@ -1,5 +1,5 @@
 // Harness CLI do fluxo de feedback / vendas (Automação 1 relatorio_trafego_semanal
-// + Automação 2 relatorio_vendas). Testa ponta a ponta sem UI.
+// + Automação 2 relatorio_conversao). Testa ponta a ponta sem UI.
 //
 // Uso (lê .env.local para NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY):
 //   node scripts/relatorio-conversao-e2e.mjs seed [--client cris-car-care]
@@ -108,7 +108,7 @@ async function seed() {
 
   for (const [automationKey, extra] of [
     ["relatorio_trafego_semanal", {}],
-    ["relatorio_vendas", { collect_metric_keys: ["vendas", "agendamentos", "seguidores", "receita"] }],
+    ["relatorio_conversao", { collect_metric_keys: ["vendas", "agendamentos", "seguidores", "receita"] }],
   ]) {
     const { data: cfg } = await db.from("automation_configs").select("id")
       .eq("target_task_id", mold.id).eq("automation_key", automationKey).limit(1);
@@ -152,7 +152,7 @@ async function inspect() {
     what: label(t.id), status: t.status, completed_at: t.completed_at,
     comments: (t.payload?.comments ?? []).map((c) => `${c.author}: ${c.text}`),
     metricas: t.payload?.metricas, linhas: t.payload?.linhas?.length,
-    markers: { trafego: t.payload?.trafego_report_at, prompt: t.payload?.feedback_prompt_at, src: t.payload?.feedback_source_at, sales: t.payload?.sales_report_generated_at },
+    markers: { trafego: t.payload?.trafego_report_at, prompt: t.payload?.feedback_prompt_at, src: t.payload?.feedback_source_at, conversion: t.payload?.conversion_report_generated_at ?? t.payload?.sales_report_generated_at },
   });
   console.log("=== task_links da ocorrência ===");
   console.log(links);

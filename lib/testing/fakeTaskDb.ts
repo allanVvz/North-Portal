@@ -327,6 +327,7 @@ export class FakeTaskDb {
     await Promise.resolve();
     this.rpcs.push({ name, args });
     if (name === "automation_task_payload_update") return this.automationPayloadUpdate(args);
+    if (name === "replace_automatic_report_attachment") return this.replaceAutomaticReportAttachment(args);
     if (name === "append_task_comment_idempotent") return this.humanComment(args as unknown as HumanCommentArgs);
     if (name === "claim_automation_run") return this.claimAutomationRun(args);
     return { data: null, error: null };
@@ -363,6 +364,36 @@ export class FakeTaskDb {
     } catch (error) {
       return { data: null, error: { message: (error as Error).message } };
     }
+  }
+
+  private replaceAutomaticReportAttachment(args: Record<string, unknown>): { data: unknown; error: DbError | null } {
+    const task = this.task(String(args.p_task_id));
+    if (!task) return { data: null, error: null };
+    const payload = { ...((task.payload as Row) ?? {}) };
+    const comments = Array.isArray(payload.comments) ? [...(payload.comments as Row[])] : [];
+    const kind = String(args.p_report_kind);
+    const isAutomatic = (id: unknown) => {
+      const value = String(id ?? "");
+      return kind === "ads"
+        ? value.startsWith("ads-report:") || value.startsWith("ads-revision:")
+        : value.startsWith("conversion-report:") || value.startsWith("sales-report:");
+    };
+    if (comments.some((comment) => comment.id === args.p_comment_id)) {
+      return { data: { inserted: false, task: { ...task } }, error: null };
+    }
+    let previousCommentId: string | null = null;
+    for (let i = comments.length - 1; i >= 0; i -= 1) {
+      if (!isAutomatic(comments[i].id)) continue;
+      previousCommentId = String(comments[i].id);
+      comments.splice(i, 1);
+      break;
+    }
+    const comment = { id: String(args.p_comment_id), author: String(args.p_comment_author ?? "Northia"), text: String(args.p_comment_text), at: new Date().toISOString() };
+    comments.push(comment);
+    payload.comments = comments;
+    task.payload = payload;
+    task.updated_at = new Date().toISOString();
+    return { data: { inserted: true, replaced_comment_id: previousCommentId, task: { ...task } }, error: null };
   }
 
   private humanComment(args: HumanCommentArgs): { data: unknown; error: DbError | null } {

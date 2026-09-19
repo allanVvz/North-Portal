@@ -15,6 +15,7 @@ import type { TaskRecord } from "@/lib/validation";
 import type { Attribution, ConversionMode } from "@/lib/reports/conversionMode";
 import type { AdminClient } from "./taskAccess";
 import type { StoredPreview } from "./creativeAssets";
+import type { TrafficFinalView } from "@/lib/reports/adsReportPdf";
 
 export type TrafficSnapshot = {
   campaignPosts: MetaPost[];
@@ -24,6 +25,8 @@ export type TrafficSnapshot = {
   prevAdPosts?: MetaPost[];
   /** Por adId: miniatura guardada no storage e link do post (creativeAssets.ts). */
   previews?: Record<string, StoredPreview>;
+  /** Final editorial view consumed by the conversion report. */
+  trafficFinalView?: TrafficFinalView;
 };
 
 export type TrafficReportStatus = "generated" | "finalized" | "superseded";
@@ -289,6 +292,22 @@ export async function recordConversionInterpretationSnapshot(
 
 export async function attachConversionDocument(admin: AdminClient, id: string, documentId: string | null): Promise<void> {
   const { error } = await admin.from("conversion_reports").update({ document_id: documentId }).eq("id", id);
+  if (error) throw error;
+}
+
+/** Once the new artifact exists, retire only previous versions over the same
+ * finalized ads report and feedback card.  The rows and their documents stay
+ * intact for audit/history; readers use the non-superseded version. */
+export async function supersedePriorConversionReports(
+  admin: AdminClient,
+  input: { id: string; trafficReportId: string; feedbackTaskId: string },
+): Promise<void> {
+  const { error } = await admin.from("conversion_reports")
+    .update({ status: "superseded" })
+    .eq("traffic_report_id", input.trafficReportId)
+    .eq("feedback_task_id", input.feedbackTaskId)
+    .neq("id", input.id)
+    .neq("status", "superseded");
   if (error) throw error;
 }
 

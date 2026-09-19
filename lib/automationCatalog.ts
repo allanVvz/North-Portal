@@ -8,12 +8,12 @@ export type AutomationKey =
   | "relatorio_trafego_semanal"
   | "provisionar_card_metricas"
   | "coleta_metrica_cliente"
-  | "relatorio_vendas";
+  | "relatorio_conversao";
 export const AUTOMATION_KEYS: AutomationKey[] = [
   "relatorio_trafego_semanal",
   "provisionar_card_metricas",
   "coleta_metrica_cliente",
-  "relatorio_vendas",
+  "relatorio_conversao",
 ];
 
 // "ads_account": eligible if the client has a mapped Windsor or Meta ad
@@ -75,9 +75,9 @@ export const AUTOMATION_DEFINITIONS: Record<AutomationKey, AutomationDef> = {
   // Segunda pipeline da cascata: só roda sobre a revisão FINAL do relatório de
   // anúncios da mesma ocorrência (traffic_reports), lê o feedback da semana num
   // comentário e gera o relatório de vendas. Ver docs/reporting/report-pipeline.md.
-  relatorio_vendas: {
-    label: "Relatório de vendas",
-    description: "Depois que o relatório de anúncios é finalizado, lê o feedback da semana no comentário e gera o relatório de vendas.",
+  relatorio_conversao: {
+    label: "Relatório de conversão",
+    description: "Depois que o relatório de anúncios é finalizado, lê o feedback da semana no comentário e gera o relatório de conversão.",
     eligibility: "ads_account",
     requiresPerformanceTemplate: true,
     requiresTemplateTask: true,

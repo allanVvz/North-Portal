@@ -1,5 +1,5 @@
 // Busca e preparo de dados compartilhados pelas duas automações de relatório
-// (relatorio_trafego_semanal e relatorio_vendas). Extraído de run.ts para os
+// (relatorio_trafego_semanal e relatorio_conversao). Extraído de run.ts para os
 // dois lados importarem sem ciclo.
 
 import {

@@ -32,7 +32,12 @@ vi.mock("@/app/admin/performance/insights", () => ({
   inPeriod: () => true,
   previousPeriod: () => ({ from: "2026-09-07", to: "2026-09-13" }),
 }));
-vi.mock("@/lib/reports/adsReportPdf", () => ({ renderAdsReportPdf: hooks.render }));
+vi.mock("@/lib/reports/adsReportPdf", () => ({
+  renderAdsReportPdf: hooks.render,
+  trafficFinalViewOf: (instruction?: string | null) => ({
+    reach: null, hideClicks: false, hideImpressions: false, hideTrend: false, instruction: instruction ?? null,
+  }),
+}));
 vi.mock("@/lib/reports/adsInsights", () => ({
   creativeRows: () => ({ rows: [] }),
   mediaOutcome: () => "outcome",
@@ -87,7 +92,7 @@ function seed(cardOverrides: Partial<Row> = {}, occOverrides: Partial<Row> = {})
     task_links: [{ parent_id: "occ-1", child_id: "trafego-1", relation_kind: "workflow_step", workflow_step_id: "ws-ads", slot: "relatorio_anuncios", position: 10 }],
     automation_configs: [
       { ...ADS_CONFIG },
-      { id: "cfg-vendas", automation_key: "relatorio_vendas", target_task_id: "entrega-mold", depends_on_config_id: "cfg-ads", active: true },
+      { id: "cfg-conversao", automation_key: "relatorio_conversao", target_task_id: "entrega-mold", depends_on_config_id: "cfg-ads", active: true },
     ],
   });
   hooks.ensureFlowOccurrence.mockImplementation(async () => asRecord(db.task("occ-1")));

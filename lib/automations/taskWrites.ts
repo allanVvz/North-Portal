@@ -64,6 +64,27 @@ export async function updateTaskPayload(
   return { inserted: Boolean(result.inserted), task: asTaskRecord(result.task) };
 }
 
+/** Substitui somente o último comentário automático de anexo do relatório.
+ * A RPC remove esse comentário sob lock e preserva comentários humanos feitos
+ * enquanto o PDF era renderizado; retries com o mesmo id são idempotentes. */
+export async function replaceAutomaticReportAttachment(
+  admin: AdminClient,
+  taskId: string,
+  input: { reportKind: "ads" | "conversion"; text: string; commentId: string; author?: string },
+): Promise<PayloadUpdateResult | null> {
+  const { data, error } = await admin.rpc("replace_automatic_report_attachment", {
+    p_task_id: taskId,
+    p_report_kind: input.reportKind,
+    p_comment_id: input.commentId,
+    p_comment_text: input.text,
+    p_comment_author: input.author ?? AUTOMATION_AUTHOR,
+  });
+  if (error) throw error;
+  const result = data as { inserted?: boolean; task?: Record<string, unknown> } | null;
+  if (!result?.task) return null;
+  return { inserted: Boolean(result.inserted), task: asTaskRecord(result.task) };
+}
+
 export type StatusTransition = {
   to: TaskStatus;
   /** Só move se o status ATUAL estiver aqui (compare-and-set). */

@@ -1,6 +1,6 @@
 // Daily cron entrypoint, called by app/api/admin/automations/run/route.ts.
 // Despacha por automation_key: `relatorio_trafego_semanal` (aqui) e
-// `relatorio_vendas` (lib/automations/sales.ts). `provisionar_card_metricas`
+// `relatorio_conversao` (lib/automations/conversionFlow.ts). `provisionar_card_metricas`
 // continua sendo um fan-out síncrono (lib/automations/provision.ts) e
 // `coleta_metrica_cliente` ainda é só stub (roadmap R6.11).
 //
@@ -17,7 +17,7 @@ import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
 import { inPeriod, previousPeriod } from "@/app/admin/performance/insights";
 import type { WindsorSettings } from "@/lib/windsor";
-import { renderAdsReportPdf } from "@/lib/reports/adsReportPdf";
+import { renderAdsReportPdf, trafficFinalViewOf } from "@/lib/reports/adsReportPdf";
 import { creativeRows, mediaOutcome, mediaTotals } from "@/lib/reports/adsInsights";
 import { collectAndStorePreviews } from "./creativeAssets";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
@@ -33,7 +33,7 @@ import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } fr
 import { commentsOf } from "@/lib/comments";
 import { markTaskParada } from "./errorHandling";
 import { errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
-import { automationCommentId, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
+import { automationCommentId, replaceAutomaticReportAttachment, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import {
   adsAccountFor,
   getClientById,
@@ -48,14 +48,14 @@ export type AutomationConfigRow = {
   target_task_id: string;
   performance_template_id: string | null;
   active: boolean;
-  /** Métricas (tags) que `relatorio_vendas` lê do comentário. */
+  /** Métricas (tags) que `relatorio_conversao` lê do comentário. */
   collect_metric_keys: string[] | null;
-  /** A automação da qual esta depende (a de anúncios, para `relatorio_vendas`). */
+  /** A automação da qual esta depende (a de anúncios, para `relatorio_conversao`). */
   depends_on_config_id: string | null;
 };
 
 /** Uma tarefa recorrente vira PAI de um fluxo de feedback quando alguma
- *  automação `relatorio_vendas` ativa DECLARA depender desta automação de
+ *  automação `relatorio_conversao` ativa DECLARA depender desta automação de
  *  anúncios. Antes era deduzido de "as duas apontam pro mesmo card"
  *  (docs/audits/report-automation-flow.md, A6). */
 async function dependentConversionConfig(
@@ -66,7 +66,7 @@ async function dependentConversionConfig(
     .from("automation_configs")
     .select("id,target_task_id")
     .eq("depends_on_config_id", trafficConfigId)
-    .eq("automation_key", "relatorio_vendas")
+    .eq("automation_key", "relatorio_conversao")
     .eq("active", true)
     .limit(1);
   if (error) throw error;
@@ -195,7 +195,7 @@ async function fillReportCard(
     occurrenceId,
     period,
     revision,
-    snapshot: { campaignPosts: currentPosts, prevCampaignPosts: prevPosts, adPosts: currentAdPosts, prevAdPosts, previews },
+    snapshot: { campaignPosts: currentPosts, prevCampaignPosts: prevPosts, adPosts: currentAdPosts, prevAdPosts, previews, trafficFinalView: trafficFinalViewOf(revisionInstruction) },
     documentId: (docRows?.[0] as { id: string } | undefined)?.id ?? null,
     finalizedAt: actingTask.reviewer_id ? null : new Date().toISOString(),
   });
@@ -231,7 +231,7 @@ export async function runOneReportAutomation(
   // recorrente e para o plano de ação recorrente.
   if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return "not_due";
 
-  // Modo-fluxo: M1 tem uma automação `relatorio_vendas` ativa → a ocorrência
+  // Modo-fluxo: M1 tem uma automação `relatorio_conversao` ativa → a ocorrência
   // desta semana vira PAI de um fluxo de feedback. A Automação 1 cria a
   // ocorrência + a etapa `trafego`, preenche essa etapa com o PDF do Meta e a
   // deixa em REVISÃO (um humano confere). O pedido de feedback e a etapa 2 são
@@ -284,7 +284,8 @@ export async function runOneReportAutomation(
       // intervalo. Já o status é compare-and-set — se alguém moveu a etapa
       // enquanto o PDF era gerado, o relatório continua salvo e comentado, mas a
       // etapa não é rebaixada.
-      await updateTaskPayload(admin, card1.id, {
+      await replaceAutomaticReportAttachment(admin, card1.id, {
+        reportKind: "ads",
         text: `Relatório de anúncios gerado e anexado: [${fileName}](${url})\n\nComente aqui caso queira algum ajuste neste relatório de anúncios.`,
         commentId: automationCommentId("ads-report", card1.id, report.revision),
       });
@@ -323,7 +324,8 @@ export async function runOneReportAutomation(
   try {
     const { fileName, url, report } = await fillReportCard(admin, actingTask, target, config, windsor, meta, today, null);
     // Mesma regra do modo-fluxo: comentário atômico, status por compare-and-set.
-    await updateTaskPayload(admin, actingTask.id, {
+    await replaceAutomaticReportAttachment(admin, actingTask.id, {
+      reportKind: "ads",
       text: `Relatório de anúncios gerado e anexado: [${fileName}](${url})`,
       commentId: automationCommentId("ads-report", actingTask.id, report.revision),
     });
@@ -339,7 +341,7 @@ export async function runOneReportAutomation(
 }
 
 // coleta_metrica_cliente fica de fora (roadmap R6.11 — ainda é só stub).
-const RUN_KEYS = ["relatorio_trafego_semanal", "relatorio_vendas"] as const;
+const RUN_KEYS = ["relatorio_trafego_semanal", "relatorio_conversao"] as const;
 
 export type RunOptions = {
   /** Dia da execução (ISO). Padrão: hoje em UTC — o cron roda às 12:00 UTC (9h
@@ -352,7 +354,7 @@ export type RunOptions = {
 type AutomationRunRow = { id: string };
 
 async function claimDailyRun(admin: AdminClient, config: AutomationConfigRow, today: string): Promise<AutomationRunRow | null> {
-  const action = config.automation_key === "relatorio_vendas" ? "conversion_report" : "ads_report";
+  const action = config.automation_key === "relatorio_conversao" ? "conversion_report" : "ads_report";
   const { data, error } = await admin.rpc("claim_automation_run", {
     p_config_id: config.id,
     p_occurrence_key: today,
@@ -404,7 +406,7 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
 
     let outcome: RunOutcome;
     try {
-      outcome = config.automation_key === "relatorio_vendas"
+      outcome = config.automation_key === "relatorio_conversao"
         ? await runConversionFlow(admin, config, today)
         : await runOneReportAutomation(admin, config, windsor, meta, today);
     } catch (error) {
@@ -431,9 +433,20 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
 /** Regera a revisão de tráfego a partir de um comentário editorial humano.
  * O comentário permanece na thread como instrução/auditoria; o PDF recebe uma
  * nova revisão e tudo o que dependia do snapshot anterior volta a aguardar. */
-export async function handleTrafficRevisionComment(admin: AdminClient, taskId: string): Promise<void> {
+export type TrafficRevisionCommentOptions = {
+  /** Texto vindo de Feedback/Conversão quando a intenção é uma correção de mídia. */
+  instruction?: string;
+  authorId?: string;
+};
+
+export async function handleTrafficRevisionComment(
+  admin: AdminClient,
+  taskId: string,
+  options: TrafficRevisionCommentOptions = {},
+): Promise<void> {
   const trafficTask = await getAdminTask(admin, taskId);
   if (!trafficTask || trafficTask.subtype !== ADS_REPORT_STEP_KEY) return;
+  if (options.authorId && trafficTask.reviewer_id && trafficTask.reviewer_id !== options.authorId) return;
   // Etapa já concluída: uma pessoa a aprovou. Comentário depois disso é conversa;
   // regenerar substituiria o relatório em que o Feedback e a Conversão já se
   // apoiam, e o status `revisao` que a geração grava reabriria a etapa.
@@ -459,7 +472,7 @@ export async function handleTrafficRevisionComment(admin: AdminClient, taskId: s
       .from("automation_configs")
       .select("depends_on_config_id")
       .eq("target_task_id", moldId)
-      .eq("automation_key", "relatorio_vendas")
+      .eq("automation_key", "relatorio_conversao")
       .eq("active", true)
       .not("depends_on_config_id", "is", null)
       .limit(1);
@@ -473,7 +486,7 @@ export async function handleTrafficRevisionComment(admin: AdminClient, taskId: s
     }
   }
   if (!config) return;
-  const instruction = [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
+  const instruction = options.instruction?.trim() || [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
   if (!instruction) return;
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
   const today = occ.due_date ?? isoDay(new Date());
@@ -497,7 +510,7 @@ export async function handleTrafficRevisionComment(admin: AdminClient, taskId: s
 
   // O relatório de conversão depende do snapshot de tráfego; uma revisão nova
   // torna a coleta e a conversão anteriores obsoletas e pede novo feedback.
-  await updateTaskPayload(admin, occ.id, { remove: ["feedback_source_at", "sales_report_generated_at"] });
+  await updateTaskPayload(admin, occ.id, { remove: ["feedback_source_at", "conversion_report_generated_at", "sales_report_generated_at"] });
   // A Entrega é projeção de suas etapas: escrever seu status diretamente é
   // recusado pelo trigger `tasks_project_parent_status`. A etapa de tráfego já
   // está em Revisão acima; a projeção do pai acompanha esse estado.

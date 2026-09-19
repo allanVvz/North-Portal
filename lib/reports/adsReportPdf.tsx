@@ -100,7 +100,19 @@ export function objectiveTable(objectives: ObjectiveRow[], outcome: MediaOutcome
   };
 }
 
-type RevisionAdjustments = { hideClicks: boolean; hideImpressions: boolean; reach: number | null };
+/** Structured view shared with the conversion report.  This is intentionally
+ * independent from the raw Meta snapshot: a finalized traffic revision can
+ * correct a number, hide a field, or remove trend charts without mutating raw
+ * data. */
+export type TrafficFinalView = {
+  reach: number | null;
+  hideClicks: boolean;
+  hideImpressions: boolean;
+  hideTrend?: boolean;
+  instruction?: string | null;
+};
+
+export type RevisionAdjustments = TrafficFinalView;
 
 /** Applies unambiguous editorial corrections without altering the raw Meta snapshot. */
 export function revisionAdjustments(instruction?: string | null): RevisionAdjustments {
@@ -110,6 +122,12 @@ export function revisionAdjustments(instruction?: string | null): RevisionAdjust
   const match = text.match(/alcance[^\d]{0,80}(\d[\d.,\s]*)/);
   const parsed = match ? Number(match[1].replace(/\D/g, "")) : NaN;
   return { hideClicks, hideImpressions, reach: Number.isFinite(parsed) && parsed >= 0 ? parsed : null };
+}
+
+export function trafficFinalViewOf(instruction?: string | null): TrafficFinalView {
+  const base = revisionAdjustments(instruction);
+  const text = (instruction ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return { ...base, hideTrend: /remov\w*[^.\n]{0,80}(grafic|tendenc)/.test(text), instruction: instruction ?? null };
 }
 
 type CampaignAgg = { id: string; name: string; objective: string; metrics: Partial<Record<MetaPostMetricKey, number>> };

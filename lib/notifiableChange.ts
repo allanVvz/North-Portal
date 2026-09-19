@@ -134,7 +134,7 @@ const EDIT_FIELDS = [
  * comentário é invisível para esta função (quem avisa comentário é a rota de
  * comentários, e avisar nos dois seria a mesma frase duas vezes); e todo o
  * bookkeeping que as automações escrevem — `recurrence_cycle`,
- * `trafego_report_at`, `pre_parada_status`, `sales_report_generated_at`… —
+ * `trafego_report_at`, `pre_parada_status`, `conversion_report_generated_at`… —
  * fica de fora sem ninguém precisar enumerá-lo. Uma lista negra teria que
  * caçar as 20+ chaves de taskPayloadSchema e vazaria na próxima que nascesse. */
 const PAYLOAD_WATCHED = [

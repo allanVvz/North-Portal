@@ -1,10 +1,11 @@
-// Automação 2 (relatorio_vendas), executada pela Entrega · Automação.
+// Automação 2 (relatorio_conversao), executada pela Entrega · Automação.
 // A aprovação manual do relatório de anúncios abre Feedback; concluir esse
 // card libera uma única etapa Relatório de conversão. Comentários fornecem os
 // dados, mas nunca aprovam o Feedback e vencimento nunca o fecha sozinho.
 //
 // Idempotência em duas camadas: marcadores no payload (feedback_source_at /
-// sales_report_generated_at) decidem se há algo novo; a
+// conversion_report_generated_at (com leitura histórica de sales_report_generated_at)
+// decide se há algo novo; a
 // reivindicação em `conversion_reports` (chave única por etapa + revisão do
 // tráfego + comentário) impede duas execuções simultâneas de gerarem dois PDFs.
 // Também é chamada pontualmente pelo hook de comentário
@@ -29,7 +30,7 @@ import { markTaskParada } from "./errorHandling";
 import { loadStoredPreviews } from "./creativeAssets";
 import { assignResponsibilityHolders } from "./responsibleOwners";
 import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
-import { automationCommentId, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
+import { automationCommentId, replaceAutomaticReportAttachment, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { getClientById } from "./serviceIntegrations";
 import { reportPeriodFor, resolveTemplateConfig } from "./reportData";
@@ -43,6 +44,7 @@ import {
   finalizeTrafficReport,
   recordConversionInterpretationSnapshot,
   releaseConversionReport,
+  supersedePriorConversionReports,
   trafficReportIsFinal,
   type TrafficReportRow,
 } from "./reportEntities";
@@ -119,11 +121,11 @@ export async function prepareFeedbackCard(admin: AdminClient, occ: TaskRecord): 
     .from("automation_configs")
     .select("*")
     .eq("target_task_id", moldId)
-    .eq("automation_key", "relatorio_vendas")
+    .eq("automation_key", "relatorio_conversao")
     .eq("active", true)
     .limit(1);
   const config = data?.[0] as AutomationConfigRow | undefined;
-  if (!config) return null; // cliente sem relatorio_vendas configurado: este fluxo não tem Feedback
+  if (!config) return null; // cliente sem relatorio_conversao configurado: este fluxo não tem Feedback
 
   const tags = tagsOf(config);
   const holderNames = await assignResponsibilityHolders(admin, card.id, "gestor_trafego");
@@ -307,7 +309,7 @@ async function generateSalesReport(
   // números (auditoria, A3), e esta pipeline não depende da API estar no ar.
   // Snapshot vazio (cliente sem conta de anúncios) = PDF só com o que o gestor
   // relatou, sem investimento/ROAS. Não é erro.
-  const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews } = traffic.snapshot ?? {};
+  const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews, trafficFinalView } = traffic.snapshot ?? {};
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
   const [prevTotals, history, previews, followers] = await Promise.all([
@@ -345,12 +347,13 @@ async function generateSalesReport(
     prevTotals: effectivePrevTotals,
     history: historyWithFollowers,
     adaptiveContext: ext.interpretation,
+    trafficFinalView: trafficFinalView ?? null,
     generatedAt: new Date(),
   });
 
   // Nome versionado: um comentário corrigido regera o PDF sem colidir no storage.
   const version = sourceFingerprint.slice(0, 12) || (sourceCommentAt ? sourceCommentAt.replace(/\D/g, "").slice(-14) : "initial");
-  const fileName = `relatorio-vendas-${period.to}-${version}.pdf`;
+  const fileName = `relatorio-conversao-${period.to}-${version}.pdf`;
   // A claim may be retried after a crash between document creation and the
   // final task update. Reuse that persisted artifact instead of creating a
   // second PDF/object for the same conversion card and period.
@@ -364,7 +367,7 @@ async function generateSalesReport(
   const existingId = (existingRows?.[0] as { id?: string } | undefined)?.id;
   if (existingId) return existingId;
 
-  const path = documentStoragePath(client.slug, `relatorio-vendas-${period.to}-${Date.now()}.pdf`, card2.id);
+  const path = documentStoragePath(client.slug, `relatorio-conversao-${period.to}-${Date.now()}.pdf`, card2.id);
   const { error: uploadError } = await admin.storage.from(DOCUMENT_BUCKET).upload(path, pdf, {
     contentType: "application/pdf",
     upsert: false,
@@ -393,12 +396,13 @@ async function generateSalesReport(
   }
 
   // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
-  await updateTaskPayload(admin, card2.id, {
-    text: `Relatório de vendas gerado e anexado: [${fileName}](${urlData.publicUrl})`,
+  await replaceAutomaticReportAttachment(admin, card2.id, {
+    reportKind: "conversion",
+    text: `Relatório de conversão gerado e anexado: [${fileName}](${urlData.publicUrl})`,
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
     // 128 caracteres do id. (card, período) já identifica a conversão — o retry
     // que reencontra o documento já retorna antes de chegar aqui.
-    commentId: automationCommentId("sales-report", card2.id, fileName),
+    commentId: automationCommentId("conversion-report", card2.id, fileName),
   });
   return (docRows?.[0] as { id: string } | undefined)?.id ?? null;
 }
@@ -598,11 +602,16 @@ async function processOccurrence(
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
     const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, ext.interpretation.sourceFingerprint);
     await attachConversionDocument(admin, claim.id, documentId);
+    await supersedePriorConversionReports(admin, {
+      id: claim.id,
+      trafficReportId: traffic.id,
+      feedbackTaskId: card2.id,
+    });
     // A Entrega passa a Revisão sozinha, projetada desta etapa.
     await transitionTaskStatus(admin, card3.id, { to: "revisao", from: ["em_producao"] });
 
     await updateTaskPayload(admin, occ.id, {
-      patch: { sales_report_generated_at: nowIso(), adaptive_source_fingerprint: ext.interpretation.sourceFingerprint },
+      patch: { conversion_report_generated_at: nowIso(), adaptive_source_fingerprint: ext.interpretation.sourceFingerprint },
     });
   } catch (error) {
     // Sem isto a reivindicação ficaria órfã e bloquearia o retry do mesmo
@@ -684,7 +693,7 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
     .from("automation_configs")
     .select("*")
     .eq("target_task_id", moldId)
-    .eq("automation_key", "relatorio_vendas")
+    .eq("automation_key", "relatorio_conversao")
     .eq("active", true)
     .limit(1);
   const config = data?.[0] as AutomationConfigRow | undefined;
@@ -734,7 +743,7 @@ export async function feedbackMetricApprovalProblem(admin: AdminClient, taskId: 
   const moldId = typeof occurrence?.payload?.recurrence_parent_id === "string" ? occurrence.payload.recurrence_parent_id : null;
   if (!moldId) return "Não encontrei a configuração desta automação.";
   const { data: configRows, error: configError } = await admin.from("automation_configs").select("*")
-    .eq("target_task_id", moldId).eq("automation_key", "relatorio_vendas").eq("active", true).limit(1);
+    .eq("target_task_id", moldId).eq("automation_key", "relatorio_conversao").eq("active", true).limit(1);
   if (configError) throw configError;
   const config = configRows?.[0] as AutomationConfigRow | undefined;
   if (!config) return "A automação de relatório de conversão não está ativa.";
@@ -757,7 +766,7 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
   const moldId = typeof occurrence?.payload?.recurrence_parent_id === "string" ? occurrence.payload.recurrence_parent_id : null;
   if (!occurrence || !moldId) return;
   const { data: configRows, error: configError } = await admin.from("automation_configs").select("*")
-    .eq("target_task_id", moldId).eq("automation_key", "relatorio_vendas").eq("active", true).limit(1);
+    .eq("target_task_id", moldId).eq("automation_key", "relatorio_conversao").eq("active", true).limit(1);
   if (configError) throw configError;
   const config = configRows?.[0] as AutomationConfigRow | undefined;
   if (!config) return;

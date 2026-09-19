@@ -44,11 +44,11 @@ const AUTOMATION_ICON: Record<AutomationKey, string> = {
   relatorio_trafego_semanal: "▤",
   provisionar_card_metricas: "⇄",
   coleta_metrica_cliente: "✎",
-  relatorio_vendas: "▧",
+  relatorio_conversao: "▧",
 };
 
 // Automações que usam um template de Performance (o mesmo seletor).
-const USES_PERFORMANCE_TEMPLATE: AutomationKey[] = ["relatorio_trafego_semanal", "relatorio_vendas"];
+const USES_PERFORMANCE_TEMPLATE: AutomationKey[] = ["relatorio_trafego_semanal", "relatorio_conversao"];
 
 // A "slot" is one card on screen — either a saved automation_configs row
 // (id set) or a still-unsaved draft added by clicking "+ Nova automação"
@@ -141,7 +141,7 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
       targetTaskId: slot.targetTask.id,
       performanceTemplateId: USES_PERFORMANCE_TEMPLATE.includes(slot.automationKey as AutomationKey) ? (slot.performanceTemplateId || null) : null,
       active: slot.active,
-      collectMetricKeys: slot.automationKey === "relatorio_vendas"
+      collectMetricKeys: slot.automationKey === "relatorio_conversao"
         ? (slot.collectMetricKeys.length ? slot.collectMetricKeys : CONVERSION_METRICS_DEFAULT)
         : slot.automationKey === "coleta_metrica_cliente"
           ? slot.collectMetricKeys
@@ -352,7 +352,7 @@ function AutomationConfigCard({
             </select>
           ) : null}
 
-          {slot.automationKey === "relatorio_vendas" ? (
+          {slot.automationKey === "relatorio_conversao" ? (
             <label className="auto-field">
               <span>Métricas que a automação lê do comentário</span>
               <TagChipsInput

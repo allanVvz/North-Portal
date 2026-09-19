@@ -66,7 +66,7 @@ function seed(conversao: Partial<Row> = {}) {
     traffic_reports: [{ id: "tr-1", client_id: "cli", task_id: TRAFEGO, occurrence_id: OCC, period_from: "2026-09-14", period_to: "2026-09-20", revision: 1, snapshot: {}, status: "finalized", document_id: null, generated_at: "2026-09-21T11:00:00.000Z", finalized_at: "2026-09-21T13:00:00.000Z" }],
     automation_configs: [
       { id: "cfg-ads", automation_key: "relatorio_trafego_semanal", target_task_id: "ads-mold", active: true, depends_on_config_id: null },
-      { id: "cfg-vendas", automation_key: "relatorio_vendas", target_task_id: "entrega-mold", active: true, depends_on_config_id: "cfg-ads", collect_metric_keys: null, performance_template_id: null },
+      { id: "cfg-conversao", automation_key: "relatorio_conversao", target_task_id: "entrega-mold", active: true, depends_on_config_id: "cfg-ads", collect_metric_keys: null, performance_template_id: null },
     ],
   });
 }
@@ -93,10 +93,10 @@ describe("conversão depois do Feedback concluído", () => {
     expect(db.table("conversion_report_snapshots")).toHaveLength(1);
     expect(conversaoTexts()).toEqual([
       expect.stringContaining("North IA consolidou o período"),
-      expect.stringContaining("Relatório de vendas gerado e anexado"),
+      expect.stringContaining("Relatório de conversão gerado e anexado"),
     ]);
     const occPayload = db.task(OCC)!.payload as Row;
-    expect(occPayload.sales_report_generated_at).toBeTruthy();
+    expect(occPayload.conversion_report_generated_at).toBeTruthy();
     expect(occPayload).toHaveProperty("feedback_source_at");
     // O comentário humano do Feedback continua onde foi escrito.
     expect(db.comments(FEEDBACK).map((c) => c.text)).toEqual(["Vendas: 5\nAgendamentos: 8"]);
@@ -118,7 +118,7 @@ describe("conversão depois do Feedback concluído", () => {
     expect(hooks.render).toHaveBeenCalledTimes(1);
     expect(db.table("documents")).toHaveLength(1);
     expect(db.table("conversion_reports")).toHaveLength(1);
-    expect(conversaoTexts().filter((text) => text.includes("Relatório de vendas gerado"))).toHaveLength(1);
+    expect(conversaoTexts().filter((text) => text.includes("Relatório de conversão gerado"))).toHaveLength(1);
   });
 
   it("conversão que uma pessoa já aprovou não é regerada nem reaberta", async () => {
@@ -141,7 +141,7 @@ describe("conversão depois do Feedback concluído", () => {
     await processConversionFeedback(db.asAdmin(), OCC);
 
     expect(conversaoTexts()).toContain("Confira o valor da receita");
-    expect(conversaoTexts().some((text) => text.includes("Relatório de vendas gerado e anexado"))).toBe(true);
+    expect(conversaoTexts().some((text) => text.includes("Relatório de conversão gerado e anexado"))).toBe(true);
   });
 
   it("comentário de revisão cria uma versão nova com o contexto consolidado", async () => {

@@ -1,4 +1,4 @@
-// Catálogo das métricas (tags) que a automação `relatorio_vendas` lê do
+// Catálogo das métricas (tags) que a automação `relatorio_conversao` lê do
 // comentário do gestor. É deliberadamente aberto: a config guarda uma lista de
 // strings livres; as tags conhecidas abaixo só dão rótulo bonito e dizem se o
 // número é contagem ou dinheiro. Uma tag fora da lista funciona igual —

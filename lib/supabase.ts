@@ -3965,9 +3965,9 @@ export type AutomationConfig = {
   targetTaskId: string;
   performanceTemplateId: string | null;
   active: boolean;
-  /** Métricas (tags) que a automação pede/lê — `coleta_metrica_cliente` e `relatorio_vendas`. */
+  /** Métricas (tags) que a automação pede/lê — `coleta_metrica_cliente` e `relatorio_conversao`. */
   collectMetricKeys: string[] | null;
-  /** A automação da qual esta depende (`relatorio_vendas` → a de anúncios do
+  /** A automação da qual esta depende (`relatorio_conversao` → a de anúncios do
    *  mesmo cliente). Resolvida no servidor ao salvar, nunca escolhida na tela. */
   dependsOnConfigId: string | null;
   // Resolved directly here (not left to the frontend to cross-reference

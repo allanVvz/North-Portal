@@ -10,19 +10,64 @@ import { handleConversionRevisionComment, recordFeedbackMetricComment } from "@/
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
+import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY } from "@/lib/automationWorkflow";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
 export const runtime = "nodejs";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function scheduleCommentAutomation(taskId: string) {
+/**
+ * Correções de mídia são semanticamente da etapa de anúncios, ainda que o
+ * comentário tenha sido escrito no Feedback/Conversão.  O texto continua
+ * persistido somente no destino canônico (a etapa que a UI resolveu), mas o
+ * worker recebe o id da etapa de mídia para poder produzir uma nova revisão.
+ * Mantemos a classificação deliberadamente conservadora: comentários
+ * operacionais/editoriais não atravessam etapas.
+ */
+function isMediaCorrection(text: string): boolean {
+  return /\b(api|meta|facebook|alcance|impress(?:ão|oes|ões)|clique(?:s)?|campanha|anúncio(?:s)?|graf(?:ico|ia)|gráfico(?:s)?|visibilidade|cpm|ctr|cpc)\b/i.test(text);
+}
+
+async function trafficSiblingFor(admin: ReturnType<typeof createAdminClient>, taskId: string, authorId: string): Promise<string | null> {
+  const task = await getTaskById(taskId);
+  if (!task || !["feedback", CONVERSION_REPORT_STEP_KEY].includes(task.subtype ?? "")) return null;
+  const { data: parentRows, error: parentError } = await admin.from("task_links")
+    .select("parent_id").eq("child_id", taskId).eq("relation_kind", "workflow_step").limit(1);
+  if (parentError) throw parentError;
+  const parentId = (parentRows?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (!parentId) return null;
+  const { data: links, error: linksError } = await admin.from("task_links")
+    .select("child_id").eq("parent_id", parentId).eq("relation_kind", "workflow_step");
+  if (linksError) throw linksError;
+  for (const link of (links ?? []) as { child_id?: string }[]) {
+    if (!link.child_id || link.child_id === taskId) continue;
+    const sibling = await getTaskById(link.child_id);
+    if (sibling?.subtype !== ADS_REPORT_STEP_KEY) continue;
+    // Mídia é uma revisão do revisor. Sem revisor configurado, o fluxo antigo
+    // continua permissivo (a etapa já é final automaticamente nesse cadastro).
+    if (sibling.reviewer_id && sibling.reviewer_id !== authorId) return null;
+    return sibling.id;
+  }
+  return null;
+}
+
+function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string) {
   after(async () => {
     const admin = createAdminClient();
     try {
-      await handleTrafficRevisionComment(admin, taskId);
-      await recordFeedbackMetricComment(admin, taskId);
-      await handleConversionRevisionComment(admin, taskId);
+      const mediaTaskId = text && authorId && isMediaCorrection(text)
+        ? await trafficSiblingFor(admin, taskId, authorId)
+        : null;
+      // O caminho usual mantém a assinatura histórica (e a idempotência) dos
+      // hooks. Quando há uma correção de mídia, o hook recebe a etapa correta.
+      if (mediaTaskId) {
+        await handleTrafficRevisionComment(admin, mediaTaskId, { instruction: text, authorId });
+      } else {
+        await handleTrafficRevisionComment(admin, taskId);
+        await recordFeedbackMetricComment(admin, taskId);
+        await handleConversionRevisionComment(admin, taskId);
+      }
     } catch (hookError) {
       console.error("comment hook failed", { taskId, hookError });
       await markTaskParada(admin, taskId, `Falha ao processar o comentário: ${errorMessage(hookError)}`);
@@ -73,7 +118,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // aparece na hora e a nova versão chega como um comentário da automação.
     // Uma falha aqui não pode se perder calada: vira o mesmo aviso que as
     // automações usam — a etapa `parada` com um comentário explicando.
-    scheduleCommentAutomation(targetId);
+    scheduleCommentAutomation(targetId, session.userId, text);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }

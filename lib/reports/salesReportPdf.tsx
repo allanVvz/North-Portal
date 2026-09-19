@@ -1,4 +1,4 @@
-// PDF do "Relatório de resultados" (Automação 2 — relatorio_vendas).
+// PDF do "Relatório de conversão" (Automação 2 — relatorio_conversao).
 //
 // Muda de forma conforme o feedback. Plano: docs/reporting/adaptive-report-plan.md §2–§3.
 // A conversão mais importante informada (conversionFocus.focusOf) decide a
@@ -24,13 +24,13 @@ import { blockResolver } from "./campaignBlockKpis";
 import { attributionOf, type InformedTotals } from "./conversionMode";
 import {
   creativeBadges, creativeHighlights, creativeRows, mediaOutcome, mediaTotals, money, num, objectiveRows,
-  type MediaOutcome,
+  type MediaOutcome, signed,
 } from "./adsInsights";
-import { costLadder, focusOf, heroFor, historyView, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
+import { costLadder, focusOf, heroFor, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
-import { creativeCardView, fullDay, shortDay } from "./adsReportPdf";
+import { creativeCardView, fullDay, shortDay, type TrafficFinalView } from "./adsReportPdf";
 import {
-  AnalysisList, ColumnsChart, ComparisonFigure, CreativeCards, DataTable, FigureRow, Footer, Headline, HeroFigure, LineChart,
+  AnalysisList, CreativeCards, DataTable, FigureRow, Footer, Headline, HeroFigure,
   PageHeader, ProportionalFunnel, RankBars, Section, T, W,
 } from "./reportBlocks";
 
@@ -62,6 +62,8 @@ export type SalesReportInput = {
   previews?: Record<string, PreviewAsset>;
   /** Entendimento auditável do North IA: contexto, precisão e trade-offs. */
   adaptiveContext?: AdaptiveInterpretation;
+  /** Finalized view from the technical ads report. */
+  trafficFinalView?: TrafficFinalView | null;
   generatedAt: Date;
 };
 
@@ -80,6 +82,15 @@ function totalsOf(conversoes: ConversionRow[]) {
     agendamentos: conversoes.length,
     vendas: conversoes.filter((c) => c.status === "fechado").length,
     receita: conversoes.reduce((sum, c) => sum + (c.valor ?? 0), 0),
+  };
+}
+
+function comparison(current: number, previous: number | null) {
+  if (previous === null) return { difference: "—", percent: "—" };
+  const diff = current - previous;
+  return {
+    difference: signed(diff),
+    percent: previous === 0 ? "—" : `${(diff / previous * 100).toFixed(2).replace("-", "−")}%`,
   };
 }
 
@@ -128,6 +139,7 @@ function SalesReportDocument(input: SalesReportInput) {
 
   const focus = focusOf(cur);
   const media = mediaTotals(campaignPosts);
+  if (input.trafficFinalView?.reach !== null && input.trafficFinalView?.reach !== undefined) media.reach = input.trafficFinalView.reach;
   const prevMedia = prevCampaignPosts.some((p) => p.source === "paid") ? mediaTotals(prevCampaignPosts) : null;
   const ctx: FocusContext = { kind: focus, cur, prev, media, prevMedia, followersGain, prevFollowersGain, prevFollowersTotal };
 
@@ -140,7 +152,7 @@ function SalesReportDocument(input: SalesReportInput) {
   const { rows: creatives } = creativeRows(adPosts, outcome);
   const prevCreatives = prevAdPosts?.length ? creativeRows(prevAdPosts, outcome).rows : [];
   const badges = creativeBadges(creatives, outcome, prevCreatives);
-  const highlights = creativeHighlights(creatives, badges, outcome, 2);
+  const highlights = creativeHighlights(creatives, badges, outcome, 4);
 
   // ---- leitura ----
   const hero = heroFor(ctx);
@@ -149,7 +161,6 @@ function SalesReportDocument(input: SalesReportInput) {
   const attribution = attributionOf(cur.vendas, conversoes);
   const top = highlights[0]?.row;
   const analysis = resultAnalysis({ ...ctx, attribution, topCreative: top ? { name: top.name, clicks: top.clicks, conversations: top.conversations, spend: top.spend } : null });
-  const hist = historyView(focus, series);
   const ladder = costLadder(media.spend, media.conversations, cur);
 
   const origins = Object.entries(attribution.porFonte)
@@ -167,17 +178,6 @@ function SalesReportDocument(input: SalesReportInput) {
   const creativeSectionTitle = focus === "seguidores"
     ? highlights.length > 1 ? "Os anúncios que mais levaram gente ao perfil" : "O anúncio que mais levou gente ao perfil"
     : highlights.length > 1 ? "Os criativos que mais contribuíram" : "O criativo que mais contribuiu";
-
-  // Em seguidores, a comparação de 2 semanas só repetiria a figura principal
-  // ("passou de 1.214 para 1.251") — a seção aparece quando vira gráfico.
-  const showHistory = hist.type === "chart" || (hist.type === "comparison" && focus !== "seguidores");
-  const historySection = !showHistory ? null : (
-    <Section title={hist.type === "chart" ? hist.title : "Em relação à semana anterior"} aside={hist.type === "chart" ? hist.summary ?? undefined : undefined}>
-      {hist.type === "comparison" ? <ComparisonFigure items={hist.items} /> : null}
-      {hist.type === "chart" && hist.form === "line" ? <LineChart periods={hist.periods} values={hist.series[0].values} height={100} /> : null}
-      {hist.type === "chart" && hist.form === "columns" ? <ColumnsChart periods={hist.periods} series={hist.series.map((s) => ({ label: s.label, values: s.values }))} /> : null}
-    </Section>
-  );
 
   const creativeSection = highlights.length ? (
     <Section title={creativeSectionTitle} lead={<CreativeCards items={highlights.map((h) => creativeCardView(h.row, h.badges, outcome, previews))} />} />
@@ -206,7 +206,8 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null;
 
-  const adaptiveSection = input.adaptiveContext && (
+  const adaptiveSection = null; /* client PDF excludes internal context and authors */
+  /*
     input.adaptiveContext.context.length
     || input.adaptiveContext.tradeoffs.length
     || input.adaptiveContext.claims.some((claim) => claim.precision !== "exata")
@@ -226,6 +227,79 @@ function SalesReportDocument(input: SalesReportInput) {
         <Text key={`${index}:${tradeoff}`} style={T.note}>Decisão de leitura: {tradeoff}</Text>
       ))}
     </Section>
+  ) : null; */
+
+  const conversionNarrative = focus === "seguidores" && followersGain !== null ? (
+    <Section title="Leitura do período">
+      <Text style={T.analysisText}>
+        {num(followersGain)} seguidores adquiridos no período. {prevFollowersGain !== null
+          ? `Em comparação à referência anterior de ${num(prevFollowersGain)} seguidores, a variação foi de ${signed(followersGain - prevFollowersGain)} (${((followersGain - prevFollowersGain) / prevFollowersGain * 100).toFixed(2).replace("-", "−")}%). `
+          : "A comparação com o período anterior não foi informada. "}
+        {cur.seguidores !== null && prevFollowersTotal !== null ? `O perfil encerrou o período com ${num(cur.seguidores)} seguidores, ${num(followersGain)} acima da base registrada de ${num(prevFollowersTotal)}. ` : ""}
+        A mídia alcançou {media.reach === null ? "um público não informado" : `${num(media.reach)} pessoas`} e gerou {media.profileVisits === null ? "visitas ao perfil em volume não informado" : `${num(media.profileVisits)} visitas ao perfil`}. Esse volume compõe a jornada observada, mas não atribui automaticamente cada novo seguidor aos anúncios.
+      </Text>
+    </Section>
+  ) : null;
+
+  const confirmedMetrics = [
+    followersGain !== null ? { label: "Seguidores adquiridos", current: followersGain, previous: prevFollowersGain, source: "Resultado informado" } : null,
+    cur.seguidores !== null ? { label: "Base total de seguidores", current: cur.seguidores, previous: prevFollowersTotal, source: "Resultado informado" } : null,
+    cur.vendas !== null ? { label: "Vendas", current: cur.vendas, previous: prev?.vendas ?? null, source: "Resultado informado" } : null,
+    cur.agendamentos !== null ? { label: "Agendamentos", current: cur.agendamentos, previous: prev?.agendamentos ?? null, source: "Resultado informado" } : null,
+    cur.receita !== null ? { label: "Receita", current: cur.receita, previous: prev?.receita ?? null, source: "Resultado informado", money: true } : null,
+  ].filter((metric): metric is { label: string; current: number; previous: number | null; source: string; money?: boolean } => metric !== null);
+
+  const indicatorsSection = confirmedMetrics.length ? (
+    <Section title="Indicadores confirmados">
+      <DataTable
+        columns={[
+          { key: "metric", label: "Indicador", flex: 1.6 }, { key: "current", label: "Atual", align: "right" },
+          { key: "previous", label: "Referência", align: "right" }, { key: "difference", label: "Diferença", align: "right" },
+          { key: "percent", label: "%", align: "right" }, { key: "source", label: "Fonte", flex: 1.2 },
+        ]}
+        rows={confirmedMetrics.map((metric) => {
+          const delta = comparison(metric.current, metric.previous);
+          const format = (value: number) => metric.money ? money(value) : num(value);
+          return {
+            metric: { text: metric.label, strong: true }, current: { text: format(metric.current) },
+            previous: { text: metric.previous === null ? "—" : format(metric.previous) },
+            difference: { text: delta.difference }, percent: { text: delta.percent }, source: { text: metric.source },
+          };
+        })}
+      />
+    </Section>
+  ) : null;
+
+  const conversionHistorySection = series.length > 1 ? (
+    <Section title="Histórico de conversão">
+      <DataTable
+        columns={[
+          { key: "period", label: "Período", flex: 1.2 }, { key: "followers", label: "Seguidores", align: "right" },
+          { key: "sales", label: "Vendas", align: "right" }, { key: "bookings", label: "Agendamentos", align: "right" },
+          { key: "revenue", label: "Receita", align: "right" },
+        ]}
+        rows={series.slice(-8).map((point) => ({
+          period: { text: shortDay(point.periodTo) }, followers: { text: point.seguidores === null ? "—" : num(point.seguidores) },
+          sales: { text: point.vendas === null ? "—" : num(point.vendas) }, bookings: { text: point.agendamentos === null ? "—" : num(point.agendamentos) },
+          revenue: { text: point.receita === null ? "—" : money(point.receita) },
+        }))}
+      />
+    </Section>
+  ) : null;
+
+  const allAdsSection = creatives.length ? (
+    <Section title="Contribuição dos anúncios" aside="Todos os anúncios relevantes do período">
+      <DataTable columns={[
+        { key: "thumb", label: "", width: 26 }, { key: "name", label: "Anúncio", flex: 1.7 },
+        { key: "campaign", label: "Campanha / objetivo", flex: 1.5 }, { key: "spend", label: "Investimento", align: "right" },
+        { key: "result", label: "Resultado", align: "right" }, { key: "cost", label: "Custo", align: "right" }, { key: "share", label: "Contribuição", align: "right" },
+      ]} rows={creatives.map((r) => ({
+        thumb: { text: "", image: previews?.[r.adId]?.dataUri ?? null }, name: { text: r.name, strong: true },
+        campaign: { text: `${r.campaignName || "—"} · ${outcome === "visitas" ? "Visitas ao perfil" : "Conversas"}` }, spend: { text: money(r.spend) },
+        result: { text: num(r.result) }, cost: { text: r.costPerResult === null ? "—" : money(r.costPerResult) },
+        share: { text: r.resultShare === null ? "—" : `${r.resultShare.toFixed(1).replace(".", ",")}%` },
+      }))} />
+    </Section>
   ) : null;
 
   return (
@@ -233,20 +307,22 @@ function SalesReportDocument(input: SalesReportInput) {
       <Page size="A4" style={T.page} wrap>
         <PageHeader
           eyebrow={clientName}
-          title="Relatório de resultados"
+          title="Relatório de conversão"
           subtitle={`${fullDay(period.from)} a ${fullDay(period.to)}${comparedRange ? ` · comparado com ${shortDay(comparedRange.from)} a ${shortDay(comparedRange.to)}` : ""}`}
-          pill="Relatório 2"
+          pill="Conversão"
         />
 
         {focus === "vendas" || focus === "agendamentos" ? <Headline text={analysis.headline} /> : null}
         <HeroFigure value={hero.value} label={hero.label} caption={hero.caption || undefined} delta={hero.delta} />
         <FigureRow items={figures} />
         {adaptiveSection}
+        {conversionNarrative}
+        {indicatorsSection}
 
         {funnel.stages.length ? (
           <Section title={focus === "seguidores" ? "Do alcance ao perfil" : focus === "midia" ? "Do alcance às conversas" : "Do alcance à venda"}>
             <View style={T.twoCol} wrap={false}>
-              <ProportionalFunnel width={analysis.insights.length ? 290 : W} stages={funnel.stages.map((s) => ({ label: s.label, value: s.key === "seguidores_novos" ? `+${num(s.value)}` : num(s.value), numeric: s.value, base: s.base }))} gaps={funnel.gaps} />
+              <ProportionalFunnel width={analysis.insights.length ? 290 : W} stages={funnel.stages.map((s) => ({ label: `${s.label} · ${s.source === "feedback" ? "resultado informado" : "mídia"}`, value: s.key === "seguidores_novos" ? `+${num(s.value)}` : num(s.value), numeric: s.value, base: s.base }))} gaps={focus === "seguidores" ? [] : funnel.gaps} />
               {analysis.insights.length ? (
                 <View style={{ flex: 1, justifyContent: "center" }}>
                   <AnalysisList items={analysis.insights} />
@@ -258,8 +334,8 @@ function SalesReportDocument(input: SalesReportInput) {
 
         {focus === "seguidores" ? (
           <>
-            {historySection}
             {creativeSection}
+            {allAdsSection}
             {mediaSection}
           </>
         ) : null}
@@ -290,7 +366,6 @@ function SalesReportDocument(input: SalesReportInput) {
                 </View>
               </Section>
             ) : null}
-            {historySection}
             {conversoes.length ? (
               <Section title="Vendas descritas" aside={cur.vendas !== null && conversoes.length < cur.vendas ? `${conversoes.length} de ${cur.vendas} descritas` : undefined}>
                 <DataTable
@@ -310,14 +385,15 @@ function SalesReportDocument(input: SalesReportInput) {
               </Section>
             ) : null}
             {creativeSection}
+            {allAdsSection}
             {mediaSection}
           </>
         ) : null}
 
         {focus === "agendamentos" ? (
           <>
-            {historySection}
             {creativeSection}
+            {allAdsSection}
             {mediaSection}
           </>
         ) : null}
@@ -325,9 +401,12 @@ function SalesReportDocument(input: SalesReportInput) {
         {focus === "midia" ? (
           <>
             {creativeSection}
+            {allAdsSection}
             {mediaSection}
           </>
         ) : null}
+
+        {conversionHistorySection}
 
         <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} note={footnote} />
       </Page>
