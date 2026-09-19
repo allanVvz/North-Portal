@@ -35,7 +35,6 @@ import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurren
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus, projectParentStatus } from "@/lib/flows/parentStatus";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
-import { cycleLogOf } from "@/lib/cycleLog";
 import { createCommentIdRegistry } from "./commentIds";
 import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { responsibilityForSubtype } from "@/lib/flows/responsibilityForSubtype";
@@ -662,13 +661,6 @@ export default function TaskModal({
   const planMembers = liveTask
     ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
-  // Uma rotina pode ter dois eixos independentes: ocorrências materializadas
-  // (a caixa acima) e planos estruturais que compõem sua pauta. Não misture os
-  // dois: `recurrenceExecutionsOf` deve continuar contando somente entregas,
-  // mas os planos vinculados também precisam ser navegáveis no modal.
-  const routinePlanMembers = liveTask && isRecurringParent
-    ? actionPlanMembersOf(liveTask.id, clientTasks).filter((task) => kindDef(task.kind).isPlan)
-    : [];
   const flowSteps = liveTask && isDelivery ? flowStepsOf(liveTask.id, clientTasks) : [];
   // Sem isto, um membro que é ele mesmo um pai (a ocorrência de uma
   // recorrência de Plano, ex. "REUNIÃO ROTINA - ALLAN" — herda o `kind`
@@ -704,6 +696,7 @@ export default function TaskModal({
     ? `${effectiveParentMembers.filter((m) => m.status === "aprovado").length} de ${effectiveParentMembers.length}`
     : null;
   const canCrossClientPlan = Boolean(liveTask && kd.isPlan && draft.clientSlug === "north");
+  const canCrossClientRecurrence = Boolean(liveTask && isRecurringParent && draft.clientSlug === "north");
   const linkableCandidates = liveTask
     // Ter uma entrega como pai não impede entrar num plano, e já pertencer a
     // OUTRO plano também não — um card pode ser membro de vários Planos de
@@ -719,7 +712,7 @@ export default function TaskModal({
   // só ordena o mesmo tipo primeiro, não trava — pedido explícito: precisa
   // aceitar vincular uma Entrega).
   const recurrenceLinkCandidates = liveTask && isRecurringParent
-    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id && t.kind === liveTask.kind)
+    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && (canCrossClientRecurrence || t.client_id === liveTask.client_id) && t.kind === liveTask.kind)
     : [];
   // As etapas são lidas para o próprio card Entrega e para compor o resumo
   // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
@@ -1807,10 +1800,7 @@ export default function TaskModal({
               <div className={`tm-box tm-planmembers${isRecurringParent ? " tm-cycles" : ""}`}>
                 <div className="tm-box-head">
                   <p className="tm-box-label">
-                    {isRecurringParent ? "Execuções materializadas" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
-                    {isRecurringParent && liveTask && cycleLogOf(liveTask.payload).length ? (
-                      <span className="tm-box-label-sub"> · {cycleLogOf(liveTask.payload).length} ciclos concluídos no histórico</span>
-                    ) : null}
+                    {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
                     {!isRecurringParent && liveTask && planMembers.length ? (
                       <span className="tm-box-label-sub"> · {effectiveParentMembers.filter((m) => m.status === "aprovado").length} concluídas</span>
                     ) : null}
@@ -1925,31 +1915,6 @@ export default function TaskModal({
                     }}
                   />
                 )}
-              </div>
-            ) : null}
-
-            {isRecurringParent && liveTask && routinePlanMembers.length ? (
-              <div className="tm-box tm-planmembers tm-routine-plans">
-                <div className="tm-box-head">
-                  <p className="tm-box-label">Planos vinculados à rotina ({routinePlanMembers.length})</p>
-                </div>
-                <div className="tm-member-list">
-                  {routinePlanMembers.map((plan) => (
-                    <StepRow
-                      key={plan.id}
-                      card={plan}
-                      label={plan.title}
-                      team={adminReviewers}
-                      busy={busy}
-                      canOpen={Boolean(onOpenRelatedTask)}
-                      onOpen={() => void openRelatedTask(plan)}
-                      onUnlink={() => void unlinkMember(plan.id, liveTask.id)}
-                      unlinkTitle={`Remover ligação com ${plan.title}`}
-                      onPatch={patchRelatedCard}
-                      onComment={commentRelatedCard}
-                    />
-                  ))}
-                </div>
               </div>
             ) : null}
 
