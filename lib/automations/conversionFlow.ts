@@ -300,6 +300,7 @@ async function generateSalesReport(
   period: Period,
   sourceCommentAt: string | null,
   sourceFingerprint: string,
+  conversionReportId: string,
 ): Promise<string | null> {
   const clientId = occ.client_id;
   if (!clientId) throw new Error("A ocorrência não pertence a nenhum cliente.");
@@ -355,6 +356,24 @@ async function generateSalesReport(
   });
   const layoutPlan = planned.layout;
   reportContext.narrative = planned.narrative;
+  const { error: planError } = await admin.from("conversion_reports").update({
+    interpretation: {
+      ...ext.interpretation,
+      northai: {
+        context: buildNorthAIContext({
+          client: { id: clientId, slug: client.slug, name: client.name },
+          context: reportContext,
+          adsFinal: traffic.status === "finalized",
+          adsRevision: traffic.revision,
+          editorialInstruction: trafficFinalView?.instruction ?? null,
+        }),
+        narrative: planned.narrative,
+        layoutPlan,
+        aiUsed: planned.aiUsed,
+      },
+    },
+  }).eq("id", conversionReportId);
+  if (planError) throw planError;
 
   const pdf = await renderSalesReportPdf({
     clientName: client.name,
@@ -634,7 +653,7 @@ async function processOccurrence(
     });
     if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, ext.interpretation.sourceFingerprint);
+    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, ext.interpretation.sourceFingerprint, claim.id);
     await attachConversionDocument(admin, claim.id, documentId);
     await supersedePriorConversionReports(admin, {
       id: claim.id,
