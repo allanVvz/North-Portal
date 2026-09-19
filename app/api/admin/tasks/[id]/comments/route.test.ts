@@ -15,6 +15,7 @@ const hooks = vi.hoisted(() => ({
   notifyParticipants: vi.fn(),
   trafficHook: vi.fn(),
   feedbackHook: vi.fn(),
+  conversionHook: vi.fn(),
   markParada: vi.fn(),
   afterQueue: [] as Array<() => Promise<void>>,
 }));
@@ -36,8 +37,8 @@ vi.mock("@/lib/supabase", async () => {
       if (!result) throw new HttpError(404, "Tarefa não encontrada.");
       return { task: result.task, inserted: result.inserted };
     },
-    deleteTaskComment: vi.fn(),
-    editTaskComment: vi.fn(),
+    deleteTaskComment: async (taskId: string) => hooks.db.task(taskId),
+    editTaskComment: async (taskId: string) => hooks.db.task(taskId),
     getProfileName: async () => "Allan",
     getTaskById: async (id: string) => hooks.db.task(id) ?? null,
     listTeamMembers: async () => [],
@@ -50,10 +51,10 @@ vi.mock("@/lib/notifications", () => ({
   taskCommentedMessage: () => "comentou",
 }));
 vi.mock("@/lib/automations/run", () => ({ handleTrafficRevisionComment: hooks.trafficHook }));
-vi.mock("@/lib/automations/conversionFlow", () => ({ recordFeedbackMetricComment: hooks.feedbackHook }));
+vi.mock("@/lib/automations/conversionFlow", () => ({ recordFeedbackMetricComment: hooks.feedbackHook, handleConversionRevisionComment: hooks.conversionHook }));
 vi.mock("@/lib/automations/errorHandling", () => ({ markTaskParada: hooks.markParada }));
 
-import { POST } from "./route";
+import { DELETE, PATCH, POST } from "./route";
 
 const ENTREGA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const TRAFEGO = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -62,7 +63,14 @@ const CONVERSAO = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const OUTRA_ENTREGA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const OUTRA_ETAPA = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 
-const step = (id: string, title: string, status: string) => ({ id, title, kind: "operacional", status, payload: { comments: [] } });
+const step = (id: string, title: string, status: string) => ({
+  id,
+  title,
+  kind: "operacional",
+  subtype: id === CONVERSAO ? "relatorio_conversao" : id === FEEDBACK ? "feedback" : id === TRAFEGO ? "relatorio_anuncios" : undefined,
+  status,
+  payload: { comments: [] },
+});
 const link = (parent: string, child: string, position: number) => ({ parent_id: parent, child_id: child, relation_kind: "workflow_step", workflow_step_id: `ws-${position}`, slot: `slot-${position}`, position });
 
 /** Entrega de Automação; `steps` são as etapas já materializadas, em ordem. */
@@ -84,6 +92,22 @@ function seed(steps: Array<{ id: string; title: string; status: string }>) {
 async function post(id: string, body: Record<string, unknown>) {
   const response = await POST(
     new Request(`http://localhost/api/admin/tasks/${id}/comments`, { method: "POST", body: JSON.stringify(body) }),
+    { params: Promise.resolve({ id }) },
+  );
+  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+}
+
+async function patchComment(id: string, body: Record<string, unknown>) {
+  const response = await PATCH(
+    new Request(`http://localhost/api/admin/tasks/${id}/comments`, { method: "PATCH", body: JSON.stringify(body) }),
+    { params: Promise.resolve({ id }) },
+  );
+  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+}
+
+async function deleteComment(id: string, body: Record<string, unknown>) {
+  const response = await DELETE(
+    new Request(`http://localhost/api/admin/tasks/${id}/comments`, { method: "DELETE", body: JSON.stringify(body) }),
     { params: Promise.resolve({ id }) },
   );
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
@@ -266,5 +290,28 @@ describe("roteamento ambíguo ou inválido", () => {
     const result = await post(TRAFEGO, { text: "direto na etapa" });
     expect(result.body.id).toBe(TRAFEGO);
     expect(commentsOn(TRAFEGO)).toEqual(["direto na etapa"]);
+  });
+
+  it("comentário direto na conversão dispara a regeneração idempotente", async () => {
+    seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
+    const result = await post(CONVERSAO, { text: "gere outro relatório", comment_id: "cid-conversion-01" });
+    expect(result.body.id).toBe(CONVERSAO);
+    await flushAfter();
+    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
+  });
+
+  it("edição e exclusão também reprocessam o card de conversão", async () => {
+    seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
+
+    const edited = await patchComment(CONVERSAO, { index: 0, at: "2026-09-18T10:00:00.000Z", text: "Vendas: 4" });
+    expect(edited.status).toBe(200);
+    await flushAfter();
+    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
+
+    hooks.conversionHook.mockClear();
+    const removed = await deleteComment(CONVERSAO, { index: 0, at: "2026-09-18T10:00:00.000Z" });
+    expect(removed.status).toBe(200);
+    await flushAfter();
+    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
   });
 });

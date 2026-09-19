@@ -17,6 +17,7 @@ import { Document, Page, Text, View, renderToBuffer } from "@react-pdf/renderer"
 import { previousPeriod, type Period } from "@/app/admin/performance/insights";
 import type { PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
+import type { AdaptiveInterpretation } from "@/lib/ai/adaptiveFeedback";
 import type { MetaPost } from "@/lib/windsor";
 import { registerReportFonts } from "./reportFonts";
 import { blockResolver } from "./campaignBlockKpis";
@@ -59,6 +60,8 @@ export type SalesReportInput = {
   /** Série da conversão, semanas anteriores E a atual. */
   history?: HistoryPoint[] | null;
   previews?: Record<string, PreviewAsset>;
+  /** Entendimento auditável do North IA: contexto, precisão e trade-offs. */
+  adaptiveContext?: AdaptiveInterpretation;
   generatedAt: Date;
 };
 
@@ -203,6 +206,28 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null;
 
+  const adaptiveSection = input.adaptiveContext && (
+    input.adaptiveContext.context.length
+    || input.adaptiveContext.tradeoffs.length
+    || input.adaptiveContext.claims.some((claim) => claim.precision !== "exata")
+  ) ? (
+    <Section title="Contexto e leitura do período">
+      {input.adaptiveContext.context.map((item) => (
+        <Text key={`${item.sourceTaskId}:${item.sourceCommentAt}`} style={T.note}>
+          Contexto informado por {item.author}: {item.text}
+        </Text>
+      ))}
+      {input.adaptiveContext.claims.some((claim) => claim.precision !== "exata") ? (
+        <Text style={T.note}>
+          Dados aproximados: os indicadores marcados como aproximados, estimados ou em faixa foram mantidos com essa precisão; comparações evitam precisão artificial.
+        </Text>
+      ) : null}
+      {input.adaptiveContext.tradeoffs.map((tradeoff, index) => (
+        <Text key={`${index}:${tradeoff}`} style={T.note}>Decisão de leitura: {tradeoff}</Text>
+      ))}
+    </Section>
+  ) : null;
+
   return (
     <Document>
       <Page size="A4" style={T.page} wrap>
@@ -216,6 +241,7 @@ function SalesReportDocument(input: SalesReportInput) {
         {focus === "vendas" || focus === "agendamentos" ? <Headline text={analysis.headline} /> : null}
         <HeroFigure value={hero.value} label={hero.label} caption={hero.caption || undefined} delta={hero.delta} />
         <FigureRow items={figures} />
+        {adaptiveSection}
 
         {funnel.stages.length ? (
           <Section title={focus === "seguidores" ? "Do alcance ao perfil" : focus === "midia" ? "Do alcance às conversas" : "Do alcance à venda"}>

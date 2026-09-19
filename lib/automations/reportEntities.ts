@@ -43,6 +43,12 @@ export type TrafficReportRow = {
   finalized_at: string | null;
 };
 
+export type ConversionInterpretationSnapshot = {
+  id: string;
+  scope_key: string;
+  source_fingerprint: string;
+};
+
 const TRAFFIC_COLUMNS = "id,client_id,task_id,occurrence_id,period_from,period_to,revision,snapshot,status,document_id,generated_at,finalized_at";
 
 // ---- puro --------------------------------------------------------------------
@@ -209,6 +215,9 @@ export async function claimConversionReport(
     metrics: Record<string, string>;
     attribution: Attribution;
     parser: string;
+    sourceFingerprint: string;
+    interpretation: Record<string, unknown>;
+    interpretationSnapshotId: string | null;
   },
 ): Promise<{ id: string } | null> {
   const { data, error } = await admin
@@ -221,6 +230,9 @@ export async function claimConversionReport(
       conversion_metrics: input.metrics,
       attribution: input.attribution,
       parser: input.parser,
+      source_fingerprint: input.sourceFingerprint,
+      interpretation: input.interpretation,
+      interpretation_snapshot_id: input.interpretationSnapshotId,
     })
     .select("id")
     .limit(1);
@@ -229,6 +241,50 @@ export async function claimConversionReport(
     throw error;
   }
   return data![0] as { id: string };
+}
+
+/**
+ * Registro append-only do entendimento que antecede a renderização. A mesma
+ * impressão digital pode aparecer em retries, mas nunca ganha outro snapshot.
+ */
+export async function recordConversionInterpretationSnapshot(
+  admin: AdminClient,
+  input: {
+    trafficReportId: string;
+    feedbackTaskId: string;
+    conversionTaskId: string | null;
+    sourceFingerprint: string;
+    interpretation: Record<string, unknown>;
+    metrics: Record<string, string>;
+    parser: string;
+  },
+): Promise<ConversionInterpretationSnapshot> {
+  const scopeKey = `${input.trafficReportId}:${input.feedbackTaskId}`;
+  const { data, error } = await admin
+    .from("conversion_report_snapshots")
+    .insert({
+      traffic_report_id: input.trafficReportId,
+      feedback_task_id: input.feedbackTaskId,
+      conversion_task_id: input.conversionTaskId,
+      scope_key: scopeKey,
+      source_fingerprint: input.sourceFingerprint,
+      interpretation: input.interpretation,
+      conversion_metrics: input.metrics,
+      parser: input.parser,
+    })
+    .select("id,scope_key,source_fingerprint")
+    .limit(1);
+  if (!error) return data![0] as ConversionInterpretationSnapshot;
+  if (!isUniqueViolation(error)) throw error;
+  const { data: existing, error: existingError } = await admin
+    .from("conversion_report_snapshots")
+    .select("id,scope_key,source_fingerprint")
+    .eq("scope_key", scopeKey)
+    .eq("source_fingerprint", input.sourceFingerprint)
+    .limit(1);
+  if (existingError) throw existingError;
+  if (!existing?.[0]) throw error;
+  return existing[0] as ConversionInterpretationSnapshot;
 }
 
 export async function attachConversionDocument(admin: AdminClient, id: string, documentId: string | null): Promise<void> {

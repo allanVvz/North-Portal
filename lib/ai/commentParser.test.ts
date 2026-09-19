@@ -74,6 +74,26 @@ describe("parseFeedbackComment — texto natural", () => {
     expect(second.valoresAnteriores.seguidores).toBe(829);
   });
 
+  it("aceita total anterior e total atual em frases separadas", () => {
+    const r = parseFeedbackComment(
+      "gere outro relatorio considerando periodo anterior com 7953 seguidores e atualmente com 8000 seguidores",
+      TAGS,
+    );
+    expect(r.state).toBe("PARTIAL");
+    expect(r.valores.seguidores).toBe(8000);
+    expect(r.valoresAnteriores.seguidores).toBe(7953);
+    expect(r.seguidoresGanho).toBeNull();
+  });
+
+  it.each([
+    "na semana passada tínhamos 7953 seguidores e agora temos 8000 seguidores",
+    "seguidores: 7953 na semana anterior; atualmente: 8000",
+  ])("aceita variações de snapshot: %s", (text) => {
+    const r = parseFeedbackComment(text, TAGS);
+    expect(r.valores.seguidores).toBe(8000);
+    expect(r.valoresAnteriores.seguidores).toBe(7953);
+  });
+
   it("aceita ganho de seguidores sem confundir com total", () => {
     const r = parseFeedbackComment("Vendas: 2, ganhamos 17 seguidores", TAGS);
     expect(r.valores.seguidores).toBe(17);

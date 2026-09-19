@@ -59,6 +59,22 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
     expect(isPdf(buf)).toBe(true);
   });
 
+  it("inclui contexto, aproximação e trade-off sem quebrar a versão final", async () => {
+    const buf = await renderSalesReportPdf({
+      ...base,
+      vendasTotal: 4,
+      adaptiveContext: {
+        sourceFingerprint: "a".repeat(64),
+        comments: [],
+        claims: [{ metric: "vendas", value: 4, precision: "aproximada", confidence: "baixa", sourceCommentAt: "2026-08-30T10:00:00.000Z", sourceTaskId: "conversao", evidence: "Cerca de 4 vendas" }],
+        context: [{ sourceCommentAt: "2026-08-30T10:00:00.000Z", sourceTaskId: "conversao", author: "Luiza", text: "O foco do período foi a divulgação do evento." }],
+        decision: "Atualizei vendas e mantive os demais dados.",
+        tradeoffs: ["vendas: usei 4 do comentário mais recente em vez de 5; a divergência ficou registrada."],
+      },
+    });
+    expect(isPdf(buf)).toBe(true);
+  });
+
   it("foco em seguidores com histórico não lança", async () => {
     const buf = await renderSalesReportPdf({
       ...base,

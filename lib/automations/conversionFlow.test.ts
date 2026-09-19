@@ -90,8 +90,9 @@ describe("conversão depois do Feedback concluído", () => {
     expect(db.task(OCC)!.status).toBe("revisao");
     expect(db.table("documents")).toHaveLength(1);
     expect(db.table("conversion_reports")).toHaveLength(1);
+    expect(db.table("conversion_report_snapshots")).toHaveLength(1);
     expect(conversaoTexts()).toEqual([
-      expect.stringContaining("Registrei o feedback da semana"),
+      expect.stringContaining("North IA consolidou o período"),
       expect.stringContaining("Relatório de vendas gerado e anexado"),
     ]);
     const occPayload = db.task(OCC)!.payload as Row;
@@ -141,6 +142,28 @@ describe("conversão depois do Feedback concluído", () => {
 
     expect(conversaoTexts()).toContain("Confira o valor da receita");
     expect(conversaoTexts().some((text) => text.includes("Relatório de vendas gerado e anexado"))).toBe(true);
+  });
+
+  it("comentário de revisão cria uma versão nova com o contexto consolidado", async () => {
+    await processConversionFeedback(db.asAdmin(), OCC);
+    await db.rpc("append_task_comment_idempotent", {
+      p_task_id: CONVERSAO,
+      p_author_id: "u1",
+      p_text: "Corrigindo: Vendas: 4",
+      p_comment_id: "human-revision-4",
+    });
+    hooks.extract.mockImplementation(async (text: string) => text.includes("Vendas: 4")
+      ? { valores: { vendas: 4, agendamentos: null, receita: null, seguidores: null }, linhas: [], note: "parser" }
+      : { valores: { vendas: 5, agendamentos: 8, receita: null, seguidores: null }, linhas: [], note: "parser" });
+
+    await processConversionFeedback(db.asAdmin(), OCC);
+
+    expect(hooks.render).toHaveBeenCalledTimes(2);
+    expect(db.table("documents")).toHaveLength(2);
+    expect(db.table("conversion_reports")).toHaveLength(2);
+    expect(db.table("conversion_report_snapshots")).toHaveLength(2);
+    expect(db.task(CONVERSAO)!.status).toBe("revisao");
+    expect(conversaoTexts().some((text) => text.includes("North IA consolidou"))).toBe(true);
   });
 
   it("falha ao gerar o PDF: a reivindicação é liberada (o retry funciona) e o erro fica visível", async () => {

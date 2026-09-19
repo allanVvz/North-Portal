@@ -25,7 +25,7 @@ describe("figura principal por modo", () => {
   it("seguidores: o ganho grande, a frase de crescimento embaixo", () => {
     const h = heroFor(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 1251 }, media: baitaMedia, followersGain: 37, prevFollowersTotal: 1214 }));
     expect(h.value).toBe("+37");
-    expect(h.caption).toBe("O perfil passou de 1.214 para 1.251 e cresceu 3,05%.");
+    expect(h.caption).toBe("Total do perfil: 1.251. Diferença para a semana anterior: +37 (+3,05%), quando eram 1.214.");
   });
 
   it("seguidores na primeira semana: total, sem ganho inventado", () => {
@@ -47,6 +47,18 @@ describe("figura principal por modo", () => {
     expect(h.value).toBe("+47");
     expect(h.caption).toContain("−43");
     expect(h.caption).toContain("−47,78%");
+  });
+
+  it("total de seguidores em relatório comercial mantém a comparação explícita", () => {
+    const f = supportFigures(ctx({
+      cur: { ...nada, vendas: 5, seguidores: 8000 },
+      followersGain: 47,
+      prevFollowersTotal: 7953,
+    }));
+    const followers = f.find((item) => item.label === "Seguidores no perfil");
+    expect(followers?.value).toBe("8.000");
+    expect(followers?.hint).toContain("+47");
+    expect(followers?.hint).toContain("+0,59%");
   });
 
   it("vendas com receita: receita é a figura", () => {

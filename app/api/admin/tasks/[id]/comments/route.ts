@@ -6,7 +6,7 @@ import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleTrafficRevisionComment } from "@/lib/automations/run";
-import { recordFeedbackMetricComment } from "@/lib/automations/conversionFlow";
+import { handleConversionRevisionComment, recordFeedbackMetricComment } from "@/lib/automations/conversionFlow";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
@@ -15,6 +15,20 @@ import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
 export const runtime = "nodejs";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function scheduleCommentAutomation(taskId: string) {
+  after(async () => {
+    const admin = createAdminClient();
+    try {
+      await handleTrafficRevisionComment(admin, taskId);
+      await recordFeedbackMetricComment(admin, taskId);
+      await handleConversionRevisionComment(admin, taskId);
+    } catch (hookError) {
+      console.error("comment hook failed", { taskId, hookError });
+      await markTaskParada(admin, taskId, `Falha ao processar o comentário: ${errorMessage(hookError)}`);
+    }
+  });
+}
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -59,16 +73,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // aparece na hora e a nova versão chega como um comentário da automação.
     // Uma falha aqui não pode se perder calada: vira o mesmo aviso que as
     // automações usam — a etapa `parada` com um comentário explicando.
-    const admin = createAdminClient();
-    after(async () => {
-      try {
-        await handleTrafficRevisionComment(admin, targetId);
-        await recordFeedbackMetricComment(admin, targetId);
-      } catch (hookError) {
-        console.error("comment hook failed", { taskId: targetId, hookError });
-        await markTaskParada(admin, targetId, `Falha ao processar o comentário: ${errorMessage(hookError)}`);
-      }
-    });
+    scheduleCommentAutomation(targetId);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }
@@ -83,7 +88,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID inválido.");
     const { index, at, text } = taskCommentEditSchema.parse(await request.json());
-    return NextResponse.json(await editTaskComment(id, index, at, text));
+    const task = await editTaskComment(id, index, at, text);
+    scheduleCommentAutomation(task.id);
+    return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }
 
@@ -93,6 +100,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID inválido.");
     const { index, at } = taskCommentDeleteSchema.parse(await request.json());
-    return NextResponse.json(await deleteTaskComment(id, index, at));
+    const task = await deleteTaskComment(id, index, at);
+    scheduleCommentAutomation(task.id);
+    return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }

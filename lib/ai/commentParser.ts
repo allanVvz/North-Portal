@@ -116,6 +116,20 @@ function followerGainComparison(text: string): { previous: number; current: numb
   return current === undefined ? null : { previous: parseAmount(previous[1]) ?? 0, current };
 }
 
+/** Snapshot do total do perfil em linguagem natural: "período anterior com
+ * 7953 seguidores e atualmente com 8000 seguidores". Isso é diferente de
+ * "47 seguidores novos": aqui os dois números são totais acumulados e o
+ * ganho deve ser calculado pela diferença entre eles. */
+function followerSnapshotComparison(text: string): { previous: number; current: number } | null {
+  const base = fold(text);
+  const match = /(?:periodo|semana)\s+(?:anterior|passada)[\s\S]{0,80}?(?:com\s+)?([\d.,]+)\s+seguidores?\b[\s\S]{0,80}?(?:atualmente|agora|neste\s+periodo|no\s+periodo(?:\s+atual)?)[\s\S]{0,40}?(?:com\s+)?([\d.,]+)\s+seguidores?\b/i.exec(base)
+    ?? /\bseguidores?\b\s*[:=]\s*([\d.,]+)[\s\S]{0,50}?(?:na\s+)?(?:periodo|semana)\s+(?:anterior|passada)[\s\S]{0,50}?(?:atualmente|agora|neste\s+periodo|no\s+periodo(?:\s+atual)?)[\s:=-]*([\d.,]+)/i.exec(base);
+  if (!match) return null;
+  const previous = parseAmount(match[1]);
+  const current = parseAmount(match[2]);
+  return previous === null || current === null ? null : { previous, current };
+}
+
 function readChunk(original: string, tags: string[], acc: Acc) {
   const base = fold(original);
   let rest = base;
@@ -204,6 +218,7 @@ function readChunk(original: string, tags: string[], acc: Acc) {
 export function parseFeedbackComment(text: string, tags: string[]): ParsedComment {
   const acc: Acc = { found: new Map(), previousFound: new Map(), problemas: [], precisaIa: false, seguidoresGanho: null, seguidoresGanhoAnterior: null };
   const gainComparison = followerGainComparison(text);
+  const snapshotComparison = followerSnapshotComparison(text);
   if (gainComparison && tags.includes("seguidores")) {
     acc.seguidoresGanho = gainComparison.current;
     acc.seguidoresGanhoAnterior = gainComparison.previous;
@@ -221,6 +236,14 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
     for (const chunk of line.split(/;|,\s+|\.\s+|\s+e\s+/i)) {
       if (chunk.trim()) readChunk(chunk, tags, acc);
     }
+  }
+
+  // A snapshot comparison contains two valid values for the same metric. The
+  // generic reader sees both before it knows their roles, so normalize it
+  // before the ambiguity check below.
+  if (snapshotComparison && tags.includes("seguidores")) {
+    acc.found.set("seguidores", [snapshotComparison.current]);
+    acc.previousFound.set("seguidores", [snapshotComparison.previous]);
   }
 
   const valores: Record<string, number | null> = Object.fromEntries(tags.map((t) => [t, null]));

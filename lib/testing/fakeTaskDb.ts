@@ -151,6 +151,9 @@ class Query implements PromiseLike<Result> {
 
     if (this.mode === "update") {
       const targets = matching();
+      if (this.table === "conversion_report_snapshots" && targets.length) {
+        return { data: null, error: { code: "23514", message: "conversion_report_snapshots are append-only" } };
+      }
       // Trigger tasks_reject_manual_rollup_status: uma escrita DIRETA de status em
       // Entrega, Plano ou molde recorrente é recusada (o status deles é projetado).
       // O statement falha inteiro, como no Postgres.
@@ -169,6 +172,9 @@ class Query implements PromiseLike<Result> {
 
     if (this.mode === "delete") {
       const gone = matching();
+      if (this.table === "conversion_report_snapshots" && gone.length) {
+        return { data: null, error: { code: "23514", message: "conversion_report_snapshots are append-only" } };
+      }
       this.db.tables[this.table] = rows.filter((row) => !gone.includes(row));
       return { data: null, error: null };
     }
@@ -227,8 +233,12 @@ export class FakeTaskDb {
     if (table === "conversion_reports" && rows.some((existing) =>
       existing.traffic_report_id === row.traffic_report_id
       && existing.feedback_task_id === row.feedback_task_id
-      && (existing.source_comment_at ?? null) === (row.source_comment_at ?? null))) {
-      return "duplicate key (conversion_reports traffic_report_id, feedback_task_id, source_comment_at)";
+      && String(existing.source_fingerprint ?? existing.source_comment_at ?? "") === String(row.source_fingerprint ?? row.source_comment_at ?? ""))) {
+      return "duplicate key (conversion_reports traffic_report_id, feedback_task_id, source_fingerprint)";
+    }
+    if (table === "conversion_report_snapshots" && rows.some((existing) =>
+      existing.scope_key === row.scope_key && existing.source_fingerprint === row.source_fingerprint)) {
+      return "duplicate key (conversion_report_snapshots scope_key, source_fingerprint)";
     }
     return null;
   }

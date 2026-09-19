@@ -46,6 +46,18 @@ const none: Delta = { pct: null, tone: "neutral", text: "sem semana anterior" };
 const up = (c: number | null, p: number | null | undefined) => (p === undefined || p === null ? none : deltaOf(c, p, "higher_is_better"));
 const down = (c: number | null, p: number | null | undefined) => (p === undefined || p === null ? none : deltaOf(c, p, "lower_is_better"));
 
+function signedPct(value: number): string {
+  return `${value >= 0 ? "+" : "−"}${pctText(value)}`;
+}
+
+function followerTotalHint(current: number | null, previous: number | null): string | undefined {
+  if (current === null) return undefined;
+  if (previous === null) return `${num(current)} no perfil; semana anterior não informada`;
+  const difference = current - previous;
+  const percentage = pctChange(current, previous);
+  return `era ${num(previous)} · ${signed(difference)} (${percentage === null ? "sem base percentual" : signedPct(percentage)}) vs semana anterior`;
+}
+
 // ---- figura principal ---------------------------------------------------------------
 
 export type Hero = { label: string; value: string; caption: string; delta: Delta | null };
@@ -73,11 +85,11 @@ export function heroFor(x: FocusContext): Hero {
   }
   if (x.kind === "seguidores") {
     if (x.followersGain !== null && x.cur.seguidores !== null && x.prevFollowersTotal !== null) {
-      const growth = pctChange(cur.seguidores, x.prevFollowersTotal) ?? 0;
+      const growth = pctChange(cur.seguidores, x.prevFollowersTotal);
       return {
-        label: "seguidores na semana",
+        label: "crescimento de seguidores",
         value: signed(x.followersGain),
-        caption: `O perfil passou de ${num(x.prevFollowersTotal)} para ${num(cur.seguidores)} e cresceu ${pctText(growth)}.`,
+        caption: `Total do perfil: ${num(cur.seguidores)}. Diferença para a semana anterior: ${signed(x.followersGain)} (${growth === null ? "sem base percentual" : signedPct(growth)}), quando eram ${num(x.prevFollowersTotal)}.`,
         delta: null,
       };
     }
@@ -113,13 +125,21 @@ export function supportFigures(x: FocusContext): Figure[] {
       const pc = prevMedia?.spend && prev?.vendas ? prevMedia.spend / prev.vendas : null;
       out.push({ label: "Custo de mídia por venda", value: money(c), delta: pc !== null ? down(c, pc) : null });
     }
-    if (x.followersGain !== null) out.push({ label: "Seguidores novos", value: signed(x.followersGain), delta: null, hint: `${num(cur.seguidores)} no perfil` });
+    if (cur.seguidores !== null) {
+      out.push({ label: "Seguidores no perfil", value: num(cur.seguidores), delta: null, hint: followerTotalHint(cur.seguidores, x.prevFollowersTotal) });
+    } else if (x.followersGain !== null) {
+      out.push({ label: "Seguidores novos", value: signed(x.followersGain), delta: null, hint: x.prevFollowersGain === null ? "total do perfil não informado" : `eram ${num(x.prevFollowersGain)} na semana anterior` });
+    }
   } else if (x.kind === "agendamentos") {
     if (media.conversations !== null) out.push({ label: "Conversas", value: num(media.conversations), delta: prevMedia ? up(media.conversations, prevMedia.conversations) : null });
     if (media.spend && cur.agendamentos) out.push({ label: "Custo de mídia por agendamento", value: money(media.spend / cur.agendamentos), delta: null });
-    if (x.followersGain !== null) out.push({ label: "Seguidores novos", value: signed(x.followersGain), delta: null });
+    if (cur.seguidores !== null) {
+      out.push({ label: "Seguidores no perfil", value: num(cur.seguidores), delta: null, hint: followerTotalHint(cur.seguidores, x.prevFollowersTotal) });
+    } else if (x.followersGain !== null) {
+      out.push({ label: "Seguidores novos", value: signed(x.followersGain), delta: null, hint: x.prevFollowersGain === null ? "total do perfil não informado" : `eram ${num(x.prevFollowersGain)} na semana anterior` });
+    }
   } else if (x.kind === "seguidores") {
-    if (x.followersGain !== null && cur.seguidores !== null) out.push({ label: "Seguidores no perfil", value: num(cur.seguidores), delta: null, hint: `${num(x.prevFollowersTotal)} na semana anterior` });
+    if (cur.seguidores !== null) out.push({ label: "Seguidores no perfil", value: num(cur.seguidores), delta: null, hint: followerTotalHint(cur.seguidores, x.prevFollowersTotal) });
     if (media.profileVisits !== null) out.push({ label: "Visitas ao perfil", value: num(media.profileVisits), delta: prevMedia ? up(media.profileVisits, prevMedia.profileVisits) : null });
     if (media.spend && media.profileVisits) {
       const c = media.spend / media.profileVisits;

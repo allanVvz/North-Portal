@@ -13,13 +13,14 @@
 import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
-import { commentsOf, type TaskComment } from "@/lib/comments";
+import { commentsOf } from "@/lib/comments";
+import { consolidateAdaptiveFeedback, type AdaptiveMetricExtract, type SourcedComment } from "@/lib/ai/adaptiveFeedback";
 import { addDaysIso, agencyToday } from "@/lib/time/agency";
 import { recurrenceStopped } from "@/lib/recurrenceState";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } from "@/lib/automationWorkflow";
 import { workflowByVersionId, workflowStepByKey } from "@/lib/workflows";
 import type { Period } from "@/app/admin/performance/insights";
-import { extractMetrics, type ConversionRow, type MetricExtract } from "@/lib/ai/extractMetrics";
+import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import { feedbackTemplate } from "@/lib/ai/commentParser";
 import { CONVERSION_METRICS_DEFAULT, metricTagLabel, needsRichExtraction } from "@/lib/metricTags";
 import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
@@ -40,8 +41,7 @@ import {
   currentTrafficReport,
   finalizationMoment,
   finalizeTrafficReport,
-  isAfter,
-  laterOf,
+  recordConversionInterpretationSnapshot,
   releaseConversionReport,
   trafficReportIsFinal,
   type TrafficReportRow,
@@ -72,8 +72,7 @@ const FEEDBACK_DESCRIPTION = [
 ].join("\n\n");
 
 type OccPayload = Record<string, unknown> & {
-  feedback_source_at?: string;
-  sales_report_generated_at?: string;
+  adaptive_source_fingerprint?: string;
 };
 
 function nowIso() {
@@ -187,15 +186,12 @@ function metricsParaBanco(valores: Record<string, number | null>, tags: string[]
   );
 }
 
-/** O comentário humano mais recente, em qualquer um dos cards, mais novo que `since`. */
-function latestHumanComment(cards: TaskRecord[], since: string | null): (TaskComment & { taskId: string }) | null {
-  const all = cards.flatMap((c) => commentsOf(c.payload).map((cm) => ({ ...cm, taskId: c.id })));
-  // Instantes, não strings: `at` vem em dois formatos (RPC e JS) e comparar
-  // como texto ordena errado entre eles.
-  const human = all
-    .filter((c) => !AUTOMATION_AUTHORS.has(c.author) && isAfter(c.at, since))
+/** Comentários humanos dos dois pontos de entrada, em ordem cronológica. */
+function humanComments(cards: TaskRecord[]): SourcedComment[] {
+  return cards
+    .flatMap((card) => commentsOf(card.payload).map((comment) => ({ ...comment, taskId: card.id })))
+    .filter((comment) => !AUTOMATION_AUTHORS.has(comment.author))
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
-  return human.length ? human[human.length - 1] : null;
 }
 
 async function openOccurrences(admin: AdminClient, moldId: string): Promise<TaskRecord[]> {
@@ -295,11 +291,12 @@ async function generateSalesReport(
   config: AutomationConfigRow,
   occ: TaskRecord,
   card2: TaskRecord,
-  ext: MetricExtract,
+  ext: AdaptiveMetricExtract,
   traffic: TrafficReportRow,
   cadence: RecurringCadence,
   period: Period,
   sourceCommentAt: string | null,
+  sourceFingerprint: string,
 ): Promise<string | null> {
   const clientId = occ.client_id;
   if (!clientId) throw new Error("A ocorrência não pertence a nenhum cliente.");
@@ -342,16 +339,17 @@ async function generateSalesReport(
     // Ganho e total do perfil são grandezas diferentes. Quando o comentário
     // diz "47 seguidores novos", não trate 47 como total e não o subtraia da
     // base anterior; o ganho vai explicitamente para a figura de conversão.
-    seguidores: ext.seguidoresGanho == null && typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
+    seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
     seguidoresNovos: ext.seguidoresGanho ?? null,
     prevSeguidoresNovos: ext.seguidoresGanhoAnterior ?? effectivePrevTotals?.seguidoresNovos ?? null,
     prevTotals: effectivePrevTotals,
     history: historyWithFollowers,
+    adaptiveContext: ext.interpretation,
     generatedAt: new Date(),
   });
 
   // Nome versionado: um comentário corrigido regera o PDF sem colidir no storage.
-  const version = sourceCommentAt ? sourceCommentAt.replace(/\D/g, "").slice(-14) : "initial";
+  const version = sourceFingerprint.slice(0, 12) || (sourceCommentAt ? sourceCommentAt.replace(/\D/g, "").slice(-14) : "initial");
   const fileName = `relatorio-vendas-${period.to}-${version}.pdf`;
   // A claim may be retried after a crash between document creation and the
   // final task update. Reuse that persisted artifact instead of creating a
@@ -435,17 +433,17 @@ async function processOccurrence(
     traffic = await finalizeTrafficReport(admin, traffic, finalizationMoment(traffic, card1));
   }
 
-  // Só o card Feedback é uma resposta de métricas. O card de tráfego recebe
-  // instruções editoriais e é processado por `handleTrafficRevisionComment`.
-  const since = laterOf(traffic.finalized_at, occPayload.feedback_source_at);
-  const human = latestHumanComment([card2], since);
-  // Sem comentário posterior ao último relatório, um retry do hook/cron não
-  // cria uma nova reivindicação nem um PDF vazio.
-  if (!human && occPayload.sales_report_generated_at) return false;
-
-  const ext: MetricExtract = human
-    ? await extractMetrics(human.text, tags)
-    : { valores: Object.fromEntries(tags.map((tag) => [tag, null])), linhas: [], note: "feedback aprovado sem métricas" };
+  // Feedback e Revisão são uma conversa única para o Relatório 2. Uma correção
+  // parcial no card de conversão atualiza apenas o que foi citado e mantém os
+  // demais dados consolidados do card de Feedback.
+  let card3 = await linkedCardForStep(admin, occ, CONVERSION_REPORT_STEP_KEY);
+  if (!card3) return false;
+  // Uma aprovação sem comentário humano no próprio relatório é terminal. Um
+  // revisor que efetivamente escreva uma correção continua podendo abrir uma
+  // nova versão, cujo fingerprint não colide com a anterior.
+  if (card3.completed_at && !humanComments([card3]).length) return false;
+  const ext = await consolidateAdaptiveFeedback(humanComments([card2, card3]), tags);
+  if (occPayload.adaptive_source_fingerprint === ext.interpretation.sourceFingerprint) return false;
 
   // O período REPORTADO (não a data em que a automação rodou) é o eixo da série
   // temporal em `task_metrics` — é o que deixa "seguidores ao longo do tempo" e
@@ -462,7 +460,9 @@ async function processOccurrence(
   // — o mesmo modo e a mesma cobertura de atribuição que o PDF desenha.
   const metrics = metricsParaBanco(ext.valores, tags);
   if (ext.seguidoresGanho != null) {
-    delete metrics.seguidores;
+    // Ganho e snapshot do perfil podem coexistir: "47 novos" seguido de
+    // "7.953 para 8.000" preserva tanto o total quanto o ritmo semanal.
+    if (ext.valores.seguidores == null) delete metrics.seguidores;
     metrics.seguidores_novos = String(ext.seguidoresGanho);
     if (ext.seguidoresGanhoAnterior != null) metrics.seguidores_novos_anterior = String(ext.seguidoresGanhoAnterior);
   }
@@ -471,15 +471,22 @@ async function processOccurrence(
     agendamentos: ext.valores.agendamentos ?? null,
     receita: ext.valores.receita ?? null,
     seguidores: ext.valores.seguidores ?? null,
+    seguidoresGanho: ext.seguidoresGanho ?? null,
   };
   const mode = conversionModeOf(informed, ext.linhas);
-  const sourceCommentAt = human?.at ?? null;
+  const sourceCommentAt = ext.sourceCommentAt;
 
-  // Uma conversão já concluída ou entregue para aprovação não é regerada por
-  // esta execução: reabri-la desfaria uma decisão humana mais recente do que o
-  // comentário que a motivou.
-  const existingConversion = await linkedCardForStep(admin, occ, CONVERSION_REPORT_STEP_KEY);
-  if (existingConversion && (existingConversion.completed_at || existingConversion.status === "aprovacao")) return false;
+  // A interpretação é gravada antes da renderização. Assim uma falha do PDF
+  // não apaga a decisão do agente nem as evidências que a sustentaram.
+  const snapshot = await recordConversionInterpretationSnapshot(admin, {
+    trafficReportId: traffic.id,
+    feedbackTaskId: card2.id,
+    conversionTaskId: card3.id,
+    sourceFingerprint: ext.interpretation.sourceFingerprint,
+    interpretation: ext.interpretation as unknown as Record<string, unknown>,
+    metrics,
+    parser: ext.note,
+  });
 
   // Reivindica ANTES de qualquer escrita, com chave única por (etapa de
   // feedback, revisão do tráfego, comentário): retry de worker, cron em dobro ou
@@ -493,10 +500,13 @@ async function processOccurrence(
     metrics,
     attribution: attributionOf(informed.vendas, ext.linhas),
     parser: ext.note,
+    sourceFingerprint: ext.interpretation.sourceFingerprint,
+    interpretation: ext.interpretation as unknown as Record<string, unknown>,
+    interpretationSnapshotId: snapshot.id,
   });
   if (!claim) return false;
 
-  const occurrenceKey = `${occ.id}:${sourceCommentAt ?? "approved"}`;
+  const occurrenceKey = `${occ.id}:${ext.interpretation.sourceFingerprint}`;
   const { data: runRows, error: runError } = await admin.rpc("claim_automation_run", {
     p_config_id: config.id,
     p_occurrence_key: occurrenceKey,
@@ -546,7 +556,7 @@ async function processOccurrence(
         taskId: card2.id,
         periodFrom: period.from,
         periodTo: period.to,
-        current: ext.seguidoresGanho == null ? (ext.valores.seguidores ?? null) : null,
+        current: ext.valores.seguidores ?? null,
         previous: ext.valoresAnteriores?.seguidores ?? null,
         sourceCommentAt,
       });
@@ -556,9 +566,15 @@ async function processOccurrence(
     const ganhoComparativo = ext.seguidoresGanho != null && ext.seguidoresGanhoAnterior != null
       ? ` Comparação de seguidores novos: ${ext.seguidoresGanho} contra ${ext.seguidoresGanhoAnterior} (${ext.seguidoresGanho - ext.seguidoresGanhoAnterior >= 0 ? "+" : ""}${ext.seguidoresGanho - ext.seguidoresGanhoAnterior}; ${ext.seguidoresGanhoAnterior === 0 ? "sem base percentual" : `${((ext.seguidoresGanho - ext.seguidoresGanhoAnterior) / ext.seguidoresGanhoAnterior * 100).toFixed(2).replace(".", ",")}%`}).`
       : "";
-    const resumo = human
-      ? `Registrei o feedback da semana — ${resumoDe(ext.valores, tags)}.${ganhoComparativo}${ext.problemas?.length ? ` Deixei de fora: ${ext.problemas.join("; ")}.` : ""}`
-      : `Feedback aprovado sem métricas informadas; o relatório registra os campos como não informados.`;
+    const precisions = [...new Set(ext.interpretation.claims.map((claim) => claim.precision).filter((precision) => precision !== "exata"))];
+    const contextNote = ext.interpretation.context.length
+      ? ` Contexto considerado: ${ext.interpretation.context.map((item) => item.text).join(" · ")}.`
+      : "";
+    const tradeoffNote = ext.interpretation.tradeoffs.length
+      ? ` Decisão e trade-off: ${ext.interpretation.tradeoffs.join(" ")}`
+      : "";
+    const decision = ext.interpretation.decision.replace(/[.]+$/, "");
+    const resumo = `North IA consolidou o período — ${resumoDe(ext.valores, tags)}.${ganhoComparativo} ${decision}.${precisions.length ? ` Valores ${precisions.join(" e ")} foram mantidos com essa etiqueta no relatório.` : ""}${contextNote}${tradeoffNote}${ext.problemas?.length ? ` Pontos não interpretados: ${ext.problemas.join("; ")}.` : ""}`;
 
     // Pai: só os marcadores estruturais (sem comentário — invisível). O status do
     // pai NUNCA é escrito aqui: ele é a projeção da etapa aberta (o banco recusa
@@ -568,29 +584,26 @@ async function processOccurrence(
     const marked = await updateTaskPayload(admin, occ.id, { patch: { feedback_source_at: sourceAt } });
     occ = marked?.task ?? occ;
 
-    // O relatório de conversão é uma etapa própria; Feedback é só a coleta.
-    let card3 = await linkedCardForStep(admin, occ, CONVERSION_REPORT_STEP_KEY);
-    if (!card3) throw new Error("A etapa Relatório de conversão não foi materializada.");
     conversionTaskId = card3.id;
     await updateTaskPayload(admin, card3.id, {
       text: resumo,
       commentId: automationCommentId("conversion-summary", card3.id, claim.id),
     });
-    // Compare-and-set: uma decisão humana mais recente (aprovado/aprovação) não é
-    // desfeita por esta execução.
     const started = await transitionTaskStatus(admin, card3.id, {
       to: "em_producao",
-      from: ["backlog", "parada", "em_producao", "revisao"],
+      from: ["backlog", "parada", "em_producao", "revisao", "aprovado", "aprovacao"],
       extra: { assignee: AUTOMATION_ASSIGNEE },
     });
     if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt);
+    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, ext.interpretation.sourceFingerprint);
     await attachConversionDocument(admin, claim.id, documentId);
     // A Entrega passa a Revisão sozinha, projetada desta etapa.
     await transitionTaskStatus(admin, card3.id, { to: "revisao", from: ["em_producao"] });
 
-    await updateTaskPayload(admin, occ.id, { patch: { sales_report_generated_at: nowIso() } });
+    await updateTaskPayload(admin, occ.id, {
+      patch: { sales_report_generated_at: nowIso(), adaptive_source_fingerprint: ext.interpretation.sourceFingerprint },
+    });
   } catch (error) {
     // Sem isto a reivindicação ficaria órfã e bloquearia o retry do mesmo
     // comentário para sempre.
@@ -687,6 +700,23 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
   }
 }
 
+/** Comentário direto na etapa de conversão pede uma nova versão do PDF.
+ * Feedback continua sendo a fonte das métricas; esta etapa só reaproveita o
+ * comentário editorial já escrito no relatório para disparar o mesmo fluxo
+ * idempotente do cron, sem duplicar documento nem exigir aprovação novamente. */
+export async function handleConversionRevisionComment(admin: AdminClient, taskId: string): Promise<void> {
+  const card = await getAdminTask(admin, taskId);
+  if (!card || card.subtype !== CONVERSION_REPORT_STEP_KEY) return;
+  const { data, error } = await admin.from("task_links")
+    .select("parent_id")
+    .eq("child_id", taskId)
+    .eq("relation_kind", "workflow_step")
+    .limit(1);
+  if (error) throw error;
+  const occurrenceId = (data?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (occurrenceId) await processConversionFeedback(admin, occurrenceId);
+}
+
 /**
  * Comentários de Feedback alimentam a série temporal imediatamente, inclusive
  * se a etapa falhar depois. Eles não aprovam o card: aprovar ou devolver para
@@ -710,7 +740,7 @@ export async function feedbackMetricApprovalProblem(admin: AdminClient, taskId: 
   if (!config) return "A automação de relatório de conversão não está ativa.";
   const comment = [...commentsOf(card.payload)].reverse().find((item) => !AUTOMATION_AUTHORS.has(item.author));
   if (!comment) return `Antes de aprovar, informe pelo menos uma métrica. ${pedidoDe(tagsOf(config))}`;
-  const parsed = await extractMetrics(comment.text, tagsOf(config));
+  const parsed = await consolidateAdaptiveFeedback(humanComments([card]), tagsOf(config));
   const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0 || parsed.seguidoresGanho != null;
   return hasMetric ? null : `Não consegui identificar uma métrica no último comentário. ${pedidoDe(tagsOf(config))}`;
 }
@@ -733,7 +763,7 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
   if (!config) return;
   const comment = [...commentsOf(card.payload)].reverse().find((item) => !AUTOMATION_AUTHORS.has(item.author));
   if (!comment) return;
-  const parsed = await extractMetrics(comment.text, tagsOf(config));
+  const parsed = await consolidateAdaptiveFeedback(humanComments([card]), tagsOf(config));
   const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0;
   if (!hasMetric) {
     const marker = (card.payload as Record<string, unknown> | null)?.feedback_format_warned_for;
@@ -785,9 +815,9 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
     taskId: card.id,
     periodFrom: period.from,
     periodTo: period.to,
-    current: parsed.seguidoresGanho == null ? (parsed.valores.seguidores ?? null) : null,
+    current: parsed.valores.seguidores ?? null,
     previous: parsed.valoresAnteriores?.seguidores ?? null,
-    sourceCommentAt: comment.at,
+    sourceCommentAt: parsed.sourceCommentAt ?? comment.at,
   });
 
   // Feedback vÃ¡lido Ã© a decisÃ£o do revisor: sai de Entrada e fica publicado
