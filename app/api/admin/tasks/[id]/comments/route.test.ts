@@ -16,6 +16,9 @@ const hooks = vi.hoisted(() => ({
   trafficHook: vi.fn(),
   feedbackHook: vi.fn(),
   conversionHook: vi.fn(),
+  visualClarification: vi.fn(),
+  visualResolved: vi.fn(),
+  visualDecision: vi.fn((): { kind: string; instruction?: string; question?: string } => ({ kind: "clear", instruction: "" })),
   markParada: vi.fn(),
   afterQueue: [] as Array<() => Promise<void>>,
 }));
@@ -51,7 +54,22 @@ vi.mock("@/lib/notifications", () => ({
   taskCommentedMessage: () => "comentou",
 }));
 vi.mock("@/lib/automations/run", () => ({ handleTrafficRevisionComment: hooks.trafficHook }));
-vi.mock("@/lib/automations/conversionFlow", () => ({ recordFeedbackMetricComment: hooks.feedbackHook, handleConversionRevisionComment: hooks.conversionHook }));
+vi.mock("@/lib/automations/conversionFlow", () => ({
+  recordFeedbackMetricComment: hooks.feedbackHook,
+  handleConversionRevisionComment: hooks.conversionHook,
+  requestVisualClarification: hooks.visualClarification,
+  markVisualClarificationResolved: hooks.visualResolved,
+  classifyVisualComment: hooks.visualDecision,
+  visualRequestFromText: (text: string, sourceCommentAt: string | null = null) => ({
+    target: /funil/i.test(text) ? "funnel" : /tabela/i.test(text) ? "table" : /anúncio|mídia|gráfico/i.test(text) ? "ads" : "first_page",
+    problem: /larg|estica|amplo/i.test(text) ? "too_wide" : /sobrepos|encosta/i.test(text) ? "overlap" : "other",
+    instruction: text,
+    sourceCommentAt,
+    needsClarification: false,
+    clarification: null,
+  }),
+  requestVisualDetailClarification: hooks.visualClarification,
+}));
 vi.mock("@/lib/automations/errorHandling", () => ({ markTaskParada: hooks.markParada }));
 
 import { DELETE, PATCH, POST } from "./route";
@@ -297,7 +315,17 @@ describe("roteamento ambíguo ou inválido", () => {
     const result = await post(CONVERSAO, { text: "gere outro relatório", comment_id: "cid-conversion-01" });
     expect(result.body.id).toBe(CONVERSAO);
     await flushAfter();
-    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
+    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO, expect.objectContaining({ instruction: "gere outro relatório" }));
+  });
+
+  it("pedido visual ambíguo pergunta o ponto exato e não regenera", async () => {
+    hooks.visualDecision.mockReturnValue({ kind: "ambiguous", question: "onde exatamente está sobrepondo?" });
+    seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
+    const result = await post(CONVERSAO, { text: "o pdf está feio", comment_id: "cid-visual-ambiguous" });
+    expect(result.status).toBe(200);
+    await flushAfter();
+    expect(hooks.visualClarification).toHaveBeenCalledWith(hooks.db, CONVERSAO, expect.objectContaining({ text: "o pdf está feio" }));
+    expect(hooks.conversionHook).not.toHaveBeenCalled();
   });
 
   it("edição e exclusão também reprocessam o card de conversão", async () => {

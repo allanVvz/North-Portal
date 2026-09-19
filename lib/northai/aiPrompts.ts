@@ -1,5 +1,5 @@
 import { aiComplete } from "@/lib/ai/complete";
-import { layoutNarrativeSchema, layoutPlanSchema, northAIContextSchema, type LayoutPlan, type NorthAIContext } from "./aiContracts";
+import { layoutNarrativeSchema, layoutPlanSchema, northAIContextSchema, visualRequestSchema, type LayoutPlan, type NorthAIContext, type VisualRequest } from "./aiContracts";
 
 export type StructuredPrompt = { system: string; user: string; maxTokens: number; model?: string };
 
@@ -13,11 +13,27 @@ export function buildLayoutPlanPrompt(input: NorthAIContext, document: "ads" | "
       "NorthAI já forneceu os fatos; escolha hierarquia, ordem e densidade, sem alterar valores.",
       "Use apenas fatos presentes no contexto; null significa não informado e não pode virar zero.",
       "Não invente causalidade, taxas ou métricas. Respeite reports.hiddenFields.",
-      `${JSON_RULE} O objeto deve conter document, title, period, sections, narrative, hiddenFields, creativeCards e narrativeLayout.`,
+      "Para o funil, prefira largura moderada, labels abaixo do bloco e nunca estique o último nível até a largura da página.",
+      `${JSON_RULE} O objeto deve conter document, title, period, sections, narrative, hiddenFields, creativeCards, funnel e narrativeLayout.`,
     ].join(" "),
     user: JSON.stringify({ document, context }),
     maxTokens: 3000,
     model: process.env.DASHBOARD_ARCHITECT_MODEL ?? undefined,
+  };
+}
+
+export function buildVisualRequestPrompt(input: NorthAIContext): StructuredPrompt {
+  const context = northAIContextSchema.parse(input);
+  return {
+    system: [
+      "Você é o NorthAI, classificador de pedidos de melhoria de relatório.",
+      "Leia somente os comentários e o contexto factual fornecidos; não leia PDF nem imagem.",
+      "Classifique o último pedido visual. Se faltarem local ou tipo de correção, marque needsClarification=true e escolha uma pergunta curta.",
+      `${JSON_RULE} Retorne {"target":"funnel|narrative|table|first_page|ads|unknown","problem":"overlap|too_wide|too_narrow|too_much_padding|wrong_order|repetition|other","instruction":"...","sourceCommentAt":"... ou null","needsClarification":true|false,"clarification":"where_overlap|what_to_improve|more_changes ou null"}.`,
+    ].join(" "),
+    user: JSON.stringify({ context }),
+    maxTokens: 900,
+    model: process.env.NORTHAI_MODEL ?? undefined,
   };
 }
 
@@ -46,6 +62,11 @@ function jsonObject(text: string): unknown {
 export async function generateLayoutPlan(input: NorthAIContext, document: "ads" | "conversion"): Promise<LayoutPlan> {
   const result = await aiComplete(buildLayoutPlanPrompt(input, document));
   return layoutPlanSchema.parse(jsonObject(result));
+}
+
+export async function classifyVisualRequest(input: NorthAIContext): Promise<VisualRequest> {
+  const result = await aiComplete(buildVisualRequestPrompt(input));
+  return visualRequestSchema.parse(jsonObject(result));
 }
 
 export async function generateNarrative(input: NorthAIContext, document: "ads" | "conversion"): Promise<LayoutPlan["narrative"]> {

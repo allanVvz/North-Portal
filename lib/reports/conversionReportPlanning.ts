@@ -4,7 +4,7 @@ import type { AdaptiveInterpretation } from "@/lib/ai/adaptiveFeedback";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { MetaPost } from "@/lib/windsor";
 import { generateLayoutPlan, generateNarrative } from "@/lib/northai/aiPrompts";
-import { northAIContextSchema, type NorthAIContext } from "@/lib/northai/aiContracts";
+import { northAIContextSchema, type NorthAIContext, type VisualRequest } from "@/lib/northai/aiContracts";
 
 export type ReportContext = {
   period: Period;
@@ -15,14 +15,17 @@ export type ReportContext = {
   parser: "llm" | "parser" | "fallback";
   sourceFingerprint: string;
   narrative?: Array<{ kind: string; text: string }>;
+  visualRequest?: VisualRequest | null;
 };
 
 export type ConversionLayoutPlan = {
   sections: { result: true; indicators: true; funnel: true; technicalReading: true; adContribution: true; conversionHistory: boolean; commercial: boolean };
   hideTrendCharts: true;
   creativeCards: { columns: 1 | 2; maxLines: number; minWidth: number };
+  funnel: { width: number; maxWidth: number; nodeWidth: number; labelMode: "inside" | "below" | "outside"; lastLevelWidth: number; gap: number; maxLabelLines: number };
   narrative: { placement: "first_page" | "next_page"; maxParagraphs: number; maxChars: number };
   fingerprint: string;
+  visualRequest?: VisualRequest | null;
 };
 
 function fingerprint(value: unknown): string {
@@ -32,10 +35,10 @@ function fingerprint(value: unknown): string {
 export function buildReportContext(input: {
   period: Period; metrics: ReportContext["metrics"]; conversions: ConversionRow[];
   campaigns: MetaPost[]; ads: MetaPost[]; interpretation: AdaptiveInterpretation;
-  parser: string; sourceFingerprint: string;
+  parser: string; sourceFingerprint: string; visualRequest?: VisualRequest | null;
 }): ReportContext {
   const parser: ReportContext["parser"] = input.parser === "llm" ? "llm" : input.parser === "parser" ? "parser" : "fallback";
-  return { period: input.period, metrics: input.metrics, conversions: input.conversions, media: { campaigns: input.campaigns, ads: input.ads }, interpretation: input.interpretation, parser, sourceFingerprint: input.sourceFingerprint };
+  return { period: input.period, metrics: input.metrics, conversions: input.conversions, media: { campaigns: input.campaigns, ads: input.ads }, interpretation: input.interpretation, parser, sourceFingerprint: input.sourceFingerprint, visualRequest: input.visualRequest ?? null };
 }
 
 function metricSum(posts: MetaPost[], key: "alcance" | "profileVisits") {
@@ -50,6 +53,7 @@ export function buildNorthAIContext(input: {
   adsFinal: boolean;
   adsRevision?: number | null;
   editorialInstruction?: string | null;
+  visualRequest?: VisualRequest | null;
 }): NorthAIContext {
   const { context } = input;
   const metricValues = context.metrics;
@@ -86,13 +90,14 @@ export function buildNorthAIContext(input: {
     ],
     media: { reach: metricSum(context.media.campaigns, "alcance"), profileVisits: metricSum(context.media.campaigns, "profileVisits"), ads },
     comments: context.interpretation.context.map((comment) => ({ at: comment.sourceCommentAt, author: comment.author, text: comment.text })),
+    visualRequest: input.visualRequest ?? null,
     reports: { adsFinal: input.adsFinal, adsRevision: input.adsRevision ?? null, hiddenFields: [], editorialInstruction: input.editorialInstruction ?? null },
   });
 }
 
 export function buildLayoutPlan(context: ReportContext): ConversionLayoutPlan {
   const commercial = context.metrics.vendas !== null || context.metrics.receita !== null || context.metrics.agendamentos !== null || context.conversions.length > 0;
-  const shape = { sections: { result: true, indicators: true, funnel: true, technicalReading: true, adContribution: true, conversionHistory: context.metrics.seguidoresNovos !== null || commercial, commercial }, hideTrendCharts: true, creativeCards: { columns: 1 as const, maxLines: 3, minWidth: 0 }, narrative: { placement: "first_page" as const, maxParagraphs: 1, maxChars: 560 }, sourceFingerprint: context.sourceFingerprint } as const;
+  const shape = { sections: { result: true, indicators: true, funnel: true, technicalReading: true, adContribution: true, conversionHistory: context.metrics.seguidoresNovos !== null || commercial, commercial }, hideTrendCharts: true, creativeCards: { columns: 1 as const, maxLines: 3, minWidth: 0 }, funnel: { width: 360, maxWidth: 420, nodeWidth: 220, labelMode: "below" as const, lastLevelWidth: 220, gap: 12, maxLabelLines: 2 }, narrative: { placement: "first_page" as const, maxParagraphs: 1, maxChars: 560 }, sourceFingerprint: context.sourceFingerprint, visualRequest: context.visualRequest ?? null } as const;
   return { ...shape, fingerprint: fingerprint(shape) };
 }
 
@@ -105,9 +110,14 @@ export async function planWithNorthAI(input: {
   const fallback = buildLayoutPlan(input.context);
   if (process.env.NORTHAI_REPORT_PLANNER === "0" || process.env.NODE_ENV === "test") return { layout: fallback, narrative: [], aiUsed: false, aiError: null };
   try {
+    // A classificacao acontece no hook do comentario, onde o comentario mais
+    // recente e conhecido. O planner recebe somente o pedido normalizado;
+    // nunca tenta inferir um pedido antigo a cada regeneracao.
+    const visualRequest = input.northAIContext.visualRequest ?? null;
+    const enrichedContext = northAIContextSchema.parse({ ...input.northAIContext, visualRequest });
     const [remoteLayout, narrative] = await Promise.all([
-      generateLayoutPlan(input.northAIContext, "conversion"),
-      generateNarrative(input.northAIContext, "conversion"),
+      generateLayoutPlan(enrichedContext, "conversion"),
+      generateNarrative(enrichedContext, "conversion"),
     ]);
     return {
       layout: {
@@ -116,6 +126,15 @@ export async function planWithNorthAI(input: {
           columns: remoteLayout.creativeCards.columns,
           maxLines: remoteLayout.creativeCards.maxLines,
           minWidth: remoteLayout.creativeCards.minWidth,
+        },
+        funnel: {
+          width: remoteLayout.funnel.width,
+          maxWidth: remoteLayout.funnel.maxWidth,
+          nodeWidth: remoteLayout.funnel.nodeWidth,
+          labelMode: remoteLayout.funnel.labelMode,
+          lastLevelWidth: remoteLayout.funnel.lastLevelWidth,
+          gap: remoteLayout.funnel.gap,
+          maxLabelLines: remoteLayout.funnel.maxLabelLines,
         },
         narrative: {
           // A long narrative is never allowed to compete with the KPI block
@@ -126,7 +145,7 @@ export async function planWithNorthAI(input: {
           maxParagraphs: remoteLayout.narrativeLayout.maxParagraphs,
           maxChars: remoteLayout.narrativeLayout.maxChars,
         },
-        fingerprint: fingerprint({ fallback, remoteLayout }),
+        fingerprint: fingerprint({ fallback, remoteLayout, visualRequest }),
       },
       narrative,
       aiUsed: true,

@@ -36,5 +36,19 @@ describe("contratos NorthAI", () => {
     });
     expect(plan.sections[0].visible).toBe(true);
     expect(plan.narrative).toEqual([]);
+    expect(plan.funnel.lastLevelWidth).toBe(220);
+  });
+
+  it("preserva pedido visual e rejeita dimensao perigosa", () => {
+    const parsed = northAIContextSchema.parse({
+      ...context,
+      visualRequest: { target: "funnel", problem: "too_wide", instruction: "Centralizar ultimo nivel", needsClarification: false },
+    });
+    expect(parsed.visualRequest?.target).toBe("funnel");
+    expect(() => layoutPlanSchema.parse({
+      document: "conversion", title: "Relatorio", period: context.period,
+      sections: [{ key: "funnel", title: "Funil", kind: "funnel", order: 0 }],
+      funnel: { width: 999 },
+    })).toThrow();
   });
 });

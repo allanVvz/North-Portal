@@ -226,62 +226,55 @@ export function ComparisonFigure({ items }: { items: { label: string; from: stri
 
 // ---- funil ---------------------------------------------------------------------------------
 
-export type FunnelView = { label: string; value: string; numeric: number; base?: boolean };
+export type FunnelView = { label: string; value: string; numeric: number; base?: boolean; source?: string };
+export type FunnelLayout = { width?: number; maxWidth?: number; nodeWidth?: number; labelMode?: "inside" | "below" | "outside"; lastLevelWidth?: number; gap?: number; maxLabelLines?: number };
 
 const STAGE_H = 28;
 const GAP_H = 13;
 
 /** Trapézios proporcionais (escala log) com o número dentro quando cabe e à
  *  direita quando não; a placa-base (ex.: total do perfil) fecha o funil. */
-export function ProportionalFunnel({ stages, gaps, width = 300 }: { stages: FunnelView[]; gaps: string[]; width?: number }) {
+export function ProportionalFunnel({ stages, gaps, width = 300, layout }: { stages: FunnelView[]; gaps: string[]; width?: number; layout?: FunnelLayout }) {
   const flow = stages.filter((s) => !s.base);
   const base = stages.find((s) => s.base);
+  const visualWidth = Math.min(width, layout?.maxWidth ?? 360);
   const widths = funnelWidths(flow.map((s) => s.numeric));
   const fills = [TEAL.d1, TEAL.d2, TEAL.d3, TEAL.d3, TEAL.d4, TEAL.d4];
+  const labelWidth = Math.min(visualWidth - 16, layout?.nodeWidth ?? 190, 190);
+  const baseWidth = Math.min(layout?.lastLevelWidth ?? visualWidth * 0.62, 220);
+  const labelLimit = Math.max(1, layout?.maxLabelLines ?? 2) * 28;
+  const clampLabel = (value: string) => value.length <= labelLimit ? value : `${value.slice(0, labelLimit - 1).trimEnd()}…`;
   return (
-    <View style={{ width, alignItems: "center" }} wrap={false}>
+    <View style={{ width: visualWidth, alignItems: "center" }}>
       {flow.map((stage, i) => {
-        const top = width * widths[i];
-        const bottom = width * (i + 1 < flow.length ? widths[i + 1] : Math.max(0.3, widths[i] - 0.08));
+        const top = visualWidth * widths[i];
+        const bottom = visualWidth * (i + 1 < flow.length ? widths[i + 1] : Math.max(0.3, widths[i] - 0.08));
         // Em funis estreitos há uma coluna de insights ao lado. Etiquetas de
         // estágios pequenos não podem escapar pela direita e ocupar essa
         // coluna; reserve uma linha abaixo do trapézio para o rótulo.
-        const compact = width < W && top < 130;
-        const inside = top >= 130;
         return (
-          <View key={stage.label} style={{ alignItems: "center", width }}>
-            <View style={{ width, height: compact ? STAGE_H + 12 : STAGE_H, position: "relative" }}>
-              <Svg viewBox={`0 0 ${width} ${STAGE_H}`} style={{ position: "absolute", top: 0, left: 0, width, height: STAGE_H }}>
+          <View key={`${stage.label}:${stage.source ?? ""}`} style={{ alignItems: "center", width: visualWidth }} wrap={false}>
+            <View style={{ width: visualWidth, height: STAGE_H, position: "relative" }}>
+              <Svg viewBox={`0 0 ${visualWidth} ${STAGE_H}`} style={{ position: "absolute", top: 0, left: 0, width: visualWidth, height: STAGE_H }}>
                 <Path
-                  d={`M ${(width - top) / 2} 0 L ${(width + top) / 2} 0 L ${(width + bottom) / 2} ${STAGE_H} L ${(width - bottom) / 2} ${STAGE_H} Z`}
+                  d={`M ${(visualWidth - top) / 2} 0 L ${(visualWidth + top) / 2} 0 L ${(visualWidth + bottom) / 2} ${STAGE_H} L ${(visualWidth - bottom) / 2} ${STAGE_H} Z`}
                   fill={fills[Math.min(i, fills.length - 1)]}
                 />
               </Svg>
-              {compact ? (
-                <>
-                  <Text style={{ position: "absolute", top: 7, left: 0, width, textAlign: "center", fontSize: 10, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
-                  <Text style={{ position: "absolute", top: STAGE_H + 1, left: 0, width, textAlign: "center", fontSize: 6.2, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.25 }}>{stage.label}</Text>
-                </>
-              ) : inside ? (
-                <View style={{ position: "absolute", top: 0, left: 0, width, height: STAGE_H, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6 }}>
-                  <Text style={{ fontSize: 12, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
-                  <Text style={{ fontSize: 6.5, fontWeight: 600, color: "#ffffff", textTransform: "uppercase", letterSpacing: 0.4 }}>{stage.label}</Text>
-                </View>
-              ) : (
-                <View style={{ position: "absolute", top: 0, left: (width + top) / 2 + 6, height: STAGE_H, justifyContent: "center" }}>
-                  <Text style={{ fontSize: 12, fontWeight: 700, color: INK }}>{stage.value}</Text>
-                  <Text style={{ fontSize: 6.5, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.4 }}>{stage.label}</Text>
-                </View>
-              )}
+              <Text style={{ position: "absolute", top: 7, left: 0, width: visualWidth, textAlign: "center", fontSize: 11, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
+            </View>
+            <View style={{ width: labelWidth, alignItems: "center", marginTop: 3 }}>
+              <Text style={{ width: labelWidth, textAlign: "center", fontSize: 6.5, lineHeight: 1.2, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.25 }}>{clampLabel(stage.label)}</Text>
+              {stage.source ? <Text style={{ width: labelWidth, textAlign: "center", fontSize: 6.5, lineHeight: 1.2, color: MUTED }}>{stage.source}</Text> : null}
             </View>
             {i < flow.length - 1 || base ? (
-              <Text style={{ fontSize: 7.5, color: MUTED, height: GAP_H, paddingTop: 2, textAlign: "center" }}>{gaps[i] ?? ""}</Text>
+              <Text style={{ width: labelWidth, fontSize: 7.5, color: MUTED, minHeight: layout?.gap ?? GAP_H, paddingTop: 3, textAlign: "center" }}>{gaps[i] ?? ""}</Text>
             ) : null}
           </View>
         );
       })}
       {base ? (
-        <View style={{ width: width * 0.62, borderRadius: 4, backgroundColor: TEAL.soft, paddingVertical: 6, alignItems: "center" }}>
+        <View style={{ width: baseWidth, borderRadius: 4, backgroundColor: TEAL.soft, paddingVertical: 6, alignItems: "center" }} wrap={false}>
           <Text style={{ fontSize: 13, fontWeight: 700, color: INK }}>{base.value}</Text>
           <Text style={{ fontSize: 6.5, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.4 }}>{base.label}</Text>
         </View>
@@ -381,6 +374,7 @@ export type CreativeCardView = {
 };
 
 export type LayoutPlan = {
+  funnel?: FunnelLayout;
   creativeCards?: {
     columns?: 1 | 2;
     maxLines?: number;

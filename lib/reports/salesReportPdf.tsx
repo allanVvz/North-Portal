@@ -342,7 +342,7 @@ function SalesReportDocument(input: SalesReportInput) {
         {funnel.stages.length ? (
           <Section title={focus === "seguidores" ? "Do alcance ao perfil" : focus === "midia" ? "Do alcance às conversas" : "Do alcance à venda"}>
             <View style={T.twoCol}>
-              <ProportionalFunnel width={analysis.insights.length ? 290 : W} stages={funnel.stages.map((s) => ({ label: `${s.label} · ${s.source === "feedback" ? "resultado informado" : "mídia"}`, value: s.key === "seguidores_novos" ? `+${num(s.value)}` : num(s.value), numeric: s.value, base: s.base }))} gaps={focus === "seguidores" ? [] : funnel.gaps} />
+              <ProportionalFunnel width={analysis.insights.length ? 290 : (input.layout?.funnel?.width ?? 360)} layout={input.layout?.funnel} stages={funnel.stages.map((s) => ({ label: s.label, source: s.source === "feedback" ? "resultado informado" : "mídia", value: s.key === "seguidores_novos" ? `+${num(s.value)}` : num(s.value), numeric: s.value, base: s.base }))} gaps={focus === "seguidores" ? [] : funnel.gaps} />
               {analysis.insights.length ? (
                 <View style={{ flex: 1, justifyContent: "center" }}>
                   <AnalysisList items={analysis.insights} />

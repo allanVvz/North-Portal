@@ -52,6 +52,7 @@ import { logReportRun } from "./reportLog";
 import { followerSeries, recordFollowerSnapshots } from "./clientMetricSeries";
 import type { AutomationConfigRow, RunOutcome } from "./run";
 import { buildNorthAIContext, buildReportContext, planWithNorthAI } from "@/lib/reports/conversionReportPlanning";
+import { visualRequestSchema, type VisualRequest } from "@/lib/northai/aiContracts";
 
 const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 
@@ -77,6 +78,94 @@ const FEEDBACK_DESCRIPTION = [
 type OccPayload = Record<string, unknown> & {
   adaptive_source_fingerprint?: string;
 };
+
+export type VisualCommentDecision =
+  | { kind: "none" }
+  | { kind: "clear"; instruction: string }
+  | { kind: "ambiguous"; question: string };
+
+const VISUAL_TARGET = /\b(pdf|relat(?:ório|orio)|p(?:á|a)gina|funil|layout|visual|design|texto|bloco|card|gr(?:á|a)fico|tabela|margem|padding|espa(?:ço|c)o|fonte|imagem|capa|criativo|an(?:úncio|uncio))\b/i;
+const VISUAL_ACTION = /\b(corr(?:igir|ija|eção|ecao)|ajust(?:ar|e)|melhor(?:ar|e)|refa(?:zer|ça|ca)|regener(?:ar|e)|ger(?:ar|e)|tro(?:car|que)|mudar|reduz(?:ir|a)|aument(?:ar|e)|centraliz(?:ar|e)|quebr(?:ar|e)|remov(?:er|a)|ocult(?:ar|e)|reorgan(?:izar|e))\b/i;
+const VISUAL_VAGUE = /\b(feio|horr(?:ível|ivel)|ruim|pessimo|péssimo|n(?:ão|a)o ficou bom|n(?:ão|a)o gostei|melhore|arrume|conserte|est(?:á|a) feio|est(?:á|a) ruim)\b/i;
+const VISUAL_SPECIFIC = /\b(sobreposi(?:ção|c)(?:ão|a)o|primeira p(?:ágina|agina)|segunda p(?:ágina|agina)|último nível|ultimo nivel|dentro|fora|largura|altura|vertical|horizontal|linha|coluna|quebra|cortad|invad|espa(?:çamento|camento)|padding|margem|fonte|tamanho|centraliz|alinh|limite)\b/i;
+const VISUAL_CLARIFICATION_TARGET = "Em qual lugar está sobrepondo: leitura do período, funil, tabela ou primeira página?";
+const VISUAL_CLARIFICATION_DETAIL = "O que exatamente deve melhorar nesse bloco: largura, espaçamento, posição do texto ou tamanho da fonte?";
+
+export function visualRequestFromText(text: string, sourceCommentAt?: string | null): VisualRequest {
+  const target = /funil/i.test(text) || /último nível|ultimo nivel/i.test(text)
+    ? "funnel"
+    : /tabela/i.test(text)
+      ? "table"
+      : /primeira página|primeira pagina|leitura do período|texto/i.test(text)
+        ? "first_page"
+        : /anúncio|anuncio|mídia|midia|gráfico|grafico/i.test(text)
+          ? "ads"
+          : "unknown";
+  const problem = /sobrepos|invad|cortad/i.test(text)
+    ? "overlap"
+    : /largo|largura|esticar|esticad/i.test(text)
+      ? "too_wide"
+      : /estreito|apertad/i.test(text)
+        ? "too_narrow"
+        : /padding|espaço|espacamento|buraco|vazio/i.test(text)
+          ? "too_much_padding"
+          : /repet|mesma mensagem/i.test(text)
+            ? "repetition"
+            : "other";
+  return visualRequestSchema.parse({ target, problem, instruction: text.trim(), sourceCommentAt: sourceCommentAt ?? null, needsClarification: false, clarification: null });
+}
+
+/** Classifica somente pedidos visuais; não interpreta métrica nem conversa operacional. */
+export function classifyVisualComment(text: string): VisualCommentDecision {
+  const normalized = text.trim();
+  if (!normalized || (!VISUAL_TARGET.test(normalized) && !VISUAL_VAGUE.test(normalized))) return { kind: "none" };
+  const explicitRegeneration = /\b(regere|regener|gere outra|gerar novamente|nova vers(?:ão|ao)|regerar|refa(?:zer|ça|ca) o relat(?:ório|orio))\b/i.test(normalized);
+  const specificObjectAction = VISUAL_ACTION.test(normalized) && VISUAL_TARGET.test(normalized) && !VISUAL_VAGUE.test(normalized);
+  if (explicitRegeneration || specificObjectAction || (/\b(troque|mude|remova|oculte)\b/i.test(normalized) && VISUAL_TARGET.test(normalized))) {
+    return { kind: "clear", instruction: normalized };
+  }
+  if (VISUAL_VAGUE.test(normalized) || (VISUAL_TARGET.test(normalized) && !VISUAL_SPECIFIC.test(normalized))) {
+    return { kind: "ambiguous", question: VISUAL_CLARIFICATION_TARGET };
+  }
+  return { kind: "clear", instruction: normalized };
+}
+
+function visualCommentFingerprint(taskId: string, text: string, commentAt?: string | null): string {
+  const compact = text.trim().toLocaleLowerCase().replace(/\s+/g, " ").slice(0, 180);
+  return `${taskId}:${commentAt || compact}`;
+}
+
+/** Persiste a pergunta no mesmo card e usa uma chave estável para não repeti-la em retries. */
+export async function requestVisualClarification(
+  admin: AdminClient,
+  taskId: string,
+  input: { text: string; commentAt?: string | null },
+): Promise<void> {
+  const card = await getAdminTask(admin, taskId);
+  if (!card || ![ADS_REPORT_STEP_KEY, FEEDBACK_STEP_KEY, CONVERSION_REPORT_STEP_KEY].includes(card.subtype ?? "")) return;
+  const fingerprint = visualCommentFingerprint(taskId, input.text, input.commentAt);
+  await updateTaskPayload(admin, taskId, {
+    text: VISUAL_CLARIFICATION_TARGET,
+    commentId: automationCommentId("visual-clarification", fingerprint),
+    patch: { visual_clarification_pending: true, visual_clarification_stage: "target", visual_clarification_for: fingerprint, visual_request_pending: { instruction: input.text, sourceCommentAt: input.commentAt ?? null } },
+  });
+}
+
+export async function markVisualClarificationResolved(admin: AdminClient, taskId: string, text: string, commentAt?: string | null, request?: VisualRequest): Promise<void> {
+  const card = await getAdminTask(admin, taskId);
+  if (!card || ![ADS_REPORT_STEP_KEY, FEEDBACK_STEP_KEY, CONVERSION_REPORT_STEP_KEY].includes(card.subtype ?? "")) return;
+  await updateTaskPayload(admin, taskId, {
+    patch: { visual_clarification_pending: false, visual_clarification_stage: null, visual_clarification_resolved_for: visualCommentFingerprint(taskId, text, commentAt), visual_request_pending: null, visual_request: request ?? visualRequestFromText(text, commentAt) },
+  });
+}
+
+export async function requestVisualDetailClarification(admin: AdminClient, taskId: string, input: { text: string; commentAt?: string | null }): Promise<void> {
+  await updateTaskPayload(admin, taskId, {
+    text: VISUAL_CLARIFICATION_DETAIL,
+    commentId: automationCommentId("visual-clarification-detail", visualCommentFingerprint(taskId, input.text, input.commentAt)),
+    patch: { visual_clarification_pending: true, visual_clarification_stage: "detail", visual_clarification_for: visualCommentFingerprint(taskId, input.text, input.commentAt), visual_request_pending: { instruction: input.text, sourceCommentAt: input.commentAt ?? null } },
+  });
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -301,6 +390,7 @@ async function generateSalesReport(
   sourceCommentAt: string | null,
   sourceFingerprint: string,
   conversionReportId: string,
+  visualRequest?: VisualRequest | null,
 ): Promise<string | null> {
   const clientId = occ.client_id;
   if (!clientId) throw new Error("A ocorrência não pertence a nenhum cliente.");
@@ -341,6 +431,7 @@ async function generateSalesReport(
     interpretation: ext.interpretation,
     parser: ext.note,
     sourceFingerprint,
+    visualRequest: visualRequest ?? null,
   });
   // NorthAI builds the client-facing context and Dashboard Architect chooses a
   // bounded visual plan. Both calls fall back to the deterministic plan.
@@ -352,6 +443,7 @@ async function generateSalesReport(
       adsFinal: traffic.status === "finalized",
       adsRevision: traffic.revision,
       editorialInstruction: trafficFinalView?.instruction ?? null,
+      visualRequest: visualRequest ?? null,
     }),
   });
   const layoutPlan = planned.layout;
@@ -366,6 +458,7 @@ async function generateSalesReport(
           adsFinal: traffic.status === "finalized",
           adsRevision: traffic.revision,
           editorialInstruction: trafficFinalView?.instruction ?? null,
+          visualRequest: visualRequest ?? null,
         }),
         narrative: planned.narrative,
         layoutPlan,
@@ -474,6 +567,7 @@ async function processOccurrence(
   mold: TaskRecord,
   occ: TaskRecord,
   today: string,
+  visualRequest?: VisualRequest | null,
 ): Promise<boolean> {
   const startedAt = Date.now();
   const tags = tagsOf(config);
@@ -651,7 +745,7 @@ async function processOccurrence(
     });
     if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, ext.interpretation.sourceFingerprint, claim.id);
+    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, ext.interpretation.sourceFingerprint, claim.id, visualRequest);
     await attachConversionDocument(admin, claim.id, documentId);
     await supersedePriorConversionReports(admin, {
       id: claim.id,
@@ -735,7 +829,7 @@ export async function runConversionFlow(
 }
 
 /** Executa a conversão depois da aprovação manual do Feedback. */
-export async function processConversionFeedback(admin: AdminClient, occId: string): Promise<void> {
+export async function processConversionFeedback(admin: AdminClient, occId: string, visualRequest?: VisualRequest | null): Promise<void> {
   const occ = await getAdminTask(admin, occId);
   if (!occ) return;
   const moldId = (occ.payload as Record<string, unknown>)?.recurrence_parent_id;
@@ -754,7 +848,7 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
 
   const today = new Date().toISOString().slice(0, 10);
   try {
-    await processOccurrence(admin, config, mold, occ, today);
+    await processOccurrence(admin, config, mold, occ, today, visualRequest);
   } catch (error) {
     await markTaskParada(admin, occId, `Falha ao processar o feedback da semana: ${errorMessage(error)}`);
   }
@@ -764,7 +858,7 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
  * Feedback continua sendo a fonte das métricas; esta etapa só reaproveita o
  * comentário editorial já escrito no relatório para disparar o mesmo fluxo
  * idempotente do cron, sem duplicar documento nem exigir aprovação novamente. */
-export async function handleConversionRevisionComment(admin: AdminClient, taskId: string): Promise<void> {
+export async function handleConversionRevisionComment(admin: AdminClient, taskId: string, visualRequest?: VisualRequest | null): Promise<void> {
   const card = await getAdminTask(admin, taskId);
   if (!card || card.subtype !== CONVERSION_REPORT_STEP_KEY) return;
   const { data, error } = await admin.from("task_links")
@@ -774,7 +868,7 @@ export async function handleConversionRevisionComment(admin: AdminClient, taskId
     .limit(1);
   if (error) throw error;
   const occurrenceId = (data?.[0] as { parent_id?: string } | undefined)?.parent_id;
-  if (occurrenceId) await processConversionFeedback(admin, occurrenceId);
+  if (occurrenceId) await processConversionFeedback(admin, occurrenceId, visualRequest);
 }
 
 /**

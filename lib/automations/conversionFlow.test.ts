@@ -32,7 +32,7 @@ vi.mock("./notify", () => ({
 }));
 vi.mock("./reportLog", () => ({ logReportRun: vi.fn() }));
 
-import { processConversionFeedback } from "./conversionFlow";
+import { classifyVisualComment, processConversionFeedback, requestVisualClarification } from "./conversionFlow";
 
 const OCC = "occ-1";
 const TRAFEGO = "trafego-1";
@@ -43,6 +43,28 @@ let db: FakeTaskDb;
 
 const link = (child: string, key: string, position: number) => ({
   parent_id: OCC, child_id: child, relation_kind: "workflow_step", workflow_step_id: `ws-${key}`, slot: key, position,
+});
+
+describe("classificação de pedido visual", () => {
+  it("pede contexto para uma crítica visual sem local ou correção", () => {
+    expect(classifyVisualComment("o pdf está feio")).toMatchObject({ kind: "ambiguous" });
+  });
+
+  it("libera pedido visual específico para a revisão", () => {
+    expect(classifyVisualComment("corrigir a sobreposição do texto na primeira página")).toMatchObject({ kind: "clear" });
+  });
+
+  it("não transforma comentário operacional em pedido visual", () => {
+    expect(classifyVisualComment("confira o valor da receita")).toEqual({ kind: "none" });
+  });
+
+  it("persiste uma única pergunta para retry do mesmo comentário", async () => {
+    seed();
+    await requestVisualClarification(db.asAdmin(), CONVERSAO, { text: "o pdf está feio", commentAt: "2026-09-23T10:00:00.000Z" });
+    await requestVisualClarification(db.asAdmin(), CONVERSAO, { text: "o pdf está feio", commentAt: "2026-09-23T10:00:00.000Z" });
+    expect(db.comments(CONVERSAO).filter((comment) => String(comment.text).includes("Em qual lugar"))).toHaveLength(1);
+    expect((db.task(CONVERSAO)!.payload as Record<string, unknown>).visual_clarification_pending).toBe(true);
+  });
 });
 
 function seed(conversao: Partial<Row> = {}) {

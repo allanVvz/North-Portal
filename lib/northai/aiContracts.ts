@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+export const visualRequestSchema = z.object({
+  target: z.enum(["funnel", "narrative", "table", "first_page", "ads", "unknown"]),
+  problem: z.enum(["overlap", "too_wide", "too_narrow", "too_much_padding", "wrong_order", "repetition", "other"]),
+  instruction: z.string().trim().max(2000),
+  sourceCommentAt: z.string().nullable().default(null),
+  needsClarification: z.boolean().default(false),
+  clarification: z.enum(["where_overlap", "what_to_improve", "more_changes"]).nullable().default(null),
+});
+
+export type VisualRequest = z.infer<typeof visualRequestSchema>;
+
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida.");
 
 /** Contexto factual entregue ao NorthAI. Valores desconhecidos são null, nunca
@@ -43,6 +54,7 @@ export const northAIContextSchema = z.object({
     author: z.string().max(160).nullable().default(null),
     text: z.string().max(10000),
   })).max(500).default([]),
+  visualRequest: visualRequestSchema.nullable().default(null),
   reports: z.object({
     adsFinal: z.boolean().default(false),
     adsRevision: z.number().int().nonnegative().nullable().default(null),
@@ -80,6 +92,15 @@ export const layoutPlanSchema = z.object({
     columns: z.union([z.literal(1), z.literal(2)]).default(1),
     maxLines: z.number().int().min(1).max(4).default(3),
     minWidth: z.number().finite().min(0).max(531).default(0),
+  }).default({}),
+  funnel: z.object({
+    width: z.number().int().min(240).max(420).default(360),
+    maxWidth: z.number().int().min(280).max(480).default(420),
+    nodeWidth: z.number().int().min(160).max(280).default(220),
+    labelMode: z.enum(["inside", "below", "outside"]).default("below"),
+    lastLevelWidth: z.number().int().min(160).max(280).default(220),
+    gap: z.number().int().min(8).max(32).default(12),
+    maxLabelLines: z.number().int().min(1).max(3).default(2),
   }).default({}),
   narrativeLayout: z.object({
     placement: z.enum(["first_page", "next_page"]).default("first_page"),

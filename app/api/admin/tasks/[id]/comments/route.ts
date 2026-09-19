@@ -1,12 +1,13 @@
 import { NextResponse, after } from "next/server";
 import { apiError } from "@/lib/api";
 import { appendTaskComment, deleteTaskComment, editTaskComment, getProfileName, getTaskById, listTeamMembers, mentionsName } from "@/lib/supabase";
+import { commentsOf } from "@/lib/comments";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/lib/notifications";
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleTrafficRevisionComment } from "@/lib/automations/run";
-import { handleConversionRevisionComment, recordFeedbackMetricComment } from "@/lib/automations/conversionFlow";
+import { classifyVisualComment, handleConversionRevisionComment, markVisualClarificationResolved, recordFeedbackMetricComment, requestVisualClarification, requestVisualDetailClarification, visualRequestFromText } from "@/lib/automations/conversionFlow";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
@@ -52,17 +53,63 @@ async function trafficSiblingFor(admin: ReturnType<typeof createAdminClient>, ta
   return null;
 }
 
-function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string) {
+async function conversionSiblingFor(admin: ReturnType<typeof createAdminClient>, taskId: string): Promise<string | null> {
+  const task = await getTaskById(taskId);
+  if (!task) return null;
+  if (task.subtype === CONVERSION_REPORT_STEP_KEY) return task.id;
+  if (task.subtype !== "feedback") return null;
+  const { data: parentRows, error: parentError } = await admin.from("task_links").select("parent_id").eq("child_id", taskId).eq("relation_kind", "workflow_step").limit(1);
+  if (parentError) throw parentError;
+  const parentId = (parentRows?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (!parentId) return null;
+  const { data: links, error: linksError } = await admin.from("task_links").select("child_id").eq("parent_id", parentId).eq("relation_kind", "workflow_step");
+  if (linksError) throw linksError;
+  for (const link of (links ?? []) as { child_id?: string }[]) {
+    if (!link.child_id) continue;
+    const sibling = await getTaskById(link.child_id);
+    if (sibling?.subtype === CONVERSION_REPORT_STEP_KEY) return sibling.id;
+  }
+  return null;
+}
+
+function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string, commentAt?: string | null) {
   after(async () => {
     const admin = createAdminClient();
     try {
+      if (text) {
+        const task = await getTaskById(taskId);
+        const pending = task?.payload?.visual_request_pending as { instruction?: string; sourceCommentAt?: string | null } | undefined;
+        const stage = task?.payload?.visual_clarification_stage;
+        if (pending && stage === "target" && /funil|tabela|primeira p[áa]gina|leitura do per[íi]odo|an[úu]ncio|m[íi]dia/i.test(text) && !/largo|largura|sobrepos|padding|espa[çc]amento|fonte|texto|invad/i.test(text)) {
+          await requestVisualDetailClarification(admin, taskId, { text: `${pending.instruction ?? ""} ${text}`, commentAt });
+          return;
+        }
+        const visual = pending && stage === "detail"
+          ? { kind: "clear" as const, instruction: `${pending.instruction ?? ""} ${text}` }
+          : pending
+            ? classifyVisualComment(`${pending.instruction ?? ""} ${text}`)
+            : classifyVisualComment(text);
+        if (visual.kind === "ambiguous") {
+          await requestVisualClarification(admin, taskId, { text, commentAt });
+          return;
+        }
+        if (visual.kind === "clear") {
+          const request = visualRequestFromText(`${pending?.instruction ?? ""} ${text}`.trim(), pending?.sourceCommentAt ?? commentAt);
+          await markVisualClarificationResolved(admin, taskId, text, commentAt, request);
+          const conversionTaskId = await conversionSiblingFor(admin, taskId);
+          if (conversionTaskId && request.target !== "ads") {
+            await handleConversionRevisionComment(admin, conversionTaskId, request);
+            return;
+          }
+        }
+      }
       const mediaTaskId = text && authorId && isMediaCorrection(text)
         ? await trafficSiblingFor(admin, taskId, authorId)
         : null;
       // O caminho usual mantém a assinatura histórica (e a idempotência) dos
       // hooks. Quando há uma correção de mídia, o hook recebe a etapa correta.
       if (mediaTaskId) {
-        await handleTrafficRevisionComment(admin, mediaTaskId, { instruction: text, authorId });
+        await handleTrafficRevisionComment(admin, mediaTaskId, { instruction: text ?? "", authorId });
       } else {
         await handleTrafficRevisionComment(admin, taskId);
         await recordFeedbackMetricComment(admin, taskId);
@@ -118,7 +165,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // aparece na hora e a nova versão chega como um comentário da automação.
     // Uma falha aqui não pode se perder calada: vira o mesmo aviso que as
     // automações usam — a etapa `parada` com um comentário explicando.
-    scheduleCommentAutomation(targetId, session.userId, text);
+    const sourceComment = commentsOf(task.payload).slice().reverse().find((comment) => comment.author_id === session.userId && comment.text === text);
+    scheduleCommentAutomation(targetId, session.userId, text, sourceComment?.at ?? null);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }
