@@ -243,7 +243,10 @@ export function ProportionalFunnel({ stages, gaps, width = 300 }: { stages: Funn
       {flow.map((stage, i) => {
         const top = width * widths[i];
         const bottom = width * (i + 1 < flow.length ? widths[i + 1] : Math.max(0.3, widths[i] - 0.08));
-        const inside = top >= 130;
+        // Em funis estreitos há uma coluna de insights ao lado. Etiquetas de
+        // estágios pequenos não podem escapar pela direita e ocupar essa
+        // coluna; centralize-as na faixa completa do funil.
+        const inside = top >= 130 || width < W;
         return (
           <View key={stage.label} style={{ alignItems: "center", width }}>
             <View style={{ width, height: STAGE_H, position: "relative" }}>
