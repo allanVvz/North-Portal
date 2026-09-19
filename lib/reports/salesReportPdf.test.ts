@@ -50,7 +50,7 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
       ...base,
       layout: {
         creativeCards: { columns: 1, maxLines: 3, minWidth: 0 },
-        narrative: { placement: "next_page", maxParagraphs: 1, maxChars: 240 },
+        narrative: { placement: "first_page", maxParagraphs: 1, maxChars: 560 },
       },
       reportContext: {
         period,

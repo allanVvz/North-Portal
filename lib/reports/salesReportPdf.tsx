@@ -234,7 +234,7 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null; */
 
-  const narrativePlan = input.layout?.narrative ?? { placement: "next_page" as const, maxParagraphs: 1, maxChars: 720 };
+  const narrativePlan = input.layout?.narrative ?? { placement: "first_page" as const, maxParagraphs: 1, maxChars: 560 };
   const clipNarrative = (text: string) => {
     const normalized = text.replace(/\s+/g, " ").trim();
     return normalized.length <= (narrativePlan.maxChars ?? 720)

@@ -92,7 +92,7 @@ export function buildNorthAIContext(input: {
 
 export function buildLayoutPlan(context: ReportContext): ConversionLayoutPlan {
   const commercial = context.metrics.vendas !== null || context.metrics.receita !== null || context.metrics.agendamentos !== null || context.conversions.length > 0;
-  const shape = { sections: { result: true, indicators: true, funnel: true, technicalReading: true, adContribution: true, conversionHistory: context.metrics.seguidoresNovos !== null || commercial, commercial }, hideTrendCharts: true, creativeCards: { columns: 1 as const, maxLines: 3, minWidth: 0 }, narrative: { placement: "next_page" as const, maxParagraphs: 1, maxChars: 720 }, sourceFingerprint: context.sourceFingerprint } as const;
+  const shape = { sections: { result: true, indicators: true, funnel: true, technicalReading: true, adContribution: true, conversionHistory: context.metrics.seguidoresNovos !== null || commercial, commercial }, hideTrendCharts: true, creativeCards: { columns: 1 as const, maxLines: 3, minWidth: 0 }, narrative: { placement: "first_page" as const, maxParagraphs: 1, maxChars: 560 }, sourceFingerprint: context.sourceFingerprint } as const;
   return { ...shape, fingerprint: fingerprint(shape) };
 }
 

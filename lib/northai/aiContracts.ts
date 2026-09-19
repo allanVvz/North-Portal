@@ -82,9 +82,9 @@ export const layoutPlanSchema = z.object({
     minWidth: z.number().finite().min(0).max(531).default(0),
   }).default({}),
   narrativeLayout: z.object({
-    placement: z.enum(["first_page", "next_page"]).default("next_page"),
+    placement: z.enum(["first_page", "next_page"]).default("first_page"),
     maxParagraphs: z.number().int().min(1).max(3).default(1),
-    maxChars: z.number().int().min(240).max(1200).default(720),
+    maxChars: z.number().int().min(240).max(1200).default(560),
   }).default({}),
 }).superRefine((plan, ctx) => {
   const keys = new Set<string>();
