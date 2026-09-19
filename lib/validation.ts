@@ -216,6 +216,7 @@ export const taskPayloadSchema = z.object({
   // Recorrência — execução
   recurrence_parent_id: z.unknown().optional(),
   occurrence_date: z.unknown().optional(),
+  recurrence_manual_occurrence: z.unknown().optional(),
   deferred_until_accessed: z.unknown().optional(),
   accessed_at: z.unknown().optional(),
   // Grupos por datas explícitas (legado — convertidos em 20260804000002)

@@ -11,7 +11,7 @@ import {
 import { RECURRENCE_CYCLE_KEY, RECURRENCE_GROUP_KEY, RECURRENCE_REVISION_KEY, isRecurrenceTemplate, recurrenceCycleOf, recurrenceParentPayload, recurrenceRevisionOf, recurrenceStopped } from "./recurrenceState";
 import { EXPLICIT_GROUP_KEY, explicitDatesOf, inferDateGroupRule, isExplicitDateParent, normalizeOccurrenceDates, parentTemplatePatch, replicaPatch } from "./taskDateGrouping";
 import { mergeAssigneeDisplay } from "./assignees";
-import { actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, currentRecurringExecutionOf, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard } from "./taskRelations";
+import { actionPlanMembersOf, belongsToTaskScreen, childrenByParent, clientVisibleInOps, currentRecurringExecutionOf, detachedRecurrencePatch, flowStepsOf, isFlowDelivery, recurrenceParentIdOf, visibleOnTaskBoard, DEFERRED_TASK_FLAG } from "./taskRelations";
 import { commentsOf, type TaskComment } from "./comments";
 import { appendCycleLog } from "./cycleLog";
 import { AGENCY_TIMEZONE, agencyToday } from "./time/agency";
@@ -2380,6 +2380,19 @@ async function materializeOrReuseExecution(
 ): Promise<{ task: TaskRecord; created: boolean }> {
   const reused = await findRecurrenceExecutionByCycle(supabase, parent.id, cycle);
   if (reused) return { task: reused, created: false };
+  // Uma execução criada manualmente para uma data futura é uma reserva. Quando
+  // a agenda chega a essa data, adota o card existente em vez de duplicá-lo.
+  const { data: reserved, error: reservedError } = await supabase.from("tasks").select(TASK_COLUMNS)
+    .eq("plan_id", parent.id).contains("payload", { occurrence_date: occurrenceDate, recurrence_manual_occurrence: true }).limit(1);
+  if (reservedError) fail(reservedError);
+  const reservedTask = reserved?.[0] as unknown as TaskRecord | undefined;
+  if (reservedTask) {
+    const payload: Record<string, unknown> = { ...(reservedTask.payload ?? {}), [RECURRENCE_CYCLE_KEY]: cycle };
+    delete payload.recurrence_manual_occurrence;
+    delete payload[DEFERRED_TASK_FLAG];
+    const updated = await updateTask(reservedTask.id, { payload, due_date: occurrenceDate, start_date: occurrenceDate });
+    return { task: (await getTaskById(updated.id)) ?? updated, created: false };
+  }
   const executionId = recurringExecutionId(parent.id, cycle);
   const { data, error } = await supabase.from("tasks")
     .insert(recurringExecutionFields(parent, executionId, occurrenceDate, cycle))
@@ -2590,6 +2603,53 @@ export async function linkExistingRecurrenceExecution(templateId: string, taskId
   const refreshed = await getTaskById(taskId);
   if (!refreshed) throw new HttpError(404, "Card não encontrado.");
   return refreshed;
+}
+
+/** Vincula um card a uma data específica da recorrência. Usado pelo compositor
+ * inline para reconciliar histórico e reservar uma ocorrência futura. */
+export async function linkRecurrenceExecutionAtDate(templateId: string, taskId: string, occurrenceDate: string): Promise<TaskRecord> {
+  const [template, task] = await Promise.all([getTaskById(templateId), getTaskById(taskId)]);
+  if (!template) throw new HttpError(404, "Recorrência não encontrada.");
+  if (!task) throw new HttpError(404, "Card não encontrado.");
+  if (!template.recurrence_cadence) throw new HttpError(409, "Este card não é uma recorrência.");
+  if (task.id === template.id) throw new HttpError(400, "Um card não pode ser execução de si mesmo.");
+  if (task.client_id !== template.client_id || task.kind !== template.kind) throw new HttpError(400, "A execução precisa ter o mesmo cliente e tipo da recorrência.");
+  const supabase = await createClient();
+  const { data: occupied } = await supabase.from("tasks").select(TASK_COLUMNS)
+    .eq("plan_id", templateId).contains("payload", { occurrence_date: occurrenceDate }).limit(1);
+  if (occupied?.[0] && occupied[0].id !== taskId) throw new HttpError(409, "Esta data já possui uma execução.", { code: "recurrence_date_occupied", task: occupied[0] });
+  const payload: Record<string, unknown> = { ...(task.payload ?? {}), recurrence_parent_id: templateId, occurrence_date: occurrenceDate, recurrence_manual_occurrence: true };
+  delete payload[RECURRENCE_CYCLE_KEY];
+  delete payload[RECURRENCE_GROUP_KEY];
+  delete payload[RECURRENCE_REVISION_KEY];
+  await updateTask(taskId, { plan_id: templateId, due_date: occurrenceDate, start_date: occurrenceDate, payload });
+  return (await getTaskById(taskId)) ?? task;
+}
+
+/** Cria uma execução manual, sem ocupar o contador do ciclo atual. */
+export async function createManualRecurrenceExecution(templateId: string, occurrenceDate: string, title?: string): Promise<TaskRecord> {
+  const template = await getTaskById(templateId);
+  if (!template) throw new HttpError(404, "Recorrência não encontrada.");
+  if (!template.recurrence_cadence) throw new HttpError(409, "Este card não é uma recorrência.");
+  const supabase = await createClient();
+  const { data: occupied } = await supabase.from("tasks").select(TASK_COLUMNS)
+    .eq("plan_id", templateId).contains("payload", { occurrence_date: occurrenceDate }).limit(1);
+  if (occupied?.[0]) throw new HttpError(409, "Esta data já possui uma execução.", { code: "recurrence_date_occupied", task: occupied[0] });
+  const payload: Record<string, unknown> = { ...(template.payload ?? {}), recurrence_parent_id: templateId, occurrence_date: occurrenceDate, recurrence_manual_occurrence: true };
+  delete payload[RECURRENCE_GROUP_KEY];
+  delete payload[RECURRENCE_CYCLE_KEY];
+  delete payload[RECURRENCE_REVISION_KEY];
+  const task = await createTask(template.client_id, {
+    ...recurringExecutionFields(template, crypto.randomUUID(), occurrenceDate),
+    title: title?.trim() || template.title,
+    payload,
+    plan_id: templateId,
+    recurrence_cadence: null,
+    recurrence_weekdays: [],
+    recurrence_day_of_month: null,
+  });
+  if (isFlowDelivery(template)) await materializeFirstStep(createAdminClient(), task);
+  return (await getTaskById(task.id)) ?? task;
 }
 
 export async function detachTaskRelation(taskId: string, parentId: string): Promise<TaskRecord> {

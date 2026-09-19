@@ -695,12 +695,13 @@ export default function TaskModal({
   const headerProgressCount = !isDelivery && (kd.isPlan || isRecurringParent) && effectiveParentMembers.length
     ? `${effectiveParentMembers.filter((m) => m.status === "aprovado").length} de ${effectiveParentMembers.length}`
     : null;
+  const canCrossClientPlan = Boolean(liveTask && kd.isPlan && draft.clientSlug === "north");
   const linkableCandidates = liveTask
     // Ter uma entrega como pai não impede entrar num plano, e já pertencer a
     // OUTRO plano também não — um card pode ser membro de vários Planos de
     // Ação ao mesmo tempo. O que continua impedido é oferecer de novo um card
     // que já é membro DESTE plano especificamente.
-    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && t.client_id === liveTask.client_id)
+    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && (canCrossClientPlan || t.client_id === liveTask.client_id))
     : [];
   // Candidatos a "vincular como execução" de um molde de recorrência: mesmo
   // cliente, não pode ser molde de nenhuma recorrência nem já ser execução de
@@ -710,7 +711,7 @@ export default function TaskModal({
   // só ordena o mesmo tipo primeiro, não trava — pedido explícito: precisa
   // aceitar vincular uma Entrega).
   const recurrenceLinkCandidates = liveTask && isRecurringParent
-    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id)
+    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id && t.kind === liveTask.kind)
     : [];
   // As etapas são lidas para o próprio card Entrega e para compor o resumo
   // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
@@ -881,6 +882,28 @@ export default function TaskModal({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function linkRecurrenceExecutionAtDate(taskId: string, occurrenceDate: string) {
+    if (!liveTask) return;
+    setBusy(true); setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/recurrence-executions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "link", child_id: taskId, occurrence_date: occurrenceDate }) });
+      const body = await res.json().catch(() => null) as (TaskRecord & { error?: string }) | null;
+      if (!res.ok) throw new Error(body?.error ?? "Não foi possível vincular esta execução.");
+      onTaskPatched?.(body as TaskRecord);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível vincular esta execução."); } finally { setBusy(false); }
+  }
+
+  async function createRecurrenceExecutions(dates: string[], title: string) {
+    if (!liveTask) return;
+    setBusy(true); setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/recurrence-executions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "create", occurrence_dates: dates, title: title || undefined }) });
+      const body = await res.json().catch(() => null) as { tasks?: TaskRecord[]; error?: string } | null;
+      if (!res.ok) throw new Error(body?.error ?? "Não foi possível criar as execuções.");
+      for (const task of body?.tasks ?? []) onTaskPatched?.(task);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível criar as execuções."); } finally { setBusy(false); }
   }
 
   async function unlinkMember(taskId: string, parentId: string) {
@@ -1849,7 +1872,8 @@ export default function TaskModal({
                       candidates={recurrenceLinkCandidates}
                       templateKind={liveTask.kind}
                       busy={busy}
-                      onLink={(c) => void linkRecurrenceExecution(c.id)}
+                      onLink={(c, date) => void linkRecurrenceExecutionAtDate(c.id, date)}
+                      onCreate={(dates, title) => void createRecurrenceExecutions(dates, title)}
                     />
                   ) : null
                 ) : (
