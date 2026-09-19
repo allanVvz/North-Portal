@@ -245,18 +245,24 @@ export function ProportionalFunnel({ stages, gaps, width = 300 }: { stages: Funn
         const bottom = width * (i + 1 < flow.length ? widths[i + 1] : Math.max(0.3, widths[i] - 0.08));
         // Em funis estreitos há uma coluna de insights ao lado. Etiquetas de
         // estágios pequenos não podem escapar pela direita e ocupar essa
-        // coluna; centralize-as na faixa completa do funil.
-        const inside = top >= 130 || width < W;
+        // coluna; reserve uma linha abaixo do trapézio para o rótulo.
+        const compact = width < W && top < 130;
+        const inside = top >= 130;
         return (
           <View key={stage.label} style={{ alignItems: "center", width }}>
-            <View style={{ width, height: STAGE_H, position: "relative" }}>
+            <View style={{ width, height: compact ? STAGE_H + 12 : STAGE_H, position: "relative" }}>
               <Svg viewBox={`0 0 ${width} ${STAGE_H}`} style={{ position: "absolute", top: 0, left: 0, width, height: STAGE_H }}>
                 <Path
                   d={`M ${(width - top) / 2} 0 L ${(width + top) / 2} 0 L ${(width + bottom) / 2} ${STAGE_H} L ${(width - bottom) / 2} ${STAGE_H} Z`}
                   fill={fills[Math.min(i, fills.length - 1)]}
                 />
               </Svg>
-              {inside ? (
+              {compact ? (
+                <>
+                  <Text style={{ position: "absolute", top: 7, left: 0, width, textAlign: "center", fontSize: 10, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
+                  <Text style={{ position: "absolute", top: STAGE_H + 1, left: 0, width, textAlign: "center", fontSize: 6.2, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.25 }}>{stage.label}</Text>
+                </>
+              ) : inside ? (
                 <View style={{ position: "absolute", top: 0, left: 0, width, height: STAGE_H, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6 }}>
                   <Text style={{ fontSize: 12, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
                   <Text style={{ fontSize: 6.5, fontWeight: 600, color: "#ffffff", textTransform: "uppercase", letterSpacing: 0.4 }}>{stage.label}</Text>
