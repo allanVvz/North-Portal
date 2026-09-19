@@ -29,7 +29,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!parent || !child) throw new HttpError(404, "Card nao encontrado.");
     if (relationKind === "structural_member" && parent.client_id !== child.client_id) {
       if (parent.kind !== "plano_acao") throw new HttpError(403, "Somente um Plano de Ação pode reunir cards de outros clientes.");
-      const admin = await createClient();
+      const admin = createAdminClient();
       const { data: parentClient, error: parentClientError } = await admin.from("clients").select("slug").eq("id", parent.client_id).maybeSingle();
       if (parentClientError) throw parentClientError;
       if (parentClient?.slug !== "north") throw new HttpError(403, "Somente Planos de Ação da ADM North podem reunir cards de outros clientes.");

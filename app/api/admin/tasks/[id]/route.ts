@@ -200,7 +200,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         const targetPlan = await getTaskById(planLink);
         if (!targetPlan || targetPlan.kind !== "plano_acao") throw new HttpError(400, "O vínculo precisa apontar para um Plano de Ação.");
         if (targetPlan.client_id !== current.client_id) {
-          const admin = await createClient();
+          const admin = createAdminClient();
           const { data: parentClient, error: parentClientError } = await admin.from("clients").select("slug").eq("id", targetPlan.client_id).maybeSingle();
           if (parentClientError) throw parentClientError;
           if (parentClient?.slug !== "north") throw new HttpError(403, "Somente Planos de Ação da ADM North podem reunir cards de outros clientes.");
