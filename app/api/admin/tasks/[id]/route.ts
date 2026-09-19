@@ -195,18 +195,20 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // slot, para não derrubar as ligações de etapa de uma corrente.
     const { plan_id: planLink, ...taskPatch } = patch as Record<string, unknown>;
     let task = await updateTaskGroup(id, baseTask, taskPatch, session.userId);
+    let crossClientPlanLink = false;
     if (planLink !== undefined) {
       if (typeof planLink === "string" && planLink) {
         const targetPlan = await getTaskById(planLink);
         if (!targetPlan || targetPlan.kind !== "plano_acao") throw new HttpError(400, "O vínculo precisa apontar para um Plano de Ação.");
         if (targetPlan.client_id !== current.client_id) {
+          crossClientPlanLink = true;
           const admin = createAdminClient();
           const { data: parentClient, error: parentClientError } = await admin.from("clients").select("slug").eq("id", targetPlan.client_id).maybeSingle();
           if (parentClientError) throw parentClientError;
           if (parentClient?.slug !== "north") throw new HttpError(403, "Somente Planos de Ação da ADM North podem reunir cards de outros clientes.");
         }
       }
-      await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null);
+      await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null, crossClientPlanLink);
     }
     if (payload_patch) task = await updateTaskPayloadPatch(id, payload_patch);
     if (assignee_profile_ids !== undefined) await setTaskAssigneeProfiles(task.id, assignee_profile_ids);

@@ -28,7 +28,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const [parent, child] = await Promise.all([getTaskById(id), getTaskById(child_id)]);
     if (!parent || !child) throw new HttpError(404, "Card nao encontrado.");
+    let crossClient = false;
     if (relationKind === "structural_member" && parent.client_id !== child.client_id) {
+      crossClient = true;
       if (parent.kind !== "plano_acao") throw new HttpError(403, "Somente um Plano de Ação pode reunir cards de outros clientes.");
       const admin = createAdminClient();
       const { data: parentClient, error: parentClientError } = await admin.from("clients").select("slug").eq("id", parent.client_id).maybeSingle();
@@ -55,7 +57,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       throw new HttpError(409, "Esta etapa ja tem um card ligado.");
     }
 
-    await linkTasks(id, child_id, workflowStepId ?? null, relationKind);
+    await linkTasks(id, child_id, workflowStepId ?? null, relationKind, crossClient ? createAdminClient() : undefined);
     return NextResponse.json(await getTaskById(child_id));
   } catch (error) {
     return apiError(error);

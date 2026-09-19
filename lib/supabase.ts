@@ -1665,9 +1665,9 @@ async function childIdsOf(supabase: SupabaseLike, parentIds: readonly string[]):
   return ((data as { child_id: string }[] | null) ?? []).map((r) => r.child_id);
 }
 
-export async function linkTasks(parentId: string, childId: string, workflowStepId: string | null, relationKind: TaskParentLink["relation_kind"]): Promise<void> {
+export async function linkTasks(parentId: string, childId: string, workflowStepId: string | null, relationKind: TaskParentLink["relation_kind"], db?: SupabaseLike): Promise<void> {
   if (parentId === childId) throw new HttpError(400, "Um card nao pode ser pai de si mesmo.");
-  const supabase = await createClient();
+  const supabase = db ?? await createClient();
   if (relationKind === "workflow_step") {
     if (!workflowStepId) throw new HttpError(400, "Informe a etapa persistida do workflow.");
   } else if (workflowStepId) {
@@ -1705,8 +1705,8 @@ export async function unlinkTasks(parentId: string, childId: string): Promise<vo
  * usar esta função para reuso — use `linkTasks(..., null, "reference")`. Só
  * `parentId === null` solta os elos estruturais de Plano. Etapas e referências
  * nunca são tocadas aqui. */
-export async function setTaskPlanLink(taskId: string, parentId: string | null): Promise<void> {
-  const supabase = await createClient();
+export async function setTaskPlanLink(taskId: string, parentId: string | null, crossClient = false): Promise<void> {
+  const supabase = crossClient ? createAdminClient() : await createClient();
   const { data, error } = await supabase.from("task_links").select("parent_id,child_id,relation_kind,slot").eq("child_id", taskId);
   if (error) fail(error);
   const current = ((data as LinkRow[] | null) ?? []).filter((l) => l.relation_kind === "structural_member");
@@ -1714,7 +1714,7 @@ export async function setTaskPlanLink(taskId: string, parentId: string | null): 
     for (const link of current) await unlinkTasks(link.parent_id, taskId);
     return;
   }
-  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null, "structural_member");
+  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null, "structural_member", supabase);
 }
 
 // ---- Planos de Ação (admin) --------------------------------------------------
