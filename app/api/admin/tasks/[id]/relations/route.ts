@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { getTaskById, linkTasks, workflowStepIsTaken } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { workflowByVersionId } from "@/lib/workflows";
 import { HttpError } from "@/lib/validation";
