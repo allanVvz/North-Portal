@@ -545,7 +545,9 @@ async function generateSalesReport(
   }
 
   // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
-  const layoutNote = layoutPlan.narrative.placement === "next_page"
+  const layoutNote = visualRequest?.target === "funnel"
+    ? "funil reorganizado: rotulos abaixo e base centralizada"
+    : layoutPlan.narrative.placement === "next_page"
     ? "leitura técnica separada em página própria"
     : "leitura técnica reorganizada";
   await replaceAutomaticReportAttachment(admin, card2.id, {
