@@ -43,7 +43,7 @@ describe("consolidateAdaptiveFeedback", () => {
 
     expect(result.seguidoresGanho).toBe(47);
     expect(result.valores.seguidores).toBe(8000);
-    expect(result.valoresAnteriores.seguidores).toBe(7953);
+    expect(result.valoresAnteriores?.seguidores).toBe(7953);
   });
 
   it("registra o trade-off quando um valor mais recente diverge sem correção explícita", async () => {
