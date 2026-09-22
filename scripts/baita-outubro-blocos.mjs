@@ -211,6 +211,42 @@ try {
       }
     };
 
+    // Toda Entrega nova nasce com workflow_version_id preenchido, e a trigger
+    // `tasks_materialize_first_workflow_step` (AFTER INSERT on tasks, migração
+    // 20260917120000) dispara na hora e MATERIALIZA sozinha um card em branco
+    // pra primeira etapa do workflow (aqui, roteiro): cria a task e já a linka
+    // via `task_links ... on conflict (parent_id, child_id) do update`. O
+    // índice único é por (parent_id, workflow_step_id) — então quando este
+    // script tenta inserir o link da etapa real logo depois, `on conflict do
+    // nothing` bate nesse índice e é ENGOLIDO em silêncio, deixando o
+    // placeholder (backlog, sem completed_at) na vaga do roteiro. A etapa
+    // seguinte (captação) então falha "every previous step is complete",
+    // porque o roteiro "linkado" é o placeholder vazio, não o card real.
+    // Correção: reaponta o link já existente pro card real e apaga o
+    // placeholder órfão, em vez de tentar inserir um segundo link na mesma
+    // vaga.
+    const primeiraEtapa = wf[0].etapa;
+    const vincularPrimeiraEtapa = async (entregaId, realId, etapa) => {
+      const { rows } = await db.query(
+        `select child_id from public.task_links
+           where parent_id = $1::uuid and workflow_step_id = $2::uuid and relation_kind = 'workflow_step'`,
+        [entregaId, stepId(etapa)]);
+      const atual = rows[0]?.child_id;
+      if (atual === realId) return; // reuso idempotente, já correto
+      if (!atual) {
+        await db.query(`
+          insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
+          values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)`, [entregaId, realId, stepId(etapa)]);
+        return;
+      }
+      await db.query(`
+        update public.task_links set child_id = $3::uuid
+          where parent_id = $1::uuid and workflow_step_id = $2::uuid`,
+        [entregaId, stepId(etapa), realId]);
+      await db.query(`delete from public.tasks where id = $1::uuid`, [atual]);
+      console.log(`  (placeholder da 1ª etapa substituído pelo card real; órfão ${atual} apagado)`);
+    };
+
     const criarBloco = async (bloco, partes) => {
       await corrigirTipoCompartilhado(partes);
       for (const p of bloco.pecas) {
@@ -268,6 +304,10 @@ try {
           ...(partes.edicaoPronta ? [["publicacao", pubId]] : []),
         ];
         for (const [etapa, filho] of etapas) {
+          if (etapa === primeiraEtapa) {
+            await vincularPrimeiraEtapa(entregaId, filho, etapa);
+            continue;
+          }
           await db.query(`
             insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
             values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)
