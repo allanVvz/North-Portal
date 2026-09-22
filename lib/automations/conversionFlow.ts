@@ -73,7 +73,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // A render revision is part of idempotency, not of feedback extraction.
 // Bumping it regenerates only open/current occurrences and leaves earlier
 // documents and append-only snapshots available as audit history.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v6";
+const CONVERSION_RENDERER_REVISION = "segment-summary-v7";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",

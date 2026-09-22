@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { costLadder, focusOf, heroFor, historyView, resultAnalysis, resultFunnel, supportFigures, type FocusContext } from "./conversionFocus";
+import { costLadder, focusOf, heroFor, historyView, positiveFollowerFallback, resultAnalysis, resultFunnel, supportFigures, type FocusContext } from "./conversionFocus";
 import type { MediaTotals } from "./adsInsights";
 
 const nada = { vendas: null, agendamentos: null, receita: null, seguidores: null };
@@ -102,11 +102,10 @@ describe("figuras de apoio", () => {
 });
 
 describe("funil do resultado", () => {
-  it("seguidores: alcance → visitas → seguidores novos → total do perfil (placa-base), sem taxa entre fontes", () => {
+  it("seguidores: alcance → visitas → seguidores novos, sempre em forma trapezoidal", () => {
     const f = resultFunnel(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 1251 }, media: baitaMedia, followersGain: 37, prevFollowersTotal: 1214 }));
-    expect(f.stages.map((s) => s.key)).toEqual(["alcance", "visitas", "seguidores_novos", "total_perfil"]);
-    expect(f.stages[3].base).toBe(true);
-    expect(f.gaps).toEqual(["4,47% visitaram", "", ""]);
+    expect(f.stages.map((s) => s.key)).toEqual(["alcance", "visitas", "seguidores_novos"]);
+    expect(f.gaps).toEqual(["4,47% visitaram", ""]);
   });
 
   it("vendas: termina em vendas; taxa só entre agendamento e venda", () => {
@@ -114,6 +113,16 @@ describe("funil do resultado", () => {
     expect(f.stages.map((s) => s.key)).toEqual(["alcance", "cliques", "conversas", "agendamentos", "vendas"]);
     expect(f.gaps[2]).toBe("");
     expect(f.gaps[3]).toBe("62,5% viraram venda");
+  });
+});
+
+describe("fallback positivo de seguidores", () => {
+  it("mantém o ganho quando acompanha ou supera a referência", () => {
+    expect(positiveFollowerFallback(ctx({ kind: "seguidores", followersGain: 47, prevFollowersGain: 40, cur: { ...nada, seguidores: 8000 } }))).toEqual({ label: "Novos seguidores", value: 47, gained: true });
+  });
+
+  it("usa a base atual quando o ganho perde ritmo", () => {
+    expect(positiveFollowerFallback(ctx({ kind: "seguidores", followersGain: 47, prevFollowersGain: 90, cur: { ...nada, seguidores: 8000 } }))).toEqual({ label: "Seguidores no perfil", value: 8000, gained: false });
   });
 });
 

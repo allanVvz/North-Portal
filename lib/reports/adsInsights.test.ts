@@ -99,7 +99,7 @@ describe("funil", () => {
 
   it("etapa maior que a anterior não alarga o funil", () => {
     const w = funnelWidths([12569, 404, 562]);
-    expect(w[2]).toBeLessThanOrEqual(w[1]);
+    expect(w[2]).toBeLessThan(w[1]);
   });
 
   it("conversas: os mesmos cliques da faixa de números, sem visita ao site no meio", () => {

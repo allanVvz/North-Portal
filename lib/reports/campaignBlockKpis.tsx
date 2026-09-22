@@ -227,7 +227,7 @@ export function CampaignBlocksSection({
         const extra = extraKpis?.(block, cur, prev) ?? [];
         const detailContent = detail?.(block, cur, prev) ?? null;
         return (
-          <View style={S.blockGroup} key={block} wrap={false}>
+          <View style={S.blockGroup} key={block} wrap={!detailContent ? false : true}>
             <View style={S.blockHead}>
               <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
             </View>

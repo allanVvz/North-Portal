@@ -313,9 +313,14 @@ export function funnelWidths(values: number[], min = 0.36): number[] {
   const hi = Math.max(...logs);
   const lo = Math.min(...logs);
   const out: number[] = [];
+  const drop = Math.min(0.08, (0.94 - min) / Math.max(1, values.length - 1));
   values.forEach((_, i) => {
     const raw = hi === lo ? 1 - (i * (1 - min)) / Math.max(1, values.length - 1) : min + ((1 - min) * (logs[i] - lo)) / (hi - lo);
-    out.push(i === 0 ? Math.max(raw, 0.94) : Math.min(raw, out[i - 1] - 0.04 > min ? out[i - 1] - 0.04 : out[i - 1]));
+    // Reserve one visual step for every remaining stage. Without this floor a
+    // small middle number hits the minimum too early and a larger final number
+    // produces a flat or visually inverted base instead of a trapezoid.
+    const floor = min + drop * (values.length - i - 1);
+    out.push(i === 0 ? Math.max(raw, 0.94) : Math.max(floor, Math.min(raw, out[i - 1] - drop)));
   });
   return out.map((w) => Math.max(min, Math.min(1, w)));
 }

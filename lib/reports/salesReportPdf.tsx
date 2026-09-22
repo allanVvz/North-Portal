@@ -27,7 +27,7 @@ import {
   creativeBadges, creativeHighlights, creativeRows, mediaOutcome, mediaTotals, money, num, objectiveRows,
   type Badge, type MediaOutcome, signed,
 } from "./adsInsights";
-import { costLadder, focusOf, heroFor, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
+import { costLadder, focusOf, heroFor, positiveFollowerFallback, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
 import type { ReportContext } from "./conversionReportPlanning";
 import { creativeCardView, fullDay, shortDay, type TrafficFinalView } from "./adsReportPdf";
@@ -332,44 +332,54 @@ function SalesReportDocument(input: SalesReportInput) {
   // Segment templates start with the global journey, then keep KPIs and
   // creatives together in each real campaign objective.
   if (config.reportKpiPolicy !== "generic") {
+    const followerFallback = focus === "seguidores" ? positiveFollowerFallback(ctx) : null;
     const resultItems = [
       cur.vendas !== null ? { label: "Vendas", value: num(cur.vendas), delta: null } : null,
       cur.agendamentos !== null ? { label: "Agendamentos", value: num(cur.agendamentos), delta: null } : null,
       cur.receita !== null ? { label: "Receita", value: money(cur.receita), delta: null } : null,
+      followerFallback ? { label: followerFallback.label, value: followerFallback.gained ? `+${num(followerFallback.value)}` : num(followerFallback.value), delta: null } : null,
     ].filter((item): item is { label: string; value: string; delta: null } => item !== null);
     const creativeTableForBlock = (block: CampaignBlock) => {
       const rows = creatives.filter((creative) => creative.block === block);
       if (!rows.length) return null;
-      const highlight = [...rows].sort((a, b) => {
-        if (a.costPerResult !== null && b.costPerResult !== null) return a.costPerResult - b.costPerResult;
-        if (a.costPerResult !== null) return -1;
-        if (b.costPerResult !== null) return 1;
-        return b.result - a.result;
-      })[0];
-      const highlightView = creativeCardView(highlight, badges.get(highlight.adId) ?? [], outcome, previews);
+      const groups = [...rows.reduce((byCampaign, creative) => {
+        const name = creative.campaignName.trim() || "Campanha";
+        const current = byCampaign.get(name) ?? [];
+        current.push(creative);
+        byCampaign.set(name, current);
+        return byCampaign;
+      }, new Map<string, typeof rows>())];
+      const cardFor = (creative: typeof rows[number]) => {
+        const view = creativeCardView(creative, badges.get(creative.adId) ?? [], outcome, previews);
+        return {
+          ...view,
+          metrics: [
+            { label: creative.resultLabel.toLocaleLowerCase("pt-BR"), value: num(creative.result) },
+            { label: "investidos", value: money(creative.spend) },
+          ],
+        };
+      };
       return (
         <View style={{ marginTop: 10 }}>
-          <CreativeCards
-            items={[{
-              ...highlightView,
-              metrics: highlightView.metrics.filter((metric) => metric.label === "investidos" || metric.label === `${highlight.resultUnit}s`),
-            }]}
-            layout={{ maxLines: 2 }}
-          />
-          <View style={{ marginTop: 8 }}>
-          <DataTable
-            columns={[
-              { key: "creative", label: "Criativo", flex: 2.4 },
-              { key: "investment", label: "Investimento", align: "right" },
-              { key: "result", label: rows[0].resultLabel, align: "right", flex: 1.2 },
-            ]}
-            rows={rows.map((creative) => ({
-              creative: { text: creative.name, strong: true },
-              investment: { text: money(creative.spend) },
-              result: { text: num(creative.result) },
-            }))}
-          />
-          </View>
+          {groups.map(([campaignName, campaignCreatives]) => {
+            const highlight = [...campaignCreatives].sort((a, b) => (b.result - a.result) || (b.spend - a.spend))[0];
+            const allCards = campaignCreatives
+              .sort((a, b) => (b.result - a.result) || (b.spend - a.spend))
+              .map(cardFor);
+            return (
+              <View key={campaignName} style={{ marginTop: 8 }}>
+                <Text style={[T.cardBadge, { color: "#54706b", marginBottom: 4 }]}>{campaignName}</Text>
+                <Text style={[T.cardMetricLabel, { marginBottom: 4 }]}>Destaque</Text>
+                <CreativeCards items={[cardFor(highlight)]} layout={{ maxLines: 2 }} />
+                <Text style={[T.cardMetricLabel, { marginTop: 8, marginBottom: 4 }]}>Todos os criativos</Text>
+                {Array.from({ length: Math.ceil(allCards.length / 4) }, (_, index) => (
+                  <View key={index} style={{ marginBottom: 8 }}>
+                    <CreativeCards items={allCards.slice(index * 4, (index + 1) * 4)} layout={{ maxLines: 2 }} />
+                  </View>
+                ))}
+              </View>
+            );
+          })}
         </View>
       );
     };

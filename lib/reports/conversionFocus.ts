@@ -42,6 +42,18 @@ export type FocusContext = {
   prevFollowersTotal: number | null;
 };
 
+/** Escolhe um único dado de seguidores para o resumo visual. O comparativo é
+ * usado somente para preferir a leitura positiva mais estável: quando o ganho
+ * semanal perde ritmo, a base atual do perfil substitui esse comparativo. */
+export function positiveFollowerFallback(x: Pick<FocusContext, "followersGain" | "prevFollowersGain" | "cur">): { label: string; value: number; gained: boolean } | null {
+  const gainIsPositive = x.followersGain !== null && x.followersGain > 0;
+  const gainKeptPace = gainIsPositive && (x.prevFollowersGain === null || x.followersGain! >= x.prevFollowersGain);
+  if (gainKeptPace) return { label: "Novos seguidores", value: x.followersGain!, gained: true };
+  if (x.cur.seguidores !== null) return { label: "Seguidores no perfil", value: x.cur.seguidores, gained: false };
+  if (gainIsPositive) return { label: "Novos seguidores", value: x.followersGain!, gained: true };
+  return null;
+}
+
 const none: Delta = { pct: null, tone: "neutral", text: "sem semana anterior" };
 const up = (c: number | null, p: number | null | undefined) => (p === undefined || p === null ? none : deltaOf(c, p, "higher_is_better"));
 const down = (c: number | null, p: number | null | undefined) => (p === undefined || p === null ? none : deltaOf(c, p, "lower_is_better"));
@@ -188,7 +200,6 @@ export function resultFunnel(x: FocusContext): ResultFunnel {
   if (x.kind === "seguidores") {
     stages = mediaFunnel(media, "visitas");
     if (x.followersGain !== null && x.followersGain > 0) stages.push({ key: "seguidores_novos", label: "Seguidores novos", value: x.followersGain, source: "feedback" });
-    if (cur.seguidores !== null) stages.push({ key: "total_perfil", label: "Total do perfil", value: cur.seguidores, source: "feedback", base: true });
   } else {
     stages = mediaFunnel(media, "conversas");
     if ((x.kind === "vendas" || x.kind === "agendamentos") && cur.agendamentos !== null) stages.push({ key: "agendamentos", label: "Agendamentos", value: cur.agendamentos, source: "feedback" });
