@@ -105,7 +105,7 @@ try {
 
   // Workflow e ids de etapa vêm do banco, nunca fixados aqui.
   const { rows: wf } = await db.query(`
-    select v.id, v.delivery_type_id, s.id as step_id, tt.key as etapa, s.order_index
+    select v.id, v.delivery_type_id, s.id as step_id, s.task_type_id, tt.key as etapa, s.order_index
     from public.workflow_versions v
     join public.workflow_version_steps s on s.workflow_version_id = v.id
     join public.task_types tt on tt.id = s.task_type_id
@@ -114,11 +114,12 @@ try {
   if (!wf.length) throw new Error("Workflow publicado de Criativo não encontrado.");
   const WORKFLOW = wf[0].id;
   const DELIVERY_TYPE = wf[0].delivery_type_id;
-  const stepId = (etapa) => {
+  const step = (etapa) => {
     const hit = wf.find((s) => s.etapa === etapa);
     if (!hit) throw new Error(`Etapa "${etapa}" não existe no workflow publicado.`);
-    return hit.step_id;
+    return hit;
   };
+  const stepId = (etapa) => step(etapa).step_id;
 
   // `task_type_id` é a fonte da verdade de kind/subtype — a trigger
   // `tasks_project_task_type` (migração 20260917120000) DERIVA kind/subtype dele
@@ -134,7 +135,9 @@ try {
   const PUBLICACAO_TYPE = tt[0].id;
 
   const card = async (id) => {
-    const { rows } = await db.query(`select id, title, due_date, reviewer_id from public.tasks where id = $1::uuid`, [id]);
+    const { rows } = await db.query(
+      `select id, title, due_date, reviewer_id, task_type_id, kind, subtype, status, completed_at is not null as concluida
+         from public.tasks where id = $1::uuid`, [id]);
     return rows[0] ?? null;
   };
 
@@ -147,18 +150,33 @@ try {
     if (!roteiro || !captacao || !edicao) throw new Error(`Etapa compartilhada de ${nomeBloco} não encontrada.`);
 
     console.log(`${nomeBloco} — ${bloco.pecas.length} peça(s), vence ${bloco.vence}`);
-    console.log(`  roteiro  compartilhado: "${roteiro.title}"  (${dia(roteiro.due_date)})`);
-    console.log(`  captação compartilhada: "${captacao.title}"  (${dia(captacao.due_date)})`);
-    console.log(`  edição   compartilhada: "${edicao.title}"  (${dia(edicao.due_date)})`);
+    // Os 3 cards compartilhados nasceram pelo composer genérico de "Plano de
+    // conteúdo" (PlanAddCombobox.tsx), que crava toda etapa como
+    // `kind: 'operacional'` SEM subtype — task_type_id aponta pra raiz "tarefa".
+    // Pra virar etapa de workflow, o child precisa do task_type_id EXATO que a
+    // etapa declara (trigger task_link_matches_workflow_version, migração
+    // 20260917120000): não basta a chave bater, tem que ser o mesmo id.
+    for (const [nome, c, etapa] of [["roteiro", roteiro, "roteiro"], ["captação", captacao, "captacao"], ["edição", edicao, "edicao"]]) {
+      const esperado = step(etapa).task_type_id;
+      const okAgora = c.task_type_id === esperado;
+      console.log(`  ${nome.padEnd(9)} compartilhado: "${c.title}"  (${dia(c.due_date)})  ${okAgora ? "[tipo já correto]" : `[subtype ${c.subtype ?? "—"} → ${etapa}]`}`);
+    }
+    // Mesma regra do trigger `workflow_link_is_strictly_sequential`: publicacao
+    // (order 40) só pode ser linkada se edicao (order 30) já estiver concluída.
+    // "Edição — 6 Reels" e "Edição — 2 anúncios" estão `backlog` hoje — nenhuma
+    // das 8 Entregas ganha a etapa de publicação vinculada nesta rodada.
+    const edicaoPronta = edicao.concluida;
     for (const p of bloco.pecas) {
       console.log(`\n  Entrega a criar: "${p.titulo}"`);
       console.log(`    roteiro    ← ${roteiro.title}   [compartilhado]`);
       console.log(`    captacao   ← ${captacao.title}  [compartilhado]`);
       console.log(`    edicao     ← ${edicao.title}    [compartilhado]`);
-      console.log(`    publicacao ← nova task, vence ${bloco.vence}`);
+      console.log(edicaoPronta
+        ? `    publicacao ← nova task, vence ${bloco.vence}, vinculada como etapa`
+        : `    publicacao ← nova task, vence ${bloco.vence}  ⚠ NÃO vinculada — edição ainda "${edicao.status}"`);
     }
     console.log("");
-    return { roteiro, captacao, edicao };
+    return { roteiro, captacao, edicao, edicaoPronta };
   };
 
   const reels = await planejar(BLOCO_REELS, "1. BLOCO 6 REELS");
@@ -174,7 +192,27 @@ try {
 
   await db.query("begin");
   try {
+    // Corrige o tipo dos 3 cards compartilhados de um bloco, UMA vez (não por
+    // peça — são os mesmos 3 cards em todas as Entregas do bloco). Sem isso,
+    // `task_link_matches_workflow_version` recusa o link: "workflow child has
+    // an incompatible Task subtype" — o child precisa do MESMO task_type_id
+    // que a etapa declara, não só a chave batendo.
+    const corrigirTipoCompartilhado = async (partes) => {
+      for (const [etapa, c] of [["roteiro", partes.roteiro], ["captacao", partes.captacao], ["edicao", partes.edicao]]) {
+        const esperado = step(etapa).task_type_id;
+        if (c.task_type_id === esperado) continue;
+        const { rows } = await db.query(
+          `update public.tasks set task_type_id = $2::uuid where id = $1::uuid returning kind, subtype`,
+          [c.id, esperado]);
+        if (rows[0].subtype !== etapa) {
+          throw new Error(`task_type_id de "${c.title}" projetou subtype inesperado: ${JSON.stringify(rows[0])}`);
+        }
+        console.log(`ok: "${c.title}" tipado como ${etapa}`);
+      }
+    };
+
     const criarBloco = async (bloco, partes) => {
+      await corrigirTipoCompartilhado(partes);
       for (const p of bloco.pecas) {
         // kind/subtype NÃO são passados — a trigger os deriva de task_type_id.
         // Passá-los aqui seria redundante na melhor hipótese e enganoso na pior
@@ -196,22 +234,40 @@ try {
         }
         const pubId = pubRows[0].id;
 
-        const { rows: nova } = await db.query(`
-          insert into public.tasks (
-            client_id, kind, subtype, title, status, priority, assignee,
-            due_date, start_date, end_date, position, client_visible, progress_weight,
-            requires_review, requires_approval, reviewer_id, task_type_id, workflow_version_id, payload
-          ) values (
-            $1::uuid, 'criativo', null, $2, 'backlog', 'media', null,
-            $3::date, $3::date, $3::date, 0, false, 1,
-            true, false, $4::uuid, $5::uuid, $6::uuid, '{}'::jsonb
-          ) returning id, title`,
-          [CLIENTE, p.titulo, bloco.vence, partes.roteiro.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
-        const entregaId = nova[0].id;
+        // Idempotência por TÍTULO: sem id determinístico no insert, rodar o
+        // script de novo (o caminho normal pra linkar publicacao depois que a
+        // edição do bloco for aprovada) não pode criar Entrega duplicada.
+        const { rows: existente } = await db.query(
+          `select id from public.tasks where client_id = $1::uuid and kind = 'criativo' and title = $2 limit 1`,
+          [CLIENTE, p.titulo]);
+        let entregaId;
+        if (existente.length) {
+          entregaId = existente[0].id;
+          console.log(`(Entrega "${p.titulo}" já existe, ${entregaId} — reusando)`);
+        } else {
+          const { rows: nova } = await db.query(`
+            insert into public.tasks (
+              client_id, kind, subtype, title, status, priority, assignee,
+              due_date, start_date, end_date, position, client_visible, progress_weight,
+              requires_review, requires_approval, reviewer_id, task_type_id, workflow_version_id, payload
+            ) values (
+              $1::uuid, 'criativo', null, $2, 'backlog', 'media', null,
+              $3::date, $3::date, $3::date, 0, false, 1,
+              true, false, $4::uuid, $5::uuid, $6::uuid, '{}'::jsonb
+            ) returning id`,
+            [CLIENTE, p.titulo, bloco.vence, partes.roteiro.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
+          entregaId = nova[0].id;
+        }
 
-        for (const [etapa, filho] of [
-          ["roteiro", bloco.roteiro], ["captacao", bloco.captacao], ["edicao", bloco.edicao], ["publicacao", pubId],
-        ]) {
+        // publicacao só entra se edicao já estiver concluída — senão o trigger
+        // `task_link_matches_workflow_version`/`workflow_link_is_strictly_sequential`
+        // recusa e derruba a transação inteira. O card de publicação já foi
+        // corrigido acima (nome/tipo/data); só a LIGAÇÃO como etapa fica pendente.
+        const etapas = [
+          ["roteiro", bloco.roteiro], ["captacao", bloco.captacao], ["edicao", bloco.edicao],
+          ...(partes.edicaoPronta ? [["publicacao", pubId]] : []),
+        ];
+        for (const [etapa, filho] of etapas) {
           await db.query(`
             insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
             values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)
@@ -222,7 +278,9 @@ try {
           values ($1::uuid, $2::uuid, 'structural_member', 0)
           on conflict do nothing`, [PLANO, entregaId]);
 
-        console.log(`ok: Entrega "${nova[0].title}" (${entregaId}) com as 4 etapas, membro de "${plano[0].title}"`);
+        console.log(partes.edicaoPronta
+          ? `ok: Entrega "${p.titulo}" (${entregaId}) com as 4 etapas, membro de "${plano[0].title}"`
+          : `ok: Entrega "${p.titulo}" (${entregaId}) com 3 etapas — publicação PENDENTE (edição em ${partes.edicao.status}), membro de "${plano[0].title}"`);
       }
     };
 
