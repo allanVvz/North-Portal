@@ -11,6 +11,7 @@
 // taggeada.
 
 import { Text, View } from "@react-pdf/renderer";
+import type { ReactNode } from "react";
 import { ratio, resolveAcquisitionMetric } from "@/app/admin/performance/acquisitionInsights";
 import { isNotIntegrated } from "@/app/admin/performance/insights";
 import { metricRefInverse, metricRefKind } from "@/app/admin/performance/performanceLabels";
@@ -192,6 +193,7 @@ export function CampaignBlocksSection({
   adPosts = [],
   kicker = "Resultados por campanha",
   extraKpis,
+  detail,
   footer,
 }: {
   config: PerformanceTemplateConfig;
@@ -205,6 +207,8 @@ export function CampaignBlocksSection({
   adPosts?: MetaPost[];
   kicker?: string;
   extraKpis?: (block: CampaignBlock, cur: MetaPost[], prev: MetaPost[]) => KpiProps[];
+  /** Conteúdo específico do objetivo, renderizado logo após seus KPIs. */
+  detail?: (block: CampaignBlock, cur: MetaPost[], prev: MetaPost[]) => ReactNode;
   footer?: string;
 }) {
   const cm = config.prefs.customMetrics;
@@ -221,6 +225,7 @@ export function CampaignBlocksSection({
         const cur = posts.filter((p) => postBlock(p) === block);
         const prev = prevPosts.filter((p) => postBlock(p) === block);
         const extra = extraKpis?.(block, cur, prev) ?? [];
+        const detailContent = detail?.(block, cur, prev) ?? null;
         return (
           <View style={S.blockGroup} key={block} wrap={false}>
             <View style={S.blockHead}>
@@ -230,6 +235,7 @@ export function CampaignBlocksSection({
               {blockKpisOf(config, block).map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm)} />)}
               {extra.map((k) => <KpiCard key={k.label} {...k} />)}
             </View>
+            {detailContent}
           </View>
         );
       })}

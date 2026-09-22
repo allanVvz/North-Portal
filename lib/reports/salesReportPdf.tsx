@@ -16,6 +16,7 @@
 import { Document, Page, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { previousPeriod, type Period } from "@/app/admin/performance/insights";
 import type { PerformanceTemplateConfig } from "@/lib/performanceTemplates";
+import type { CampaignBlock } from "@/lib/performanceTemplates";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { AdaptiveInterpretation } from "@/lib/ai/adaptiveFeedback";
 import type { MetaPost } from "@/lib/windsor";
@@ -311,7 +312,7 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null;
 
-  const conversionHistorySection = series.length > 1 ? (
+  const conversionHistorySection = series.filter((point) => [point.vendas, point.agendamentos, point.receita, point.seguidores].some((value) => value !== null)).length >= 3 ? (
     <Section title="Histórico de conversão">
       <DataTable
         columns={[
@@ -328,17 +329,34 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null;
 
-  // The active segment templates use the conversion PDF as a concise closing
-  // of the operational summary. Do not repeat the hero/headline, aggregate
-  // funnel, generic objective table or creative stats: those can introduce
-  // impressions, CPM/CTR/frequency and derived totals that were not sent to
-  // the client. Followers have exactly one home, the final audience table.
+  // Segment templates start with the global journey, then keep KPIs and
+  // creatives together in each real campaign objective.
   if (config.reportKpiPolicy !== "generic") {
     const resultItems = [
       cur.vendas !== null ? { label: "Vendas", value: num(cur.vendas), delta: null } : null,
       cur.agendamentos !== null ? { label: "Agendamentos", value: num(cur.agendamentos), delta: null } : null,
       cur.receita !== null ? { label: "Receita", value: money(cur.receita), delta: null } : null,
     ].filter((item): item is { label: string; value: string; delta: null } => item !== null);
+    const creativeTableForBlock = (block: CampaignBlock) => {
+      const rows = creatives.filter((creative) => creative.block === block);
+      if (!rows.length) return null;
+      return (
+        <View style={{ marginTop: 10 }}>
+          <DataTable
+            columns={[
+              { key: "creative", label: "Criativo", flex: 2.4 },
+              { key: "investment", label: "Investimento", align: "right" },
+              { key: "result", label: rows[0].resultLabel, align: "right", flex: 1.2 },
+            ]}
+            rows={rows.map((creative) => ({
+              creative: { text: creative.name, strong: true },
+              investment: { text: money(creative.spend) },
+              result: { text: num(creative.result) },
+            }))}
+          />
+        </View>
+      );
+    };
     return (
       <Document>
         <Page size="A4" style={T.page} wrap>
@@ -348,6 +366,21 @@ function SalesReportDocument(input: SalesReportInput) {
             subtitle={`${fullDay(period.from)} a ${fullDay(period.to)}`}
             pill="Conversão"
           />
+          {funnel.stages.length ? (
+            <Section title="Funil">
+              <ProportionalFunnel
+                width={input.layout?.funnel?.width ?? 360}
+                layout={input.layout?.funnel}
+                stages={funnel.stages.map((stage) => ({
+                  label: stage.label,
+                  value: stage.key === "seguidores_novos" ? `+${num(stage.value)}` : num(stage.value),
+                  numeric: stage.value,
+                  base: stage.base,
+                }))}
+                gaps={funnel.gaps}
+              />
+            </Section>
+          ) : null}
           {resultItems.length ? <Section title="Resultados informados"><FigureRow items={resultItems} /></Section> : null}
           {informadosSection}
           <CampaignBlocksSection
@@ -356,6 +389,7 @@ function SalesReportDocument(input: SalesReportInput) {
             prevPosts={prevCampaignPosts}
             adPosts={adPosts}
             kicker="Mídia por objetivo"
+            detail={(block) => creativeTableForBlock(block)}
           />
           {conversoes.length ? (
             <Section title="Conversões informadas">
@@ -376,7 +410,8 @@ function SalesReportDocument(input: SalesReportInput) {
             </Section>
           ) : null}
           {audienceGrowthSection}
-          <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} note={footnote} />
+          {conversionHistorySection}
+          <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} />
         </Page>
       </Document>
     );
