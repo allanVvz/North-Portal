@@ -22,6 +22,7 @@ declare
   expected_configs integer;
   archived_configs integer;
   updated_configs integer;
+  final_configs integer;
 begin
   -- Both active legs (traffic + conversion) use the same segment policy.  The
   -- explicit allowlist prevents a stray/inactive config from being rewritten.
@@ -83,10 +84,15 @@ begin
     and ac.performance_template_id is distinct from archive.next_template_id;
   get diagnostics updated_configs = row_count;
 
-  -- A rerun after a transaction retry is a valid no-op; otherwise every active
-  -- config should have moved exactly once.
-  if updated_configs not in (0, 12) then
-    raise exception 'Atualização parcial das configurações: % de 12', updated_configs;
+  -- Some traffic legs may already have the desired template; the invariant is
+  -- the final state of all 12 active legs, not an assumed row-count update.
+  select count(*) into final_configs
+  from public.automation_configs ac
+  join public.automation_config_template_archive_20260922 archive on archive.config_id = ac.id
+  where archive.migration_key = '20260922140000_segment_report_templates'
+    and ac.performance_template_id = archive.next_template_id;
+  if final_configs <> 12 then
+    raise exception 'Estado final incompleto das configurações: % de 12 (atualizadas nesta execução: %)', final_configs, updated_configs;
   end if;
 end
 $$;
