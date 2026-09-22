@@ -19,6 +19,21 @@
 //      nunca por child_id — então o mesmo card de edição é etapa das duas Entregas
 //      sem ser duplicado.
 //
+// A primeira tentativa de --apply falhou (rollback confirmado, nada gravado):
+// "A workflow step may only be linked after every previous step is complete"
+// (trigger workflow_link_is_strictly_sequential, migração 20260918004358). É
+// regra real, não bug — a etapa de EDIÇÃO compartilhada ("Evento Baita 10/10 —
+// Edição") ainda está `em_producao`, não `aprovado`, então NENHUMA Entrega
+// (nem a antiga "Evento Baita 26/09", nem as 2 novas) pode ter a etapa de
+// publicação vinculada agora. O script passa a criar as 2 Entregas com
+// roteiro+captação+edição linkados (os três já estão liberados) e deixa
+// publicação PENDENTE — a etapa fica vaga, o card de publicação é corrigido
+// mesmo assim (nome/subtype/data não dependem do trigger), e rodar o script de
+// novo depois que alguém aprovar a edição linka o que falta, sem duplicar
+// Entrega: como o insert da Entrega não usa id determinístico, a idempotência
+// é por TÍTULO — se já existe uma "Evento Baita 10/10 — Reels"/"Carrossel", o
+// script reusa o id em vez de criar outra.
+//
 // Uso: node scripts/baita-setembro-entregas.mjs [--apply]
 
 import { createRequire } from "node:module";
@@ -102,7 +117,8 @@ try {
 
   const card = async (id) => {
     const { rows } = await db.query(
-      `select id, title, kind, subtype, status, due_date, reviewer_id from public.tasks where id = $1::uuid`, [id]);
+      `select id, title, kind, subtype, status, due_date, reviewer_id, completed_at is not null as concluida
+         from public.tasks where id = $1::uuid`, [id]);
     return rows[0] ?? null;
   };
 
@@ -126,6 +142,11 @@ try {
   const edicao = await card(COMPARTILHADAS.edicao);
   if (!roteiro || !captacao || !edicao) throw new Error("Etapa compartilhada não encontrada.");
 
+  // A publicação só pode ser linkada como etapa se a edição JÁ estiver
+  // completa — é a regra do trigger. Checado uma vez, vale para as 2 Entregas
+  // porque as duas compartilham a mesma edição.
+  const edicaoPronta = edicao.concluida;
+
   const criar = [];
   for (const p of PECAS) {
     const pub = await card(p.card);
@@ -136,6 +157,9 @@ try {
     console.log(`     edicao     ← ${edicao.title}    [compartilhado]`);
     console.log(`     publicacao ← "${pub.title}" → "${p.publicacao}"`);
     console.log(`                  subtype ${pub.subtype ?? "—"} → publicacao, vence — → ${EVENTO}`);
+    console.log(edicaoPronta
+      ? `                  vinculada como etapa (edição concluída)`
+      : `                  ⚠ NÃO vinculada como etapa agora: edição ainda "${edicao.status}" — card só é corrigido, etapa fica vaga`);
     console.log(`     plano      ← Tarefas do mes de setembro`);
     criar.push({ ...p, pub });
   }
@@ -144,6 +168,11 @@ try {
   console.log(`   Bloco 6 Reels e bloco 2 anúncios: ver scripts/baita-outubro-blocos.mjs.`);
   console.log(`   "Gravação 17/09 — 3 publicações" (solta) pode ser a mesma diária de`);
   console.log(`   "Gravação do bloco — 6 Reels" (16/09, no plano) — confirmar antes de usar.`);
+  console.log(`   "Post evento 26/09" (2d3dff22…) e o slot vago de publicação da Entrega`);
+  console.log(`   EXISTENTE "Evento Baita 26/09" (e0b23dce…) não são tocados aqui — essa era`);
+  console.log(`   uma suposição de uma rodada anterior, anterior a você apontar os 2 cards`);
+  console.log(`   certos (reels/carrossel). Confirmar se esse card e essa Entrega antiga ainda`);
+  console.log(`   servem para algo, ou se ficaram obsoletos com as 2 Entregas novas.`);
 
   if (!APPLY) {
     console.log("\nDry-run: nada gravado. Rode com --apply.\n");
@@ -165,25 +194,43 @@ try {
                 end_date = case when end_date is null then null else greatest($3::date, end_date) end
            where id = $1::uuid`, [c.pub.id, c.publicacao, EVENTO]);
 
-      const { rows: nova } = await db.query(`
-        insert into public.tasks (
-          client_id, kind, subtype, title, status, priority, assignee,
-          due_date, start_date, end_date, position, client_visible, progress_weight,
-          requires_review, requires_approval, reviewer_id, task_type_id, workflow_version_id, payload
-        ) values (
-          $1::uuid, 'criativo', null, $2, 'backlog', 'media', null,
-          $3::date, $3::date, $3::date, 0, false, 1,
-          true, false, $4::uuid, $5::uuid, $6::uuid, '{}'::jsonb
-        ) returning id, title`,
-        [CLIENTE, c.entrega, EVENTO, edicao.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
-      const entregaId = nova[0].id;
+      // Idempotência por TÍTULO: esta Entrega nasce por insert puro (sem id
+      // determinístico), e rodar o script de novo — o caminho normal para
+      // completar a publicação depois que a edição for aprovada — não pode
+      // criar uma segunda Entrega. Se já existe uma com este título, reusa.
+      const { rows: existente } = await db.query(
+        `select id from public.tasks where client_id = $1::uuid and kind = 'criativo' and title = $2 limit 1`,
+        [CLIENTE, c.entrega]);
+      let entregaId;
+      if (existente.length) {
+        entregaId = existente[0].id;
+        console.log(`(Entrega "${c.entrega}" já existe, ${entregaId} — reusando)`);
+      } else {
+        const { rows: nova } = await db.query(`
+          insert into public.tasks (
+            client_id, kind, subtype, title, status, priority, assignee,
+            due_date, start_date, end_date, position, client_visible, progress_weight,
+            requires_review, requires_approval, reviewer_id, task_type_id, workflow_version_id, payload
+          ) values (
+            $1::uuid, 'criativo', null, $2, 'backlog', 'media', null,
+            $3::date, $3::date, $3::date, 0, false, 1,
+            true, false, $4::uuid, $5::uuid, $6::uuid, '{}'::jsonb
+          ) returning id`,
+          [CLIENTE, c.entrega, EVENTO, edicao.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
+        entregaId = nova[0].id;
+      }
 
-      for (const [etapa, filho] of [
+      // publicacao só entra na lista se a edição já estiver completa — senão o
+      // trigger `workflow_link_is_strictly_sequential` recusa o insert e derruba
+      // a transação inteira. O card de publicação já foi corrigido acima
+      // (nome/subtype/data); só a LIGAÇÃO como etapa fica pendente.
+      const etapas = [
         ["roteiro", COMPARTILHADAS.roteiro],
         ["captacao", COMPARTILHADAS.captacao],
         ["edicao", COMPARTILHADAS.edicao],
-        ["publicacao", c.pub.id],
-      ]) {
+        ...(edicaoPronta ? [["publicacao", c.pub.id]] : []),
+      ];
+      for (const [etapa, filho] of etapas) {
         await db.query(`
           insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
           values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)
@@ -196,7 +243,9 @@ try {
         insert into public.task_links (parent_id, child_id, relation_kind, position)
         values ($1::uuid, $2::uuid, 'structural_member', 0)
         on conflict do nothing`, [PLANO_EVENTO, entregaId]);
-      console.log(`ok: Entrega "${nova[0].title}" (${entregaId}) com as 4 etapas, membro de "Tarefas do mes de setembro"`);
+      console.log(edicaoPronta
+        ? `ok: Entrega "${c.entrega}" (${entregaId}) com as 4 etapas, membro de "Tarefas do mes de setembro"`
+        : `ok: Entrega "${c.entrega}" (${entregaId}) com 3 etapas — publicação PENDENTE (edição em produção), membro de "Tarefas do mes de setembro"`);
     }
     await db.query("commit");
     console.log("\nTransação confirmada.\n");
