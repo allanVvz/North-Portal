@@ -27,7 +27,7 @@ import {
   creativeBadges, creativeHighlights, creativeRows, mediaOutcome, mediaTotals, money, num, objectiveRows,
   type Badge, type MediaOutcome, signed,
 } from "./adsInsights";
-import { costLadder, focusOf, heroFor, positiveFollowerFallback, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
+import { costLadder, focusOf, heroFor, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
 import type { ReportContext } from "./conversionReportPlanning";
 import { creativeCardView, fullDay, shortDay, type TrafficFinalView } from "./adsReportPdf";
@@ -166,6 +166,10 @@ function SalesReportDocument(input: SalesReportInput) {
   // ---- mídia e criativos ----
   const outcome: MediaOutcome = focus === "seguidores" ? "visitas" : mediaOutcome(media);
   const { postBlock } = blockResolver(config, adPosts);
+  // Em templates com Mensagens, a conversa é uma etapa real da jornada antes
+  // do resultado de seguidores — mesmo quando o foco do feedback é perfil.
+  ctx.hasMessageObjective = campaignPosts.some((post) => postBlock(post) === "mensagens");
+  ctx.hasProfileObjective = campaignPosts.some((post) => postBlock(post) === "trafego_perfil");
   const objectives = objectiveRows(campaignPosts, prevCampaignPosts, postBlock, outcome);
   const { rows: creatives } = creativeRows(adPosts, outcome, postBlock);
   const prevCreatives = prevAdPosts?.length ? creativeRows(prevAdPosts, outcome, postBlock).rows : [];
@@ -332,12 +336,10 @@ function SalesReportDocument(input: SalesReportInput) {
   // Segment templates start with the global journey, then keep KPIs and
   // creatives together in each real campaign objective.
   if (config.reportKpiPolicy !== "generic") {
-    const followerFallback = focus === "seguidores" ? positiveFollowerFallback(ctx) : null;
     const resultItems = [
       cur.vendas !== null ? { label: "Vendas", value: num(cur.vendas), delta: null } : null,
       cur.agendamentos !== null ? { label: "Agendamentos", value: num(cur.agendamentos), delta: null } : null,
       cur.receita !== null ? { label: "Receita", value: money(cur.receita), delta: null } : null,
-      followerFallback ? { label: followerFallback.label, value: followerFallback.gained ? `+${num(followerFallback.value)}` : num(followerFallback.value), delta: null } : null,
     ].filter((item): item is { label: string; value: string; delta: null } => item !== null);
     const creativeTableForBlock = (block: CampaignBlock) => {
       const rows = creatives.filter((creative) => creative.block === block);

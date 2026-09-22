@@ -40,18 +40,28 @@ export type FocusContext = {
   followersGain: number | null;
   prevFollowersGain: number | null;
   prevFollowersTotal: number | null;
+  /** A semana contém campanha de Mensagens: conversas entram antes de seguidores. */
+  hasMessageObjective?: boolean;
+  /** A semana contém campanha de Tráfego para o perfil. */
+  hasProfileObjective?: boolean;
 };
 
 /** Escolhe um único dado de seguidores para o resumo visual. O comparativo é
  * usado somente para preferir a leitura positiva mais estável: quando o ganho
  * semanal perde ritmo, a base atual do perfil substitui esse comparativo. */
 export function positiveFollowerFallback(x: Pick<FocusContext, "followersGain" | "prevFollowersGain" | "cur">): { label: string; value: number; gained: boolean } | null {
-  const gainIsPositive = x.followersGain !== null && x.followersGain > 0;
-  const gainKeptPace = gainIsPositive && (x.prevFollowersGain === null || x.followersGain! >= x.prevFollowersGain);
-  if (gainKeptPace) return { label: "Novos seguidores", value: x.followersGain!, gained: true };
-  if (x.cur.seguidores !== null) return { label: "Seguidores no perfil", value: x.cur.seguidores, gained: false };
-  if (gainIsPositive) return { label: "Novos seguidores", value: x.followersGain!, gained: true };
-  return null;
+  if (x.followersGain === null || x.followersGain <= 0) return null;
+  // Ganho que acompanha a semana anterior: percentual de evolução semanal.
+  // Ganho abaixo da referência: percentual positivo sobre a base do perfil.
+  const comparisonPct = x.prevFollowersGain !== null && x.prevFollowersGain > 0 && x.followersGain >= x.prevFollowersGain
+    ? ((x.followersGain - x.prevFollowersGain) / x.prevFollowersGain) * 100
+    : x.cur.seguidores !== null && x.cur.seguidores > 0
+      ? (x.followersGain / x.cur.seguidores) * 100
+      : x.prevFollowersGain !== null && x.prevFollowersGain > 0
+        ? (x.followersGain / x.prevFollowersGain) * 100
+        : null;
+  const suffix = comparisonPct === null ? "" : ` · +${pctText(comparisonPct)}`;
+  return { label: `Seguidores${suffix}`, value: x.followersGain, gained: true };
 }
 
 const none: Delta = { pct: null, tone: "neutral", text: "sem semana anterior" };
@@ -198,12 +208,15 @@ export function resultFunnel(x: FocusContext): ResultFunnel {
   const { cur, media } = x;
   let stages: FunnelStage[];
   if (x.kind === "seguidores") {
-    stages = mediaFunnel(media, "visitas");
-    if (x.followersGain !== null && x.followersGain > 0) stages.push({ key: "seguidores_novos", label: "Seguidores novos", value: x.followersGain, source: "feedback" });
+    stages = mediaFunnel(media, x.hasMessageObjective ? "conversas" : "visitas");
   } else {
     stages = mediaFunnel(media, "conversas");
     if ((x.kind === "vendas" || x.kind === "agendamentos") && cur.agendamentos !== null) stages.push({ key: "agendamentos", label: "Agendamentos", value: cur.agendamentos, source: "feedback" });
     if (x.kind === "vendas" && cur.vendas !== null) stages.push({ key: "vendas", label: "Vendas", value: cur.vendas, source: "feedback" });
+  }
+  const follower = positiveFollowerFallback(x);
+  if (follower && (x.kind === "seguidores" || x.hasProfileObjective || x.hasMessageObjective)) {
+    stages.push({ key: "seguidores_novos", label: follower.label, value: follower.value, source: "feedback" });
   }
   return { stages, gaps: stages.slice(1).map((s, i) => stageGap(stages[i], s)) };
 }
