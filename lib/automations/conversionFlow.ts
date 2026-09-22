@@ -649,8 +649,16 @@ async function processOccurrence(
   if (ext.seguidoresGanho != null) {
     // Ganho e snapshot do perfil podem coexistir: "47 novos" seguido de
     // "7.953 para 8.000" preserva tanto o total quanto o ritmo semanal.
-    if (ext.valores.seguidores == null) delete metrics.seguidores;
+    //
+    // Mas quando o único número informado É o ganho, ele não vira total: a
+    // FALKE respondeu "Seguidores: 66" querendo dizer 66 novos, e o relatório
+    // saiu com "Total do perfil: 66". O total só existe quando a pessoa disser
+    // um número diferente do ganho (snapshot ou base do perfil).
+    if (ext.valores.seguidores == null || ext.valores.seguidores === ext.seguidoresGanho) delete metrics.seguidores;
     metrics.seguidores_novos = String(ext.seguidoresGanho);
+    // A série do perfil (client_metric_series) segue a mesma regra: sem total
+    // real informado, não há snapshot do perfil a registrar.
+
     if (ext.seguidoresGanhoAnterior != null) metrics.seguidores_novos_anterior = String(ext.seguidoresGanhoAnterior);
   }
   const informed = {
@@ -743,7 +751,7 @@ async function processOccurrence(
         taskId: card2.id,
         periodFrom: period.from,
         periodTo: period.to,
-        current: ext.valores.seguidores ?? null,
+        current: metrics.seguidores == null ? null : ext.valores.seguidores ?? null,
         previous: ext.valoresAnteriores?.seguidores ?? null,
         sourceCommentAt,
       });

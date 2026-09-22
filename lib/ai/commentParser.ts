@@ -144,6 +144,22 @@ function followerGain(text: string): number | null {
   return match ? parseAmount(match[1]) : null;
 }
 
+/** A base do perfil dita em texto corrido: "o perfil já estava com mais de
+ *  8000", "o perfil tem 30000 seguidores".
+ *
+ *  Não exige a palavra "seguidores" depois do número, de propósito: os dois
+ *  comentários reais que trouxeram essa frase vieram com erro de digitação
+ *  justamente ali ("8000 seguidres", "mias de 30000"), e exigir a palavra
+ *  fazia a base do perfil ser descartada como "número sem rótulo". */
+function followerBaseTotal(text: string): number | null {
+  const base = fold(text);
+  const match = new RegExp(
+    String.raw`\bperfil\b\s+(?:ja\s+)?(?:estava|esta|tinha|tem|contava)\s+(?:com\s+)?(?:\w+\s+de\s+)?${NUM}`,
+    "i",
+  ).exec(base);
+  return match ? parseAmount(match[1]) : null;
+}
+
 /** A operação pode informar o custo diretamente; ele não precisa ser inferido. */
 function followerCost(text: string): number | null {
   const base = fold(text).replace(/[*_`]/g, "");
@@ -274,6 +290,21 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
   if (snapshotComparison && tags.includes("seguidores")) {
     acc.found.set("seguidores", [snapshotComparison.current]);
     acc.previousFound.set("seguidores", [snapshotComparison.previous]);
+  }
+
+  // "21 novos seguidores. O perfil já estava com 30000": a base do perfil é o
+  // valor ANTERIOR ao ganho, não um segundo valor da mesma métrica. Sem separar
+  // os dois papéis, o leitor genérico via 21 e 30000 na mesma tag, marcava
+  // AMBIGUOUS e descartava os dois em silêncio — foi assim que os seguidores da
+  // CRIS sumiram do relatório.
+  if (!snapshotComparison && tags.includes("seguidores")) {
+    const baseTotal = followerBaseTotal(text);
+    if (baseTotal !== null) {
+      acc.previousFound.set("seguidores", [baseTotal]);
+      const candidatos = (acc.found.get("seguidores") ?? []).filter((v) => v !== baseTotal);
+      if (candidatos.length) acc.found.set("seguidores", candidatos);
+      else acc.found.delete("seguidores");
+    }
   }
 
   const valores: Record<string, number | null> = Object.fromEntries(tags.map((t) => [t, null]));
