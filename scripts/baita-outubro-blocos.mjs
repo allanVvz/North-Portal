@@ -120,6 +120,19 @@ try {
     return hit.step_id;
   };
 
+  // `task_type_id` é a fonte da verdade de kind/subtype — a trigger
+  // `tasks_project_task_type` (migração 20260917120000) DERIVA kind/subtype dele
+  // em todo insert/update que toque numa dessas 3 colunas, e sobrescreve
+  // silenciosamente o que for passado direto. Não dá pra criar a task de
+  // publicação com `kind: 'operacional', subtype: 'publicacao'` — precisa do
+  // task_type_id do tipo "publicacao" (filho de "tarefa"), lido do banco.
+  const { rows: tt } = await db.query(`
+    select subtype.id from public.task_types subtype
+    join public.task_types parent on parent.id = subtype.parent_id
+    where parent.key = 'tarefa' and subtype.key = 'publicacao'`);
+  if (!tt.length) throw new Error("task_type 'publicacao' (filho de 'tarefa') não encontrado.");
+  const PUBLICACAO_TYPE = tt[0].id;
+
   const card = async (id) => {
     const { rows } = await db.query(`select id, title, due_date, reviewer_id from public.tasks where id = $1::uuid`, [id]);
     return rows[0] ?? null;
@@ -163,17 +176,24 @@ try {
   try {
     const criarBloco = async (bloco, partes) => {
       for (const p of bloco.pecas) {
+        // kind/subtype NÃO são passados — a trigger os deriva de task_type_id.
+        // Passá-los aqui seria redundante na melhor hipótese e enganoso na pior
+        // (o valor escrito não é necessariamente o que fica gravado).
         const { rows: pubRows } = await db.query(`
           insert into public.tasks (
-            client_id, kind, subtype, title, description, status, priority, assignee,
+            client_id, title, description, status, priority, assignee,
             due_date, start_date, end_date, position, client_visible, progress_weight,
             requires_review, requires_approval, task_type_id, payload
           ) values (
-            $1::uuid, 'operacional', 'publicacao', $2, $3, 'backlog', 'media', null,
+            $1::uuid, $2, $3, 'backlog', 'media', null,
             $4::date, $4::date, $4::date, 0, false, 1,
-            true, false, null, '{}'::jsonb
-          ) returning id`,
-          [CLIENTE, p.titulo, p.descricao, bloco.vence]);
+            true, false, $5::uuid, '{}'::jsonb
+          ) returning id, kind, subtype`,
+          [CLIENTE, p.titulo, p.descricao, bloco.vence, PUBLICACAO_TYPE]);
+        // Confere o que a trigger realmente gravou, em vez de assumir.
+        if (pubRows[0].kind !== "operacional" || pubRows[0].subtype !== "publicacao") {
+          throw new Error(`task_type_id de publicacao projetou kind/subtype inesperado: ${JSON.stringify(pubRows[0])}`);
+        }
         const pubId = pubRows[0].id;
 
         const { rows: nova } = await db.query(`

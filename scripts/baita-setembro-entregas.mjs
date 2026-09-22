@@ -115,6 +115,21 @@ try {
     return hit.step_id;
   };
 
+  // `task_type_id` é a fonte da verdade de kind/subtype — a trigger
+  // `tasks_project_task_type` (migração 20260917120000) DERIVA as duas colunas
+  // dele em todo insert/update que as toque, e sobrescreve silenciosamente o
+  // que for passado direto. Um `update ... set subtype = 'publicacao'` sem tocar
+  // task_type_id não teria funcionado: a trigger relê o task_type_id (a raiz
+  // "tarefa", sem subtipo) e reescreve subtype de volta para null — a mesma
+  // classe de bug que travou scripts/baita-outubro-blocos.mjs, só que sem
+  // erro nenhum aparecer, porque a trigger não recusa, só ignora.
+  const { rows: tt } = await db.query(`
+    select subtype.id from public.task_types subtype
+    join public.task_types parent on parent.id = subtype.parent_id
+    where parent.key = 'tarefa' and subtype.key = 'publicacao'`);
+  if (!tt.length) throw new Error("task_type 'publicacao' (filho de 'tarefa') não encontrado.");
+  const PUBLICACAO_TYPE = tt[0].id;
+
   const card = async (id) => {
     const { rows } = await db.query(
       `select id, title, kind, subtype, status, due_date, reviewer_id, completed_at is not null as concluida
@@ -156,7 +171,7 @@ try {
     console.log(`     captacao   ← ${captacao.title}  [compartilhado]`);
     console.log(`     edicao     ← ${edicao.title}    [compartilhado]`);
     console.log(`     publicacao ← "${pub.title}" → "${p.publicacao}"`);
-    console.log(`                  subtype ${pub.subtype ?? "—"} → publicacao, vence — → ${EVENTO}`);
+    console.log(`                  subtype ${pub.subtype ?? "—"} → publicacao (via task_type_id), vence — → ${EVENTO}`);
     console.log(edicaoPronta
       ? `                  vinculada como etapa (edição concluída)`
       : `                  ⚠ NÃO vinculada como etapa agora: edição ainda "${edicao.status}" — card só é corrigido, etapa fica vaga`);
@@ -187,12 +202,16 @@ try {
     }
 
     for (const c of criar) {
-      // O card de publicação é corrigido ANTES de a Entrega nascer: nome, subtype e
-      // data. Sem o subtype `publicacao` ele não é reconhecível como a etapa que é.
-      await db.query(
-        `update public.tasks set title = $2, subtype = 'publicacao', due_date = $3::date,
-                end_date = case when end_date is null then null else greatest($3::date, end_date) end
-           where id = $1::uuid`, [c.pub.id, c.publicacao, EVENTO]);
+      // O card de publicação é corrigido ANTES de a Entrega nascer: nome,
+      // task_type_id (→ subtype "publicacao" via trigger) e data.
+      const { rows: pubUpd } = await db.query(
+        `update public.tasks set title = $2, task_type_id = $3::uuid, due_date = $4::date,
+                end_date = case when end_date is null then null else greatest($4::date, end_date) end
+           where id = $1::uuid returning kind, subtype`, [c.pub.id, c.publicacao, PUBLICACAO_TYPE, EVENTO]);
+      // Confere o que a trigger realmente gravou, em vez de assumir.
+      if (pubUpd[0].kind !== "operacional" || pubUpd[0].subtype !== "publicacao") {
+        throw new Error(`task_type_id de publicacao projetou kind/subtype inesperado: ${JSON.stringify(pubUpd[0])}`);
+      }
 
       // Idempotência por TÍTULO: esta Entrega nasce por insert puro (sem id
       // determinístico), e rodar o script de novo — o caminho normal para
