@@ -42,6 +42,12 @@ const COMPARTILHADAS = {
   edicao: "f6c9580e-aa2f-486d-8937-88dbe52a6bcd",   // edição materiais evento Baita 26/09
 };
 
+/** Plano de Ação que recebe as duas Entregas do evento. É onde o material do
+ *  evento já vive hoje: a Entrega original e as duas peças de publicação são
+ *  membros de "Tarefas do mes de setembro" — não do "PLANO DE CONTEÚDO -
+ *  OUTUBRO" (que é o plano dos blocos de 6 Reels e 2 anúncios, outra frente). */
+const PLANO_EVENTO = "1f179322-90f0-4a2d-8df0-9b72507dda27"; // Tarefas do mes de setembro
+
 /** Uma Entrega por formato. O card de publicação já existe: só é renomeado (o nome
  *  atual diz "edicao", que é justamente o que ele NÃO é) e recebe o subtype certo. */
 const PECAS = [
@@ -130,11 +136,12 @@ try {
     console.log(`     edicao     ← ${edicao.title}    [compartilhado]`);
     console.log(`     publicacao ← "${pub.title}" → "${p.publicacao}"`);
     console.log(`                  subtype ${pub.subtype ?? "—"} → publicacao, vence — → ${EVENTO}`);
+    console.log(`     plano      ← Tarefas do mes de setembro`);
     criar.push({ ...p, pub });
   }
 
   console.log("\n3. FORA DESTA RODADA — precisa de decisão");
-  console.log(`   Bloco 6 Reels e bloco 2 anúncios: as 8 peças não têm card próprio.`);
+  console.log(`   Bloco 6 Reels e bloco 2 anúncios: ver scripts/baita-outubro-blocos.mjs.`);
   console.log(`   "Gravação 17/09 — 3 publicações" (solta) pode ser a mesma diária de`);
   console.log(`   "Gravação do bloco — 6 Reels" (16/09, no plano) — confirmar antes de usar.`);
 
@@ -182,7 +189,14 @@ try {
           values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)
           on conflict do nothing`, [entregaId, filho, stepId(etapa)]);
       }
-      console.log(`ok: Entrega "${nova[0].title}" (${entregaId}) com as 4 etapas`);
+      // A Entrega nasce SOLTA — nada aqui a liga a plano nenhum ainda — então ela
+      // entra explicitamente como membro de "Tarefas do mes de setembro", de onde
+      // o material do evento já vem.
+      await db.query(`
+        insert into public.task_links (parent_id, child_id, relation_kind, position)
+        values ($1::uuid, $2::uuid, 'structural_member', 0)
+        on conflict do nothing`, [PLANO_EVENTO, entregaId]);
+      console.log(`ok: Entrega "${nova[0].title}" (${entregaId}) com as 4 etapas, membro de "Tarefas do mes de setembro"`);
     }
     await db.query("commit");
     console.log("\nTransação confirmada.\n");
