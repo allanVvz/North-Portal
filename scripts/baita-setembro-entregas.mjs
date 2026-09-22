@@ -63,9 +63,19 @@ const DIARIA_17_09 = {
   publicacoes: [
     { card: "dce78cc2-9736-46c1-bbb2-1ebe53a8a387", nota: "Publicação post Evento — vencia 06/09, antes da gravação" },
     { card: "fafaf36a-8d7c-468b-8363-ab515d94a999", nota: "Post evento 19/09 — vencia 13/09, antes da gravação" },
-    { card: "19405746-eeb2-4ce6-b6cd-655e8132686c", nota: "Post jogando pratos novos — vencia 13/09; ATENÇÃO, possível duplicata de 'REELS FEED - Jogando pratos novos', que já está ligado ao Plano de Agosto" },
   ],
 };
+
+/** Cards cujo `subtype` está errado e é corrigido aqui.
+ *
+ *  "Post jogando pratos novos" é a MESMA peça que "REELS FEED - Jogando pratos
+ *  novos" (já ligado ao Plano de Agosto) — um reels só, ainda não publicado. Como os
+ *  outros cards dessa peça não existem, ela não compõe Entrega: fica como task de
+ *  edição, solta. Por isso ela saiu de DIARIA_17_09 e a diária tem 2 publicações, e
+ *  não 3, apesar do título da captação. */
+const AJUSTAR_SUBTYPE = [
+  { card: "19405746-eeb2-4ce6-b6cd-655e8132686c", de: null, para: "edicao", porque: "mesma peça de 'REELS FEED - Jogando pratos novos'; sem os outros cards, não compõe Entrega" },
+];
 
 /** Ficam SOZINHOS, sem Entrega. Listados para o relatório dizer que a decisão foi
  *  deliberada, e não esquecimento. */
@@ -74,6 +84,7 @@ const SEM_ENTREGA = [
   ["fea9aae7-8d25-44ac-aab0-9250fa87df80", "Postagem motivo do estresse", "publicação avulsa, por decisão do usuário"],
   ["1e3260fc-ae42-4bc8-a90a-7195f0cec3bf", "Dia do Consumidor", "edição de card promocional ('promoções ativas no Dia do Consumidor'), sem relação com as peças do evento"],
   ["049c13ad-dcd1-45ea-9a92-fb4523758f17", "DIVULGAÇÃO EVENTO - 12/09", "evento de 12/09, marcado 'finalizado' em comentário"],
+  ["19405746-eeb2-4ce6-b6cd-655e8132686c", "Post jogando pratos novos", "um reels só, ainda não publicado; mesma peça de 'REELS FEED - Jogando pratos novos'. Sem os outros cards não compõe Entrega — fica como task de edição (ver AJUSTAR_SUBTYPE)"],
 ];
 
 const dia = (v) => (v ? new Date(v).toISOString().slice(0, 10) : "—");
@@ -154,8 +165,23 @@ try {
     console.log(`     publicacao ← ${pub.title}`);
     pecas.push({ pub, novaData });
   }
-  if (pecas.length !== 3) {
-    console.log(`\n   ⚠ ${pecas.length} publicações mapeadas, e a captação diz 3. Revise DIARIA_17_09.publicacoes.`);
+  // O título da captação diz "3 publicações", mas só 2 peças têm card próprio: a
+  // terceira ("jogando pratos") é a mesma de um card já ligado ao Plano de Agosto e
+  // não tem as demais etapas, então virou task de edição solta. A divergência é
+  // deliberada e fica registrada em vez de virar uma Entrega vazia.
+  console.log(`\n   ${pecas.length} Entrega(s) da diária — a captação diz 3 publicações;`);
+  console.log(`   a terceira é a mesma peça de "REELS FEED - Jogando pratos novos" e fica como edição solta.`);
+
+  // ---- 2b. corrigir subtype -------------------------------------------------
+  console.log(`\n2b. CORRIGIR SUBTYPE`);
+  const ajustes = [];
+  for (const a of AJUSTAR_SUBTYPE) {
+    const c = await card(a.card);
+    if (!c) { console.log(`   ! card ${a.card} não existe — pulado`); continue; }
+    if (c.subtype === a.para) { console.log(`   já está como ${a.para}: ${c.title}`); continue; }
+    console.log(`   ${c.title}:  subtype ${c.subtype ?? "—"} → ${a.para}`);
+    console.log(`     ${a.porque}`);
+    ajustes.push({ id: c.id, para: a.para, title: c.title });
   }
 
   // ---- 3. o que fica sozinho ----------------------------------------------
@@ -174,6 +200,12 @@ try {
   // ---- aplicar -------------------------------------------------------------
   await db.query("begin");
   try {
+    for (const a of ajustes) {
+      const { rowCount } = await db.query(
+        `update public.tasks set subtype = $2 where id = $1::uuid returning id`, [a.id, a.para]);
+      console.log(rowCount === 1 ? `ok: subtype de "${a.title}" → ${a.para}` : `! subtype de "${a.title}" não mudou`);
+    }
+
     for (const l of paraLigar) {
       const { rowCount } = await db.query(`
         insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
