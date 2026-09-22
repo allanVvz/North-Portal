@@ -185,6 +185,10 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
   const daily = dailySeries(posts, period, outcome);
   const platforms = platformSplit(posts, outcome);
   const campaigns = campaignsOf(posts, (id, name, objective) => blockOf(id, name, objective));
+  // Segment templates reproduce an approved operational summary. They are not
+  // generic Meta dashboards, so no aggregate or creative-level metric can
+  // bypass the per-block KPI allow-list below.
+  const operationalOnly = config.reportKpiPolicy !== "generic";
 
   const d = (c: number | null, p: number | null, dir: "higher_is_better" | "lower_is_better" | "neutral") => (prev ? deltaOf(c, p, dir) : null);
   const figures: FigureItem[] = [
@@ -211,6 +215,29 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
     ? `${leadCreative.row.name} ${leadCreative.badges[0].key === "mais_conversas" ? "liderou as conversas" : leadCreative.badges[0].key === "mais_cliques" && !revision.hideClicks ? "liderou os cliques" : "se destacou na semana"}`
     : "Criativos";
 
+  if (operationalOnly) {
+    return (
+      <Document>
+        <Page size="A4" style={T.page} wrap>
+          <PageHeader
+            eyebrow={clientName}
+            title="Relatório de anúncios"
+            subtitle={`${fullDay(period.from)} a ${fullDay(period.to)}`}
+            pill="Relatório 1"
+          />
+          <CampaignBlocksSection
+            config={config}
+            posts={posts}
+            prevPosts={prevPosts}
+            adPosts={adPosts}
+            kicker="Resultados por objetivo"
+          />
+          <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} />
+        </Page>
+      </Document>
+    );
+  }
+
   return (
     <Document>
       <Page size="A4" style={T.page} wrap>
@@ -222,7 +249,7 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
         />
 
         <Headline text={revision.hideClicks || revision.hideImpressions ? analysis.headline.replace(/[^.]*\b(cliques?|impressões|ctr|cpc|cpm)\b[^.]*\.?\s*/gi, "") : analysis.headline} />
-        <FigureRow items={figures} />
+        {objectives.length >= 2 ? <FigureRow items={figures.slice(0, 2)} /> : null}
         {alert ? <AlertLine text={alert} /> : null}
 
         <Section title={`Do alcance ${outcome === "conversas" ? "às conversas" : "às visitas ao perfil"}`}>

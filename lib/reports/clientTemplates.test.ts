@@ -42,7 +42,7 @@ describe("moldes por perfil de cliente", () => {
     // Não bloquear: uma campanha inesperada precisa sair com números, não em branco.
     const config = templateById("builtin-perfil-negocio-local").config;
     expect(config.blockKpis.trafego_site).toBeUndefined();
-    expect(blockKpisOf(config, "trafego_site")).toEqual(BLOCK_KPIS_DEFAULT.trafego_site);
+    expect(blockKpisOf(config, "trafego_site")).toEqual([]);
   });
 
   it("Estética automotiva traz os três blocos (Karpinski, UTZIG, FALKE, CRIS)", () => {
@@ -60,6 +60,18 @@ describe("moldes por perfil de cliente", () => {
   it('"Novas conversas" em vez de "Mensagens" — é como a operação conta o desfecho', () => {
     expect(BLOCK_KPIS_DEFAULT.mensagens.map((k) => k.label)).toContain("Mensagens");
     expect(labels("builtin-estetica-automotiva", "mensagens")).not.toContain("Mensagens");
+  });
+  it("E-commerce accepts only the CRIS operational blocks", () => {
+    expect(labels("builtin-ecommerce", "trafego_site")).toEqual([
+      "Investimento", "Alcance", "Cliques no link",
+    ]);
+    expect(labels("builtin-ecommerce", "trafego_perfil")).toEqual([
+      "Investimento", "Alcance", "Visitas ao perfil", "Custo por visita",
+    ]);
+    expect(labels("builtin-ecommerce", "mensagens")).toEqual([
+      "Investimento", "Alcance", "Novas conversas", "Custo por conversa",
+    ]);
+    expect(blockKpisOf(templateById("builtin-ecommerce").config, "engajamento")).toEqual([]);
   });
 });
 
@@ -91,5 +103,25 @@ describe("blockKpis como dado de entrada", () => {
     const many = Array.from({ length: 12 }, (_, i) => ({ label: `KPI ${i}`, metric: "custo" }));
     const config = sanitizePerformanceTemplateConfig({ blockKpis: { outro: many } });
     expect(config.blockKpis.outro).toHaveLength(8);
+  });
+
+  it("E-commerce rejects metrics outside the operational summary", () => {
+    const config = sanitizePerformanceTemplateConfig({
+      reportKpiPolicy: "ecommerce",
+      blockKpis: {
+        trafego_site: [
+          { label: "Investimento", metric: "custo" },
+          { label: "Landing page", metric: "landingPageViews" },
+          { label: "CTR", metric: "ctr" },
+          { label: "Custo por clique", ratio: ["custo", "cliquesLink"] },
+        ],
+        trafego_perfil: [
+          { label: "Visitas ao perfil", metric: "profileVisits" },
+          { label: "Cliques no link", metric: "cliquesLink" },
+        ],
+      },
+    });
+    expect(config.blockKpis.trafego_site?.map((k) => k.label)).toEqual(["Investimento"]);
+    expect(config.blockKpis.trafego_perfil?.map((k) => k.label)).toEqual(["Visitas ao perfil"]);
   });
 });

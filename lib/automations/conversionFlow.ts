@@ -70,6 +70,11 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // técnico que o parser lê (pedidoDe) continua indo como comentário, uma vez,
 // na criação — a descrição não muda card a card, não faz sentido reescrevê-la
 // toda vez que o parser mudar de tags.
+// A render revision is part of idempotency, not of feedback extraction.
+// Bumping it regenerates only open/current occurrences and leaves earlier
+// documents and append-only snapshots available as audit history.
+const CONVERSION_RENDERER_REVISION = "segment-summary-v1";
+
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
   "É a partir do que for respondido aqui que a automação gera o Relatório de conversão: o documento que mostra ao cliente o retorno real do investimento em anúncios, não só o desempenho de mídia (cliques, impressões).",
@@ -78,6 +83,7 @@ const FEEDBACK_DESCRIPTION = [
 
 type OccPayload = Record<string, unknown> & {
   adaptive_source_fingerprint?: string;
+  conversion_renderer_revision?: string;
 };
 
 export type VisualCommentDecision =
@@ -624,7 +630,8 @@ async function processOccurrence(
   // nova versão, cujo fingerprint não colide com a anterior.
   if (card3.completed_at && !humanComments([card3]).length) return false;
   const ext = await consolidateAdaptiveFeedback(humanComments([card2, card3]), tags);
-  if (occPayload.adaptive_source_fingerprint === ext.interpretation.sourceFingerprint) return false;
+  const reportFingerprint = `${ext.interpretation.sourceFingerprint}:${CONVERSION_RENDERER_REVISION}`;
+  if (occPayload.adaptive_source_fingerprint === reportFingerprint) return false;
 
   // O período REPORTADO (não a data em que a automação rodou) é o eixo da série
   // temporal em `task_metrics` — é o que deixa "seguidores ao longo do tempo" e
@@ -663,7 +670,7 @@ async function processOccurrence(
     trafficReportId: traffic.id,
     feedbackTaskId: card2.id,
     conversionTaskId: card3.id,
-    sourceFingerprint: ext.interpretation.sourceFingerprint,
+    sourceFingerprint: reportFingerprint,
     interpretation: ext.interpretation as unknown as Record<string, unknown>,
     metrics,
     parser: ext.note,
@@ -681,13 +688,13 @@ async function processOccurrence(
     metrics,
     attribution: attributionOf(informed.vendas, ext.linhas),
     parser: ext.note,
-    sourceFingerprint: ext.interpretation.sourceFingerprint,
+    sourceFingerprint: reportFingerprint,
     interpretation: ext.interpretation as unknown as Record<string, unknown>,
     interpretationSnapshotId: snapshot.id,
   });
   if (!claim) return false;
 
-  const occurrenceKey = `${occ.id}:${ext.interpretation.sourceFingerprint}`;
+  const occurrenceKey = `${occ.id}:${reportFingerprint}`;
   const { data: runRows, error: runError } = await admin.rpc("claim_automation_run", {
     p_config_id: config.id,
     p_occurrence_key: occurrenceKey,
@@ -769,7 +776,7 @@ async function processOccurrence(
     });
     if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, ext.interpretation.sourceFingerprint, claim.id, visualRequest);
+    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, reportFingerprint, claim.id, visualRequest);
     await attachConversionDocument(admin, claim.id, documentId);
     await supersedePriorConversionReports(admin, {
       id: claim.id,
@@ -780,7 +787,11 @@ async function processOccurrence(
     await transitionTaskStatus(admin, card3.id, { to: "revisao", from: ["em_producao"] });
 
     await updateTaskPayload(admin, occ.id, {
-      patch: { conversion_report_generated_at: nowIso(), adaptive_source_fingerprint: ext.interpretation.sourceFingerprint },
+      patch: {
+        conversion_report_generated_at: nowIso(),
+        adaptive_source_fingerprint: reportFingerprint,
+        conversion_renderer_revision: CONVERSION_RENDERER_REVISION,
+      },
     });
   } catch (error) {
     // Sem isto a reivindicação ficaria órfã e bloquearia o retry do mesmo

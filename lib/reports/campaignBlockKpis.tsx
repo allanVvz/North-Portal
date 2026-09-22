@@ -81,7 +81,12 @@ export const ZERO_NOT_DASH = new Set<MetricRef>(["contatos"]);
  *  rótulos saem do template, não do código. Um bloco não declarado cai no padrão,
  *  para uma campanha inesperada nunca sair sem números. */
 export function blockKpisOf(config: PerformanceTemplateConfig, block: CampaignBlock): BlockKpi[] {
-  return config.blockKpis[block] ?? BLOCK_KPIS_DEFAULT[block];
+  // Operational templates are allow-lists.  Falling back to the generic
+  // collection here would let an unexpected campaign surface clicks, CTR or
+  // other data that was never part of the client summary.
+  return config.reportKpiPolicy === "generic"
+    ? config.blockKpis[block] ?? BLOCK_KPIS_DEFAULT[block]
+    : config.blockKpis[block] ?? [];
 }
 
 /** Classifica uma evidência isolada, sem deixar o nome da campanha vazar para
@@ -204,7 +209,9 @@ export function CampaignBlocksSection({
 }) {
   const cm = config.prefs.customMetrics;
   const { postBlock } = blockResolver(config, adPosts);
-  const blocksPresent = CAMPAIGN_BLOCKS.filter((block) => posts.some((p) => postBlock(p) === block));
+  const blocksPresent = CAMPAIGN_BLOCKS.filter((block) =>
+    posts.some((p) => postBlock(p) === block) && blockKpisOf(config, block).length,
+  );
   if (!blocksPresent.length) return null;
 
   return (

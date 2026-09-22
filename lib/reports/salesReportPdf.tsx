@@ -20,7 +20,7 @@ import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { AdaptiveInterpretation } from "@/lib/ai/adaptiveFeedback";
 import type { MetaPost } from "@/lib/windsor";
 import { registerReportFonts } from "./reportFonts";
-import { blockResolver } from "./campaignBlockKpis";
+import { blockResolver, CampaignBlocksSection } from "./campaignBlockKpis";
 import { attributionOf, type InformedTotals } from "./conversionMode";
 import {
   creativeBadges, creativeHighlights, creativeRows, mediaOutcome, mediaTotals, money, num, objectiveRows,
@@ -327,6 +327,60 @@ function SalesReportDocument(input: SalesReportInput) {
       />
     </Section>
   ) : null;
+
+  // The active segment templates use the conversion PDF as a concise closing
+  // of the operational summary. Do not repeat the hero/headline, aggregate
+  // funnel, generic objective table or creative stats: those can introduce
+  // impressions, CPM/CTR/frequency and derived totals that were not sent to
+  // the client. Followers have exactly one home, the final audience table.
+  if (config.reportKpiPolicy !== "generic") {
+    const resultItems = [
+      cur.vendas !== null ? { label: "Vendas", value: num(cur.vendas), delta: null } : null,
+      cur.agendamentos !== null ? { label: "Agendamentos", value: num(cur.agendamentos), delta: null } : null,
+      cur.receita !== null ? { label: "Receita", value: money(cur.receita), delta: null } : null,
+    ].filter((item): item is { label: string; value: string; delta: null } => item !== null);
+    return (
+      <Document>
+        <Page size="A4" style={T.page} wrap>
+          <PageHeader
+            eyebrow={clientName}
+            title="Relatório de conversão"
+            subtitle={`${fullDay(period.from)} a ${fullDay(period.to)}`}
+            pill="Conversão"
+          />
+          {resultItems.length ? <Section title="Resultados informados"><FigureRow items={resultItems} /></Section> : null}
+          {informadosSection}
+          <CampaignBlocksSection
+            config={config}
+            posts={campaignPosts}
+            prevPosts={prevCampaignPosts}
+            adPosts={adPosts}
+            kicker="Mídia por objetivo"
+          />
+          {conversoes.length ? (
+            <Section title="Conversões informadas">
+              <DataTable
+                columns={[
+                  { key: "servico", label: "Serviço", flex: 2.4 },
+                  { key: "fonte", label: "Origem" },
+                  { key: "status", label: "Situação" },
+                  { key: "valor", label: "Valor", align: "right" },
+                ]}
+                rows={[...conversoes].sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0)).map((row) => ({
+                  servico: { text: row.servico ?? "—", strong: true },
+                  fonte: { text: row.fonte ? `#${row.fonte}` : "—" },
+                  status: { text: row.status === "fechado" ? "Fechada" : row.status === "agendado" ? "Agendada" : "—" },
+                  valor: { text: row.valor === null ? "—" : money(row.valor) },
+                }))}
+              />
+            </Section>
+          ) : null}
+          {audienceGrowthSection}
+          <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} note={footnote} />
+        </Page>
+      </Document>
+    );
+  }
 
   const tableHasCampaign = creatives.some((r) => Boolean(r.campaignName.trim()));
   const tableHasCost = creatives.some((r) => r.costPerResult !== null);

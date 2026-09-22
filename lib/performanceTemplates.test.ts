@@ -12,6 +12,7 @@ describe("performance templates", () => {
       // que nome cada número é lido (formatos definidos pela operação em 21/09).
       "Perfil — negócio local",
       "Estética automotiva",
+      "E-commerce",
     ]);
     // A tela abre no primeiro do array e a automação usa esta constante como
     // fallback — se deixarem de bater, o padrão da UI e o do PDF divergem.

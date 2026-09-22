@@ -34,6 +34,12 @@ export const CAMPAIGN_BLOCK_LABEL: Record<CampaignBlock, string> = {
  *  vem do template e não do código: "Mensagens" para uns, "Novas conversas" para
  *  outros, "Custo por novo seguidor" para quem acompanha perfil. */
 export type BlockKpiDef = { label: string; metric?: MetricRef; ratio?: [MetricRef, MetricRef] };
+/**
+ * A policy is intentionally part of the persisted template configuration.
+ * `blockKpis` is editable data, but a client-facing operational report must
+ * never gain a metric merely because somebody edited a template in the UI.
+ */
+export type ReportKpiPolicy = "generic" | "perfil_negocio_local" | "estetica_automotiva" | "ecommerce";
 
 /** Fonte de tráfego de uma conversão — rastreada a partir da primeira mensagem
  *  ("#1", "#2", "#3" por anúncio). Tag manual por anúncio no template. */
@@ -84,6 +90,8 @@ export type PerformanceTemplateConfig = {
   // (BLOCK_KPIS em lib/reports/campaignBlockKpis.tsx). É o que permite um molde
   // por cliente: quais números aparecem em cada bloco, e com que nome.
   blockKpis: Partial<Record<CampaignBlock, BlockKpiDef[]>>;
+  /** Which operational summary this template is allowed to reproduce. */
+  reportKpiPolicy: ReportKpiPolicy;
   // Fonte #1/#2/#3 por anúncio (chave = adId).
   adSourceTags: Record<string, AdSourceTag>;
   level: PerformanceEntityLevel;
@@ -137,7 +145,20 @@ function sanitizeTagMap<T extends string>(raw: unknown, allowed: readonly T[]): 
  *  um `label` gigante ou uma métrica inexistente não pode chegar ao renderizador
  *  do PDF: cada entrada é validada, e um bloco que sobra vazio simplesmente cai
  *  no conjunto padrão. */
-function sanitizeBlockKpis(raw: unknown, customIds: Set<string>): Partial<Record<CampaignBlock, BlockKpiDef[]>> {
+function sameKpi(left: BlockKpiDef, right: BlockKpiDef): boolean {
+  return left.label === right.label
+    && left.metric === right.metric
+    && left.ratio?.[0] === right.ratio?.[0]
+    && left.ratio?.[1] === right.ratio?.[1];
+}
+
+function allowedKpisFor(policy: ReportKpiPolicy, block: CampaignBlock): readonly BlockKpiDef[] | null {
+  if (policy === "generic") return null;
+  if (policy === "ecommerce") return ECOMMERCE_BLOCK_KPIS[block] ?? [];
+  return CLIENT_BLOCK_KPIS[block] ?? [];
+}
+
+function sanitizeBlockKpis(raw: unknown, customIds: Set<string>, policy: ReportKpiPolicy): Partial<Record<CampaignBlock, BlockKpiDef[]>> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const allowed = new Set<string>(CAMPAIGN_BLOCKS);
   const isRef = (v: unknown): v is MetricRef => isValidMetricRef(v, customIds);
@@ -150,11 +171,14 @@ function sanitizeBlockKpis(raw: unknown, customIds: Set<string>): Partial<Record
       if (!def || typeof def !== "object") continue;
       const { label, metric, ratio } = def as { label?: unknown; metric?: unknown; ratio?: unknown };
       if (typeof label !== "string" || !label.trim() || label.length > 60) continue;
+      let parsed: BlockKpiDef | null = null;
       if (Array.isArray(ratio) && ratio.length === 2 && isRef(ratio[0]) && isRef(ratio[1])) {
-        kpis.push({ label: label.trim(), ratio: [ratio[0], ratio[1]] });
+        parsed = { label: label.trim(), ratio: [ratio[0], ratio[1]] };
       } else if (isRef(metric)) {
-        kpis.push({ label: label.trim(), metric });
+        parsed = { label: label.trim(), metric };
       }
+      if (parsed && (allowedKpisFor(policy, block as CampaignBlock) === null
+        || allowedKpisFor(policy, block as CampaignBlock)!.some((allowedKpi) => sameKpi(parsed!, allowedKpi)))) kpis.push(parsed);
     }
     if (kpis.length) out[block as CampaignBlock] = kpis;
   }
@@ -167,6 +191,9 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
   const prefs = sanitizePerformanceViewPrefs(value.prefs);
   const acquisition = sanitizeAcquisitionViewPrefs(value.acquisition, prefs.customMetrics);
   const customIds = new Set(prefs.customMetrics.map((metric) => metric.id));
+  const reportKpiPolicy: ReportKpiPolicy = value.reportKpiPolicy === "perfil_negocio_local"
+    || value.reportKpiPolicy === "estetica_automotiva" || value.reportKpiPolicy === "ecommerce"
+    ? value.reportKpiPolicy : "generic";
   const customRefs = new Set(prefs.customMetrics.map((metric) => `custom:${metric.id}`));
   const trendMetrics = stringList(value.trendMetrics, 3).filter((metric): metric is MetricRef => {
     if (metric.startsWith("custom:")) return customRefs.has(metric);
@@ -187,7 +214,8 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
     dateRange: sanitizeDateRange(value.dateRange),
     cardSources: sanitizeCardSources(value.cardSources),
     campaignBlocks: sanitizeTagMap(value.campaignBlocks, CAMPAIGN_BLOCKS),
-    blockKpis: sanitizeBlockKpis(value.blockKpis, customIds),
+    blockKpis: sanitizeBlockKpis(value.blockKpis, customIds, reportKpiPolicy),
+    reportKpiPolicy,
     adSourceTags: sanitizeTagMap(value.adSourceTags, AD_SOURCE_TAGS),
     level: LEVELS.has(value.level as PerformanceEntityLevel) ? value.level as PerformanceEntityLevel : "campaign",
     selectedCampaignIds: stringList(value.selectedCampaignIds),
@@ -336,6 +364,33 @@ const mensagensKpis: BlockKpiDef[] = [
   { label: "Custo por conversa", ratio: [CUSTO, "contatos"] },
 ];
 
+/** The profile and automotive summaries share the media vocabulary. */
+const CLIENT_BLOCK_KPIS: Partial<Record<CampaignBlock, BlockKpiDef[]>> = {
+  trafego_perfil: perfilKpis,
+  trafego_site: siteKpis,
+  mensagens: mensagensKpis,
+};
+
+/**
+ * CRIS' WhatsApp summary is the contract for this template.  Keep this list
+ * deliberately small: landing-page/session, CPC, CPM, CTR, frequency and
+ * impressions are available in Meta but are not part of that contract.
+ */
+const ECOMMERCE_BLOCK_KPIS: Partial<Record<CampaignBlock, BlockKpiDef[]>> = {
+  trafego_site: [
+    { label: "Investimento", metric: CUSTO },
+    { label: "Alcance", metric: ALCANCE },
+    { label: "Cliques no link", metric: "cliquesLink" },
+  ],
+  trafego_perfil: [
+    { label: "Investimento", metric: CUSTO },
+    { label: "Alcance", metric: ALCANCE },
+    { label: "Visitas ao perfil", metric: "profileVisits" },
+    { label: "Custo por visita", ratio: [CUSTO, "profileVisits"] },
+  ],
+  mensagens: mensagensKpis,
+};
+
 export const BUILTIN_CLIENT_TEMPLATES: PerformanceTemplate[] = [
   {
     // Negócio local que vive de presença: uma campanha, um objetivo. ROSE DIAS e
@@ -345,7 +400,7 @@ export const BUILTIN_CLIENT_TEMPLATES: PerformanceTemplate[] = [
     description: "Só tráfego para o perfil, detalhado. Para quem mede presença, não clique.",
     scope: "builtin", ownerProfileId: null, updatedAt: null,
     config: sanitizePerformanceTemplateConfig({
-      version: 1, prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition,
+      version: 1, reportKpiPolicy: "perfil_negocio_local", prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition,
       filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] },
       level: "campaign", trendMetrics: ["custo", "profileVisits"],
       blockKpis: { trafego_perfil: perfilKpis },
@@ -358,10 +413,21 @@ export const BUILTIN_CLIENT_TEMPLATES: PerformanceTemplate[] = [
     description: "Perfil, site e mensagens no mesmo relatório. Para quem roda os três objetivos em paralelo.",
     scope: "builtin", ownerProfileId: null, updatedAt: null,
     config: sanitizePerformanceTemplateConfig({
-      version: 1, prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition,
+      version: 1, reportKpiPolicy: "estetica_automotiva", prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition,
       filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] },
       level: "campaign", trendMetrics: ["custo", "contatos"],
       blockKpis: { trafego_perfil: perfilKpis, trafego_site: siteKpis, mensagens: mensagensKpis },
+    }),
+  },
+  {
+    id: "builtin-ecommerce", name: "E-commerce",
+    description: "Resumo operacional de site, perfil e WhatsApp sem métricas derivadas ou totais globais.",
+    scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({
+      version: 1, reportKpiPolicy: "ecommerce", prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition,
+      filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] },
+      level: "campaign", trendMetrics: ["custo", "contatos"],
+      blockKpis: ECOMMERCE_BLOCK_KPIS,
     }),
   },
 ];
