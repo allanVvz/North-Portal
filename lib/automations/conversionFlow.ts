@@ -512,6 +512,8 @@ async function generateSalesReport(
   const pdf = await renderSalesReportPdf({
     clientName: client.name,
     informados,
+    // O que o pedido humano mandou esconder (ver reportInstructions.ts).
+    hidden: pedidos.instrucoes.flatMap((i) => (i.kind === "esconder" ? [i.alvo] : [])),
     period,
     cadenceLabel: RECURRENCE_CADENCE_LABEL[cadence] ?? cadence,
     config: templateConfig,

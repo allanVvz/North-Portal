@@ -30,6 +30,7 @@ import {
 import { costLadder, focusOf, heroFor, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
 import type { ReportContext } from "./conversionReportPlanning";
+import type { HideTarget } from "./reportInstructions";
 import { creativeCardView, fullDay, shortDay, type TrafficFinalView } from "./adsReportPdf";
 import {
   AnalysisList, CreativeCards, DataTable, FigureRow, Footer, Headline, HeroFigure,
@@ -69,6 +70,10 @@ export type SalesReportInput = {
    *  conjunto é configurável por cliente (`collect_metric_keys`): o relatório
    *  mostra o que foi pedido, sem o código conhecer cada tag. */
   informados?: { label: string; value: number; kind: "count" | "money" }[];
+  /** Alvos que um pedido humano mandou esconder ("remova o comentário sobre
+   *  seguidores", "retire o % comparativo"). Vem de
+   *  lib/reports/reportInstructions.ts, através da ocorrência. */
+  hidden?: HideTarget[];
   /** Entendimento auditável do North IA: contexto, precisão e trade-offs. */
   adaptiveContext?: AdaptiveInterpretation;
   /** Finalized view from the technical ads report. */
@@ -116,6 +121,13 @@ function campaignObjectiveText(campaignName: string, resultLabel: string): strin
 
 function SalesReportDocument(input: SalesReportInput) {
   const { clientName, period, config, campaignPosts, adPosts, prevAdPosts, prevCampaignPosts, conversoes, prevConversoes, prevTotals, history, previews, generatedAt } = input;
+
+  // O que um pedido humano mandou esconder. "Remova o comentário sobre
+  // seguidores novos" e "retire dos dados o % comparativo com o período
+  // anterior" (CRIS, 22/09) são pedidos legítimos e recorrentes; sem isto eles
+  // eram registrados e respondidos, mas o bloco continuava no PDF.
+  const escondido = new Set(input.hidden ?? []);
+  const esconde = (alvo: HideTarget) => escondido.has(alvo);
 
   // ---- o que foi informado (null = não informado) ----
   const temLinhas = conversoes.length > 0;
@@ -186,7 +198,6 @@ function SalesReportDocument(input: SalesReportInput) {
   const highlights = [...rankedHighlights, ...fallbackHighlights];
 
   // ---- leitura ----
-  const hero = heroFor(ctx);
   const figures = supportFigures(ctx);
   const funnel = resultFunnel(ctx);
   const attribution = attributionOf(cur.vendas, conversoes);
@@ -420,7 +431,7 @@ function SalesReportDocument(input: SalesReportInput) {
                 <ProportionalFunnel
                   width={Math.min(input.layout?.funnel?.width ?? 300, 300)}
                   layout={{ ...input.layout?.funnel, maxWidth: 300, nodeWidth: 180 }}
-                  stages={funnel.stages.map((stage) => ({
+                  stages={funnel.stages.filter((stage) => !(esconde("seguidores") && stage.key === "seguidores_novos")).map((stage) => ({
                     label: stage.label,
                     value: stage.key === "seguidores_novos" ? `+${num(stage.value)}` : num(stage.value),
                     numeric: stage.value,
@@ -436,10 +447,13 @@ function SalesReportDocument(input: SalesReportInput) {
           <CampaignBlocksSection
             config={config}
             posts={campaignPosts}
-            prevPosts={prevCampaignPosts}
+            // Sem período anterior não há % a calcular: é assim que "retire o %
+            // comparativo" some das boxes sem tocar no cálculo de cada KPI.
+            prevPosts={esconde("percentual_comparativo") ? [] : prevCampaignPosts}
             adPosts={adPosts}
             kicker="Mídia por objetivo"
             extraKpis={(block) => {
+              if (esconde("seguidores")) return [];
               if (block !== "trafego_perfil" || followersGain === null || followersGain <= 0) return [];
               return [
                 {
@@ -519,8 +533,9 @@ function SalesReportDocument(input: SalesReportInput) {
           pill="Conversão"
         />
 
-        {focus === "vendas" || focus === "agendamentos" ? <Headline text={analysis.headline} /> : null}
-        <HeroFigure value={hero.value} label={hero.label} caption={hero.caption || undefined} delta={hero.delta} />
+        {/* O destaque acima da faixa de KPIs (manchete + número de 30pt) saiu por
+            decisão do usuário: repetia o que a faixa e o funil já dizem, e no
+            foco seguidores era a terceira vez que o mesmo ganho aparecia. */}
         <FigureRow items={figures} />
         {informadosSection}
         {adaptiveSection}

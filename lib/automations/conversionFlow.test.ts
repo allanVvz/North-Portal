@@ -213,6 +213,9 @@ describe("conversão depois do Feedback concluído", () => {
     expect(resposta).toContain("Tirei o comentário sobre seguidores.");
     expect(resposta).toContain("Tirei o % comparativo com o período anterior.");
     expect(resposta).not.toContain("crescimento de seguidores reorganizado");
+
+    // E os dois pedidos de remoção chegam ao renderer como alvos escondidos.
+    expect(ultimaChamada?.hidden).toEqual(["seguidores", "percentual_comparativo"]);
   });
 
   it("falha ao gerar o PDF: a reivindicação é liberada (o retry funciona) e o erro fica visível", async () => {
