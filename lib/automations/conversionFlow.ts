@@ -73,7 +73,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // A render revision is part of idempotency, not of feedback extraction.
 // Bumping it regenerates only open/current occurrences and leaves earlier
 // documents and append-only snapshots available as audit history.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v2";
+const CONVERSION_RENDERER_REVISION = "segment-summary-v3";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
@@ -529,7 +529,13 @@ async function generateSalesReport(
   });
 
   // Nome versionado: um comentário corrigido regera o PDF sem colidir no storage.
-  const version = sourceFingerprint.slice(0, 12) || (sourceCommentAt ? sourceCommentAt.replace(/\D/g, "").slice(-14) : "initial");
+  // Include the renderer revision in the artifact name. A corrected renderer
+  // can otherwise collide with the same feedback fingerprint and silently
+  // reuse the previous PDF instead of producing the requested new version.
+  const revision = sourceFingerprint.split(":").at(-1);
+  const version = sourceFingerprint.includes(":")
+    ? `${sourceFingerprint.slice(0, 8)}-${revision}`
+    : sourceFingerprint.slice(0, 12) || (sourceCommentAt ? sourceCommentAt.replace(/\D/g, "").slice(-14) : "initial");
   const fileName = `relatorio-conversao-${period.to}-${version}.pdf`;
   // A claim may be retried after a crash between document creation and the
   // final task update. Reuse that persisted artifact instead of creating a
