@@ -94,6 +94,12 @@ describe("parseFeedbackComment — texto natural", () => {
     expect(r.valoresAnteriores.seguidores).toBe(7953);
   });
 
+  it("lê o total anterior e atual no formato operacional curto", () => {
+    const r = parseFeedbackComment("tínhamos 8000 seguidores e alcançamos 8066", TAGS);
+    expect(r.valores.seguidores).toBe(8066);
+    expect(r.valoresAnteriores.seguidores).toBe(8000);
+  });
+
   it("aceita ganho de seguidores sem confundir com total", () => {
     const r = parseFeedbackComment("Vendas: 2, ganhamos 17 seguidores", TAGS);
     expect(r.valores.seguidores).toBe(17);
@@ -110,6 +116,16 @@ describe("parseFeedbackComment — texto natural", () => {
     const r = parseFeedbackComment(text, TAGS);
     expect(r.valores.seguidores).toBe(47);
     expect(r.seguidoresGanho).toBe(47);
+  });
+
+  it("lê o formato completo do resumo operacional de perfil", () => {
+    const r = parseFeedbackComment(
+      "• 66 novos seguidores\n• Custo por novo seguidor: *R$ 1,07*",
+      TAGS,
+    );
+    expect(r.valores.seguidores).toBe(66);
+    expect(r.seguidoresGanho).toBe(66);
+    expect(r.custoPorNovoSeguidor).toBe(1.07);
   });
 
   it("extrai ganhos do período anterior e do atual", () => {

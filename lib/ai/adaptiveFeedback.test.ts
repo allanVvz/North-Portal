@@ -46,6 +46,27 @@ describe("consolidateAdaptiveFeedback", () => {
     expect(result.valoresAnteriores?.seguidores).toBe(7953);
   });
 
+  it("preserva seguidores novos e custo declarados no resumo operacional", async () => {
+    const result = await consolidateAdaptiveFeedback([
+      comment("66 novos seguidores\nCusto por novo seguidor: R$ 1,07", "2026-09-18T10:00:00.000Z", "conversao"),
+    ], tags);
+
+    expect(result.seguidoresGanho).toBe(66);
+    expect(result.custoPorNovoSeguidor).toBe(1.07);
+    expect(result.interpretation.claims).toContainEqual(expect.objectContaining({ metric: "custo_por_novo_seguidor", value: 1.07 }));
+  });
+
+  it("leva a análise operacional para uma leitura curta do relatório", async () => {
+    const result = await consolidateAdaptiveFeedback([
+      comment("Tivemos a atenção dividida entre vídeo de apresentação da Baita e vídeo sobre dia do cliente. Tivemos total de 66 novos seguidores.", "2026-09-18T10:00:00.000Z"),
+    ], tags);
+
+    expect(result.seguidoresGanho).toBe(66);
+    expect(result.interpretation.context).toEqual([
+      expect.objectContaining({ text: "Tivemos a atenção dividida entre vídeo de apresentação da Baita e vídeo sobre dia do cliente." }),
+    ]);
+  });
+
   it("registra o trade-off quando um valor mais recente diverge sem correção explícita", async () => {
     const result = await consolidateAdaptiveFeedback([
       comment("Vendas: 5", "2026-09-18T10:00:00.000Z"),

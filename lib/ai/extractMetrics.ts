@@ -38,6 +38,8 @@ export type MetricExtract = {
   /** Ganho de seguidores informado sem total (ex.: "47 novos"). */
   seguidoresGanho?: number | null;
   seguidoresGanhoAnterior?: number | null;
+  /** Custo por seguidor novo declarado no resumo operacional. */
+  custoPorNovoSeguidor?: number | null;
 };
 
 function buildSystem(tags: string[], rich: boolean): string {
@@ -146,7 +148,11 @@ export async function extractMetrics(commentText: string, tags: string[]): Promi
   const lido = parsed.state === "PARSED_OK" || parsed.state === "PARTIAL";
   const fallback = aiFallbackEnabled();
   if (lido && !(parsed.precisaIa && fallback)) {
-    return { valores: parsed.valores, valoresAnteriores: parsed.valoresAnteriores, linhas: parsed.linhas, note: "parser", problemas: parsed.problemas, seguidoresGanho: parsed.seguidoresGanho, seguidoresGanhoAnterior: parsed.seguidoresGanhoAnterior };
+    return {
+      valores: parsed.valores, valoresAnteriores: parsed.valoresAnteriores, linhas: parsed.linhas,
+      note: "parser", problemas: parsed.problemas, seguidoresGanho: parsed.seguidoresGanho,
+      seguidoresGanhoAnterior: parsed.seguidoresGanhoAnterior, custoPorNovoSeguidor: parsed.custoPorNovoSeguidor,
+    };
   }
   if (!fallback) {
     return {

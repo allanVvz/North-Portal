@@ -99,6 +99,21 @@ function evidence(text: string) {
   return compact.length > 280 ? `${compact.slice(0, 277)}…` : compact;
 }
 
+/** Extrai somente a leitura editorial que a operação escreveu junto aos números.
+ * Métricas continuam no fluxo estruturado; o PDF não deve repetir o resumo todo. */
+function operationalAnalysis(text: string): string | null {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const explicit = /(?:an[aá]lise\s+(?:geral|da\s+semana)?|leitura\s+da\s+semana)\s*[:\-]?\s*([\s\S]*?)(?=\s*(?:📌|resumo\s+geral)\b|$)/i.exec(compact)?.[1]?.trim();
+  const candidate = explicit || compact
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => /aten[cç][aã]o|foco|estrat[eé]g|objetivo|prioriz|dividid|trabalhando|enquanto/i.test(sentence))
+    .slice(0, 2)
+    .join(" ");
+  if (!candidate) return null;
+  const normalized = candidate.replace(/\s+/g, " ").trim();
+  return normalized.length <= 280 ? normalized : `${normalized.slice(0, 277).trimEnd()}…`;
+}
+
 /**
  * Consolida o thread humano do Feedback e da Revisão. Cada comentário só muda
  * o que declara: correções parciais preservam valores anteriores e todos os
@@ -111,6 +126,7 @@ export async function consolidateAdaptiveFeedback(comments: readonly SourcedComm
   let linhas: ConversionRow[] = [];
   let seguidoresGanho: number | null = null;
   let seguidoresGanhoAnterior: number | null = null;
+  let custoPorNovoSeguidor: number | null = null;
   const claims = new Map<string, AdaptiveClaim>();
   const context: AdaptiveContext[] = [];
   const tradeoffs: string[] = [];
@@ -146,8 +162,18 @@ export async function consolidateAdaptiveFeedback(comments: readonly SourcedComm
       seguidoresGanhoAnterior = parsed.seguidoresGanhoAnterior;
       claims.set("seguidores_novos_anterior", { metric: "seguidores_novos_anterior", value: seguidoresGanhoAnterior, previousValue: seguidoresGanhoAnterior, precision, confidence, sourceCommentAt: comment.at, sourceTaskId: comment.taskId, evidence: evidence(comment.text) });
     }
+    if (parsed.custoPorNovoSeguidor != null) {
+      custoPorNovoSeguidor = parsed.custoPorNovoSeguidor;
+      claims.set("custo_por_novo_seguidor", {
+        metric: "custo_por_novo_seguidor", value: custoPorNovoSeguidor,
+        precision, confidence, sourceCommentAt: comment.at, sourceTaskId: comment.taskId, evidence: evidence(comment.text),
+      });
+    }
     if (parsed.linhas.length) linhas = parsed.linhas;
-    if ((intent === "contexto" || intent === "misto" || (!metricPresent && intent !== "regeneracao")) && comment.text.trim()) {
+    const analysis = operationalAnalysis(comment.text);
+    if (analysis) {
+      context.push({ sourceCommentAt: comment.at, sourceTaskId: comment.taskId, author: comment.author, text: analysis });
+    } else if ((intent === "contexto" || intent === "misto" || (!metricPresent && intent !== "regeneracao")) && comment.text.trim()) {
       context.push({ sourceCommentAt: comment.at, sourceTaskId: comment.taskId, author: comment.author, text: evidence(comment.text) });
     }
   }
@@ -166,6 +192,7 @@ export async function consolidateAdaptiveFeedback(comments: readonly SourcedComm
     problemas: problemNotes.length ? [...new Set(problemNotes)] : undefined,
     seguidoresGanho,
     seguidoresGanhoAnterior,
+    custoPorNovoSeguidor,
     sourceCommentAt: ordered.at(-1)?.at ?? null,
     interpretation: {
       sourceFingerprint: fingerprintComments(ordered),

@@ -114,11 +114,8 @@ describe("conversão depois do Feedback concluído", () => {
     expect(db.table("documents")).toHaveLength(1);
     expect(db.table("conversion_reports")).toHaveLength(1);
     expect(db.table("conversion_report_snapshots")).toHaveLength(1);
-    expect(conversaoTexts()).toEqual([]);
-    expect(feedbackTexts()).toEqual([
-      "Vendas: 5\nAgendamentos: 8",
-      expect.stringContaining("Relatório de conversão atualizado"),
-    ]);
+    expect(conversaoTexts()).toEqual([expect.stringContaining("Relatório de conversão atualizado")]);
+    expect(feedbackTexts()).toEqual(["Vendas: 5\nAgendamentos: 8"]);
     const occPayload = db.task(OCC)!.payload as Row;
     expect(occPayload.conversion_report_generated_at).toBeTruthy();
     expect(occPayload).toHaveProperty("feedback_source_at");
@@ -142,7 +139,7 @@ describe("conversão depois do Feedback concluído", () => {
     expect(hooks.render).toHaveBeenCalledTimes(1);
     expect(db.table("documents")).toHaveLength(1);
     expect(db.table("conversion_reports")).toHaveLength(1);
-    expect(feedbackTexts().filter((text) => text.includes("Relatório de conversão atualizado"))).toHaveLength(1);
+    expect(conversaoTexts().filter((text) => text.includes("Relatório de conversão atualizado"))).toHaveLength(1);
   });
 
   it("conversão que uma pessoa já aprovou não é regerada nem reaberta", async () => {
@@ -165,7 +162,7 @@ describe("conversão depois do Feedback concluído", () => {
     await processConversionFeedback(db.asAdmin(), OCC);
 
     expect(conversaoTexts()).toContain("Confira o valor da receita");
-    expect(feedbackTexts().some((text) => text.includes("Relatório de conversão atualizado"))).toBe(true);
+    expect(conversaoTexts().some((text) => text.includes("Relatório de conversão atualizado"))).toBe(true);
   });
 
   it("comentário de revisão cria uma versão nova com o contexto consolidado", async () => {
@@ -188,7 +185,7 @@ describe("conversão depois do Feedback concluído", () => {
     expect(db.table("conversion_report_snapshots")).toHaveLength(2);
     expect(db.task(CONVERSAO)!.status).toBe("revisao");
     expect(conversaoTexts().some((text) => text.includes("Contexto do período atualizado"))).toBe(false);
-    expect(feedbackTexts().filter((text) => text.includes("Relatório de conversão atualizado"))).toHaveLength(1);
+    expect(conversaoTexts().filter((text) => text.includes("Relatório de conversão atualizado"))).toHaveLength(1);
   });
 
   it("falha ao gerar o PDF: a reivindicação é liberada (o retry funciona) e o erro fica visível", async () => {

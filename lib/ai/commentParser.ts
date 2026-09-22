@@ -37,6 +37,8 @@ export type ParsedComment = {
   seguidoresGanho?: number | null;
   /** Ganho do período anterior quando o comentário traz uma comparação textual. */
   seguidoresGanhoAnterior?: number | null;
+  /** Custo por seguidor novo informado no resumo operacional. */
+  custoPorNovoSeguidor?: number | null;
 };
 
 // Rótulos já sem acento e em minúsculas (o texto é comparado dobrado).
@@ -126,11 +128,27 @@ function followerGainComparison(text: string): { previous: number; current: numb
 function followerSnapshotComparison(text: string): { previous: number; current: number } | null {
   const base = fold(text);
   const match = /(?:periodo|semana)\s+(?:anterior|passada)[\s\S]{0,80}?(?:com\s+)?([\d.,]+)\s+seguidores?\b[\s\S]{0,80}?(?:atualmente|agora|neste\s+periodo|no\s+periodo(?:\s+atual)?)[\s\S]{0,40}?(?:com\s+)?([\d.,]+)\s+seguidores?\b/i.exec(base)
-    ?? /\bseguidores?\b\s*[:=]\s*([\d.,]+)[\s\S]{0,50}?(?:na\s+)?(?:periodo|semana)\s+(?:anterior|passada)[\s\S]{0,50}?(?:atualmente|agora|neste\s+periodo|no\s+periodo(?:\s+atual)?)[\s:=-]*([\d.,]+)/i.exec(base);
+    ?? /\bseguidores?\b\s*[:=]\s*([\d.,]+)[\s\S]{0,50}?(?:na\s+)?(?:periodo|semana)\s+(?:anterior|passada)[\s\S]{0,50}?(?:atualmente|agora|neste\s+periodo|no\s+periodo(?:\s+atual)?)[\s:=-]*([\d.,]+)/i.exec(base)
+    ?? /(?:tinhamos|t[ií]nhamos|estavamos|est[aá]vamos)\s+(?:com\s+|mais\s+de\s+)?([\d.,]+)\s+seguidores?\b[\s\S]{0,80}?(?:alcancamos|alcan[cç]amos|chegamos|atingimos|temos)\s+(?:a\s+)?([\d.,]+)\b/i.exec(base);
   if (!match) return null;
   const previous = parseAmount(match[1]);
   const current = parseAmount(match[2]);
   return previous === null || current === null ? null : { previous, current };
+}
+
+/** "66 novos seguidores" é ganho do período, não a base total do perfil. */
+function followerGain(text: string): number | null {
+  const base = fold(text);
+  const match = new RegExp(String.raw`(?:\+\s*)?${NUM}\s+(?:novos?|ganhos?)\s+seguidores?\b`, "i").exec(base)
+    ?? new RegExp(String.raw`\b(?:novos?|ganhos?)\s+seguidores?\s*[:=]\s*\+?\s*${NUM}`, "i").exec(base);
+  return match ? parseAmount(match[1]) : null;
+}
+
+/** A operação pode informar o custo diretamente; ele não precisa ser inferido. */
+function followerCost(text: string): number | null {
+  const base = fold(text).replace(/[*_`]/g, "");
+  const match = new RegExp(String.raw`\bcusto\s+por\s+(?:novo\s+)?seguidor(?:es)?\s*[:=]\s*(?:r\$\s*)?${NUM}`, "i").exec(base);
+  return match ? parseAmount(match[1]) : null;
 }
 
 function readChunk(original: string, tags: string[], acc: Acc) {
@@ -158,6 +176,12 @@ function readChunk(original: string, tags: string[], acc: Acc) {
     acc.problemas.push(`origem no meio da frase ("${original.trim().slice(0, 40)}") — use uma linha começando com #1, #2 ou #3`);
     rest = rest.replace(/#\s*[123](?!\d)/g, (m) => " ".repeat(m.length));
   }
+
+  // "custo por novo seguidor" contém a palavra seguidor, mas o valor é moeda,
+  // não a quantidade de seguidores. A métrica é lida separadamente em
+  // followerCost; retire este trecho antes do leitor genérico de seguidores.
+  const followerCostMatch = new RegExp(String.raw`\bcusto\s+por\s+(?:novo\s+)?seguidor(?:es)?\s*[:=]\s*(?:\*?r\$\s*)?${NUM}`, "i").exec(rest);
+  if (followerCostMatch?.index !== undefined) blank(followerCostMatch.index, followerCostMatch[0].length);
 
   // 1. zero dito: "nenhuma venda", "sem agendamentos"
   for (const tag of tags) {
@@ -208,7 +232,7 @@ function readChunk(original: string, tags: string[], acc: Acc) {
     add(tag, m[2]);
   };
   const labelFirst = (tag: string) => new RegExp(String.raw`\b${labelAlt(tag)}\b\s*[:=\-]?\s*(\+)?\s*(?:r\$\s*)?${NUM}`);
-  const numFirst = (tag: string) => new RegExp(String.raw`(\+)?\s*(?:r\$\s*)?${NUM}\s+(?:de\s+|em\s+)?${labelAlt(tag)}\b`);
+  const numFirst = (tag: string) => new RegExp(String.raw`(\+)?\s*(?:r\$\s*)?${NUM}\s+(?:de\s+|em\s+)?(?:novos?\s+|ganhos?\s+)?${labelAlt(tag)}\b`);
   for (const pass of numberFirst ? [numFirst, labelFirst] : [labelFirst, numFirst]) {
     for (const tag of tags) take(pass(tag), (m) => handle(tag, m));
   }
@@ -222,10 +246,13 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
   const acc: Acc = { found: new Map(), previousFound: new Map(), problemas: [], precisaIa: false, seguidoresGanho: null, seguidoresGanhoAnterior: null };
   const gainComparison = followerGainComparison(text);
   const snapshotComparison = followerSnapshotComparison(text);
+  const directFollowerGain = followerGain(text);
+  const custoPorNovoSeguidor = followerCost(text);
   if (gainComparison && tags.includes("seguidores")) {
     acc.seguidoresGanho = gainComparison.current;
     acc.seguidoresGanhoAnterior = gainComparison.previous;
   }
+  if (directFollowerGain !== null && tags.includes("seguidores")) acc.seguidoresGanho = directFollowerGain;
   const rich = needsRichExtraction(tags);
   const linhas: ParsedRow[] = [];
 
@@ -294,7 +321,7 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
 
   const algo = Object.values(valores).some((v) => v !== null) || linhas.length > 0;
   const state: ParseState = conflito ? "AMBIGUOUS" : !algo ? "INVALID" : tags.every((t) => valores[t] !== null) ? "PARSED_OK" : "PARTIAL";
-  return { state, valores, valoresAnteriores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa, seguidoresGanho: acc.seguidoresGanho, seguidoresGanhoAnterior: acc.seguidoresGanhoAnterior };
+  return { state, valores, valoresAnteriores, linhas, problemas: acc.problemas, precisaIa: acc.precisaIa, seguidoresGanho: acc.seguidoresGanho, seguidoresGanhoAnterior: acc.seguidoresGanhoAnterior, custoPorNovoSeguidor };
 }
 
 // ---- o modelo do comentário ----------------------------------------------------------

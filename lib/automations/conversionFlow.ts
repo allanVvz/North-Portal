@@ -73,7 +73,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // A render revision is part of idempotency, not of feedback extraction.
 // Bumping it regenerates only open/current occurrences and leaves earlier
 // documents and append-only snapshots available as audit history.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v9";
+const CONVERSION_RENDERER_REVISION = "segment-summary-v10";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
@@ -381,7 +381,6 @@ async function generateSalesReport(
   config: AutomationConfigRow,
   occ: TaskRecord,
   conversionCard: TaskRecord,
-  feedbackCard: TaskRecord,
   ext: AdaptiveMetricExtract,
   traffic: TrafficReportRow,
   cadence: RecurringCadence,
@@ -508,6 +507,7 @@ async function generateSalesReport(
     // base anterior; o ganho vai explicitamente para a figura de conversão.
     seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
     seguidoresNovos: ext.seguidoresGanho ?? null,
+    custoPorNovoSeguidor: ext.custoPorNovoSeguidor ?? null,
     prevSeguidoresNovos: ext.seguidoresGanhoAnterior ?? effectivePrevTotals?.seguidoresNovos ?? null,
     prevTotals: effectivePrevTotals,
     history: historyWithFollowers,
@@ -570,10 +570,9 @@ async function generateSalesReport(
     throw docError;
   }
 
-  // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
-  // Keep the resulting PDF immediately after the manager's feedback instead
-  // of creating an extra generated-summary thread in the conversion card.
-  await replaceAutomaticReportAttachment(admin, feedbackCard.id, {
+  // Atômico e idempotente: o PDF pertence à etapa que o produziu (Conversão),
+  // nunca ao Feedback humano que serviu apenas como uma das fontes.
+  await replaceAutomaticReportAttachment(admin, conversionCard.id, {
     reportKind: "conversion",
     // Mesma cortesia do relatório de anúncios: quem abre o card precisa saber se a
     // bola está com ele. A frase vem do workflow versionado da ocorrência.
@@ -584,7 +583,7 @@ async function generateSalesReport(
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
     // 128 caracteres do id. (card, período) já identifica a conversão — o retry
     // que reencontra o documento já retorna antes de chegar aqui.
-    commentId: automationCommentId("conversion-report", feedbackCard.id, version),
+    commentId: automationCommentId("conversion-report", conversionCard.id, version),
   });
   return (docRows?.[0] as { id: string } | undefined)?.id ?? null;
 }
@@ -767,7 +766,7 @@ async function processOccurrence(
     });
     if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, card2, ext, traffic, cadence, period, sourceCommentAt, reportFingerprint, claim.id, visualRequest);
+    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, reportFingerprint, claim.id, visualRequest);
     await attachConversionDocument(admin, claim.id, documentId);
     await supersedePriorConversionReports(admin, {
       id: claim.id,

@@ -56,6 +56,8 @@ export type SalesReportInput = {
   seguidores?: number | null;
   /** Seguidores ganhos no período, informados diretamente no feedback. */
   seguidoresNovos?: number | null;
+  /** Custo por seguidor novo declarado pela operação para este período. */
+  custoPorNovoSeguidor?: number | null;
   /** Ganho de seguidores do período anterior, quando informado. */
   prevSeguidoresNovos?: number | null;
   prevTotals?: SalesPrevTotals | null;
@@ -336,6 +338,12 @@ function SalesReportDocument(input: SalesReportInput) {
   // Segment templates start with the global journey, then keep KPIs and
   // creatives together in each real campaign objective.
   if (config.reportKpiPolicy !== "generic") {
+    // Só entra quando a equipe efetivamente escreveu uma análise. Contexto
+    // interno, autoria e metatexto nunca são expostos ao cliente.
+    const operationalReading = [...new Set((input.adaptiveContext?.context ?? [])
+      .map((item) => item.text.replace(/\s+/g, " ").trim())
+      .filter(Boolean))]
+      .slice(-2);
     const resultItems = [
       cur.vendas !== null ? { label: "Vendas", value: num(cur.vendas), delta: null } : null,
       cur.agendamentos !== null ? { label: "Agendamentos", value: num(cur.agendamentos), delta: null } : null,
@@ -431,8 +439,28 @@ function SalesReportDocument(input: SalesReportInput) {
             prevPosts={prevCampaignPosts}
             adPosts={adPosts}
             kicker="Mídia por objetivo"
+            extraKpis={(block) => {
+              if (block !== "trafego_perfil" || followersGain === null || followersGain <= 0) return [];
+              return [
+                {
+                  label: "Novos seguidores", value: followersGain, previous: null,
+                  kind: "number", inverse: false, deltaText: `+${num(followersGain)} informados`, deltaTone: "good" as const,
+                },
+                ...(input.custoPorNovoSeguidor !== null && input.custoPorNovoSeguidor !== undefined
+                  ? [{
+                    label: "Custo por novo seguidor", value: input.custoPorNovoSeguidor, previous: null,
+                    kind: "money" as const, inverse: true, deltaText: "Informado pela equipe", deltaTone: "neutral" as const,
+                  }]
+                  : []),
+              ];
+            }}
             detail={(block) => creativeTableForBlock(block)}
           />
+          {operationalReading.length ? (
+            <Section title="Leitura da semana">
+              <AnalysisList items={operationalReading} />
+            </Section>
+          ) : null}
           {conversoes.length ? (
             <Section title="Conversões informadas">
               <DataTable
