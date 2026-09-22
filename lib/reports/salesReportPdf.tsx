@@ -363,20 +363,32 @@ function SalesReportDocument(input: SalesReportInput) {
         <View style={{ marginTop: 10 }}>
           {groups.map(([campaignName, campaignCreatives]) => {
             const highlight = [...campaignCreatives].sort((a, b) => (b.result - a.result) || (b.spend - a.spend))[0];
-            const allCards = campaignCreatives
-              .sort((a, b) => (b.result - a.result) || (b.spend - a.spend))
-              .map(cardFor);
+            // O destaque não se repete na lista. A lista mantém o preview
+            // pequeno de cada peça restante, como no relatório anterior.
+            const remaining = campaignCreatives
+              .filter((creative) => creative.adId !== highlight.adId)
+              .sort((a, b) => (b.result - a.result) || (b.spend - a.spend));
             return (
               <View key={campaignName} style={{ marginTop: 8 }}>
                 <Text style={[T.cardBadge, { color: "#54706b", marginBottom: 4 }]}>{campaignName}</Text>
                 <Text style={[T.cardMetricLabel, { marginBottom: 4 }]}>Destaque</Text>
                 <CreativeCards items={[cardFor(highlight)]} layout={{ maxLines: 2 }} />
-                <Text style={[T.cardMetricLabel, { marginTop: 8, marginBottom: 4 }]}>Todos os criativos</Text>
-                {Array.from({ length: Math.ceil(allCards.length / 4) }, (_, index) => (
-                  <View key={index} style={{ marginBottom: 8 }}>
-                    <CreativeCards items={allCards.slice(index * 4, (index + 1) * 4)} layout={{ maxLines: 2 }} />
-                  </View>
-                ))}
+                {remaining.length ? <View style={{ marginTop: 8 }}>
+                  <DataTable
+                    columns={[
+                      { key: "thumb", label: "", width: 26 },
+                      { key: "creative", label: "Outros criativos", flex: 2.4 },
+                      { key: "investment", label: "Investimento", align: "right" },
+                      { key: "result", label: highlight.resultLabel, align: "right", flex: 1.2 },
+                    ]}
+                    rows={remaining.map((creative) => ({
+                      thumb: { text: "", image: previews?.[creative.adId]?.dataUri ?? null },
+                      creative: { text: creative.name, strong: true },
+                      investment: { text: money(creative.spend) },
+                      result: { text: num(creative.result) },
+                    }))}
+                  />
+                </View> : null}
               </View>
             );
           })}
