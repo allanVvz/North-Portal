@@ -1,4 +1,4 @@
-import { GRAPH_VERSION } from "./meta";
+import { GRAPH_VERSION, metaErrorMessage } from "./meta";
 import { HttpError } from "./validation";
 import type { MetaPlatform, MetaPost } from "./windsor";
 
@@ -265,10 +265,9 @@ async function fetchAllPages(firstPageUrl: string): Promise<Record<string, unkno
       throw new HttpError(502, "Nao foi possivel falar com a Meta — verifique a conexao e tente de novo.");
     }
     const body = (await res.json().catch(() => null)) as { data?: unknown; paging?: { next?: string } } | null;
-    if (!res.ok) {
-      const message = (body as { error?: { message?: string } } | null)?.error?.message;
-      throw new HttpError(502, message ? `A Meta respondeu com erro: ${message}` : `A Meta respondeu com erro (${res.status}).`);
-    }
+    // Mesma tradução do graphGet: um checkpoint na conta chega aqui como
+    // OAuthException em HTTP 400, e é este o caminho que as automações usam.
+    if (!res.ok) throw new HttpError(502, metaErrorMessage(res.status, body as Record<string, unknown> | null));
     if (Array.isArray(body?.data)) rows.push(...(body.data as Record<string, unknown>[]));
     nextUrl = body?.paging?.next ?? null;
   }

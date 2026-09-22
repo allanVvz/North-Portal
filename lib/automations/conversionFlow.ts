@@ -23,7 +23,7 @@ import { workflowByVersionId, workflowStepByKey } from "@/lib/workflows";
 import type { Period } from "@/app/admin/performance/insights";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import { feedbackTemplate } from "@/lib/ai/commentParser";
-import { CONVERSION_METRICS_DEFAULT, metricTagLabel, needsRichExtraction } from "@/lib/metricTags";
+import { CONVERSION_METRICS_DEFAULT, metricTagDef, metricTagLabel, needsRichExtraction } from "@/lib/metricTags";
 import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
@@ -32,6 +32,7 @@ import { assignResponsibilityHolders } from "./responsibleOwners";
 import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import { automationCommentId, replaceAutomaticReportAttachment, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
+import { nextStepNotice, withNextStepNotice } from "./nextStepNotice";
 import { getClientById } from "./serviceIntegrations";
 import { reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { attributionOf, conversionModeOf } from "@/lib/reports/conversionMode";
@@ -425,6 +426,13 @@ async function generateSalesReport(
       seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
       seguidoresNovos: ext.seguidoresGanho ?? null,
     },
+    previousMetrics: {
+      vendas: effectivePrevTotals?.vendas ?? null,
+      agendamentos: effectivePrevTotals?.agendamentos ?? null,
+      receita: effectivePrevTotals?.receita ?? null,
+      seguidores: effectivePrevTotals?.seguidores ?? null,
+      seguidoresNovos: effectivePrevTotals?.seguidoresNovos ?? null,
+    },
     conversions: conversoes,
     campaigns: campaignPosts,
     ads: adPosts,
@@ -469,8 +477,22 @@ async function generateSalesReport(
   }).eq("id", conversionReportId);
   if (planError) throw planError;
 
+  // Métricas pedidas no comentário que o relatório ainda não tem lugar fixo para
+  // mostrar — verba disponível é a primeira. As quatro que já têm tratamento
+  // próprio (vendas, agendamentos, receita, seguidores) ficam de fora para não
+  // aparecerem duas vezes. Genérico de propósito: adicionar uma tag nova em
+  // `collect_metric_keys` passa a pedi-la E a exibi-la, sem tocar em código.
+  const JA_TRATADAS = new Set(["vendas", "agendamentos", "receita", "seguidores"]);
+  const informados = tagsOf(config)
+    .filter((tag) => !JA_TRATADAS.has(tag) && typeof ext.valores[tag] === "number")
+    .map((tag) => {
+      const def = metricTagDef(tag);
+      return { label: def.label, value: ext.valores[tag] as number, kind: def.kind };
+    });
+
   const pdf = await renderSalesReportPdf({
     clientName: client.name,
+    informados,
     period,
     cadenceLabel: RECURRENCE_CADENCE_LABEL[cadence] ?? cadence,
     config: templateConfig,
@@ -545,14 +567,14 @@ async function generateSalesReport(
   }
 
   // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
-  const layoutNote = visualRequest?.target === "funnel"
-    ? "funil reorganizado: rotulos abaixo e base centralizada"
-    : layoutPlan.narrative.placement === "next_page"
-    ? "leitura técnica separada em página própria"
-    : "leitura técnica reorganizada";
   await replaceAutomaticReportAttachment(admin, card2.id, {
     reportKind: "conversion",
-    text: `Relatório de conversão atualizado — ${layoutNote}. [${fileName}](${urlData.publicUrl})`,
+    // Mesma cortesia do relatório de anúncios: quem abre o card precisa saber se a
+    // bola está com ele. A frase vem do workflow versionado da ocorrência.
+    text: withNextStepNotice(
+      `Relatório de conversão atualizado — crescimento de seguidores reorganizado e campanhas classificadas por objetivo real. [${fileName}](${urlData.publicUrl})`,
+      await nextStepNotice(admin, occ, CONVERSION_REPORT_STEP_KEY),
+    ),
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
     // 128 caracteres do id. (card, período) já identifica a conversão — o retry
     // que reencontra o documento já retorna antes de chegar aqui.
@@ -809,7 +831,7 @@ export async function runConversionFlow(
   // qual relatório de anúncios ela é a continuação — e diz isso, em vez de rodar
   // em silêncio sobre o que achar no card.
   if (!config.depends_on_config_id) {
-    return { error: "Relatório de vendas sem dependência declarada: registre o Relatório de anúncios para o mesmo cliente e salve de novo." };
+    return { error: "Relatório de conversão sem dependência declarada: registre o Relatório de anúncios para o mesmo cliente e salve de novo." };
   }
   const mold = await getAdminTask(admin, config.target_task_id);
   if (!mold || !mold.recurrence_cadence || recurrenceStopped(mold.status)) return "not_due";

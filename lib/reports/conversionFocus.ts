@@ -86,10 +86,13 @@ export function heroFor(x: FocusContext): Hero {
   if (x.kind === "seguidores") {
     if (x.followersGain !== null && x.cur.seguidores !== null && x.prevFollowersTotal !== null) {
       const growth = pctChange(cur.seguidores, x.prevFollowersTotal);
+      const gainComparison = x.prevFollowersGain !== null
+        ? ` Referência anterior: ${signed(x.prevFollowersGain)}; diferença de ${signed(x.followersGain - x.prevFollowersGain)}${x.prevFollowersGain === 0 ? " (sem base percentual)" : ` (${signedPct(((x.followersGain - x.prevFollowersGain) / x.prevFollowersGain) * 100)})`} no ritmo semanal.`
+        : "";
       return {
-        label: "crescimento de seguidores",
+        label: "seguidores adquiridos",
         value: signed(x.followersGain),
-        caption: `Total do perfil: ${num(cur.seguidores)}. Diferença para a semana anterior: ${signed(x.followersGain)} (${growth === null ? "sem base percentual" : signedPct(growth)}), quando eram ${num(x.prevFollowersTotal)}.`,
+        caption: `O perfil chegou a ${num(cur.seguidores)} seguidores, ante ${num(x.prevFollowersTotal)} (${growth === null ? "sem base percentual" : signedPct(growth)} na base total).${gainComparison}`,
         delta: null,
       };
     }
@@ -139,13 +142,34 @@ export function supportFigures(x: FocusContext): Figure[] {
       out.push({ label: "Seguidores novos", value: signed(x.followersGain), delta: null, hint: x.prevFollowersGain === null ? "total do perfil não informado" : `eram ${num(x.prevFollowersGain)} na semana anterior` });
     }
   } else if (x.kind === "seguidores") {
-    if (cur.seguidores !== null) out.push({ label: "Seguidores no perfil", value: num(cur.seguidores), delta: null, hint: followerTotalHint(cur.seguidores, x.prevFollowersTotal) });
+    // A semana de perfil tem SEIS números, não um. Antes esta faixa trazia só
+    // "visitas" e "custo por visita" ao lado da figura principal de seguidores —
+    // o relatório saía com seguidores como KPI praticamente única, sem alcance e
+    // sem o custo por seguidor, que é justamente como a operação julga a
+    // campanha. O conjunto abaixo é o resumo que a especialista de produto manda
+    // para os clientes de negócio local (visitas, custo por visita,
+    // investimento, alcance, novos seguidores, custo por novo seguidor).
     if (media.profileVisits !== null) out.push({ label: "Visitas ao perfil", value: num(media.profileVisits), delta: prevMedia ? up(media.profileVisits, prevMedia.profileVisits) : null });
     if (media.spend && media.profileVisits) {
       const c = media.spend / media.profileVisits;
       const pc = prevMedia?.spend && prevMedia.profileVisits ? prevMedia.spend / prevMedia.profileVisits : null;
       out.push({ label: "Custo por visita", value: money(c), delta: pc !== null ? down(c, pc) : null });
     }
+    if (media.spend !== null) out.push({ label: "Investimento", value: money(media.spend), delta: spendDelta });
+    if (media.reach !== null) out.push({ label: "Alcance", value: num(media.reach), delta: prevMedia ? up(media.reach, prevMedia.reach) : null });
+    // Seguidores novos entra na faixa TAMBÉM, não só como figura principal: é o
+    // número que a pessoa procura, e o custo dele só faz sentido ao lado.
+    if (x.followersGain !== null) {
+      out.push({ label: "Novos seguidores", value: signed(x.followersGain), delta: x.prevFollowersGain !== null ? up(x.followersGain, x.prevFollowersGain) : null });
+      if (media.spend && x.followersGain > 0) {
+        const c = media.spend / x.followersGain;
+        const pc = prevMedia?.spend && x.prevFollowersGain ? prevMedia.spend / x.prevFollowersGain : null;
+        out.push({ label: "Custo por novo seguidor", value: money(c), delta: pc !== null ? down(c, pc) : null });
+      }
+    }
+    // Seis cabem na faixa; o corte de quatro dos outros focos deixaria metade do
+    // resumo de fora.
+    return out.slice(0, 6);
   } else {
     if (media.reach !== null) out.push({ label: "Alcance", value: num(media.reach), delta: prevMedia ? up(media.reach, prevMedia.reach) : null });
     if (media.costPerConversation !== null) out.push({ label: "Custo por conversa", value: money(media.costPerConversation), delta: prevMedia ? down(media.costPerConversation, prevMedia.costPerConversation) : null });
@@ -270,6 +294,8 @@ export function resultAnalysis(x: ResultAnalysisInput): { headline: string; insi
 
   if (x.kind === "seguidores") {
     const headline = x.followersGain !== null ? `${signed(x.followersGain)} seguidores na semana.` : `${num(cur.seguidores)} seguidores no perfil.`;
+    if (x.topCreative) out.push(`${x.topCreative.name} foi o anúncio que mais levou gente ao perfil.`);
+    if (media.spend && x.followersGain && x.followersGain > 0) out.push(`Cada seguidor novo custou em média ${money(media.spend / x.followersGain)} de mídia.`);
     const dReach = prevMedia ? pctChange(media.reach, prevMedia.reach) : null;
     const dVisits = prevMedia ? pctChange(media.profileVisits, prevMedia.profileVisits) : null;
     if (dReach !== null && dVisits !== null && dReach <= -10 && Math.abs(dVisits) < 10) {
@@ -281,8 +307,6 @@ export function resultAnalysis(x: ResultAnalysisInput): { headline: string; insi
       const d = pctChange(x.followersGain, x.prevFollowersGain) ?? 0;
       out.push(Math.abs(d) < 5 ? `O ritmo de crescimento se manteve: ${signed(x.prevFollowersGain)} na semana anterior.` : d > 0 ? `O ganho superou o da semana anterior (${signed(x.prevFollowersGain)}).` : `O ganho ficou abaixo do da semana anterior (${signed(x.prevFollowersGain)}).`);
     }
-    if (media.spend && x.followersGain && x.followersGain > 0) out.push(`Cada seguidor novo custou em média ${money(media.spend / x.followersGain)} de mídia.`);
-    if (x.topCreative) out.push(`${x.topCreative.name} foi o anúncio que mais levou gente ao perfil.`);
     return { headline, insights: out.slice(0, 3) };
   }
 

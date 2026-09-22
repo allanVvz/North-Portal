@@ -15,7 +15,12 @@ begin
 
   select id into luiza from public.profiles where full_name = 'Luiza' and role = 'admin' limit 1;
   if luiza is null then
-    raise exception 'Perfil administrativo Luiza não encontrado';
+    -- Um projeto novo aplica migrations antes de criar usuários Auth/profiles.
+    -- Nesse cenário não existe dado operacional para converter, portanto o
+    -- backfill deve ser um no-op em vez de impedir `db reset`/preview/CI.
+    -- Em bancos existentes o perfil continua sendo resolvido e o backfill
+    -- abaixo preserva exatamente o comportamento original.
+    return;
   end if;
 
   -- O molde é quem transmite Luiza para a ocorrência e suas etapas.

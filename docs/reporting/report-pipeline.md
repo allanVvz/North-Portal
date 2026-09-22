@@ -5,9 +5,9 @@ São duas configurações e dois produtos diferentes.
 | Configuração | Alvo | Pode existir sozinha | Resultado |
 |---|---|---:|---|
 | `relatorio_trafego_semanal` | Tarefa recorrente comum | sim | PDF de anúncios em uma Tarefa |
-| `relatorio_vendas` | Entrega recorrente `Automação` | não | PDF de conversão após Feedback |
+| `relatorio_conversao` | Entrega recorrente `Automação` | não | PDF de conversão após Feedback |
 
-`relatorio_vendas.depends_on_config_id` aponta para a configuração de anúncios
+`relatorio_conversao.depends_on_config_id` aponta para a configuração de anúncios
 do mesmo cliente. Ao cadastrar conversão sem anúncios, o backend cria a
 configuração dependida na mesma transação.
 
@@ -73,6 +73,75 @@ materializa a Conversão e inicia seu processamento.
   `succeeded`.
 - O PDF de conversão só é anexado depois da reivindicação durável.
 - Falha parcial registra `failed`; o retry continua do ponto seguro.
+
+## Quando a automação NÃO roda
+
+Há dois modos de falha e eles chegam por caminhos diferentes.
+
+**Rodou e quebrou.** Toda exceção passa por `lib/automations/errorHandling.ts`:
+comentário explicando o que houve, card para `parada` (ou só comentário, quando
+o status é projetado) e notificação. Visível no card, no dia.
+
+**Não rodou.** O gate de elegibilidade (`run.ts`, `target.due_date !== today`) é
+uma igualdade **estrita**: nada é gerado fora do dia exato do vencimento, para
+nunca publicar relatório de período errado. O preço é que um ciclo perdido não
+se recupera sozinho — o molde fica parado naquela data, `runOneReportAutomation`
+devolve `not_due` todo dia e `automation_runs` grava `succeeded`, porque de fato
+não houve erro.
+
+`lib/automations/moldHealth.ts` (`reportMissedAutomationCycles`) fecha esse
+buraco. Roda no fim do mesmo tique diário, depois das automações, e comenta no
+molde **uma vez por vencimento perdido** (id `automation-missed:<config>:<data>`),
+distinguindo as duas causas:
+
+| Situação | O que o comentário diz | O que fazer |
+|---|---|---|
+| Ocorrência do ciclo existe e está aberta | A Entrega anterior não foi concluída (tráfego **e** conversão) | Concluir a Entrega em aberto |
+| Não há ocorrência | O vencimento passou sem gerar nada | Mover o vencimento do molde para a próxima data |
+
+Um terceiro caso é detectado **no próprio dia**, por `run.ts`: quando a etapa de
+tráfego do ciclo anterior ainda está aberta (`revisao`/`aprovado`), a transição
+compare-and-set não pega, a execução sai por `not_due` e o molde **não avança** —
+com o gate estrito, isso congela a automação para sempre. O motivo passa a ser
+comentado no molde, com o **mesmo id** que `moldHealth` usaria, para o mesmo ciclo
+travado não render dois comentários.
+
+### Aviso antes do vencimento
+
+`lib/automations/metaCredentialHealth.ts` (`warnBeforeMetaCredentialFailure`) roda
+no mesmo tique e faz **uma** chamada a `/me` quando algum molde vence nos próximos
+2 dias. Se a Meta recusar, comenta no molde antes da segunda, uma vez por
+vencimento, e só para cliente com conta Meta mapeada — quem puxa do Windsor não
+depende desse token. Existe porque o checkpoint que derrubou 21/09/2026 já estava
+lá na semana anterior.
+
+### Erros da Meta
+
+`metaErrorMessage` (`lib/meta.ts`) classifica pelo `error.code`/`error_subcode`,
+**nunca pelo status HTTP** — a Meta manda problema de credencial como
+`OAuthException` em HTTP 400, não 401:
+
+| Código | Frase no card |
+|---|---|
+| 190 subcódigo 458–467, ou texto com `log in to www.facebook.com` | Credencial bloqueada por verificação de segurança — alguém precisa entrar no Facebook |
+| 190 / 102 / HTTP 401-403 | Token inválido ou expirado — reconectar em Integrações |
+| 368 | Conta bloqueada por política |
+| 17 / 613 / 80004 | Limite de chamadas |
+| 1 subcódigo 99 | Volume de dados pedido de uma vez (ver `TREND_WEEKS`) |
+
+A mensagem original da Meta vai no fim da frase, entre parênteses: é o que permite
+achar o código exato depois, olhando só o comentário do card.
+
+`GRAPH_VERSION` (`lib/meta.ts`) é **v25.0**, sobrescritível por
+`META_GRAPH_VERSION`. A Meta aposenta cada versão ~2 anos depois do lançamento e
+aí toda chamada de anúncios falha de uma vez com `(#2635)`. Validades publicadas:
+v21.0 → 21/01/2027, v22.0 → 20/05/2027, v23.0 → 08/10/2027, v24.0 → 18/02/2028,
+v25.0 → 29/07/2028.
+
+Não há tela de saúde das automações: a saúde é o comentário no próprio card. Para
+reexecutar um vencimento específico sem esperar o cron, `POST
+/api/admin/automations/run` com `{ "configIds": ["..."], "today": "AAAA-MM-DD" }`
+(autenticado como admin, não pelo segredo do cron).
 
 ## Roteamento de comentários e escrita atômica
 
@@ -187,6 +256,27 @@ Se a publicação terminar depois de 18/09/2026 08:00 BRT, um administrador deve
 executar uma única chamada idempotente à rota de automações com `today =
 "2026-09-18"` e somente os cinco IDs de configuração de anúncios auditados. O
 ledger registra `scheduled_for = 2026-09-18T11:00:00Z` e impede repetição.
+
+### Agendamento
+
+Uma fonte só: `supabase/migrations/20260921140000_cron_automacoes_canonico.sql`.
+Job `automations-run-daily`, schedule `0 11 * * *` (08:00 BRT), segredo
+`automations_cron_secret` no Vault e `timeout_milliseconds := 300000` no
+`net.http_post` — o default do pg_net é 5000 ms e abortava a chamada no meio da
+geração. Migrações anteriores escreveram esse mesmo schedule com outros valores
+(`20260821025707` às 08:00 UTC, `20260915130000` às 12:00 UTC); valem como
+histórico, não como configuração.
+
+Para conferir o que está no ar sem adivinhar:
+
+```sql
+select jobname, schedule, active from cron.job where jobname = 'automations-run-daily';
+select status, start_time, return_message from cron.job_run_details
+  where jobid = (select jobid from cron.job where jobname = 'automations-run-daily')
+  order by start_time desc limit 10;
+select status_code, timed_out, left(content, 400) from net._http_response
+  order by created desc limit 10;
+```
 
 ## Roadmap
 

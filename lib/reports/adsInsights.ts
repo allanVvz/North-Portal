@@ -14,9 +14,9 @@
 // 4. Investimento é neutro. Nenhuma frase afirma causa.
 
 import { formatAcquisitionValue } from "@/app/admin/performance/acquisitionInsights";
-import { recomputeRatios, sumMetricsInto } from "@/app/admin/performance/insights";
+import { recomputeRatios, sumMetricsInto, type Period } from "@/app/admin/performance/insights";
 import { CAMPAIGN_BLOCK_LABEL, type CampaignBlock } from "@/lib/performanceTemplates";
-import type { MetaPost, MetaPostMetricKey } from "@/lib/windsor";
+import type { MetaPlatform, MetaPost, MetaPostMetricKey } from "@/lib/windsor";
 
 export type Metrics = Partial<Record<MetaPostMetricKey, number>>;
 export type Tone = "good" | "bad" | "neutral";
@@ -144,6 +144,9 @@ export type TechnicalSignal = { label: string; cost: number; delta: Delta; criti
 export type ObjectiveRow = {
   block: CampaignBlock;
   label: string;
+  /** Each objective keeps its own business result; mixed periods never relabel
+   * a profile visit as a site click (or the reverse). */
+  resultLabel: string;
   spend: number;
   spendShare: number | null;
   reach: number | null;
@@ -171,6 +174,19 @@ function aggregate(posts: MetaPost[], blockOf: (p: MetaPost) => CampaignBlock): 
   }
   for (const m of out.values()) recomputeRatios(m);
   return out;
+}
+
+function objectiveResult(block: CampaignBlock, metrics: Metrics | undefined): { value: number | null; label: string } {
+  if (!metrics) return { value: null, label: "Resultado" };
+  switch (block) {
+    case "trafego_perfil": return { value: metrics.profileVisits ?? null, label: "Visitas ao perfil" };
+    case "trafego_site": return metrics.landingPageViews !== undefined
+      ? { value: metrics.landingPageViews, label: "Visualizações da página de destino" }
+      : { value: metrics.cliquesLink ?? null, label: "Cliques no link" };
+    case "mensagens": return { value: metrics.contatos ?? 0, label: "Conversas" };
+    case "engajamento": return { value: metrics.engajamento ?? null, label: "Engajamentos" };
+    default: return { value: metrics.resultado ?? metrics.cliques ?? null, label: "Resultados" };
+  }
 }
 
 export function technicalOf(block: CampaignBlock, cur: Metrics, prev: Metrics | undefined): TechnicalSignal | null {
@@ -207,10 +223,12 @@ export function objectiveRows(
   // página (3) ao lado das 562 visitas ao perfil da faixa de números.
   const visitsFor = (block: CampaignBlock, m: Metrics | undefined) =>
     !m ? null : outcome === "visitas" ? m.profileVisits ?? null : visitsOf(block, m);
-  const resultOf = (block: CampaignBlock, m: Metrics | undefined) =>
-    !m ? null : outcome === "conversas" ? m.contatos ?? 0 : visitsFor(block, m);
+  const resultOf = (block: CampaignBlock, m: Metrics | undefined) => objectiveResult(block, m).value;
   const totalSpend = [...cur.values()].reduce((s, m) => s + (m.custo ?? 0), 0);
   const totalResult = [...cur.entries()].reduce((s, [b, m]) => s + (resultOf(b, m) ?? 0), 0);
+  const comparableResults = new Set(
+    [...cur.entries()].map(([block, metrics]) => objectiveResult(block, metrics).label),
+  ).size <= 1;
 
   return [...cur.entries()]
     .map(([block, m]) => {
@@ -223,6 +241,7 @@ export function objectiveRows(
       return {
         block,
         label: CAMPAIGN_BLOCK_LABEL[block],
+        resultLabel: objectiveResult(block, m).label,
         spend: m.custo ?? 0,
         spendShare: totalSpend > 0 ? ((m.custo ?? 0) / totalSpend) * 100 : null,
         reach: m.alcance ?? null,
@@ -232,7 +251,10 @@ export function objectiveRows(
         visits: visitsFor(block, m),
         conversations: m.contatos ?? null,
         result,
-        resultShare: totalResult > 0 && result !== null ? (result / totalResult) * 100 : null,
+        // Cliques, visitas, conversas e engajamentos não compartilham unidade.
+        // Uma participação total só é honesta quando todas as linhas usam a
+        // mesma métrica de resultado.
+        resultShare: comparableResults && totalResult > 0 && result !== null ? (result / totalResult) * 100 : null,
         costPerResult,
         resultDelta: deltaOf(result, prevResult, "higher_is_better"),
         costDelta: deltaOf(costPerResult, prevCost, "lower_is_better"),
@@ -314,8 +336,11 @@ export type CreativeRow = {
   conversations: number;
   visits: number | null;
   frequency: number | null;
-  /** Resultado do criativo no desfecho da conta (conversas, ou visitas/cliques). */
+  /** Bloco usado para escolher o resultado; null mantém o modo legado global. */
+  block: CampaignBlock | null;
+  /** Resultado do criativo no objetivo da campanha (ou no desfecho global legado). */
   result: number;
+  resultLabel: string;
   resultUnit: string;
   costPerResult: number | null;
   spendShare: number;
@@ -325,7 +350,30 @@ export type CreativeRow = {
 const NOISE_SPEND = 2;
 const NOISE_IMPRESSIONS = 100;
 
-export function creativeRows(adPosts: MetaPost[], outcome: MediaOutcome): { rows: CreativeRow[]; hiddenNoise: number } {
+export function creativeResultForBlock(block: CampaignBlock, metrics: Metrics): { result: number; resultLabel: string; resultUnit: string } {
+  switch (block) {
+    case "trafego_perfil":
+      return { result: metrics.profileVisits ?? 0, resultLabel: "Visitas ao perfil", resultUnit: "visita" };
+    case "trafego_site":
+      return metrics.landingPageViews !== undefined
+        ? { result: metrics.landingPageViews, resultLabel: "Visualizações da página de destino", resultUnit: "visualização" }
+        : { result: metrics.cliquesLink ?? 0, resultLabel: "Cliques no link", resultUnit: "clique" };
+    case "mensagens":
+      return { result: metrics.contatos ?? 0, resultLabel: "Conversas", resultUnit: "conversa" };
+    case "engajamento":
+      return { result: metrics.engajamento ?? 0, resultLabel: "Engajamentos", resultUnit: "engajamento" };
+    default:
+      return { result: metrics.resultado ?? metrics.cliques ?? 0, resultLabel: "Resultados", resultUnit: "resultado" };
+  }
+}
+
+/** `blockOf` é opcional por compatibilidade. Quando informado, cada criativo
+ * usa o resultado do objetivo real de sua campanha, inclusive em período misto. */
+export function creativeRows(
+  adPosts: MetaPost[],
+  outcome: MediaOutcome,
+  blockOf?: (post: MetaPost) => CampaignBlock,
+): { rows: CreativeRow[]; hiddenNoise: number } {
   const byId = new Map<string, { base: MetaPost; metrics: Metrics }>();
   for (const p of adPosts) {
     if (!p.adId) continue;
@@ -337,8 +385,14 @@ export function creativeRows(adPosts: MetaPost[], outcome: MediaOutcome): { rows
     const clicks = m.cliques ?? m.cliquesLink ?? 0;
     const impressions = m.impressoes ?? 0;
     const visits = m.profileVisits ?? null;
-    const useVisits = outcome === "visitas";
-    const result = outcome === "conversas" ? m.contatos ?? 0 : visits && visits > 0 ? visits : clicks;
+    const block = blockOf?.(base) ?? null;
+    const objective = block
+      ? creativeResultForBlock(block, m)
+      : outcome === "conversas"
+        ? { result: m.contatos ?? 0, resultLabel: "Conversas", resultUnit: "conversa" }
+        : visits && visits > 0
+          ? { result: visits, resultLabel: "Visitas ao perfil", resultUnit: "visita" }
+          : { result: clicks, resultLabel: "Cliques", resultUnit: "clique" };
     return {
       adId: base.adId as string,
       creativeId: base.creativeId ?? null,
@@ -353,18 +407,22 @@ export function creativeRows(adPosts: MetaPost[], outcome: MediaOutcome): { rows
       conversations: m.contatos ?? 0,
       visits,
       frequency: m.alcance ? impressions / m.alcance : null,
-      result,
-      resultUnit: outcome === "conversas" ? "conversa" : useVisits && visits && visits > 0 ? "visita" : "clique",
-      costPerResult: result > 0 ? (m.custo ?? 0) / result : null,
+      block,
+      result: objective.result,
+      resultLabel: objective.resultLabel,
+      resultUnit: objective.resultUnit,
+      costPerResult: objective.result > 0 ? (m.custo ?? 0) / objective.result : null,
       spendShare: 0,
       resultShare: null as number | null,
     };
   });
   const rows = all.filter((r) => r.spend >= NOISE_SPEND || r.impressions >= NOISE_IMPRESSIONS);
   const totalSpend = rows.reduce((s, r) => s + r.spend, 0);
-  const totalResult = rows.reduce((s, r) => s + r.result, 0);
+  const resultTotals = new Map<string, number>();
+  for (const row of rows) resultTotals.set(row.resultLabel, (resultTotals.get(row.resultLabel) ?? 0) + row.result);
   for (const r of rows) {
     r.spendShare = totalSpend > 0 ? (r.spend / totalSpend) * 100 : 0;
+    const totalResult = resultTotals.get(r.resultLabel) ?? 0;
     r.resultShare = totalResult > 0 ? (r.result / totalResult) * 100 : null;
   }
   rows.sort((a, b) => b.spend - a.spend);
@@ -372,7 +430,7 @@ export function creativeRows(adPosts: MetaPost[], outcome: MediaOutcome): { rows
 }
 
 export type BadgeKey =
-  | "mais_conversas" | "mais_cliques" | "melhor_ctr" | "maior_investimento" | "maior_eficiencia"
+  | "mais_conversas" | "mais_visitas_perfil" | "mais_cliques" | "melhor_ctr" | "maior_investimento" | "maior_eficiencia"
   | "trafego_sem_conversao" | "atencao_sem_resposta" | "saturacao" | "explica_mudanca";
 
 export type Badge = { key: BadgeKey; label: string; tone: Tone; detail: string };
@@ -403,18 +461,26 @@ export function creativeBadges(rows: CreativeRow[], outcome: MediaOutcome, prevR
   };
   const best = (pick: (r: CreativeRow) => number | null, filter: (r: CreativeRow) => boolean = () => true, lowest = false) =>
     rows.filter((r) => filter(r) && pick(r) !== null).sort((a, b) => (lowest ? (pick(a)! - pick(b)!) : (pick(b)! - pick(a)!)))[0];
+  const legacy = (row: CreativeRow) => row.block === null;
+  const resultGroups = [...new Set(rows.map((row) => row.resultLabel))]
+    .map((label) => ({ label, rows: rows.filter((row) => row.resultLabel === label) }))
+    .sort((a, b) => b.rows.reduce((sum, row) => sum + row.spend, 0) - a.rows.reduce((sum, row) => sum + row.spend, 0));
 
   const candidates: Record<BadgeKey, () => void> = {
     mais_conversas: () => {
-      const r = best((x) => x.conversations, (x) => x.conversations > 0);
+      const r = best((x) => x.conversations, (x) => x.conversations > 0 && (legacy(x) || x.block === "mensagens"));
       if (r) give(r, { key: "mais_conversas", label: "Mais conversas", tone: "good", detail: `${plural(r.conversations, "conversa")}${r.resultShare !== null ? ` · ${pctRound(r.resultShare)} do total` : ""}` });
     },
+    mais_visitas_perfil: () => {
+      const r = best((x) => x.result, (x) => x.block === "trafego_perfil" && x.result > 0);
+      if (r) give(r, { key: "mais_visitas_perfil", label: "Mais visitas ao perfil", tone: "good", detail: `${plural(r.result, "visita")}${r.resultShare !== null ? ` · ${pctRound(r.resultShare)} do total` : ""}` });
+    },
     mais_cliques: () => {
-      const r = best((x) => x.clicks, (x) => x.clicks > 0);
+      const r = best((x) => x.clicks, (x) => x.clicks > 0 && (legacy(x) || x.block === "trafego_site"));
       if (r) give(r, { key: "mais_cliques", label: "Mais cliques", tone: "good", detail: plural(r.clicks, "clique") });
     },
     melhor_ctr: () => {
-      const pool = rows.filter((x) => x.impressions >= 1000 && x.spend >= 5 && x.ctr !== null);
+      const pool = rows.filter((x) => (legacy(x) || x.block === "trafego_site") && x.impressions >= 1000 && x.spend >= 5 && x.ctr !== null);
       if (pool.length < 2) return;
       const r = best((x) => x.ctr, (x) => pool.includes(x));
       if (r) give(r, { key: "melhor_ctr", label: "Melhor CTR", tone: "good", detail: `${pctText(r.ctr!)} das exibições viraram clique` });
@@ -424,20 +490,22 @@ export function creativeBadges(rows: CreativeRow[], outcome: MediaOutcome, prevR
       if (r && rows.length >= 2 && r.spendShare >= 30) give(r, { key: "maior_investimento", label: "Maior investimento", tone: "neutral", detail: `${money(r.spend)} · ${pctRound(r.spendShare)} da verba` });
     },
     maior_eficiencia: () => {
-      const r = best((x) => x.costPerResult, (x) => x.result >= 2 && x.costPerResult !== null, true);
-      const others = rows.filter((x) => x.result >= 2).length;
-      if (r && others >= 2) give(r, { key: "maior_eficiencia", label: "Maior eficiência", tone: "good", detail: `${money(r.costPerResult)} por ${r.resultUnit}` });
+      // Só compara custos com a mesma unidade (R$/visita com R$/visita etc.).
+      const comparable = resultGroups.find((group) => group.rows.filter((x) => x.result >= 2 && x.costPerResult !== null).length >= 2)?.rows ?? [];
+      const r = best((x) => x.costPerResult, (x) => comparable.includes(x) && x.result >= 2 && x.costPerResult !== null, true);
+      if (r) give(r, { key: "maior_eficiencia", label: "Maior eficiência", tone: "good", detail: `${money(r.costPerResult)} por ${r.resultUnit}` });
     },
     trafego_sem_conversao: () => {
       if (outcome !== "conversas") return;
       const p75 = percentile(rows.map((x) => x.clicks), 0.75);
-      const r = best((x) => x.clicks, (x) => x.conversations === 0 && x.clicks >= 20 && p75 !== null && x.clicks >= p75);
+      const r = best((x) => x.clicks, (x) => (legacy(x) || x.block === "mensagens") && x.conversations === 0 && x.clicks >= 20 && p75 !== null && x.clicks >= p75);
       if (r) give(r, { key: "trafego_sem_conversao", label: "Tráfego sem conversão", tone: "bad", detail: `${plural(r.clicks, "clique")} · nenhuma conversa` });
     },
     atencao_sem_resposta: () => {
-      const med = median(rows.map((x) => x.ctr).filter((v): v is number => v !== null));
+      const clickRows = rows.filter((x) => legacy(x) || x.block === "trafego_site");
+      const med = median(clickRows.map((x) => x.ctr).filter((v): v is number => v !== null));
       if (med === null || rows.length < 3) return;
-      const r = best((x) => x.spendShare, (x) => x.spendShare >= 15 && x.ctr !== null && x.ctr < med * 0.5);
+      const r = best((x) => x.spendShare, (x) => clickRows.includes(x) && x.spendShare >= 15 && x.ctr !== null && x.ctr < med * 0.5);
       if (r) give(r, { key: "atencao_sem_resposta", label: "Atenção sem resposta", tone: "bad", detail: `${pctRound(r.spendShare)} da verba · ${pctText(r.ctr!)} de clique` });
     },
     saturacao: () => {
@@ -451,8 +519,12 @@ export function creativeBadges(rows: CreativeRow[], outcome: MediaOutcome, prevR
     explica_mudanca: () => {
       if (!prevRows.length) return;
       const prevById = new Map(prevRows.map((p) => [p.adId, p]));
-      const deltas = rows.map((r) => ({ r, d: r.result - (prevById.get(r.adId)?.result ?? 0) }));
-      const total = deltas.reduce((s, x) => s + x.d, 0) - prevRows.filter((p) => !rows.some((r) => r.adId === p.adId)).reduce((s, p) => s + p.result, 0);
+      const comparable = resultGroups.find((group) => group.rows.some((row) => prevById.get(row.adId)?.resultLabel === group.label))?.rows ?? [];
+      const labels = new Set(comparable.map((row) => row.resultLabel));
+      const deltas = comparable.map((r) => ({ r, d: r.result - (prevById.get(r.adId)?.result ?? 0) }));
+      const total = deltas.reduce((s, x) => s + x.d, 0) - prevRows
+        .filter((p) => labels.has(p.resultLabel) && !comparable.some((r) => r.adId === p.adId))
+        .reduce((s, p) => s + p.result, 0);
       if (Math.abs(total) < 2) return;
       const top = deltas.filter((x) => Math.sign(x.d) === Math.sign(total)).sort((a, b) => Math.abs(b.d) - Math.abs(a.d))[0];
       if (top && Math.abs(top.d) >= Math.abs(total) * 0.3) {
@@ -462,8 +534,8 @@ export function creativeBadges(rows: CreativeRow[], outcome: MediaOutcome, prevR
   };
 
   const order: BadgeKey[] = outcome === "conversas"
-    ? ["mais_conversas", "explica_mudanca", "maior_eficiencia", "trafego_sem_conversao", "melhor_ctr", "mais_cliques", "maior_investimento", "atencao_sem_resposta", "saturacao"]
-    : ["mais_cliques", "melhor_ctr", "maior_eficiencia", "explica_mudanca", "maior_investimento", "atencao_sem_resposta", "saturacao"];
+    ? ["mais_conversas", "mais_visitas_perfil", "explica_mudanca", "maior_eficiencia", "trafego_sem_conversao", "melhor_ctr", "mais_cliques", "maior_investimento", "atencao_sem_resposta", "saturacao"]
+    : ["mais_visitas_perfil", "maior_eficiencia", "mais_cliques", "melhor_ctr", "explica_mudanca", "maior_investimento", "atencao_sem_resposta", "saturacao"];
   for (const key of order) candidates[key]();
   return out;
 }
@@ -472,8 +544,8 @@ export function creativeBadges(rows: CreativeRow[], outcome: MediaOutcome, prevR
  *  do primeiro destaque. De 1 a 4. */
 export function creativeHighlights(rows: CreativeRow[], badges: Map<string, Badge[]>, outcome: MediaOutcome, max = 4): { row: CreativeRow; badges: Badge[] }[] {
   const priority: BadgeKey[] = outcome === "conversas"
-    ? ["mais_conversas", "explica_mudanca", "maior_eficiencia", "trafego_sem_conversao", "melhor_ctr", "mais_cliques", "maior_investimento", "atencao_sem_resposta", "saturacao"]
-    : ["mais_cliques", "melhor_ctr", "maior_eficiencia", "explica_mudanca", "maior_investimento", "atencao_sem_resposta", "saturacao"];
+    ? ["mais_conversas", "mais_visitas_perfil", "explica_mudanca", "maior_eficiencia", "trafego_sem_conversao", "melhor_ctr", "mais_cliques", "maior_investimento", "atencao_sem_resposta", "saturacao"]
+    : ["mais_visitas_perfil", "maior_eficiencia", "mais_cliques", "melhor_ctr", "explica_mudanca", "maior_investimento", "atencao_sem_resposta", "saturacao"];
   return rows
     .filter((r) => badges.has(r.adId))
     .map((r) => ({ row: r, badges: badges.get(r.adId)! }))
@@ -608,6 +680,46 @@ const addDays = (iso: string, days: number) => {
 
 /** Semanas fechadas terminando em `periodTo`, da mais antiga à mais recente. Só
  *  entra semana com investimento. */
+/** Um ponto por DIA do período. A Meta já é consultada com `time_increment: 1`
+ *  (lib/metaInsights.ts), então o detalhe diário sempre esteve nos dados e nunca
+ *  foi mostrado: o relatório só tinha a série de 6 semanas. É o que responde "em
+ *  que dia a verba saiu e em que dia o resultado veio". */
+export type DailyPoint = { day: string; spend: number; result: number | null };
+
+export function dailySeries(posts: MetaPost[], period: Period, outcome: MediaOutcome): DailyPoint[] {
+  const out: DailyPoint[] = [];
+  for (let day = period.from; day <= period.to; day = addDays(day, 1)) {
+    const t = mediaTotals(posts.filter((p) => p.date === day));
+    out.push({ day, spend: t.spend ?? 0, result: outcomeValue(t, outcome) });
+  }
+  // Um período sem investimento nenhum não vira gráfico de zeros.
+  return out.some((d) => d.spend > 0) ? out : [];
+}
+
+/** Rateio por plataforma de veiculação. `breakdowns: publisher_platform` já vem
+ *  na consulta, então cada linha sabe se foi Instagram ou Facebook — e o
+ *  relatório nunca usou isso. Ordenado por investimento. */
+export type PlatformSplit = { platform: MetaPlatform; spend: number; result: number | null; cost: number | null };
+
+export function platformSplit(posts: MetaPost[], outcome: MediaOutcome): PlatformSplit[] {
+  const byPlatform = new Map<MetaPlatform, MetaPost[]>();
+  for (const p of posts) {
+    if (p.source !== "paid") continue;
+    const list = byPlatform.get(p.platform) ?? [];
+    list.push(p);
+    byPlatform.set(p.platform, list);
+  }
+  const rows: PlatformSplit[] = [];
+  for (const [platform, list] of byPlatform) {
+    const t = mediaTotals(list);
+    if (!t.spend) continue;
+    const result = outcomeValue(t, outcome);
+    rows.push({ platform, spend: t.spend, result, cost: result ? t.spend / result : null });
+  }
+  // Uma plataforma só não é um rateio — é o total, que já está no cabeçalho.
+  return rows.length >= 2 ? rows.sort((a, b) => b.spend - a.spend) : [];
+}
+
 export function weeklyTrend(posts: MetaPost[], periodTo: string, outcome: MediaOutcome, weeks = 6): TrendPoint[] {
   const out: TrendPoint[] = [];
   for (let k = weeks - 1; k >= 0; k--) {

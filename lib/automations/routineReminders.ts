@@ -3,7 +3,7 @@
 // "Diária de gravação: precisa vir notificação pra mim que precisamos agendar."
 // Uma demanda recorrente é guia: fica sempre aberta, com a próxima data no
 // futuro, e dois dias antes dessa data quem é responsável recebe o aviso para
-// agendar/preparar. Roda no tique diário do cron (9h em Brasília), junto das
+// agendar/preparar. Roda no tique diário do cron (8h em Brasília), junto das
 // automações.
 //
 // Fora: rotinas encerradas (molde aprovado/parado) e os moldes alvo de

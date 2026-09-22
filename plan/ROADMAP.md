@@ -148,13 +148,13 @@ Branch `feat/relatorio-conversao-vendas` mergeada na `main` em 2026-09-01
   (schema Meta v6). `lib/reports/reportComponents.tsx` extraído.
 - **Fase 1** — tipo-entrega `relatorio_conversao` (2 etapas: tráfego auto +
   agendamentos manual), `lib/ai/` (fetch direto na Messages API, sem SDK),
-  Automação 2 `relatorio_vendas` lê o comentário do responsável com IA →
+  Automação 2 `relatorio_conversao` lê o comentário do responsável com IA →
   `task_metrics` + `salesReportPdf`. Migrações `20260901000000/100/200`.
   Validado ponta a ponta contra CRIS CAR CARE em prod.
 - **Encosta em**: R4.1/R4.4 (loop de escrita da automação a partir de
   comentários — este fluxo é o primeiro caso concreto), R4.6 (a credencial
   `'ai'` genérica já é lida por serviço; falta a tela de modelos por provedor),
-  R6.11 (`coleta_metrica_cliente` segue stub; `relatorio_vendas` resolve o caso
+  R6.11 (`coleta_metrica_cliente` segue stub; `relatorio_conversao` resolve o caso
   de agendamentos por outro caminho — flow step, não pendência no portal).
 - **Follow-ups**: regerar o relatório de anúncios com atribuição de receita por
   fonte (hoje só no de vendas); trigger em insert de comentário para a

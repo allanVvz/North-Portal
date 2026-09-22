@@ -5,6 +5,8 @@ import {
   type MediaTotals,
 } from "./adsInsights";
 import type { MetaPost } from "@/lib/windsor";
+import { DEFAULT_BUILTIN_TEMPLATE } from "@/lib/performanceTemplates";
+import { blockResolver } from "./campaignBlockKpis";
 
 const post = (over: Partial<MetaPost> & { metrics: MetaPost["metrics"] }): MetaPost => ({
   id: Math.random().toString(36), date: "2026-09-12", accountId: "a", accountName: "A", platform: "instagram",
@@ -39,6 +41,50 @@ describe("mediaTotals", () => {
     expect(t.conversations).toBe(23);
     expect(t.ctr).toBeCloseTo((474 / 25000) * 100);
     expect(t.costPerConversation).toBeCloseTo(8.04, 2);
+  });
+});
+
+describe("objectiveRows por objetivo real", () => {
+  const campaigns = [
+    post({
+      id: "profile-campaign", campaignId: "profile", campaignName: "Baita", objective: "LINK_CLICKS",
+      metrics: { custo: 80, cliquesLink: 90, profileVisits: 40 },
+    }),
+    post({
+      id: "site-campaign", campaignId: "site", campaignName: "Landing", objective: "LINK_CLICKS",
+      metrics: { custo: 60, cliquesLink: 30, landingPageViews: 12 },
+    }),
+    post({
+      id: "messages-campaign", campaignId: "messages", campaignName: "WhatsApp",
+      metrics: { custo: 50, contatos: 10 },
+    }),
+  ];
+  const ads = [
+    post({ id: "profile-ad", campaignId: "profile", campaignName: "Baita", optimizationGoal: "PROFILE_VISIT", metrics: {} }),
+    post({ id: "site-ad", campaignId: "site", campaignName: "Landing", optimizationGoal: "LANDING_PAGE_VIEWS", metrics: {} }),
+    post({ id: "messages-ad", campaignId: "messages", campaignName: "WhatsApp", optimizationGoal: "CONVERSATIONS", metrics: {} }),
+  ];
+  const { postBlock } = blockResolver(DEFAULT_BUILTIN_TEMPLATE.config, ads);
+  const rows = objectiveRows(campaigns, [], postBlock, "visitas");
+
+  it("separa perfil, site e mensagens, cada qual com sua própria métrica e custo", () => {
+    expect(rows.map((row) => row.block)).toEqual(["trafego_perfil", "trafego_site", "mensagens"]);
+    expect(rows.find((row) => row.block === "trafego_perfil")).toMatchObject({
+      resultLabel: "Visitas ao perfil", result: 40, costPerResult: 2,
+    });
+    expect(rows.find((row) => row.block === "trafego_site")).toMatchObject({
+      resultLabel: "Visualizações da página de destino", result: 12, costPerResult: 5,
+    });
+    expect(rows.find((row) => row.block === "mensagens")).toMatchObject({
+      resultLabel: "Conversas", result: 10, costPerResult: 5,
+    });
+  });
+
+  it("usa cliques no link para site quando não há visualização da página de destino", () => {
+    const site = post({ campaignId: "site", campaignName: "Landing", metrics: { custo: 45, cliques: 100, cliquesLink: 15 } });
+    const [row] = objectiveRows([site], [], postBlock, "visitas");
+
+    expect(row).toMatchObject({ resultLabel: "Cliques no link", result: 15, costPerResult: 3 });
   });
 });
 
@@ -88,7 +134,9 @@ describe("mediaAnalysis — o resultado mais justo abre o relatório", () => {
   });
 
   it("concentração por objetivo vira uma frase só", () => {
-    expect(insights).toContain("Engajamento concentrou o resultado: recebeu 38% da verba e gerou 78% das conversas.");
+    // Cliques e engajamentos têm unidades diferentes; não existe share
+    // comparável para sustentar uma concentração artificial.
+    expect(insights.some((text) => text.includes("concentrou o resultado"))).toBe(false);
   });
 
   it("nenhuma frase afirma causa nem lista três variações", () => {
@@ -100,10 +148,11 @@ describe("mediaAnalysis — o resultado mais justo abre o relatório", () => {
 });
 
 describe("mediaAlert — no máximo um, e só quando o resultado piorou", () => {
-  it("CPE crítico com engajamento entregando conversas NÃO é alerta", () => {
+  it("CPE crítico vira alerta quando o resultado próprio do objetivo também cai", () => {
     const objectives = objectiveRows(crisCur, crisPrev, blockOf, "conversas");
     expect(objectives.find((o) => o.block === "engajamento")?.technical?.critical).toBe(true);
-    expect(mediaAlert({ cur: mediaTotals(crisCur), prev: mediaTotals(crisPrev), outcome: "conversas", objectives, creatives: [], badges: new Map() })).toBeNull();
+    expect(mediaAlert({ cur: mediaTotals(crisCur), prev: mediaTotals(crisPrev), outcome: "conversas", objectives, creatives: [], badges: new Map() }))
+      .toMatch(/^Engajamento:.*resultado do objetivo caiu 80%/);
   });
 
   it("queda forte de resultado com custo pior é alerta", () => {
@@ -153,6 +202,42 @@ describe("criativos", () => {
     const cur = creativeRows([ad("a", { custo: 50, impressoes: 5000, cliques: 50, contatos: 15 }), ad("b", { custo: 50, impressoes: 5000, cliques: 40, contatos: 5 })], "conversas").rows;
     const prev = creativeRows([ad("a", { custo: 50, impressoes: 5000, cliques: 50, contatos: 4 }), ad("b", { custo: 50, impressoes: 5000, cliques: 40, contatos: 6 })], "conversas").rows;
     expect((creativeBadges(cur, "conversas", prev).get("a") ?? []).map((b) => b.key)).toContain("explica_mudanca");
+  });
+
+  it("período misto usa o resultado do objetivo de cada criativo", () => {
+    const mixed = [
+      ad("profile", { custo: 20, cliques: 100, cliquesLink: 80, profileVisits: 10 }),
+      ad("site", { custo: 15, cliques: 70, cliquesLink: 20, landingPageViews: 5 }),
+      ad("messages", { custo: 12, cliques: 30, contatos: 4 }),
+    ];
+    mixed[0].campaignName = "profile";
+    mixed[1].campaignName = "site";
+    mixed[2].campaignName = "messages";
+    const blocks = (p: MetaPost) => p.campaignName === "profile"
+      ? "trafego_perfil" as const
+      : p.campaignName === "site"
+        ? "trafego_site" as const
+        : "mensagens" as const;
+    const { rows } = creativeRows(mixed, "visitas", blocks);
+
+    expect(rows.find((row) => row.adId === "profile")).toMatchObject({ resultLabel: "Visitas ao perfil", result: 10, costPerResult: 2 });
+    expect(rows.find((row) => row.adId === "site")).toMatchObject({ resultLabel: "Visualizações da página de destino", result: 5, costPerResult: 3 });
+    expect(rows.find((row) => row.adId === "messages")).toMatchObject({ resultLabel: "Conversas", result: 4, costPerResult: 3 });
+  });
+
+  it("criativos de perfil recebem destaque por visitas, sem badge de clique ou CTR", () => {
+    const profileAds = [
+      ad("profile-a", { custo: 20, impressoes: 2000, cliques: 100, cliquesLink: 80, profileVisits: 10 }),
+      ad("profile-b", { custo: 18, impressoes: 1800, cliques: 60, cliquesLink: 50, profileVisits: 6 }),
+    ];
+    const { rows } = creativeRows(profileAds, "visitas", () => "trafego_perfil");
+    const badges = creativeBadges(rows, "visitas");
+    const allKeys = [...badges.values()].flat().map((badge) => badge.key);
+
+    expect((badges.get("profile-a") ?? []).map((badge) => badge.key)).toContain("mais_visitas_perfil");
+    expect(allKeys).not.toContain("mais_cliques");
+    expect(allKeys).not.toContain("melhor_ctr");
+    expect(creativeHighlights(rows, badges, "visitas")[0].badges[0].label).toBe("Mais visitas ao perfil");
   });
 });
 

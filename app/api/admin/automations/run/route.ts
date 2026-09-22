@@ -4,6 +4,8 @@ import { requireCronSecret } from "@/lib/cron";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { runAutomations } from "@/lib/automations/run";
 import { remindUpcomingRoutines } from "@/lib/automations/routineReminders";
+import { reportMissedAutomationCycles } from "@/lib/automations/moldHealth";
+import { warnBeforeMetaCredentialFailure } from "@/lib/automations/metaCredentialHealth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reconcileFlows } from "@/lib/flows/reconcile";
 
@@ -47,7 +49,21 @@ export async function POST(request: Request) {
       console.error("routine reminders failed", error);
       return 0;
     });
-    return NextResponse.json({ ...summary, flows, routineReminders });
+    // Detector de ciclo perdido (lib/automations/moldHealth.ts). Roda DEPOIS das
+    // automações no mesmo tique, para que um molde que acabou de executar já
+    // esteja com o vencimento avançado e não seja acusado de ter falhado. Como
+    // os avisos acima, não pode derrubar a resposta de quem já trabalhou.
+    const missedCycles = await reportMissedAutomationCycles(createAdminClient()).catch((error) => {
+      console.error("missed automation cycles detector failed", error);
+      return 0;
+    });
+    // Sonda da credencial da Meta (lib/automations/metaCredentialHealth.ts): avisa
+    // no card ANTES do vencimento, para a falha não estrear na segunda de manhã.
+    const metaCredentialWarnings = await warnBeforeMetaCredentialFailure(createAdminClient()).catch((error) => {
+      console.error("meta credential probe failed", error);
+      return 0;
+    });
+    return NextResponse.json({ ...summary, flows, routineReminders, missedCycles, metaCredentialWarnings });
   } catch (error) {
     return apiError(error);
   }

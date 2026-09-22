@@ -42,6 +42,7 @@ export const northAIContextSchema = z.object({
       name: z.string().min(1),
       campaign: z.string().nullable().default(null),
       objective: z.string().nullable().default(null),
+      optimizationGoal: z.string().nullable().default(null),
       spend: z.number().finite().nonnegative().nullable().default(null),
       result: z.number().finite().nullable().default(null),
       cost: z.number().finite().nonnegative().nullable().default(null),

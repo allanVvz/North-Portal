@@ -25,7 +25,16 @@ describe("figura principal por modo", () => {
   it("seguidores: o ganho grande, a frase de crescimento embaixo", () => {
     const h = heroFor(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 1251 }, media: baitaMedia, followersGain: 37, prevFollowersTotal: 1214 }));
     expect(h.value).toBe("+37");
-    expect(h.caption).toBe("Total do perfil: 1.251. Diferença para a semana anterior: +37 (+3,05%), quando eram 1.214.");
+    expect(h.caption).toBe("O perfil chegou a 1.251 seguidores, ante 1.214 (+3,05% na base total).");
+  });
+
+  it("seguidores: mostra referência de ganho e evolução da base sem confundir grandezas", () => {
+    const h = heroFor(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 8000 }, media: baitaMedia, followersGain: 47, prevFollowersGain: 90, prevFollowersTotal: 7953 }));
+    expect(h.value).toBe("+47");
+    expect(h.caption).toContain("8.000");
+    expect(h.caption).toContain("7.953");
+    expect(h.caption).toContain("Referência anterior: +90");
+    expect(h.caption).toContain("−43");
   });
 
   it("seguidores na primeira semana: total, sem ganho inventado", () => {
@@ -72,10 +81,23 @@ describe("figuras de apoio", () => {
     expect(f.map((x) => x.label)).toEqual(["Vendas fechadas", "Ticket médio", "Custo de mídia por venda", "Investimento"]);
   });
 
-  it("seguidores: total, visitas, custo por visita — nada de vendas", () => {
+  it("seguidores: a faixa traz os seis números da semana de perfil, sem repetir a base total", () => {
+    // Antes eram três, e seguidores ficava só na figura principal — o relatório
+    // saía com seguidores como KPI quase única, sem alcance e sem o custo por
+    // seguidor, que é como a operação julga a campanha. A base total (1251)
+    // continua fora: o que entra é o GANHO (37) e o custo dele.
     const f = supportFigures(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 1251 }, media: baitaMedia, prevMedia: baitaPrev, followersGain: 37, prevFollowersTotal: 1214 }));
-    expect(f.map((x) => x.label)).toEqual(["Seguidores no perfil", "Visitas ao perfil", "Custo por visita", "Investimento"]);
+    expect(f.map((x) => x.label)).toEqual([
+      "Visitas ao perfil", "Custo por visita", "Investimento", "Alcance", "Novos seguidores", "Custo por novo seguidor",
+    ]);
     expect(f.find((x) => x.label === "Investimento")?.delta?.tone).toBe("neutral");
+    expect(f.map((x) => x.value)).not.toContain("1.251");
+  });
+
+  it("seguidores sem ganho informado: nada de custo por seguidor inventado", () => {
+    const f = supportFigures(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 1251 }, media: baitaMedia, prevMedia: baitaPrev, followersGain: null }));
+    expect(f.map((x) => x.label)).not.toContain("Custo por novo seguidor");
+    expect(f.map((x) => x.label)).not.toContain("Novos seguidores");
   });
 });
 

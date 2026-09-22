@@ -16,19 +16,20 @@ import { isNotIntegrated } from "@/app/admin/performance/insights";
 import { metricRefInverse, metricRefKind } from "@/app/admin/performance/performanceLabels";
 import {
   CAMPAIGN_BLOCKS, CAMPAIGN_BLOCK_LABEL, suggestCampaignBlock,
-  type CampaignBlock, type PerformanceTemplateConfig,
+  type BlockKpiDef, type CampaignBlock, type PerformanceTemplateConfig,
 } from "@/lib/performanceTemplates";
 import type { MetricRef } from "@/lib/performancePrefs";
 import type { MetaPost } from "@/lib/windsor";
 import { KpiCard, REPORT_STYLES as S } from "./reportComponents";
 
-type BlockKpi = { label: string; metric?: MetricRef; ratio?: [MetricRef, MetricRef] };
+// Mesma forma que o template declara — um alias, para as duas não divergirem.
+type BlockKpi = BlockKpiDef;
 
 // "Mensagens" (metric `contatos`) entra em TODO bloco: "alguém chamou" é o
 // desfecho que a equipe conta, independente do objetivo da campanha. "Visitas ao
 // perfil" (`profileVisits`, ingerido de instagram_profile_visits) entra onde faz
 // sentido. "Novos seguidores" fica zerado — a Meta não expõe follows na API.
-export const BLOCK_KPIS: Record<CampaignBlock, BlockKpi[]> = {
+export const BLOCK_KPIS_DEFAULT: Record<CampaignBlock, BlockKpi[]> = {
   trafego_site: [
     { label: "Investimento", metric: "custo" },
     { label: "Alcance", metric: "alcance" },
@@ -75,17 +76,68 @@ export const BLOCK_KPIS: Record<CampaignBlock, BlockKpi[]> = {
 // vendas.
 export const ZERO_NOT_DASH = new Set<MetricRef>(["contatos"]);
 
-/** Resolve o bloco de objetivo de uma campanha: tag manual do template primeiro,
- *  palpite pelo objetivo/nome só como fallback. */
-export function blockResolver(config: PerformanceTemplateConfig) {
+/** Os KPIs de um bloco: o que o template do cliente declarou, ou o conjunto
+ *  padrão acima. É este ponto que faz o molde ser "por cliente" — a lista e os
+ *  rótulos saem do template, não do código. Um bloco não declarado cai no padrão,
+ *  para uma campanha inesperada nunca sair sem números. */
+export function blockKpisOf(config: PerformanceTemplateConfig, block: CampaignBlock): BlockKpi[] {
+  return config.blockKpis[block] ?? BLOCK_KPIS_DEFAULT[block];
+}
+
+/** Classifica uma evidência isolada, sem deixar o nome da campanha vazar para
+ * uma etapa anterior da precedência. `outro` significa "evidência inconclusiva"
+ * aqui; uma classificação manual explícita como `outro` continua soberana. */
+function inferredBlock(objective?: string, optimizationGoal?: string): CampaignBlock | null {
+  const block = suggestCampaignBlock(objective, optimizationGoal);
+  return block === "outro" ? null : block;
+}
+
+/** Resolve o bloco de objetivo por evidência, nesta ordem estrita:
+ * configuração manual > goal dos anúncios > goal da campanha > objective >
+ * nome. PROFILE_VISIT nos anúncios vence LINK_CLICKS da campanha. */
+export function blockResolver(config: PerformanceTemplateConfig, ads: MetaPost[] = []) {
+  const adsByCampaign = new Map<string, MetaPost[]>();
+  for (const ad of ads) {
+    const aliases = new Set(
+      [ad.campaignId, ad.campaignName, ad.campaignName ? undefined : ad.caption]
+        .filter((value): value is string => Boolean(value)),
+    );
+    for (const key of aliases) {
+      const group = adsByCampaign.get(key) ?? [];
+      group.push(ad);
+      adsByCampaign.set(key, group);
+    }
+  }
+
   const blockOf = (
     campaignId: string | undefined,
     campaignName: string | undefined,
     objective?: string,
     optimizationGoal?: string,
-  ): CampaignBlock =>
-    config.campaignBlocks[campaignId ?? campaignName ?? ""] ??
-    suggestCampaignBlock(objective, optimizationGoal, campaignName);
+  ): CampaignBlock => {
+    const explicit = (campaignId ? config.campaignBlocks[campaignId] : undefined)
+      ?? (campaignName ? config.campaignBlocks[campaignName] : undefined);
+    if (explicit) return explicit;
+
+    const associated = new Set([
+      ...(campaignId ? adsByCampaign.get(campaignId) ?? [] : []),
+      ...(campaignName && campaignName !== campaignId ? adsByCampaign.get(campaignName) ?? [] : []),
+    ]);
+    const adGoals = [...new Set(
+      [...associated].map((ad) => ad.optimizationGoal).filter((goal): goal is string => Boolean(goal)),
+    )];
+    const profileGoal = adGoals.find((goal) => inferredBlock(undefined, goal) === "trafego_perfil");
+    if (profileGoal) return "trafego_perfil";
+    for (const goal of adGoals) {
+      const inferred = inferredBlock(undefined, goal);
+      if (inferred) return inferred;
+    }
+    const byCampaignGoal = inferredBlock(undefined, optimizationGoal);
+    if (byCampaignGoal) return byCampaignGoal;
+    const byObjective = inferredBlock(objective);
+    if (byObjective) return byObjective;
+    return suggestCampaignBlock(undefined, undefined, campaignName);
+  };
   const postBlock = (p: MetaPost) =>
     blockOf(p.campaignId, p.campaignName ?? p.caption, p.objective, p.optimizationGoal);
   return { blockOf, postBlock };
@@ -132,6 +184,7 @@ export function CampaignBlocksSection({
   config,
   posts,
   prevPosts,
+  adPosts = [],
   kicker = "Resultados por campanha",
   extraKpis,
   footer,
@@ -139,12 +192,18 @@ export function CampaignBlocksSection({
   config: PerformanceTemplateConfig;
   posts: MetaPost[];
   prevPosts: MetaPost[];
+  /** Posts de nível de ANÚNCIO. Sem eles o `optimization_goal` do adset não
+   *  chega ao resolvedor, e é ele que distingue uma campanha de perfil
+   *  (PROFILE_VISIT) de uma de site — no nível de campanha a Meta só diz
+   *  LINK_CLICKS. Omitir este argumento fazia o bloco "Tráfego para o perfil"
+   *  desaparecer do relatório. */
+  adPosts?: MetaPost[];
   kicker?: string;
   extraKpis?: (block: CampaignBlock, cur: MetaPost[], prev: MetaPost[]) => KpiProps[];
   footer?: string;
 }) {
   const cm = config.prefs.customMetrics;
-  const { postBlock } = blockResolver(config);
+  const { postBlock } = blockResolver(config, adPosts);
   const blocksPresent = CAMPAIGN_BLOCKS.filter((block) => posts.some((p) => postBlock(p) === block));
   if (!blocksPresent.length) return null;
 
@@ -161,7 +220,7 @@ export function CampaignBlocksSection({
               <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
             </View>
             <View style={S.grid}>
-              {BLOCK_KPIS[block].map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm)} />)}
+              {blockKpisOf(config, block).map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm)} />)}
               {extra.map((k) => <KpiCard key={k.label} {...k} />)}
             </View>
           </View>

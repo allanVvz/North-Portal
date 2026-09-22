@@ -171,6 +171,29 @@ describe("relatório de anúncios — execução antiga não desfaz ação human
     expect(db.table("traffic_reports")).toHaveLength(0);
   });
 
+  it("o pulo por etapa em revisão é EXPLICADO no molde — sair calado travou 2 clientes em 21/09", async () => {
+    // O ciclo anterior não fechou, então a transição não pega e o molde não
+    // avança. Como o gate é `due_date = hoje` estrito, isso congela a automação
+    // para sempre: antes, sem erro e sem comentário, ninguém descobria.
+    seed({ status: "revisao" });
+
+    expect(await run()).toBe("not_due");
+
+    const [comentario] = db.comments("ads-mold");
+    expect(String(comentario.text)).toContain("não gerou o relatório de 21/09");
+    expect(String(comentario.text)).toContain("ainda está em revisao");
+    expect(comentario.id).toBe("automation-missed:cfg-ads:2026-09-21");
+  });
+
+  it("o mesmo ciclo travado não acumula comentário a cada dia", async () => {
+    seed({ status: "revisao" });
+
+    await run();
+    await run();
+
+    expect(db.comments("ads-mold")).toHaveLength(1);
+  });
+
   it("etapa já aprovada por uma pessoa não é reaberta por um retry", async () => {
     seed({ status: "aprovado" });
     expect(await run()).toBe("not_due");

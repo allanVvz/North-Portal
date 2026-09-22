@@ -18,10 +18,24 @@ export const KNOWN_METRIC_TAGS: MetricTagDef[] = [
   { key: "agendamentos", label: "Agendamentos", kind: "count" },
   { key: "seguidores", label: "Seguidores (total do perfil)", kind: "count" },
   { key: "receita", label: "Receita", kind: "money" },
+  // A Marketing API não entrega verba restante junto com os insights, e a
+  // operação precisa do número no resumo semanal. Em vez de um card vazio no
+  // relatório, a automação PEDE no comentário — mesma via de vendas e receita.
+  // Fora do default de propósito: só quem acompanha verba adiciona a tag.
+  { key: "verba_disponivel", label: "Verba disponível", kind: "money" },
 ];
 
-/** Default quando a automação não tem `collect_metric_keys` preenchido. */
-export const CONVERSION_METRICS_DEFAULT: string[] = KNOWN_METRIC_TAGS.map((t) => t.key);
+/** Default quando a automação não tem `collect_metric_keys` preenchido.
+ *  `verba_disponivel` fica de fora: é pedido só para quem configurou a tag, para
+ *  não cobrar de todo cliente um número que nem toda operação acompanha. */
+export const CONVERSION_METRICS_DEFAULT: string[] = KNOWN_METRIC_TAGS
+  .filter((t) => t.key !== "verba_disponivel")
+  .map((t) => t.key);
+
+/** Métricas que NENHUMA integração preenche — só chegam pelo comentário. O
+ *  relatório usa isto para não exibir um card "sem integração" onde o número, na
+ *  verdade, é responsabilidade de quem responde o feedback. */
+export const COMMENT_ONLY_METRIC_TAGS = new Set<string>(["seguidores", "verba_disponivel"]);
 
 const BY_KEY = new Map(KNOWN_METRIC_TAGS.map((t) => [t.key, t]));
 

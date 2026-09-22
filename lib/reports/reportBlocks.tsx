@@ -392,46 +392,72 @@ function clampCardName(value: string, maxLines: number): string {
   return value.length <= limit ? value : `${value.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
-/** 1 criativo → cartão largo; 2 → metades; 3 → terços; 4 → 2×2. */
+function CreativeCard({ item: c, width, imageSize, horizontal, maxLines, prominent = false }: {
+  item: CreativeCardView; width: number; imageSize: number; horizontal: boolean; maxLines: number; prominent?: boolean;
+}) {
+  return (
+    <View style={[T.card, { width, maxWidth: width, minWidth: 0, flexDirection: horizontal ? "row" : "column", minHeight: prominent ? 190 : undefined }]} wrap={false}>
+      <Thumb src={c.preview} size={imageSize} kind={c.objectType} />
+      <View style={horizontal ? { flex: 1, gap: 4, minWidth: 0 } : { gap: 4, minWidth: 0 }}>
+        {c.badges.slice(0, 2).map((b) => (
+          <Text key={b.label} style={[T.cardBadge, { color: b.tone === "bad" ? C.danger : b.tone === "good" ? C.tealText : SEC }]}>{b.label}</Text>
+        ))}
+        <Text style={T.cardName}>{clampCardName(c.name, maxLines)}</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+          {c.metrics.slice(0, 4).map((m) => (
+            <View key={m.label} style={{ minWidth: horizontal ? 54 : 46 }}>
+              <Text style={T.cardMetricValue}>{m.value}</Text>
+              <Text style={T.cardMetricLabel}>{m.label}</Text>
+            </View>
+          ))}
+        </View>
+        {c.badges[0]?.detail && !c.metrics.some((m) => c.badges[0].detail === `${m.value} ${m.label}`) ? (
+          <Text style={[T.cardMetricLabel, { color: SEC }]}>{clampCardName(c.badges[0].detail, 2)}</Text>
+        ) : null}
+        {c.permalink ? <Link src={c.permalink} style={T.cardLink}>ver post</Link> : null}
+      </View>
+    </View>
+  );
+}
+
+export type CreativeCardsPattern = "wide" | "pair" | "featured_stack" | "grid_2x2";
+
+export function creativeCardsPattern(count: number): CreativeCardsPattern {
+  if (count <= 1) return "wide";
+  if (count === 2) return "pair";
+  if (count === 3) return "featured_stack";
+  return "grid_2x2";
+}
+
+/** Geometria protegida pelo renderer: 1 largo; 2 equivalentes; 3 com o melhor
+ * maior à esquerda e dois empilhados; 4 em grade 2×2. */
 export function CreativeCards({ items, layout }: { items: CreativeCardView[]; layout?: LayoutPlan["creativeCards"] }) {
   if (!items.length) return null;
   const n = items.length;
-  // A planned layout may force a conservative one/two-column grid. The
-  // legacy heuristic remains the fallback for existing callers.
-  const cols = layout?.columns ?? (n === 4 ? 2 : Math.min(n, 3));
+  const pattern = creativeCardsPattern(n);
   const gap = 8;
-  const cardW = Math.max(layout?.minWidth ?? 0, (W - gap * (cols - 1)) / cols);
-  const wide = n === 1;
-  const horizontal = wide || cols <= 2;
-  const img = wide ? 110 : horizontal ? 84 : 64;
   const maxLines = layout?.maxLines ?? 2;
+  if (pattern === "wide") return <CreativeCard item={items[0]} width={W} imageSize={112} horizontal maxLines={maxLines} />;
+  if (pattern === "pair") {
+    const width = (W - gap) / 2;
+    return <View style={[T.cardRow, { gap, width: W }]} wrap={false}>{items.map((item) => <CreativeCard key={item.name} item={item} width={width} imageSize={78} horizontal maxLines={maxLines} />)}</View>;
+  }
+  if (pattern === "featured_stack") {
+    const left = (W - gap) * 0.58;
+    const right = W - gap - left;
+    return (
+      <View style={{ width: W, flexDirection: "row", gap }} wrap={false}>
+        <CreativeCard item={items[0]} width={left} imageSize={164} horizontal={false} maxLines={maxLines} prominent />
+        <View style={{ width: right, gap }}>
+          {items.slice(1).map((item) => <CreativeCard key={item.name} item={item} width={right} imageSize={62} horizontal maxLines={Math.min(maxLines, 2)} />)}
+        </View>
+      </View>
+    );
+  }
+  const width = (W - gap) / 2;
   return (
     <View style={[T.cardRow, { gap, width: W }]} wrap>
-      {items.map((c) => (
-        <View key={c.name} style={[T.card, { width: cardW, minWidth: layout?.minWidth ?? 0, maxWidth: cardW, flexDirection: horizontal ? "row" : "column" }]} wrap>
-          <Thumb src={c.preview} size={horizontal ? img : cardW - 18} kind={c.objectType} />
-          {/* Em linha o texto ocupa o resto da largura; em coluna (3 cartões) `flex: 1`
-              sem altura no pai encolhia o bloco a zero e sumia com nome e números. */}
-          <View style={horizontal ? { flex: 1, gap: 4, minWidth: 0 } : { gap: 4 }}>
-            {c.badges.map((b) => (
-              <Text key={b.label} style={[T.cardBadge, { color: b.tone === "bad" ? C.danger : b.tone === "good" ? C.tealText : SEC }]}>{b.label}</Text>
-            ))}
-            <Text style={T.cardName}>{clampCardName(c.name, maxLines)}</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 2 }}>
-              {c.metrics.map((m) => (
-                <View key={m.label}>
-                  <Text style={T.cardMetricValue}>{m.value}</Text>
-                  <Text style={T.cardMetricLabel}>{m.label}</Text>
-                </View>
-              ))}
-            </View>
-            {c.badges[0]?.detail && !c.metrics.some((m) => c.badges[0].detail === `${m.value} ${m.label}`) ? (
-              <Text style={[T.cardMetricLabel, { color: SEC }]}>{c.badges[0].detail}</Text>
-            ) : null}
-            {c.permalink ? <Link src={c.permalink} style={T.cardLink}>ver post</Link> : null}
-          </View>
-        </View>
-      ))}
+      {items.slice(0, 4).map((item) => <CreativeCard key={item.name} item={item} width={width} imageSize={76} horizontal maxLines={Math.min(maxLines, 2)} />)}
     </View>
   );
 }

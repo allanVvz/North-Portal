@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
 import { generateDemoPosts } from "@/app/admin/performance/demoData";
 import { apiError } from "@/lib/api";
-import { getCachedInsights, getClient, getMetaAccessToken, getMetaSettings, getWindsorSettings, upsertInsightsCache } from "@/lib/supabase";
+import { getCachedInsights, getClientsBySlugs, getMetaAccessToken, getMetaSettings, getWindsorSettings, upsertInsightsCache } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { performanceInsightsQuerySchema } from "@/lib/validation";
 import { fetchWindsorPosts, type MetaPost, type WindsorDatasource } from "@/lib/windsor";
 import { fetchMetaAdsInsights, META_ADS_DATASOURCE, META_ADS_SCHEMA_VERSION } from "@/lib/metaInsights";
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h; ?refresh=1 bypasses
-const WINDOW_DAYS = 90; // always fetch a 90-day window so period switching is free
-
-const isoDay = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
 // One unit of "go get posts for this account under this datasource". Windsor
 // covers every account of a datasource in one call (grouped below); the
 // direct Meta connection is one call per mapped ad account — both shapes
@@ -46,41 +41,57 @@ export async function GET(request: Request) {
       });
     }
 
+    // Resolve every configured slug in one query. The previous nested loops
+    // called getClient serially (and Meta did it a second time), so latency
+    // grew with the number of configured clients even for one-client views.
+    const mappedSlugs = [...new Set([
+      ...Object.keys(windsor.accountMap),
+      ...Object.keys(meta.accountMap),
+    ])];
+    const clientsBySlug = await getClientsBySlugs(mappedSlugs, true);
+
     // Which accounts to serve: one client's mapped account(s), or all mapped.
     let accountFilter: string[] | null = null;
+    let requestedWindsorAccountId: string | null = null;
+    let requestedMetaAccountId: string | null = null;
     if (q.client) {
-      const client = await getClient(q.client, true);
       const ids: string[] = [];
+      const client = clientsBySlug.get(q.client);
       const windsorMapped = client ? windsor.accountMap[q.client] : null;
-      if (windsorMapped) ids.push(windsorMapped.accountId);
       const metaMapped = client ? meta.accountMap[q.client] : null;
-      if (metaMapped) ids.push(metaMapped.accountId);
-      accountFilter = ids;
+      requestedWindsorAccountId = windsorMapped?.accountId ?? null;
+      requestedMetaAccountId = metaMapped?.accountId ?? null;
+      if (requestedWindsorAccountId) ids.push(requestedWindsorAccountId);
+      if (requestedMetaAccountId) ids.push(requestedMetaAccountId);
+      accountFilter = [...new Set(ids)];
     }
 
     const accountToClientId = new Map<string, string | null>();
     for (const [slug, ref] of Object.entries(windsor.accountMap)) {
       if (ref) {
-        const client = await getClient(slug, true);
+        const client = clientsBySlug.get(slug);
         accountToClientId.set(ref.accountId, client?.id ?? null);
       }
     }
     for (const [slug, ref] of Object.entries(meta.accountMap)) {
       if (ref) {
-        const client = await getClient(slug, true);
+        const client = clientsBySlug.get(slug);
         accountToClientId.set(ref.accountId, client?.id ?? null);
       }
     }
 
-    const today = new Date();
-    const windowFrom = isoDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - WINDOW_DAYS));
-    const windowTo = isoDay(today);
+    // Fetch precisely the requested current+comparison window. A custom 3-day
+    // view asks for 6 days and must not block on a fixed 90-day provider fetch.
+    // The next migration introduces real chunks/rollups; until cutover, the
+    // legacy cache row is replaced when a wider range is requested.
+    const windowFrom = q.from;
+    const windowTo = q.to;
 
     // Windsor: one provider entry per enabled datasource (covers all its
     // accounts in a single call). Meta: one provider entry per mapped ad
     // account (the Marketing API has no "all accounts" insights call).
     const providers: Provider[] = [];
-    if (windsor.apiKey) {
+    if (windsor.apiKey && (!q.client || requestedWindsorAccountId)) {
       const enabled = (Object.keys(windsor.datasources) as WindsorDatasource[]).filter((ds) => windsor.datasources[ds]);
       for (const ds of enabled) {
         providers.push({
@@ -97,7 +108,8 @@ export async function GET(request: Request) {
       if (metaToken) {
         for (const [slug, ref] of Object.entries(meta.accountMap)) {
           if (!ref) continue;
-          const client = await getClient(slug, true);
+          if (q.client && slug !== q.client) continue;
+          const client = clientsBySlug.get(slug);
           providers.push({
             datasource: META_ADS_DATASOURCE,
             accountId: ref.accountId,
@@ -108,7 +120,9 @@ export async function GET(request: Request) {
       }
     }
 
-    const cache = await getCachedInsights();
+    // A filtered view reads only its mapped cache rows instead of transferring
+    // and decoding every account's windowed JSONB payload.
+    const cache = await getCachedInsights(accountFilter ?? undefined);
     const now = Date.now();
 
     // Each provider is an independent network round-trip (Windsor covers a
@@ -127,6 +141,7 @@ export async function GET(request: Request) {
         dsRows.every((r) =>
           now - new Date(r.fetched_at).getTime() < CACHE_TTL_MS &&
           r.date_from <= q.from &&
+          r.date_to >= q.to &&
           (provider.datasource !== META_ADS_DATASOURCE || r.payload.every((p) => p.schemaVersion === META_ADS_SCHEMA_VERSION)),
         );
 
@@ -141,7 +156,10 @@ export async function GET(request: Request) {
       }
 
       try {
-        const fetched = await provider.fetch(windowFrom, windowTo);
+        const fetchedAll = await provider.fetch(windowFrom, windowTo);
+        const fetched = accountFilter === null
+          ? fetchedAll
+          : fetchedAll.filter((post) => accountFilter.includes(post.accountId));
         const byAccount = new Map<string, MetaPost[]>();
         for (const p of fetched) {
           const list = byAccount.get(p.accountId);

@@ -29,9 +29,12 @@ import { logReportRun } from "./reportLog";
 import { materializeFirstStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
+import { agencyToday } from "@/lib/time/agency";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } from "@/lib/automationWorkflow";
 import { commentsOf } from "@/lib/comments";
 import { markTaskParada } from "./errorHandling";
+import { missedCycleCommentId, shortDate } from "./moldHealth";
+import { nextStepNotice, withNextStepNotice } from "./nextStepNotice";
 import { errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
 import { automationCommentId, replaceAutomaticReportAttachment, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import {
@@ -115,7 +118,7 @@ async function fillReportCard(
   if (!account) throw new Error(`Cliente "${client.name}" não tem conta de anúncios (Windsor ou Meta) vinculada em Integrações.`);
 
   // Task comum sem recorrência: janela padrão de 7 dias. O período termina na
-  // véspera da execução — na segunda às 9h, cobre segunda a domingo anteriores.
+  // véspera da execução — na segunda às 8h, cobre segunda a domingo anteriores.
   const cadence: RecurringCadence = target.recurrence_cadence ?? "semanal";
   const period = reportPeriodFor(cadence, today);
   const prevPeriod = previousPeriod(period);
@@ -259,7 +262,29 @@ export async function runOneReportAutomation(
       // revisão/aprovação/aprovado o relatório já foi gerado ou uma pessoa já agiu;
       // regerar aqui rebaixaria a etapa (o trigger limpa `completed_at`).
       const started = await transitionTaskStatus(admin, card1.id, { to: "em_producao", from: ["backlog", "parada", "em_producao"] });
-      if (!started) return "not_due";
+      if (!started) {
+        // Este `not_due` custou dois clientes em 21/09/2026. A etapa de tráfego
+        // do ciclo ANTERIOR ainda estava em `revisao`, então a transição não
+        // pegou, a função saiu por aqui — e, porque só `advanceFlowMold` (bem
+        // depois) move o vencimento, o molde ficou congelado naquela data. Com o
+        // gate `due_date = hoje` sendo estrito, isso é morte definitiva: todo dia
+        // seguinte devolve `not_due` e `automation_runs` grava `succeeded`,
+        // porque de fato não houve erro. Ninguém foi avisado de nada.
+        //
+        // Sair calado é o bug; o `not_due` em si está certo (regerar rebaixaria
+        // uma etapa que uma pessoa já mexeu). Então o motivo vira comentário no
+        // molde, com o MESMO id que `moldHealth` usaria — quem chegar primeiro
+        // escreve, o outro é no-op.
+        if (target.due_date) {
+          await updateTaskPayload(admin, target.id, {
+            text: `Esta automação não gerou o relatório de ${shortDate(target.due_date)}: a etapa "${card1.title}" do ciclo anterior ainda está em ${card1.status}.`
+              + ` A próxima Entrega só é gerada quando a anterior é concluída — relatório de tráfego e relatório de conversão.`
+              + ` Conclua a Entrega em aberto; se este ciclo for para ser abandonado, mova o vencimento deste card para a próxima data.`,
+            commentId: missedCycleCommentId(config.id, target.due_date),
+          });
+        }
+        return "not_due";
+      }
       // A ativação carimba uma vez; um retry não a reescreve.
       const { error: activationError } = await admin.from("tasks")
         .update({ workflow_activated_at: new Date().toISOString() })
@@ -286,7 +311,12 @@ export async function runOneReportAutomation(
       // etapa não é rebaixada.
       await replaceAutomaticReportAttachment(admin, card1.id, {
         reportKind: "ads",
-        text: `Relatório de anúncios gerado e anexado: [${fileName}](${url})\n\nComente aqui caso queira algum ajuste neste relatório de anúncios.`,
+        // O aviso da próxima etapa vem do workflow versionado da ocorrência, não de
+        // uma lista fixa: reordenar as etapas na tela de Etapas muda a frase.
+        text: withNextStepNotice(
+          `Relatório de anúncios gerado e anexado: [${fileName}](${url})\n\nComente aqui caso queira algum ajuste neste relatório de anúncios.`,
+          await nextStepNotice(admin, occ, ADS_REPORT_STEP_KEY),
+        ),
         commentId: automationCommentId("ads-report", card1.id, report.revision),
       });
       await transitionTaskStatus(admin, card1.id, { to: "revisao", from: ["em_producao"], extra: { assignee: AUTOMATION_ASSIGNEE } });
@@ -344,8 +374,12 @@ export async function runOneReportAutomation(
 const RUN_KEYS = ["relatorio_trafego_semanal", "relatorio_conversao"] as const;
 
 export type RunOptions = {
-  /** Dia da execução (ISO). Padrão: hoje em UTC — o cron roda às 12:00 UTC (9h
-   *  em Brasília), então o dia UTC e o de Brasília são o mesmo. */
+  /** Dia da execução (ISO). Padrão: hoje NO FUSO DA AGÊNCIA (`agencyToday`), a
+   *  mesma fonte que `routineReminders` e as telas usam. O cron roda às 11:00
+   *  UTC (08:00 em Brasília), horário em que o dia UTC e o de Brasília
+   *  coincidem — mas uma reexecução manual entre 21:00 e 00:00 BRT não coincide,
+   *  e um `new Date()` em UTC diria "amanhã" e faria TODO molde cair em
+   *  `not_due` sem erro nenhum. */
   today?: string;
   /** Restringe a estas automações (reexecução manual, fluxo de exemplo). */
   configIds?: string[];
@@ -366,6 +400,16 @@ async function claimDailyRun(admin: AdminClient, config: AutomationConfigRow, to
   return (data?.[0] as AutomationRunRow | undefined) ?? null;
 }
 
+/** O mesmo gate de `runOneReportAutomation`, avaliado ANTES de reivindicar um run
+ *  no ledger — ver o comentário em `runAutomations`. Uma leitura a mais por
+ *  config por dia, em troca de não queimar a chave de idempotência do dia. */
+async function isDueToday(admin: AdminClient, config: AutomationConfigRow, today: string): Promise<boolean> {
+  const target = await getAdminTask(admin, config.target_task_id);
+  if (!target || target.due_date !== today) return false;
+  if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return false;
+  return true;
+}
+
 async function finishRun(admin: AdminClient, runId: string, status: "succeeded" | "failed", lastError: string | null = null): Promise<void> {
   const { error } = await admin.from("automation_runs").update({
     status,
@@ -378,7 +422,7 @@ async function finishRun(admin: AdminClient, runId: string, status: "succeeded" 
 export async function runAutomations(options: RunOptions = {}): Promise<AutomationRunSummary> {
   const admin = createAdminClient();
   const summary: AutomationRunSummary = { processed: 0, succeeded: 0, errors: [] };
-  const today = options.today ?? isoDay(new Date());
+  const today = options.today ?? agencyToday();
 
   let query = admin
     .from("automation_configs")
@@ -399,6 +443,21 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
 
   for (const config of configs) {
+    // O ledger só é tocado quando há mesmo um vencimento hoje. Antes, o claim
+    // vinha ANTES de qualquer checagem: num dia sem vencimento (6 de 7) a
+    // automação reivindicava um run, saía por `not_due` e gravava `succeeded`.
+    // Duas consequências, as duas caras: `automation_runs` virava ruído — uma
+    // linha verde por config por dia, sem nada ter acontecido — e, pior, a chave
+    // (config, occurrence_key, action) ficava QUEIMADA para o resto do dia,
+    // porque `claim_automation_run` não reivindica um `succeeded`. Em 21/09/2026
+    // isso impediu a reexecução da CRIS CAR CARE depois de o problema real ter
+    // sido resolvido: a config era abandonada aqui, antes de o vencimento ser
+    // sequer avaliado, e só destravou com um UPDATE à mão no ledger.
+    //
+    // `runOneReportAutomation` mantém o mesmo gate — é defesa em profundidade e o
+    // que os testes exercitam direto.
+    if (config.automation_key === "relatorio_trafego_semanal" && !(await isDueToday(admin, config, today))) continue;
+
     const run = config.automation_key === "relatorio_trafego_semanal"
       ? await claimDailyRun(admin, config, today)
       : null;
@@ -489,7 +548,7 @@ export async function handleTrafficRevisionComment(
   const instruction = options.instruction?.trim() || [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
   if (!instruction) return;
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
-  const today = occ.due_date ?? isoDay(new Date());
+  const today = occ.due_date ?? agencyToday();
   const { fileName, url, report } = await fillReportCard(admin, trafficTask, mold, config, windsor, meta, today, occ.id, instruction);
   // A geração levou segundos: o comentário entra no thread que está no banco
   // AGORA (nunca numa cópia lida antes) e o status é compare-and-set. Uma pessoa

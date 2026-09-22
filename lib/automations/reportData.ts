@@ -28,7 +28,7 @@ export function periodForCadence(cadence: RecurringCadence, endIso: string): Per
 }
 
 /** Período de um relatório que roda em `runDay`: termina na VÉSPERA. Rodando na
- *  segunda às 9h, cobre de segunda a domingo anteriores — o dia da execução ainda
+ *  segunda às 8h, cobre de segunda a domingo anteriores — o dia da execução ainda
  *  está em andamento e entraria pela metade (antes o período terminava no próprio
  *  dia do cron). As duas automações usam esta mesma conta, então os dois PDFs da
  *  semana e a série de `task_metrics` falam do mesmo intervalo. */

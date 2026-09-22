@@ -4,6 +4,7 @@ import {
 } from "./acquisitionPrefs";
 import {
   PERFORMANCE_VIEW_PREFS_DEFAULT,
+  isValidMetricRef,
   sanitizePerformanceViewPrefs,
   type MetricRef,
   type PerformanceViewPrefs,
@@ -28,6 +29,12 @@ export const CAMPAIGN_BLOCK_LABEL: Record<CampaignBlock, string> = {
   outro: "Outras campanhas",
 };
 
+/** Um KPI dentro de um bloco de objetivo: uma métrica direta, ou a razão entre
+ *  duas (custo ÷ resultado). O `label` é o que o cliente lê, e é por isso que ele
+ *  vem do template e não do código: "Mensagens" para uns, "Novas conversas" para
+ *  outros, "Custo por novo seguidor" para quem acompanha perfil. */
+export type BlockKpiDef = { label: string; metric?: MetricRef; ratio?: [MetricRef, MetricRef] };
+
 /** Fonte de tráfego de uma conversão — rastreada a partir da primeira mensagem
  *  ("#1", "#2", "#3" por anúncio). Tag manual por anúncio no template. */
 export type AdSourceTag = "1" | "2" | "3";
@@ -38,10 +45,21 @@ export const AD_SOURCE_TAGS: AdSourceTag[] = ["1", "2", "3"];
  *  Só valor inicial na UI; a tag salva no template é quem manda. */
 export function suggestCampaignBlock(objective?: string | null, optimizationGoal?: string | null, name?: string | null): CampaignBlock {
   const hay = `${objective ?? ""} ${optimizationGoal ?? ""} ${name ?? ""}`.toUpperCase();
-  if (/MENSAG|MESSAGE|WHATS|CONVERSA|LEAD/.test(hay)) return "mensagens";
+  // `REPLIES` é o goal de quem otimiza para conversa no WhatsApp/Direct, e era o
+  // furo mais caro desta função: a campanha de WhatsApp da CRIS CAR CARE caía em
+  // `engajamento` (pelo objective OUTCOME_ENGAGEMENT) e o relatório mostrava
+  // "custo por engajamento" onde a operação conta "custo por conversa".
+  if (/MENSAG|MESSAGE|WHATS|DIRECT|CONVERSA|REPLIES|LEAD/.test(hay)) return "mensagens";
   if (/PERFIL|PROFILE|SEGUID|FOLLOW|PAGE_LIKE/.test(hay)) return "trafego_perfil";
-  if (/SITE|LINK_CLICK|LANDING|TR[AÁ]FEGO|TRAFFIC/.test(hay)) return "trafego_site";
-  if (/ENGAJ|ENGAGEMENT|AWARENESS|ALCANCE|REACH/.test(hay)) return "engajamento";
+  // `\bSITE\b` e não `SITE`: sem a borda, **OFFSITE**_CONVERSIONS casava aqui e
+  // uma campanha de vendas era lida como tráfego para o site por coincidência de
+  // substring. A conversão fora do app é tratada logo abaixo, de propósito.
+  if (/\bSITE\b|LINK_CLICK|LANDING|TR[AÁ]FEGO|TRAFFIC/.test(hay)) return "trafego_site";
+  // Venda/conversão fora do app leva tráfego ao site: é assim que a operação lê
+  // essas campanhas (a "VENDAS | SITE" da CRIS aparece como Tráfego para o Site no
+  // resumo da especialista). Agora por intenção declarada, não por acidente.
+  if (/OFFSITE_CONVERSION|OUTCOME_SALES|PURCHASE|OUTCOME_LEADS/.test(hay)) return "trafego_site";
+  if (/ENGAJ|ENGAGEMENT|AWARENESS|ALCANCE|REACH|POST_ENGAGEMENT|THRUPLAY|VIDEO_VIEW/.test(hay)) return "engajamento";
   return "outro";
 }
 export type PerformanceTemplateFilters = {
@@ -62,6 +80,10 @@ export type PerformanceTemplateConfig = {
   // Bloco de objetivo por campanha (chave = campaignId, ou campaignName quando
   // não há id — caso Windsor). Additivo: templates antigos sanitizam para `{}`.
   campaignBlocks: Record<string, CampaignBlock>;
+  // KPIs de cada bloco de objetivo. Vazio = usa o conjunto padrão do relatório
+  // (BLOCK_KPIS em lib/reports/campaignBlockKpis.tsx). É o que permite um molde
+  // por cliente: quais números aparecem em cada bloco, e com que nome.
+  blockKpis: Partial<Record<CampaignBlock, BlockKpiDef[]>>;
   // Fonte #1/#2/#3 por anúncio (chave = adId).
   adSourceTags: Record<string, AdSourceTag>;
   level: PerformanceEntityLevel;
@@ -111,11 +133,40 @@ function sanitizeTagMap<T extends string>(raw: unknown, allowed: readonly T[]): 
     .slice(0, 200)) as Record<string, T>;
 }
 
+/** KPIs de bloco vindos de um template salvo. Um template é dado de entrada, e
+ *  um `label` gigante ou uma métrica inexistente não pode chegar ao renderizador
+ *  do PDF: cada entrada é validada, e um bloco que sobra vazio simplesmente cai
+ *  no conjunto padrão. */
+function sanitizeBlockKpis(raw: unknown, customIds: Set<string>): Partial<Record<CampaignBlock, BlockKpiDef[]>> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const allowed = new Set<string>(CAMPAIGN_BLOCKS);
+  const isRef = (v: unknown): v is MetricRef => isValidMetricRef(v, customIds);
+
+  const out: Partial<Record<CampaignBlock, BlockKpiDef[]>> = {};
+  for (const [block, defs] of Object.entries(raw as Record<string, unknown>)) {
+    if (!allowed.has(block) || !Array.isArray(defs)) continue;
+    const kpis: BlockKpiDef[] = [];
+    for (const def of defs.slice(0, 8)) {
+      if (!def || typeof def !== "object") continue;
+      const { label, metric, ratio } = def as { label?: unknown; metric?: unknown; ratio?: unknown };
+      if (typeof label !== "string" || !label.trim() || label.length > 60) continue;
+      if (Array.isArray(ratio) && ratio.length === 2 && isRef(ratio[0]) && isRef(ratio[1])) {
+        kpis.push({ label: label.trim(), ratio: [ratio[0], ratio[1]] });
+      } else if (isRef(metric)) {
+        kpis.push({ label: label.trim(), metric });
+      }
+    }
+    if (kpis.length) out[block as CampaignBlock] = kpis;
+  }
+  return out;
+}
+
 export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemplateConfig {
   const value = (raw ?? {}) as Partial<PerformanceTemplateConfig>;
   const filters = (value.filters ?? {}) as Partial<PerformanceTemplateFilters>;
   const prefs = sanitizePerformanceViewPrefs(value.prefs);
   const acquisition = sanitizeAcquisitionViewPrefs(value.acquisition, prefs.customMetrics);
+  const customIds = new Set(prefs.customMetrics.map((metric) => metric.id));
   const customRefs = new Set(prefs.customMetrics.map((metric) => `custom:${metric.id}`));
   const trendMetrics = stringList(value.trendMetrics, 3).filter((metric): metric is MetricRef => {
     if (metric.startsWith("custom:")) return customRefs.has(metric);
@@ -136,6 +187,7 @@ export function sanitizePerformanceTemplateConfig(raw: unknown): PerformanceTemp
     dateRange: sanitizeDateRange(value.dateRange),
     cardSources: sanitizeCardSources(value.cardSources),
     campaignBlocks: sanitizeTagMap(value.campaignBlocks, CAMPAIGN_BLOCKS),
+    blockKpis: sanitizeBlockKpis(value.blockKpis, customIds),
     adSourceTags: sanitizeTagMap(value.adSourceTags, AD_SOURCE_TAGS),
     level: LEVELS.has(value.level as PerformanceEntityLevel) ? value.level as PerformanceEntityLevel : "campaign",
     selectedCampaignIds: stringList(value.selectedCampaignIds),
@@ -238,6 +290,82 @@ const resultFunnelAcquisition: AcquisitionViewPrefs = {
 // nível "ad" o currentPaidRows sai dessas mesmas linhas — um template que
 // abrisse em "ad" renderizaria KPIs, tendência e ranking vazios até alguém
 // selecionar uma campanha.
+// ---- Moldes por objetivo de cliente ------------------------------------------
+//
+// Um molde por perfil de cliente, com os KPIs que a operação de fato manda no
+// resumo semanal (formatos definidos pela especialista de produto em 21/09/2026).
+// Todos os clientes têm campanha de tráfego para o PERFIL; alguns somam site;
+// vários somam mensagens. O que muda de molde para molde é quais blocos aparecem
+// e com que nome cada número é lido.
+//
+// `blockKpis` só declara os blocos que aquele perfil usa — um bloco ausente cai
+// no conjunto padrão do relatório, então uma campanha inesperada nunca desaparece.
+const CUSTO = "custo" as const;
+const ALCANCE = "alcance" as const;
+
+/** Perfil: a base de todos os moldes.
+ *
+ *  Seguidores NÃO entra aqui, e a ausência é a decisão. Cada relatório mede o que
+ *  pode provar: o de anúncios detalha o que a Marketing API entrega (investimento,
+ *  alcance, visitas, custo por visita), e a API não entrega follows. Um card de
+ *  seguidores neste bloco sairia sempre vazio, porque o número só chega no
+ *  comentário do Feedback — que é lido DEPOIS, pelo relatório de conversão, onde
+ *  seguidores tem figura principal, histórico e custo por seguidor. */
+const perfilKpis: BlockKpiDef[] = [
+  { label: "Visitas ao perfil", metric: "profileVisits" },
+  { label: "Custo por visita", ratio: [CUSTO, "profileVisits"] },
+  { label: "Investimento", metric: CUSTO },
+  { label: "Alcance", metric: ALCANCE },
+  { label: "Frequência", metric: "frequencia" },
+  { label: "CPM", metric: "cpm" },
+];
+
+const siteKpis: BlockKpiDef[] = [
+  { label: "Investimento", metric: CUSTO },
+  { label: "Alcance", metric: ALCANCE },
+  { label: "Cliques no link", metric: "cliquesLink" },
+  { label: "Custo por clique", ratio: [CUSTO, "cliquesLink"] },
+];
+
+/** "Novas conversas", não "Mensagens": é como a operação conta o desfecho de uma
+ *  campanha de WhatsApp. */
+const mensagensKpis: BlockKpiDef[] = [
+  { label: "Investimento", metric: CUSTO },
+  { label: "Alcance", metric: ALCANCE },
+  { label: "Novas conversas", metric: "contatos" },
+  { label: "Custo por conversa", ratio: [CUSTO, "contatos"] },
+];
+
+export const BUILTIN_CLIENT_TEMPLATES: PerformanceTemplate[] = [
+  {
+    // Negócio local que vive de presença: uma campanha, um objetivo. ROSE DIAS e
+    // Baita Conveniencia. O crescimento de seguidores desses clientes é contado
+    // no relatório de CONVERSÃO, a partir do comentário da semana.
+    id: "builtin-perfil-negocio-local", name: "Perfil — negócio local",
+    description: "Só tráfego para o perfil, detalhado. Para quem mede presença, não clique.",
+    scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({
+      version: 1, prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition,
+      filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] },
+      level: "campaign", trendMetrics: ["custo", "profileVisits"],
+      blockKpis: { trafego_perfil: perfilKpis },
+    }),
+  },
+  {
+    // Estética automotiva: perfil + site + mensagens. Karpinski, UTZIG, FALKE e
+    // CRIS CAR CARE. Todos rodam os três objetivos em paralelo.
+    id: "builtin-estetica-automotiva", name: "Estética automotiva",
+    description: "Perfil, site e mensagens no mesmo relatório. Para quem roda os três objetivos em paralelo.",
+    scope: "builtin", ownerProfileId: null, updatedAt: null,
+    config: sanitizePerformanceTemplateConfig({
+      version: 1, prefs: messageFunnelPrefs, acquisition: messageFunnelAcquisition,
+      filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] },
+      level: "campaign", trendMetrics: ["custo", "contatos"],
+      blockKpis: { trafego_perfil: perfilKpis, trafego_site: siteKpis, mensagens: mensagensKpis },
+    }),
+  },
+];
+
 export const BUILTIN_PERFORMANCE_TEMPLATES: PerformanceTemplate[] = [
   {
     id: "builtin-funil-mensagens", name: "Funil de mensagens",
@@ -254,6 +382,8 @@ export const BUILTIN_PERFORMANCE_TEMPLATES: PerformanceTemplate[] = [
     description: "Mistura de objetivos: cada campanha conta o desfecho que ela persegue.", scope: "builtin", ownerProfileId: null, updatedAt: null,
     config: sanitizePerformanceTemplateConfig({ version: 1, prefs: resultFunnelPrefs, acquisition: resultFunnelAcquisition, filters: { clientSlug: "", category: "ads", platforms: [], objectives: [] }, level: "campaign", trendMetrics: ["custo", "resultado"] }),
   },
+  // Moldes por perfil de cliente (blocos de objetivo + KPIs próprios).
+  ...BUILTIN_CLIENT_TEMPLATES,
 ];
 
 export const DEFAULT_BUILTIN_TEMPLATE_ID = "builtin-funil-mensagens";

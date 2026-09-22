@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_PERFORMANCE_TEMPLATES, DEFAULT_BUILTIN_TEMPLATE, DEFAULT_BUILTIN_TEMPLATE_ID, sanitizePerformanceTemplateConfig, suggestCampaignBlock } from "./performanceTemplates";
 
 describe("performance templates", () => {
-  it("ships one builtin per tipo de desfecho, funil de mensagens first", () => {
+  it("ships one builtin per tipo de desfecho, depois os moldes por cliente", () => {
     expect(BUILTIN_PERFORMANCE_TEMPLATES.map((template) => template.name)).toEqual([
+      // Por desfecho — os três originais, e o de mensagens continua primeiro.
       "Funil de mensagens",
       "Funil de compras",
       "Por resultado",
+      // Por perfil de cliente: quais BLOCOS de objetivo o relatório mostra e com
+      // que nome cada número é lido (formatos definidos pela operação em 21/09).
+      "Perfil — negócio local",
+      "Estética automotiva",
     ]);
     // A tela abre no primeiro do array e a automação usa esta constante como
     // fallback — se deixarem de bater, o padrão da UI e o do PDF divergem.

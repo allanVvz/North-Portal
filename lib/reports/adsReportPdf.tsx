@@ -18,17 +18,18 @@ import { formatAcquisitionValue } from "@/app/admin/performance/acquisitionInsig
 import { campaignSummaries, previousPeriod, recomputeRatios, sumMetricsInto, type Period } from "@/app/admin/performance/insights";
 import { CAMPAIGN_BLOCK_LABEL, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { MetaPost, MetaPostMetricKey } from "@/lib/windsor";
+import { PLATFORM_LABEL } from "@/app/admin/performance/performanceLabels";
 import { registerReportFonts } from "./reportFonts";
-import { blockResolver } from "./campaignBlockKpis";
+import { blockResolver, CampaignBlocksSection } from "./campaignBlockKpis";
 import {
   OUTCOME_WORDS, creativeBadges, creativeHighlights, creativeRows, deltaOf, dominantBlock, mediaAlert, mediaAnalysis,
-  mediaFunnel, mediaOutcome, mediaTotals, money, num, objectiveRows, outcomeCost, outcomeValue, stageGap, weeklyTrend,
+  dailySeries, mediaFunnel, mediaOutcome, mediaTotals, money, num, objectiveRows, outcomeCost, outcomeValue, platformSplit, stageGap, weeklyTrend,
   type Badge, type CreativeRow, type MediaOutcome, type ObjectiveRow,
 } from "./adsInsights";
 import type { PreviewAsset } from "./creativePreviews";
 import {
-  AlertLine, AnalysisList, CreativeCards, DataTable, FigureRow, Footer, Headline, PageHeader, ProportionalFunnel, Section,
-  ShareBars, SmallMultiples, T, W,
+  AlertLine, AnalysisList, ColumnsChart, CreativeCards, DataTable, FigureRow, Footer, Headline, PageHeader, ProportionalFunnel,
+  RankBars, Section, ShareBars, SmallMultiples, T, W,
   type CreativeCardView, type FigureItem,
 } from "./reportBlocks";
 
@@ -62,8 +63,10 @@ export function creativeCardView(row: CreativeRow, badges: Badge[], outcome: Med
   const asset = previews?.[row.adId];
   const metrics = [
     row.result > 0 || outcome === "conversas" ? { label: row.resultUnit === "conversa" ? "conversas" : `${row.resultUnit}s`, value: num(row.result) } : null,
-    !hideClicks && row.resultUnit !== "clique" ? { label: "cliques", value: num(row.clicks) } : null,
+    row.costPerResult !== null ? { label: `por ${row.resultUnit}`, value: money(row.costPerResult) } : null,
     { label: "investidos", value: money(row.spend) },
+    row.resultShare !== null ? { label: "do resultado", value: `${row.resultShare.toFixed(1).replace(".", ",")}%` } : null,
+    !hideClicks && row.resultUnit !== "clique" && row.result === 0 ? { label: "cliques", value: num(row.clicks) } : null,
   ].filter((m): m is { label: string; value: string } => m !== null);
   return { name: row.name, badges, metrics, preview: asset?.dataUri ?? null, objectType: asset?.objectType ?? null, permalink: asset?.permalink ?? null };
 }
@@ -146,7 +149,7 @@ function campaignsOf(posts: MetaPost[], blockOf: (id: string | undefined, name: 
 }
 
 function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPosts, prevAdPosts, trendPosts, previews, revisionInstruction, generatedAt }: AdsReportInput) {
-  const { blockOf, postBlock } = blockResolver(config);
+  const { blockOf, postBlock } = blockResolver(config, adPosts);
   const cur = mediaTotals(posts);
   const revision = revisionAdjustments(revisionInstruction);
   if (revision.reach !== null) cur.reach = revision.reach;
@@ -158,8 +161,8 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
   const Wd = OUTCOME_WORDS[outcome];
   const objectives = objectiveRows(posts, prevPosts, postBlock, outcome);
   const dominant = dominantBlock(objectives);
-  const { rows: creatives, hiddenNoise } = creativeRows(adPosts, outcome);
-  const prevCreatives = prevAdPosts?.length ? creativeRows(prevAdPosts, outcome).rows : [];
+  const { rows: creatives, hiddenNoise } = creativeRows(adPosts, outcome, postBlock);
+  const prevCreatives = prevAdPosts?.length ? creativeRows(prevAdPosts, outcome, postBlock).rows : [];
   const rawBadges = creativeBadges(creatives, outcome, prevCreatives);
   // Quando a revisão remove métricas de tráfego, seus badges derivados não
   // podem reaparecer como "Mais cliques" ou "Melhor CTR" nos criativos.
@@ -175,6 +178,12 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
   const alert = mediaAlert(analysisInput);
   const funnel = mediaFunnel(cur, outcome);
   const trend = weeklyTrend(trendPosts ?? [], period.to, outcome, 6);
+  // Detalhe que os dados sempre tiveram e o relatório nunca mostrou: a Meta é
+  // consultada com time_increment=1 e breakdowns=publisher_platform, então dia e
+  // plataforma estão em cada linha. Ambas devolvem [] quando não há o que
+  // comparar (semana sem verba, uma plataforma só).
+  const daily = dailySeries(posts, period, outcome);
+  const platforms = platformSplit(posts, outcome);
   const campaigns = campaignsOf(posts, (id, name, objective) => blockOf(id, name, objective));
 
   const d = (c: number | null, p: number | null, dir: "higher_is_better" | "lower_is_better" | "neutral") => (prev ? deltaOf(c, p, dir) : null);
@@ -240,6 +249,20 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
             {technicalNotes.filter((n) => !(revision.hideClicks || revision.hideImpressions) || !/cliqu|impress|ctr|cpc|cpm/i.test(n)).map((n) => <Text key={n} style={T.note}>{n}</Text>)}
           </Section>
         ) : null}
+
+        {/* Resumo por objetivo, um bloco por tipo de campanha com os KPIs que o
+            template do cliente declarou (blockKpis). É o formato que a operação
+            manda no resumo semanal — antes existia em campaignBlockKpis.tsx e
+            nenhum relatório o renderizava, então o cliente recebia só a tabela
+            comparativa e nunca os números por objetivo. Os posts de nível de
+            anúncio vão junto: sem eles o bloco de perfil não é identificado. */}
+        <CampaignBlocksSection
+          config={config}
+          posts={posts}
+          prevPosts={prevPosts}
+          adPosts={adPosts}
+          kicker="Resultados por objetivo"
+        />
 
         {campaigns.length > Math.max(1, objectives.length) ? (
           <Section title="Campanhas" aside={`${campaigns.length} campanhas com investimento`}>
@@ -307,6 +330,30 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
                 />
               </View>
             ) : null}
+          </Section>
+        ) : null}
+
+        {daily.length ? (
+          <Section title="Dia a dia da semana">
+            <ColumnsChart
+              periods={daily.map((d) => shortDay(d.day))}
+              series={[
+                { label: "Investimento", values: daily.map((d) => d.spend) },
+                { label: Wd.Plural, values: daily.map((d) => d.result) },
+              ]}
+            />
+          </Section>
+        ) : null}
+
+        {platforms.length ? (
+          <Section title="Onde a verba foi veiculada">
+            <RankBars
+              rows={platforms.map((p) => ({
+                label: PLATFORM_LABEL[p.platform],
+                value: p.spend,
+                text: `${money(p.spend)}${p.result !== null ? ` · ${num(p.result)} ${Wd.plural}` : ""}${p.cost !== null ? ` · ${money(p.cost)} por ${Wd.unit}` : ""}`,
+              }))}
+            />
           </Section>
         ) : null}
 

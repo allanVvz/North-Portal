@@ -3,12 +3,13 @@ import type { Period } from "@/app/admin/performance/insights";
 import type { AdaptiveInterpretation } from "@/lib/ai/adaptiveFeedback";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import type { MetaPost } from "@/lib/windsor";
-import { generateLayoutPlan, generateNarrative } from "@/lib/northai/aiPrompts";
+import { generateLayoutPlan, generateNarrative, type ReportPlanningEvidence } from "@/lib/northai/aiPrompts";
 import { northAIContextSchema, type NorthAIContext, type VisualRequest } from "@/lib/northai/aiContracts";
 
 export type ReportContext = {
   period: Period;
   metrics: { vendas: number | null; agendamentos: number | null; receita: number | null; seguidores: number | null; seguidoresNovos: number | null };
+  previousMetrics?: { vendas: number | null; agendamentos: number | null; receita: number | null; seguidores: number | null; seguidoresNovos: number | null };
   conversions: ConversionRow[];
   media: { campaigns: MetaPost[]; ads: MetaPost[] };
   interpretation: AdaptiveInterpretation;
@@ -34,11 +35,12 @@ function fingerprint(value: unknown): string {
 
 export function buildReportContext(input: {
   period: Period; metrics: ReportContext["metrics"]; conversions: ConversionRow[];
+  previousMetrics?: ReportContext["previousMetrics"];
   campaigns: MetaPost[]; ads: MetaPost[]; interpretation: AdaptiveInterpretation;
   parser: string; sourceFingerprint: string; visualRequest?: VisualRequest | null;
 }): ReportContext {
   const parser: ReportContext["parser"] = input.parser === "llm" ? "llm" : input.parser === "parser" ? "parser" : "fallback";
-  return { period: input.period, metrics: input.metrics, conversions: input.conversions, media: { campaigns: input.campaigns, ads: input.ads }, interpretation: input.interpretation, parser, sourceFingerprint: input.sourceFingerprint, visualRequest: input.visualRequest ?? null };
+  return { period: input.period, metrics: input.metrics, previousMetrics: input.previousMetrics, conversions: input.conversions, media: { campaigns: input.campaigns, ads: input.ads }, interpretation: input.interpretation, parser, sourceFingerprint: input.sourceFingerprint, visualRequest: input.visualRequest ?? null };
 }
 
 function metricSum(posts: MetaPost[], key: "alcance" | "profileVisits") {
@@ -57,20 +59,27 @@ export function buildNorthAIContext(input: {
 }): NorthAIContext {
   const { context } = input;
   const metricValues = context.metrics;
-  const metrics = Object.entries(metricValues).map(([key, value]) => ({
-    key,
-    label: key === "seguidoresNovos" ? "Seguidores adquiridos" : key,
-    value,
-    previous: null,
-    difference: null,
-    percent: null,
-    source: key === "seguidoresNovos" ? "Feedback" : "Feedback",
-  }));
+  const metrics = Object.entries(metricValues).map(([key, value]) => {
+    const metricKey = key as keyof ReportContext["metrics"];
+    const previous = context.previousMetrics?.[metricKey] ?? null;
+    const difference = value !== null && previous !== null ? value - previous : null;
+    const percent = difference !== null && previous !== null && previous !== 0 ? (difference / Math.abs(previous)) * 100 : null;
+    return {
+      key,
+      label: key === "seguidoresNovos" ? "Seguidores adquiridos" : key,
+      value,
+      previous,
+      difference,
+      percent,
+      source: "Feedback",
+    };
+  });
   const ads = context.media.ads.map((post) => ({
     id: post.adId ?? post.id,
     name: (post.adName ?? post.caption) || "Anúncio",
     campaign: post.campaignName ?? null,
     objective: post.objective ?? null,
+    optimizationGoal: post.optimizationGoal ?? null,
     spend: post.metrics.custo ?? null,
     result: post.metrics.resultado ?? post.metrics.conversoes ?? null,
     cost: post.metrics.cpc ?? post.metrics.cpm ?? null,
@@ -101,6 +110,31 @@ export function buildLayoutPlan(context: ReportContext): ConversionLayoutPlan {
   return { ...shape, fingerprint: fingerprint(shape) };
 }
 
+function planningEvidence(context: ReportContext): ReportPlanningEvidence {
+  return {
+    history: context.conversions.map((row) => ({
+      service: row.servico,
+      value: row.valor,
+      source: row.fonte,
+      status: row.status,
+    })),
+    campaigns: context.media.campaigns.map((campaign) => ({
+      id: campaign.campaignId ?? campaign.id,
+      name: (campaign.campaignName ?? campaign.caption) || "Campanha",
+      objective: campaign.objective ?? null,
+      optimizationGoal: campaign.optimizationGoal ?? null,
+      metrics: {
+        reach: campaign.metrics.alcance ?? null,
+        profileVisits: campaign.metrics.profileVisits ?? null,
+        linkClicks: campaign.metrics.cliquesLink ?? null,
+        landingPageViews: campaign.metrics.landingPageViews ?? null,
+        contacts: campaign.metrics.contatos ?? campaign.metrics.mensagens ?? null,
+        spend: campaign.metrics.custo ?? null,
+      },
+    })),
+  };
+}
+
 /** Optional NorthAI/Dashboard Architect pass. It is opt-in for jobs so a
  * missing provider never blocks a deterministic report regeneration. */
 export async function planWithNorthAI(input: {
@@ -108,17 +142,21 @@ export async function planWithNorthAI(input: {
   northAIContext: NorthAIContext;
 }): Promise<{ layout: ConversionLayoutPlan; narrative: Array<{ kind: string; text: string }>; aiUsed: boolean; aiError: string | null }> {
   const fallback = buildLayoutPlan(input.context);
-  if (process.env.NORTHAI_REPORT_PLANNER === "0" || process.env.NODE_ENV === "test") return { layout: fallback, narrative: [], aiUsed: false, aiError: null };
+  const plannerFlag = process.env.NORTHAI_REPORT_PLANNER;
+  if (plannerFlag === "0" || (process.env.NODE_ENV === "test" && plannerFlag !== "1")) {
+    return { layout: fallback, narrative: [], aiUsed: false, aiError: null };
+  }
   try {
     // A classificacao acontece no hook do comentario, onde o comentario mais
     // recente e conhecido. O planner recebe somente o pedido normalizado;
     // nunca tenta inferir um pedido antigo a cada regeneracao.
     const visualRequest = input.northAIContext.visualRequest ?? null;
     const enrichedContext = northAIContextSchema.parse({ ...input.northAIContext, visualRequest });
-    const [remoteLayout, narrative] = await Promise.all([
-      generateLayoutPlan(enrichedContext, "conversion"),
-      generateNarrative(enrichedContext, "conversion"),
-    ]);
+    const evidence = planningEvidence(input.context);
+    // NorthAI first establishes the validated editorial reading. Dashboard
+    // Architect then receives that typed handoff and converts it into hierarchy.
+    const narrative = await generateNarrative(enrichedContext, "conversion", evidence);
+    const remoteLayout = await generateLayoutPlan(enrichedContext, "conversion", { evidence, northAIHandoff: narrative });
     return {
       layout: {
         ...fallback,

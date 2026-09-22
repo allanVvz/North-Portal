@@ -47,6 +47,9 @@ const LABELS: Record<string, string[]> = {
   receita: ["receita", "faturamento", "faturado"],
   seguidores: ["seguidores", "seguidor"],
   leads: ["leads", "lead"],
+  // "orcamento" NÃO entra aqui: já é alias de `agendamentos` (orçamento enviado
+  // ao cliente), e a mesma palavra nas duas listas trocaria os dois números.
+  verba_disponivel: ["verba disponivel", "verba restante", "verba", "saldo de verba", "saldo"],
 };
 
 const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -301,6 +304,7 @@ const EXEMPLO: Record<string, string> = {
   agendamentos: "Agendamentos: 8",
   receita: "Receita: R$ 4.100",
   seguidores: "Seguidores: 841",
+  verba_disponivel: "Verba disponível: R$ 1.200",
 };
 
 /** O comentário correto, com números de exemplo. É o que o pedido de feedback

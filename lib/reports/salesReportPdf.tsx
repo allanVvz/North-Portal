@@ -24,7 +24,7 @@ import { blockResolver } from "./campaignBlockKpis";
 import { attributionOf, type InformedTotals } from "./conversionMode";
 import {
   creativeBadges, creativeHighlights, creativeRows, mediaOutcome, mediaTotals, money, num, objectiveRows,
-  type MediaOutcome, signed,
+  type Badge, type MediaOutcome, signed,
 } from "./adsInsights";
 import { costLadder, focusOf, heroFor, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
@@ -61,6 +61,11 @@ export type SalesReportInput = {
   /** Série da conversão, semanas anteriores E a atual. */
   history?: HistoryPoint[] | null;
   previews?: Record<string, PreviewAsset>;
+  /** Métricas que NENHUMA integração entrega e que a equipe informou no
+   *  comentário — verba disponível é a primeira. Chegam como lista porque o
+   *  conjunto é configurável por cliente (`collect_metric_keys`): o relatório
+   *  mostra o que foi pedido, sem o código conhecer cada tag. */
+  informados?: { label: string; value: number; kind: "count" | "money" }[];
   /** Entendimento auditável do North IA: contexto, precisão e trade-offs. */
   adaptiveContext?: AdaptiveInterpretation;
   /** Finalized view from the technical ads report. */
@@ -97,6 +102,13 @@ function comparison(current: number, previous: number | null) {
     difference: signed(diff),
     percent: previous === 0 ? "—" : `${(diff / previous * 100).toFixed(2).replace("-", "−")}%`,
   };
+}
+
+function campaignObjectiveText(campaignName: string, resultLabel: string): string {
+  const name = campaignName || "—";
+  const normalizedName = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+  const normalizedResult = resultLabel.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+  return normalizedName.includes(normalizedResult) ? name : `${name} · ${resultLabel}`;
 }
 
 function SalesReportDocument(input: SalesReportInput) {
@@ -152,12 +164,19 @@ function SalesReportDocument(input: SalesReportInput) {
 
   // ---- mídia e criativos ----
   const outcome: MediaOutcome = focus === "seguidores" ? "visitas" : mediaOutcome(media);
-  const { postBlock } = blockResolver(config);
+  const { postBlock } = blockResolver(config, adPosts);
   const objectives = objectiveRows(campaignPosts, prevCampaignPosts, postBlock, outcome);
-  const { rows: creatives } = creativeRows(adPosts, outcome);
-  const prevCreatives = prevAdPosts?.length ? creativeRows(prevAdPosts, outcome).rows : [];
+  const { rows: creatives } = creativeRows(adPosts, outcome, postBlock);
+  const prevCreatives = prevAdPosts?.length ? creativeRows(prevAdPosts, outcome, postBlock).rows : [];
   const badges = creativeBadges(creatives, outcome, prevCreatives);
-  const highlights = creativeHighlights(creatives, badges, outcome, 4);
+  const rankedHighlights = creativeHighlights(creatives, badges, outcome, 4);
+  const highlightedIds = new Set(rankedHighlights.map((item) => item.row.adId));
+  const fallbackHighlights = creatives
+    .filter((row) => !highlightedIds.has(row.adId))
+    .sort((a, b) => (b.result - a.result) || (b.spend - a.spend) || (b.impressions - a.impressions))
+    .slice(0, Math.max(0, 4 - rankedHighlights.length))
+    .map((row) => ({ row, badges: [] as Badge[] }));
+  const highlights = [...rankedHighlights, ...fallbackHighlights];
 
   // ---- leitura ----
   const hero = heroFor(ctx);
@@ -188,6 +207,18 @@ function SalesReportDocument(input: SalesReportInput) {
     <Section title={creativeSectionTitle} lead={<CreativeCards items={highlights.map((h) => creativeCardView(h.row, h.badges, outcome, previews))} layout={input.layout?.creativeCards} />} />
   ) : null;
 
+  // O que a API não entrega vem do comentário. Fica em faixa própria, e não
+  // misturado às figuras de mídia, para o cliente ler de onde veio cada número.
+  const informadosSection = (input.informados ?? []).length ? (
+    <Section title="Informado pela equipe">
+      <FigureRow items={(input.informados ?? []).map((m) => ({
+        label: m.label,
+        value: m.kind === "money" ? money(m.value) : num(m.value),
+        delta: null,
+      }))} />
+    </Section>
+  ) : null;
+
   const mediaSection = objectives.length ? (
     <Section title="A mídia da semana" aside={media.spend !== null ? `${money(media.spend)} investidos` : undefined}>
       <DataTable
@@ -195,17 +226,15 @@ function SalesReportDocument(input: SalesReportInput) {
           { key: "obj", label: "Objetivo", flex: 1.5 },
           { key: "spend", label: "Investimento", align: "right" },
           { key: "reach", label: "Alcance", align: "right" },
-          { key: "clicks", label: "Cliques", align: "right" },
-          { key: "visits", label: "Visitas", align: "right" },
-          { key: "conv", label: "Conversas", align: "right" },
+          { key: "result", label: "Resultado", align: "right", flex: 1.25 },
+          { key: "cost", label: "Custo por resultado", align: "right", flex: 1.15 },
         ]}
         rows={objectives.map((o) => ({
           obj: { text: o.label, strong: true },
           spend: { text: money(o.spend) },
           reach: { text: num(o.reach) },
-          clicks: { text: num(o.clicks) },
-          visits: { text: num(o.visits) },
-          conv: { text: num(o.conversations) },
+          result: { text: o.result === null ? "—" : `${num(o.result)} ${o.resultLabel.toLocaleLowerCase("pt-BR")}`, strong: true },
+          cost: { text: o.costPerResult === null ? "—" : money(o.costPerResult) },
         }))}
       />
     </Section>
@@ -252,38 +281,30 @@ function SalesReportDocument(input: SalesReportInput) {
   ) : focus === "seguidores" && followersGain !== null ? (
     <Section title="Leitura do período" breakBefore={narrativePlan.placement === "next_page"}>
       <Text style={T.narrativeText}>
-        {num(followersGain)} seguidores adquiridos no período. {prevFollowersGain !== null
-          ? `Em comparação à referência anterior de ${num(prevFollowersGain)} seguidores, a variação foi de ${signed(followersGain - prevFollowersGain)} (${((followersGain - prevFollowersGain) / prevFollowersGain * 100).toFixed(2).replace("-", "−")}%). `
-          : "A comparação com o período anterior não foi informada. "}
-        {cur.seguidores !== null && prevFollowersTotal !== null ? `O perfil encerrou o período com ${num(cur.seguidores)} seguidores, ${num(followersGain)} acima da base registrada de ${num(prevFollowersTotal)}. ` : ""}
-        A mídia alcançou {media.reach === null ? "um público não informado" : `${num(media.reach)} pessoas`} e gerou {media.profileVisits === null ? "visitas ao perfil em volume não informado" : `${num(media.profileVisits)} visitas ao perfil`}. Esse volume compõe a jornada observada, mas não atribui automaticamente cada novo seguidor aos anúncios.
+        O crescimento semanal permaneceu positivo{prevFollowersGain !== null && followersGain < prevFollowersGain ? ", mesmo com ritmo abaixo da referência anterior" : ""}. A base total continuou avançando. {media.profileVisits !== null ? `As ${num(media.profileVisits)} visitas ao perfil compõem a jornada observada, ` : "As visitas ao perfil compõem a jornada observada, "}mas não permitem atribuir automaticamente cada novo seguidor aos anúncios.
       </Text>
     </Section>
   ) : null;
 
-  const confirmedMetrics = [
-    followersGain !== null ? { label: "Seguidores adquiridos", current: followersGain, previous: prevFollowersGain, source: "Resultado informado" } : null,
-    cur.seguidores !== null ? { label: "Base total de seguidores", current: cur.seguidores, previous: prevFollowersTotal, source: "Resultado informado" } : null,
-    cur.vendas !== null ? { label: "Vendas", current: cur.vendas, previous: prev?.vendas ?? null, source: "Resultado informado" } : null,
-    cur.agendamentos !== null ? { label: "Agendamentos", current: cur.agendamentos, previous: prev?.agendamentos ?? null, source: "Resultado informado" } : null,
-    cur.receita !== null ? { label: "Receita", current: cur.receita, previous: prev?.receita ?? null, source: "Resultado informado", money: true } : null,
-  ].filter((metric): metric is { label: string; current: number; previous: number | null; source: string; money?: boolean } => metric !== null);
+  const audienceRows = [
+    followersGain !== null ? { label: "Seguidores adquiridos na semana", current: followersGain, previous: prevFollowersGain } : null,
+    cur.seguidores !== null ? { label: "Total do perfil", current: cur.seguidores, previous: prevFollowersTotal } : null,
+  ].filter((metric): metric is { label: string; current: number; previous: number | null } => metric !== null);
 
-  const indicatorsSection = confirmedMetrics.length ? (
-    <Section title="Indicadores confirmados">
+  const audienceGrowthSection = audienceRows.length ? (
+    <Section title="Crescimento de audiência" aside="Resultado informado">
       <DataTable
         columns={[
-          { key: "metric", label: "Indicador", flex: 1.6 }, { key: "current", label: "Atual", align: "right" },
-          { key: "previous", label: "Referência", align: "right" }, { key: "difference", label: "Diferença", align: "right" },
-          { key: "percent", label: "%", align: "right" }, { key: "source", label: "Fonte", flex: 1.2 },
+          { key: "metric", label: "Indicador", flex: 1.8 }, { key: "current", label: "Atual", align: "right" },
+          { key: "previous", label: "Referência anterior", align: "right", flex: 1.2 }, { key: "difference", label: "Diferença", align: "right" },
+          { key: "percent", label: "Variação", align: "right" },
         ]}
-        rows={confirmedMetrics.map((metric) => {
+        rows={audienceRows.map((metric) => {
           const delta = comparison(metric.current, metric.previous);
-          const format = (value: number) => metric.money ? money(value) : num(value);
           return {
-            metric: { text: metric.label, strong: true }, current: { text: format(metric.current) },
-            previous: { text: metric.previous === null ? "—" : format(metric.previous) },
-            difference: { text: delta.difference }, percent: { text: delta.percent }, source: { text: metric.source },
+            metric: { text: metric.label, strong: true }, current: { text: num(metric.current) },
+            previous: { text: metric.previous === null ? "—" : num(metric.previous) },
+            difference: { text: delta.difference }, percent: { text: delta.percent },
           };
         })}
       />
@@ -307,17 +328,25 @@ function SalesReportDocument(input: SalesReportInput) {
     </Section>
   ) : null;
 
+  const tableHasCampaign = creatives.some((r) => Boolean(r.campaignName.trim()));
+  const tableHasCost = creatives.some((r) => r.costPerResult !== null);
+  const tableHasShare = creatives.some((r) => r.resultShare !== null);
   const allAdsSection = creatives.length ? (
-    <Section title="Contribuição dos anúncios" aside="Todos os anúncios relevantes do período">
+    <Section title="Contribuição dos anúncios" aside="Todos os anúncios relevantes do período" breakBefore>
       <DataTable columns={[
-        { key: "thumb", label: "", width: 26 }, { key: "name", label: "Anúncio", flex: 1.7 },
-        { key: "campaign", label: "Campanha / objetivo", flex: 1.5 }, { key: "spend", label: "Investimento", align: "right" },
-        { key: "result", label: "Resultado", align: "right" }, { key: "cost", label: "Custo", align: "right" }, { key: "share", label: "Contribuição", align: "right" },
+        { key: "name", label: "Anúncio", flex: tableHasCampaign ? 1.8 : 2.4 },
+        ...(tableHasCampaign ? [{ key: "campaign", label: "Campanha / objetivo", flex: 1.5 }] : []),
+        { key: "spend", label: "Investimento", align: "right" },
+        { key: "result", label: "Resultado", align: "right" },
+        ...(tableHasCost ? [{ key: "cost", label: "Custo", align: "right" as const }] : []),
+        ...(tableHasShare ? [{ key: "share", label: "Contribuição", align: "right" as const }] : []),
       ]} rows={creatives.map((r) => ({
-        thumb: { text: "", image: previews?.[r.adId]?.dataUri ?? null }, name: { text: r.name, strong: true },
-        campaign: { text: `${r.campaignName || "—"} · ${outcome === "visitas" ? "Visitas ao perfil" : "Conversas"}` }, spend: { text: money(r.spend) },
-        result: { text: num(r.result) }, cost: { text: r.costPerResult === null ? "—" : money(r.costPerResult) },
-        share: { text: r.resultShare === null ? "—" : `${r.resultShare.toFixed(1).replace(".", ",")}%` },
+        name: { text: r.name, strong: true },
+        ...(tableHasCampaign ? { campaign: { text: campaignObjectiveText(r.campaignName, r.resultLabel) } } : {}),
+        spend: { text: money(r.spend) },
+        result: { text: num(r.result) },
+        ...(tableHasCost ? { cost: { text: r.costPerResult === null ? "—" : money(r.costPerResult) } } : {}),
+        ...(tableHasShare ? { share: { text: r.resultShare === null ? "—" : `${r.resultShare.toFixed(1).replace(".", ",")}%` } } : {}),
       }))} />
     </Section>
   ) : null;
@@ -335,10 +364,9 @@ function SalesReportDocument(input: SalesReportInput) {
         {focus === "vendas" || focus === "agendamentos" ? <Headline text={analysis.headline} /> : null}
         <HeroFigure value={hero.value} label={hero.label} caption={hero.caption || undefined} delta={hero.delta} />
         <FigureRow items={figures} />
+        {informadosSection}
         {adaptiveSection}
         {conversionNarrative}
-        {indicatorsSection}
-
         {funnel.stages.length ? (
           <Section title={focus === "seguidores" ? "Do alcance ao perfil" : focus === "midia" ? "Do alcance às conversas" : "Do alcance à venda"}>
             <View style={T.twoCol}>
@@ -427,6 +455,7 @@ function SalesReportDocument(input: SalesReportInput) {
         ) : null}
 
         {conversionHistorySection}
+        {audienceGrowthSection}
 
         <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} note={footnote} />
       </Page>
