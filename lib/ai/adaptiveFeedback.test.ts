@@ -67,6 +67,14 @@ describe("consolidateAdaptiveFeedback", () => {
     ]);
   });
 
+  it("não repete os números na leitura quando a análise geral já os contextualiza", async () => {
+    const result = await consolidateAdaptiveFeedback([
+      comment("Análise Geral\nNesta semana, as duas campanhas seguiram trabalhando em conjunto: perfil ampliando a audiência, enquanto mensagens geram oportunidades diretas. A campanha de perfil trouxe 66 novos seguidores.", "2026-09-18T10:00:00.000Z"),
+    ], tags);
+
+    expect(result.interpretation.context[0]?.text).toBe("Nesta semana, as duas campanhas seguiram trabalhando em conjunto: perfil ampliando a audiência, enquanto mensagens geram oportunidades diretas.");
+  });
+
   it("registra o trade-off quando um valor mais recente diverge sem correção explícita", async () => {
     const result = await consolidateAdaptiveFeedback([
       comment("Vendas: 5", "2026-09-18T10:00:00.000Z"),

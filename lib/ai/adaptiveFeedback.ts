@@ -102,16 +102,18 @@ function evidence(text: string) {
 /** Extrai somente a leitura editorial que a operação escreveu junto aos números.
  * Métricas continuam no fluxo estruturado; o PDF não deve repetir o resumo todo. */
 function operationalAnalysis(text: string): string | null {
-  const compact = text.replace(/\s+/g, " ").trim();
+  const compact = text.replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
   const explicit = /(?:an[aá]lise\s+(?:geral|da\s+semana)?|leitura\s+da\s+semana)\s*[:\-]?\s*([\s\S]*?)(?=\s*(?:📌|resumo\s+geral)\b|$)/i.exec(compact)?.[1]?.trim();
-  const candidate = explicit || compact
+  const source = explicit || compact;
+  const editorialSentences = source
     .split(/(?<=[.!?])\s+/)
     .filter((sentence) => /aten[cç][aã]o|foco|estrat[eé]g|objetivo|prioriz|dividid|trabalhando|enquanto/i.test(sentence))
     .slice(0, 2)
     .join(" ");
+  const candidate = editorialSentences || (explicit ? source.split(/(?<=[.!?])\s+/).at(0) ?? "" : "");
   if (!candidate) return null;
   const normalized = candidate.replace(/\s+/g, " ").trim();
-  return normalized.length <= 280 ? normalized : `${normalized.slice(0, 277).trimEnd()}…`;
+  return normalized.length <= 220 ? normalized : `${normalized.slice(0, 217).trimEnd()}…`;
 }
 
 /**
