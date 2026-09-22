@@ -332,17 +332,27 @@ export async function advanceFlowAfterUpdate(before: TaskRecord, after: TaskReco
       const mold = await getAdminTask(admin, moldId);
       if (!mold) continue;
       const { advanceFlowMold, ensureFlowOccurrence } = await import("@/lib/automations/execute");
-      // A Entrega recorrente só avança quando o fluxo inteiro terminou. Assim
-      // uma falha no Feedback/conversão não cria uma referência semanal falsa.
+      const { nextRecurringDueDate, recurrenceRuleOf } = await import("@/lib/recurrence");
+      const rule = recurrenceRuleOf(mold);
+      if (!rule) continue;
+
+      // Concluir a Entrega desta semana pré-cria a da semana SEGUINTE, para a
+      // pessoa ver o próximo ciclo nascer na hora. A data sai da ocorrência que
+      // acabou de fechar — um fato absoluto —, nunca do `due_date` do molde, que
+      // é um cursor mutável: partir dele fazia um molde atrasado avançar para uma
+      // data já passada, e o ciclo morria ali.
       //
-      // A ocorrência concluída nasceu no ciclo (molde + 1); se o molde já está
-      // nesse ciclo, outra conclusão simultânea (ou retry) já o avançou e esta
-      // chamada não pode avançá-lo de novo. `advanceFlowMold` ainda é
-      // compare-and-set no vencimento, para a janela entre esta leitura e a escrita.
-      const advancedMold = recurrenceCycleOf(mold) >= recurrenceCycleOf(delivery)
-        ? mold
-        : await advanceFlowMold(admin, mold, mold.due_date ?? todayIso());
-      const next = await ensureFlowOccurrence(admin, advancedMold, advancedMold.due_date ?? todayIso());
+      // O molde já NÃO é a identidade da ocorrência (isso é a data, ver
+      // ensureFlowOccurrence), então nada aqui é pré-requisito para a próxima
+      // semana existir: se ninguém concluir, o tique diário cria a ocorrência do
+      // dia certo de todo jeito. Este caminho é conveniência, não gate.
+      const closedDate = (typeof delivery.payload?.occurrence_date === "string" ? delivery.payload.occurrence_date : null)
+        ?? delivery.due_date
+        ?? todayIso();
+      const nextDate = nextRecurringDueDate(closedDate, rule);
+
+      const advancedMold = await advanceFlowMold(admin, mold, closedDate);
+      const next = await ensureFlowOccurrence(admin, advancedMold, nextDate);
       await materializeFirstStep(admin, next, actorId);
     }
   } catch (error) {

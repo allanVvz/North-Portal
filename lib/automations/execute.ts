@@ -81,16 +81,32 @@ export async function materializeOccurrenceForReport(admin: AdminClient, parent:
 // task_type. Modelo LAZY — id determinístico por ciclo; o avanço do molde fica
 // em `advanceFlowMold`, chamado só depois do fill dar certo.
 export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord, today: string): Promise<TaskRecord> {
-  // Ciclo SEGUINTE ao do molde — a mesma convenção de materializeOccurrenceForReport.
-  // Com o ciclo atual, o primeiro tique em modo fluxo achava a ocorrência que o
-  // modo normal já tinha criado na semana anterior (mesmo id) e reaproveitava
-  // aquele card velho como pai do fluxo desta semana. advanceFlowMold leva o
-  // molde a este mesmo ciclo, então um retry no mesmo dia acha a ocorrência.
+  // A identidade da ocorrência é o DIA que ela cobre, não um contador.
+  //
+  // Antes era `cycle:N`, com N = ciclo do molde + 1 — e o ciclo do molde só
+  // avançava quando um humano concluía o fluxo inteiro. Consequência medida em
+  // produção: quatro clientes com o molde de anúncios no ciclo 5 e o da Entrega
+  // no 0, uma única ocorrência criada desde sempre, e a semana seguinte
+  // impossível de nascer porque o id calculado era o da Entrega ainda aberta.
+  //
+  // Com a data, 28/09 é outra chave que 21/09: a semana nasce independentemente
+  // de a anterior ter sido aprovada, e não existe contador para alguém esquecer
+  // de avançar. `derivedTaskId` exige que a identidade seja estável entre
+  // tentativas — o dia da ocorrência é, e o `due_date` do molde (editável, e
+  // empurrado por dois caminhos diferentes) nunca foi.
   const cycle = recurrenceCycleOf(mold) + 1;
-  const occId = recurringExecutionId(mold.id, cycle);
+  const occId = recurringExecutionId(mold.id, today);
 
   const found = await getAdminTask(admin, occId);
   if (found) return found;
+
+  // Transição: as ocorrências criadas antes desta mudança têm id derivado do
+  // ciclo. Sem procurá-las, o primeiro tique depois do deploy não acharia a
+  // Entrega em andamento e criaria uma SEGUNDA para a mesma semana. Só vale para
+  // a que ainda está aberta — uma ocorrência legada já concluída é história, e o
+  // ciclo novo deve nascer com id de data.
+  const legacy = await getAdminTask(admin, recurringExecutionId(mold.id, cycle));
+  if (legacy && !legacy.completed_at) return legacy;
 
   const workflow = await publishedWorkflowForKind(admin, "automacao");
   if (!workflow?.steps.length) throw new Error("O workflow publicado de Automação não está configurado.");
@@ -127,18 +143,30 @@ export async function ensureFlowOccurrence(admin: AdminClient, mold: TaskRecord,
 // para uma falha não pular um ciclo. Devolve o molde já atualizado — quem chama
 // usa o novo `recurrence_cycle` pra pré-criar o contêiner do ciclo seguinte
 // (ver ensureFlowOccurrence em run.ts), sem precisar buscar de novo.
-export async function advanceFlowMold(admin: AdminClient, mold: TaskRecord, today: string): Promise<TaskRecord> {
+export async function advanceFlowMold(admin: AdminClient, mold: TaskRecord, occurrenceDate: string): Promise<TaskRecord> {
   const nextCycle = recurrenceCycleOf(mold) + 1;
   const revision = recurrenceRevisionOf(mold);
-  const nextDue = nextRecurringDueDate(mold.due_date ?? today, {
+  // O próximo vencimento sai da OCORRÊNCIA que acabou de ser processada, não do
+  // valor antigo da coluna. A diferença é a classe inteira de bug do avanço
+  // relativo: um molde parado em 18/09 avançava para 21/09 — que já havia
+  // passado — e, com o gate estrito de então, nunca mais coincidia com `today`.
+  // Calculado a partir do dia real da ocorrência, o resultado é sempre futuro.
+  //
+  // O vencimento deixou de ser gatilho (quem decide é `recurrenceOccursOn` sobre
+  // a regra); ele fica como leitura do card, "a próxima é dia tal".
+  const nextDue = nextRecurringDueDate(occurrenceDate, {
     cadence: mold.recurrence_cadence!,
     weekdays: mold.recurrence_weekdays,
     dayOfMonth: mold.recurrence_day_of_month,
     startDate: mold.start_date ?? mold.due_date,
   });
-  // Compare-and-set no vencimento que esta chamada leu: duas conclusões
-  // simultâneas da mesma Entrega (ou um retry) avançam o molde UMA vez. Sem o
-  // filtro, a segunda relia o molde já avançado e pulava um ciclo inteiro.
+  // O filtro é "só avança se ainda não avançou" (`due_date < nextDue`), e não mais
+  // um compare-and-set no valor que esta chamada leu. Com a data de origem sendo
+  // um fato absoluto, duas chamadas para a mesma ocorrência calculam o MESMO
+  // `nextDue`: a segunda não encontra linha e nada é reescrito — nem o vencimento
+  // nem o contador. Idempotente por construção, em vez de por um filtro que
+  // dependia de ninguém ter tocado na coluna no meio do caminho. E monotônico: um
+  // vencimento já mais adiantado (ocorrência processada depois) nunca retrocede.
   let update = admin
     .from("tasks")
     .update({
@@ -147,11 +175,11 @@ export async function advanceFlowMold(admin: AdminClient, mold: TaskRecord, toda
       payload: recurrenceParentPayload(mold.payload, nextCycle, revision),
     })
     .eq("id", mold.id);
-  update = mold.due_date ? update.eq("due_date", mold.due_date) : update.is("due_date", null);
+  if (mold.due_date) update = update.lt("due_date", nextDue);
   const { data, error } = await update.select(TASK_COLUMNS).limit(1);
   if (error) throw error;
   if (data?.[0]) return asTaskRecord(data[0]);
-  // Outro caminho avançou primeiro: devolve o molde como ele está agora.
+  // Já estava mais adiantado: devolve o molde como está agora.
   return (await getAdminTask(admin, mold.id)) ?? mold;
 }
 

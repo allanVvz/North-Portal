@@ -1002,14 +1002,13 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
   // automaticamente. A cascata canÃ´nica materializa a etapa de conversÃ£o e
   // chama a geraÃ§Ã£o do primeiro PDF; um comentÃ¡rio posterior reabre somente a
   // conversÃ£o para revisÃ£o e gera a nova versÃ£o.
-  const completed = await transitionTaskStatus(admin, card.id, {
-    to: "aprovado",
-    from: ["backlog", "em_producao", "revisao"],
-    open: true,
-  });
+  // Porta única de aprovação (lib/flows/approve.ts): o compare-and-set e a
+  // cascata andam juntos num lugar só, para o futuro "comentário que aprova" não
+  // reimplementar a regra.
+  const { approveTask } = await import("@/lib/flows/approve");
+  const completed = await approveTask(admin, card, { from: ["backlog", "em_producao", "revisao"] });
   if (completed) {
-    const { advanceFlowAfterUpdate } = await import("@/lib/flows/advance");
-    await advanceFlowAfterUpdate(card, completed);
+    // nada a fazer: approveTask já disparou a cascata
   } else {
     const conversion = await linkedCardForStep(admin, occurrence, CONVERSION_REPORT_STEP_KEY);
     if (conversion && conversion.status !== "revisao" && !conversion.completed_at) {

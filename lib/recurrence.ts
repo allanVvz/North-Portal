@@ -98,6 +98,45 @@ export function nextRecurringDueDate(current: string, rule: RecurrenceRule): str
 /** Stable identity is based on the cycle, not its editable date. The hashing
  * itself now lives in lib/derivedTaskId.ts, shared with flow steps — the digest
  * and therefore every id this has ever produced is unchanged. */
+/**
+ * `day` é um dia de ocorrência desta regra?
+ *
+ * Deliberadamente definido em termos de `nextRecurringDueDate`: "o próximo
+ * vencimento a partir da véspera é exatamente este dia". Assim o GATE da
+ * automação e o CÁLCULO do agendamento não podem divergir — semanal com vários
+ * dias, quinzenal com a paridade da semana âncora e mensal com a janela de ±7
+ * dias saem todos da mesma função, em vez de uma segunda implementação da regra.
+ *
+ * `end_date` é ignorado de propósito. A recorrência v2 não tem data-limite (a
+ * parada é o molde `aprovado`/`parada`), e o valor que está na coluna é resíduo
+ * do avanço antigo, que o estendia a cada ciclo. Passar a respeitá-lo faria todo
+ * molde parar de disparar no ciclo seguinte ao último avanço.
+ */
+export function recurrenceOccursOn(rule: RecurrenceRule, day: string): boolean {
+  const start = rule.startDate ?? null;
+  // Antes de começar, não ocorre — nem no próprio dia de início, que é tratado
+  // como ocorrência abaixo.
+  if (start && day < start) return false;
+  if (start && day === start) return true;
+  try {
+    const previous = iso(addDays(atNoon(day), -1));
+    return nextRecurringDueDate(previous, rule) === day;
+  } catch {
+    return false;
+  }
+}
+
+/** A regra de recorrência de um card, na forma que o motor consome. */
+export function recurrenceRuleOf(task: Pick<TaskRecord, "recurrence_cadence" | "recurrence_weekdays" | "recurrence_day_of_month" | "start_date" | "due_date">): RecurrenceRule | null {
+  if (!task.recurrence_cadence) return null;
+  return {
+    cadence: task.recurrence_cadence,
+    weekdays: task.recurrence_weekdays ?? [],
+    dayOfMonth: task.recurrence_day_of_month ?? null,
+    startDate: task.start_date ?? task.due_date ?? null,
+  };
+}
+
 export function recurringExecutionId(parentId: string, cycle: number | string): string {
   return derivedTaskId(parentId, typeof cycle === "number" ? `cycle:${cycle}` : cycle);
 }

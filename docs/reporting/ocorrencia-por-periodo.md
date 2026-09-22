@@ -1,7 +1,7 @@
 # Ocorrência por período — remover a dependência da Entrega anterior
 
 Desenho decidido em 21/09/2026, depois do incidente em que quatro clientes ficaram
-sem o relatório da semana. Ainda **não implementado**; este documento é o contrato.
+sem o relatório da semana. **Implementado em 22/09/2026** — ver o estado abaixo.
 
 ## O problema: a dependência não está escrita em lugar nenhum
 
@@ -94,32 +94,48 @@ anexa o PDF       → revisao
 aprovação humana  → inicia a próxima etapa, ou conclui a Entrega
 ```
 
-O que **falta** aqui: ao anexar, o comentário deve **informar qual é a próxima
-etapa**. Hoje ele diz o que foi feito e não o que se espera de quem lê.
+Ao anexar, o comentário **informa qual é a próxima etapa** — antes dizia o que foi
+feito e não o que se espera de quem lê. A frase sai do workflow versionado da
+ocorrência (`nextStepNotice.ts`), então reordenar etapas na tela de Etapas muda o
+aviso sem tocar em código.
 
 ### Aprovação por comentário (futuro)
 
-Um comentário que aprova deve, no futuro, aprovar — já consta como pendência em
-`decisoes.md`. Este desenho não a implementa, mas a **habilita**: a transição de
-aprovação tem de ficar atrás de **um único ponto de entrada**, para um parser de
-comentário chamá-la depois sem duplicar regra. Hoje a aprovação está espalhada
-entre as rotas de tarefa e `advanceFlowAfterUpdate`.
+Um comentário que aprova deve, no futuro, aprovar — consta como pendência em
+`decisoes.md`. Este desenho não a implementa, mas **já a habilita**: `approveTask`
+(`lib/flows/approve.ts`) é o ponto único onde o compare-and-set e a cascata andam
+juntos. Um parser de comentário chama essa função em vez de virar uma segunda
+implementação de "aprovar" — duas implementações divergem, e foi assim que
+"avançar o molde" divergiu em dois caminhos e custou quatro clientes.
 
-## Ordem de implementação
+As escritas de humano continuam entrando por `updateTaskGroup`, que já compartilha
+a cascata entre o PATCH do admin e a aprovação do cliente. São duas portas com
+donos distintos (humano e automação), não duas implementações da mesma regra.
 
-1. `ensureFlowOccurrence` passa a derivar o id do **período**, resolvendo também o
-   id antigo (por ciclo) para as ocorrências que já existem.
-2. Gate por regra de recorrência, substituindo `due_date === today`; `isDueToday`
-   (já criado em 21/09) é o lugar natural.
-3. `occurrence_key` de `automation_runs` passa a ser o período.
-4. `advanceFlowMold` deixa de mutar `due_date`.
-5. Projeção do molde = ocorrência mais recente.
-6. Comentário do agente informa a próxima etapa.
-7. Ponto de entrada único de aprovação (preparação para o item futuro).
+## Estado da implementação — CONCLUÍDA em 22/09/2026
 
-Cada passo tem de entrar com teste que prove o cenário de 21/09: molde vencido sem
-ter rodado, ocorrência anterior aberta, e a semana seguinte nascendo **de todo
-jeito**.
+| # | O quê | Onde |
+|---|---|---|
+| 1 | Identidade da ocorrência = a DATA que ela cobre, com resolução do id legado (por ciclo) enquanto a ocorrência anterior estiver aberta | `automations/execute.ts` `ensureFlowOccurrence` |
+| 2 | Gate por REGRA (`recurrenceOccursOn`) no lugar de `due_date === today`, nos dois pontos (pré-filtro do ledger e o gate de elegibilidade) | `recurrence.ts`, `automations/run.ts` `targetIsDue` |
+| 3 | `occurrence_key` de `automation_runs` é o PERÍODO, garantido por o claim só acontecer depois do gate | `automations/run.ts` `claimDailyRun` |
+| 4 | `advanceFlowMold` calcula a partir da ocorrência processada (absoluto), com filtro `due_date < nextDue`: idempotente e monotônico | `automations/execute.ts`, `flows/advance.ts` |
+| 5 | Projeção do molde = ocorrência mais recente aberta | **já existia** em `project_parent_status` (`order by due_date desc`), e `recurringExecutionFields` grava `plan_id` |
+| 6 | O agente informa a próxima etapa no comentário | `automations/nextStepNotice.ts` |
+| 7 | Porta única de aprovação: compare-and-set + cascata numa função | `flows/approve.ts` `approveTask` |
+
+Testes que fixam o comportamento: `automations/ocorrenciaPorPeriodo.test.ts` (o cenário
+de 21/09 saindo, a transição do id legado, o avanço absoluto e monotônico),
+`recurrenceOccursOn.test.ts` (inclusive a propriedade de que gate e agendador não
+divergem), `flows/approve.test.ts`.
+
+### O que NÃO mudou, de propósito
+
+`materializeOccurrenceForReport` — o modo NORMAL, de cliente sem fluxo de
+conversão — continua com id por ciclo. Ali o contador não é disputado: a própria
+automação é a única escritora do molde, e avança no mesmo tique em que cria a
+ocorrência. Trocar a chave lá seria mudança sem defeito que a motive, e entra na
+frente separada abaixo.
 
 ## Frente separada: recorrência global
 

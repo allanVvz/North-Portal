@@ -29,6 +29,7 @@ import { logReportRun } from "./reportLog";
 import { materializeFirstStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
+import { recurrenceOccursOn, recurrenceRuleOf } from "@/lib/recurrence";
 import { agencyToday } from "@/lib/time/agency";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY, FEEDBACK_STEP_KEY } from "@/lib/automationWorkflow";
 import { commentsOf } from "@/lib/comments";
@@ -84,6 +85,27 @@ export type AutomationRunSummary = {
 
 function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Hoje é dia desta automação rodar?
+ *
+ * Para card RECORRENTE a pergunta é feita à REGRA (`recurrenceOccursOn`), não à
+ * coluna `due_date`. O motivo é o incidente de 21/09/2026: `due_date` é um cursor
+ * que alguém tem de empurrar, e era empurrado por dois caminhos diferentes — o
+ * molde de anúncios avançava ao gerar o PDF, o da Entrega só na conclusão do
+ * fluxo. Quando o avanço não acontecia (falha, ou etapa anterior ainda aberta), a
+ * coluna congelava numa data passada e a igualdade estrita nunca mais casava: a
+ * automação morria em silêncio. A regra (`cadence` + `weekdays` + `start_date`) é
+ * configuração estável — ninguém a avança, então ninguém a esquece.
+ *
+ * Card COMUM (sem recorrência) continua no vencimento: ele não tem regra, e a
+ * data dele é justamente o que a pessoa escolheu.
+ */
+function targetIsDue(target: TaskRecord, today: string): boolean {
+  if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return false;
+  const rule = recurrenceRuleOf(target);
+  return rule ? recurrenceOccursOn(rule, today) : target.due_date === today;
 }
 
 /** Semanas mostradas na tendência do relatório de anúncios. */
@@ -228,11 +250,12 @@ export async function runOneReportAutomation(
   today: string,
 ): Promise<RunOutcome> {
   const target = await getAdminTask(admin, config.target_task_id);
-  if (!target || target.due_date !== today) return "not_due";
-  // Recorrência encerrada (card-pai aprovado ou parado) não avança mais nem
-  // gera novo relatório — mesma regra dos ciclos manuais. Vale para o alvo
-  // recorrente e para o plano de ação recorrente.
-  if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return "not_due";
+  if (!target) return "not_due";
+  // Mesmo predicado do pré-filtro do ledger (`isDueToday`), repetido aqui de
+  // propósito: é defesa em profundidade e o que os testes exercitam direto.
+  // Cobre tanto "hoje não é dia" quanto recorrência encerrada (molde aprovado ou
+  // parado), que não gera mais nada — a mesma regra dos ciclos manuais.
+  if (!targetIsDue(target, today)) return "not_due";
 
   // Modo-fluxo: M1 tem uma automação `relatorio_conversao` ativa → a ocorrência
   // desta semana vira PAI de um fluxo de feedback. A Automação 1 cria a
@@ -389,6 +412,13 @@ type AutomationRunRow = { id: string };
 
 async function claimDailyRun(admin: AdminClient, config: AutomationConfigRow, today: string): Promise<AutomationRunRow | null> {
   const action = config.automation_key === "relatorio_conversao" ? "conversion_report" : "ads_report";
+  // `occurrence_key` é o PERÍODO, e não "o dia em que o cron passou". Como o
+  // claim agora só acontece depois de `isDueToday` confirmar que hoje casa com a
+  // regra, `today` É a data da ocorrência — a chave única
+  // (config, occurrence_key, action) passa a significar "esta semana", em vez de
+  // "esta execução". A diferença apareceu em 21/09/2026: com a chave sendo o dia
+  // da execução, um redisparo manual no mesmo dia colidia com a linha gravada
+  // pelo cron da manhã, e a reexecução era recusada.
   const { data, error } = await admin.rpc("claim_automation_run", {
     p_config_id: config.id,
     p_occurrence_key: today,
@@ -405,9 +435,7 @@ async function claimDailyRun(admin: AdminClient, config: AutomationConfigRow, to
  *  config por dia, em troca de não queimar a chave de idempotência do dia. */
 async function isDueToday(admin: AdminClient, config: AutomationConfigRow, today: string): Promise<boolean> {
   const target = await getAdminTask(admin, config.target_task_id);
-  if (!target || target.due_date !== today) return false;
-  if ((target.recurrence_cadence || target.kind === "plano_acao") && recurrenceStopped(target.status)) return false;
-  return true;
+  return Boolean(target) && targetIsDue(target!, today);
 }
 
 async function finishRun(admin: AdminClient, runId: string, status: "succeeded" | "failed", lastError: string | null = null): Promise<void> {
