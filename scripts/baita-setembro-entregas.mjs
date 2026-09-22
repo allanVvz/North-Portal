@@ -1,23 +1,23 @@
 // Fase 2: estrutura o conteúdo de setembro/2026 da Baita em Entregas.
 //
-// Regra que orientou o mapa: a gravação é para REELS — Feed/carrossel não sai de
-// diária. Quem não vem de gravação fica sozinho, sem Entrega, em vez de ganhar uma
-// Entrega de fachada com três etapas vazias.
+// Esta versão substitui a anterior, que estava errada: ela montava Entregas a partir
+// da "Gravação 17/09 — 3 publicações" (card solto) e ignorava as 9 atividades que já
+// estavam no Plano de Conteúdo. São elas que descrevem o mês de verdade — dois
+// blocos, 6 Reels e 2 anúncios — e o card solto de 17/09 pode ser a mesma diária do
+// bloco ("Gravação do bloco — 6 Reels", 16/09) registrada duas vezes. Enquanto isso
+// não estiver confirmado, nada é criado a partir dele.
 //
-// O estado encontrado em produção:
-//   - existem 2 Entregas "criativo" e apenas UM slot vago em toda a Baita
-//     (a publicação de "Evento Baita 26/09"), preenchido por "Post evento 26/09";
-//   - "Gravação 17/09 — 3 publicações" e "Roteiros da diária 17/09" estão soltos e
-//     são compartilháveis: um card pode ser etapa de VÁRIAS Entregas, porque
-//     `task_links` é único por (parent_id, child_id) e (parent_id, workflow_step_id),
-//     nunca por child_id;
-//   - as datas das publicações estavam erradas — venciam ANTES da gravação que as
-//     originou. Corrigidas, as três peças da diária aparecem e a conta fecha com o
-//     título da captação.
+// O que esta versão faz, e só isso:
 //
-// A Entrega recebe o título da própria publicação que entrega, como já acontece em
-// "Reels Dj Sereno" — nomear peça de conteúdo que não se sabe qual é seria inventar
-// história.
+//   1. O evento de 19/09 e o de 26/09 NÃO aconteceram — viraram 10/10. As duas peças
+//      dele (um reels e um carrossel) existem como card, com nomes que não dizem o
+//      que são ("post video 1 edicao", "post 2 edicao"). Os nomes são corrigidos e
+//      cada peça ganha sua Entrega.
+//   2. As duas Entregas COMPARTILHAM roteiro, captação e edição do evento 26: é o
+//      mesmo material, gravado uma vez, editado uma vez, publicado em dois formatos.
+//      `task_links` é único por (parent_id, child_id) e (parent_id, workflow_step_id),
+//      nunca por child_id — então o mesmo card de edição é etapa das duas Entregas
+//      sem ser duplicado.
 //
 // Uso: node scripts/baita-setembro-entregas.mjs [--apply]
 
@@ -31,73 +31,42 @@ const APPLY = process.argv.includes("--apply");
 
 const SLUG = "baita-conveniencia";
 
-/** Cards soltos que entram como etapa de uma Entrega que JÁ EXISTE. */
-const PREENCHER_VAGO = [
+/** A data real do evento. O de 19/09 e o de 26/09 não aconteceram. */
+const EVENTO = "2026-10-10";
+
+/** As etapas do evento, compartilhadas pelas duas peças. Ficam como estão — só são
+ *  referenciadas. */
+const COMPARTILHADAS = {
+  roteiro: "05bdfa56-e9d7-58a3-a998-ef348611da78",  // Evento Baita 26/09 — Roteiro
+  captacao: "51791021-7d17-5a99-be73-b3d536c861b9", // Evento Baita 19/09 — Captação
+  edicao: "f6c9580e-aa2f-486d-8937-88dbe52a6bcd",   // edição materiais evento Baita 26/09
+};
+
+/** Uma Entrega por formato. O card de publicação já existe: só é renomeado (o nome
+ *  atual diz "edicao", que é justamente o que ele NÃO é) e recebe o subtype certo. */
+const PECAS = [
   {
-    entrega: "e0b23dce-3f4f-4d2a-bd30-eaa377dbba80", // Evento Baita 26/09
-    card: "2d3dff22-7a10-4665-a026-8fc49e7adf21",    // Post evento 26/09
-    etapa: "publicacao",
-    porque: "nome e data casam com o único slot vago da Baita; vence 20/09, depois da gravação",
+    card: "ae531085-9be9-433a-8540-0e1144d357a8", // post video 1 edicao
+    entrega: `Evento Baita 10/10 — Reels`,
+    publicacao: `Evento Baita 10/10 — Reels · Publicação`,
+  },
+  {
+    card: "0dd39e0b-a172-4662-a6ef-b06230950bcc", // post 2 edicao
+    entrega: `Evento Baita 10/10 — Carrossel`,
+    publicacao: `Evento Baita 10/10 — Carrossel · Publicação`,
   },
 ];
 
-/** Quantos dias as publicações da diária andam para frente.
- *
- *  As datas estavam erradas: as publicações venciam ANTES da gravação que as
- *  originou. 14 e não 7 porque o pedido foi "mais de uma semana", e duas semanas
- *  preservam o espaçamento relativo entre as peças enquanto jogam todas para depois
- *  de 17/09. `start_date`/`end_date` andam junto quando existem — deslocar só o
- *  `due_date` deixaria a janela do card invertida. */
-const DESLOCAR_DIAS = 14;
-
-/** A diária de 17/09 e as três peças que saíram dela. Roteiro e captação são os
- *  MESMOS cards nas três Entregas — modelo de bloco compartilhado.
- *
- *  A conta fecha sem invenção: tirando o Feed, a publicação avulsa e o "Post evento
- *  26/09" (que preenche o slot vago acima), sobram exatamente três publicações — e a
- *  captação se chama "Gravação 17/09 — 3 publicações". */
-const DIARIA_17_09 = {
-  roteiro: "02954165-13bf-5a44-9811-a3de54cd7d80",  // Roteiros da diária 17/09
-  captacao: "56a6b5ea-7c05-5095-86e0-86f94860747a", // Gravação 17/09 — 3 publicações
-  publicacoes: [
-    { card: "dce78cc2-9736-46c1-bbb2-1ebe53a8a387", nota: "Publicação post Evento — vencia 06/09, antes da gravação" },
-    { card: "fafaf36a-8d7c-468b-8363-ab515d94a999", nota: "Post evento 19/09 — vencia 13/09, antes da gravação" },
-    // A terceira peça. A descrição a identifica sem ambiguidade: "Posta VÍDEO do
-    // motivo do estresse. Mencionando O EVENTO DO FINAL DE SEMANA na legenda e se
-    // couber, também no vídeo." Vídeo é reels (a regra da gravação vale), fala do
-    // mesmo evento das outras duas, e vence antes da gravação — o mesmo padrão de
-    // data errada. É ela que fecha as 3 publicações do título da captação.
-    { card: "fea9aae7-8d25-44ac-aab0-9250fa87df80", nota: "Postagem motivo do estresse — vídeo sobre o evento; vencia 09/09, antes da gravação" },
-  ],
-};
-
-/** Cards cujo `subtype` está errado e é corrigido aqui.
- *
- *  "Post jogando pratos novos" é a MESMA peça que "REELS FEED - Jogando pratos
- *  novos" (já ligado ao Plano de Agosto) — um reels só, ainda não publicado. Como os
- *  outros cards dessa peça não existem, ela não compõe Entrega: fica como task de
- *  edição, solta. Tirá-la daqui não quebrou a conta das 3 publicações — o lugar dela
- *  era ocupado por "Postagem motivo do estresse", que a descrição identifica como
- *  vídeo sobre o mesmo evento. */
-const AJUSTAR_SUBTYPE = [
-  { card: "19405746-eeb2-4ce6-b6cd-655e8132686c", de: null, para: "edicao", porque: "mesma peça de 'REELS FEED - Jogando pratos novos'; sem os outros cards, não compõe Entrega" },
-];
-
-/** Ficam SOZINHOS, sem Entrega. Listados para o relatório dizer que a decisão foi
- *  deliberada, e não esquecimento. */
-const SEM_ENTREGA = [
-  ["1684c4a4-bb60-4c49-ac5b-15c2f1acdcbe", "Post Feed agenda Mês Setembro", "Feed/carrossel — a própria descrição diz 'Postar em formato Carrossel'; não sai de gravação"],
-  ["1e3260fc-ae42-4bc8-a90a-7195f0cec3bf", "Dia do Consumidor", "edição de card promocional ('promoções ativas no Dia do Consumidor'), sem relação com as peças do evento"],
-  ["049c13ad-dcd1-45ea-9a92-fb4523758f17", "DIVULGAÇÃO EVENTO - 12/09", "evento de 12/09, marcado 'finalizado' em comentário"],
-  ["19405746-eeb2-4ce6-b6cd-655e8132686c", "Post jogando pratos novos", "um reels só, ainda não publicado; mesma peça de 'REELS FEED - Jogando pratos novos'. Sem os outros cards não compõe Entrega — fica como task de edição (ver AJUSTAR_SUBTYPE)"],
+/** Os nomes das etapas compartilhadas também mentem: falam de 19/09 e 26/09, eventos
+ *  que não ocorreram. Renomeados para a data real, mantendo a convenção de sufixo que
+ *  o repositório já usa ("<Entrega> — <Etapa>"). */
+const RENOMEAR_ETAPAS = [
+  { card: COMPARTILHADAS.roteiro, para: "Evento Baita 10/10 — Roteiro" },
+  { card: COMPARTILHADAS.captacao, para: "Evento Baita 10/10 — Captação" },
+  { card: COMPARTILHADAS.edicao, para: "Evento Baita 10/10 — Edição" },
 ];
 
 const dia = (v) => (v ? new Date(v).toISOString().slice(0, 10) : "—");
-const maisDias = (v, n) => {
-  const d = new Date(v);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-};
 
 const db = new pg.Client({ connectionString: SUPABASE_DB_URL, ssl: { rejectUnauthorized: false } });
 await db.connect();
@@ -106,8 +75,9 @@ try {
   if (!cli.length) throw new Error(`Cliente ${SLUG} não encontrado.`);
   const CLIENTE = cli[0].id;
 
-  // O workflow e os ids de step vêm do banco, nunca fixados aqui: uma versão nova
-  // publicada mudaria os ids e um script com eles cravados ligaria etapa errada.
+  // Workflow e ids de etapa vêm do banco, nunca fixados aqui: uma versão nova
+  // publicada mudaria os ids, e um script com eles cravados ligaria etapa errada em
+  // silêncio.
   const { rows: wf } = await db.query(`
     select v.id, v.delivery_type_id, s.id as step_id, tt.key as etapa, s.order_index
     from public.workflow_versions v
@@ -126,107 +96,67 @@ try {
 
   const card = async (id) => {
     const { rows } = await db.query(
-      `select id, title, kind, subtype, status, due_date, client_id, reviewer_id, priority, position
-         from public.tasks where id = $1::uuid`, [id]);
+      `select id, title, kind, subtype, status, due_date, reviewer_id from public.tasks where id = $1::uuid`, [id]);
     return rows[0] ?? null;
   };
 
-  console.log(`\nWorkflow: ${WORKFLOW}  (etapas: ${wf.map((s) => s.etapa).join(" → ")})\n`);
+  console.log(`\nWorkflow: ${WORKFLOW}  (${wf.map((s) => s.etapa).join(" → ")})`);
+  console.log(`Evento real: ${EVENTO}  (19/09 e 26/09 não aconteceram)\n`);
 
-  // ---- 1. preencher slots vagos -------------------------------------------
-  console.log("1. PREENCHER SLOT VAGO EM ENTREGA EXISTENTE");
-  const paraLigar = [];
-  for (const p of PREENCHER_VAGO) {
-    const [entrega, filho] = [await card(p.entrega), await card(p.card)];
-    if (!entrega || !filho) { console.log(`   ! card inexistente (${p.entrega} / ${p.card}) — pulado`); continue; }
-    const { rows: ocupado } = await db.query(
-      `select c.title from public.task_links l join public.tasks c on c.id = l.child_id
-        where l.parent_id = $1::uuid and l.workflow_step_id = $2::uuid`, [p.entrega, stepId(p.etapa)]);
-    if (ocupado.length) { console.log(`   ! ${entrega.title} / ${p.etapa} já ocupado por "${ocupado[0].title}" — pulado`); continue; }
-    console.log(`   ${entrega.title}  ${p.etapa} ← "${filho.title}"`);
-    console.log(`     porque: ${p.porque}`);
-    paraLigar.push({ parent: p.entrega, child: p.card, step: stepId(p.etapa), etapa: p.etapa });
+  console.log("1. RENOMEAR AS ETAPAS COMPARTILHADAS");
+  const renomear = [];
+  for (const r of RENOMEAR_ETAPAS) {
+    const c = await card(r.card);
+    if (!c) { console.log(`   ! ${r.card} não existe — pulado`); continue; }
+    if (c.title === r.para) { console.log(`   já correto: ${c.title}`); continue; }
+    console.log(`   "${c.title}"`);
+    console.log(`     → "${r.para}"   [${c.subtype ?? "—"}, ${c.status}, ${dia(c.due_date)}]`);
+    renomear.push({ id: c.id, para: r.para, de: c.title });
   }
 
-  // ---- 2. Entregas da diária ----------------------------------------------
-  console.log("\n2. ENTREGAS DA DIÁRIA 17/09 — roteiro e captação COMPARTILHADOS");
-  const roteiro = await card(DIARIA_17_09.roteiro);
-  const captacao = await card(DIARIA_17_09.captacao);
-  if (!roteiro || !captacao) throw new Error("Cards de roteiro/captação da diária não encontrados.");
-  console.log(`   roteiro  compartilhado: "${roteiro.title}"  (${dia(roteiro.due_date)})`);
-  console.log(`   captação compartilhada: "${captacao.title}"  (${dia(captacao.due_date)})`);
+  console.log("\n2. AS DUAS ENTREGAS — roteiro, captação e edição COMPARTILHADOS");
+  const roteiro = await card(COMPARTILHADAS.roteiro);
+  const captacao = await card(COMPARTILHADAS.captacao);
+  const edicao = await card(COMPARTILHADAS.edicao);
+  if (!roteiro || !captacao || !edicao) throw new Error("Etapa compartilhada não encontrada.");
 
-  const pecas = [];
-  for (const p of DIARIA_17_09.publicacoes) {
+  const criar = [];
+  for (const p of PECAS) {
     const pub = await card(p.card);
-    if (!pub) { console.log(`\n   ! card ${p.card} não existe — pulado`); continue; }
-    const novaData = maisDias(pub.due_date, DESLOCAR_DIAS);
-    console.log(`\n   Entrega a criar: "${pub.title}"`);
-    console.log(`     publicação ${dia(pub.due_date)} → ${novaData}   (+${DESLOCAR_DIAS} dias)`);
-    console.log(`     ${p.nota}`);
+    if (!pub) { console.log(`   ! ${p.card} não existe — pulado`); continue; }
+    console.log(`\n   Entrega: "${p.entrega}"   (vence ${EVENTO})`);
     console.log(`     roteiro    ← ${roteiro.title}   [compartilhado]`);
     console.log(`     captacao   ← ${captacao.title}  [compartilhado]`);
-    console.log(`     edicao     ← vago`);
-    console.log(`     publicacao ← ${pub.title}`);
-    pecas.push({ pub, novaData });
-  }
-  // O título da captação diz "3 publicações" e as três têm card. A peça que sobrava
-  // ("jogando pratos") era a mesma de um card já ligado ao Plano de Agosto — por isso
-  // ela saiu daqui e virou edição solta, sem quebrar a conta.
-  console.log(`
-   ${pecas.length} Entrega(s) da diária — bate com as 3 publicações do título da captação.`);
-
-  // ---- 2b. corrigir subtype -------------------------------------------------
-  console.log(`\n2b. CORRIGIR SUBTYPE`);
-  const ajustes = [];
-  for (const a of AJUSTAR_SUBTYPE) {
-    const c = await card(a.card);
-    if (!c) { console.log(`   ! card ${a.card} não existe — pulado`); continue; }
-    if (c.subtype === a.para) { console.log(`   já está como ${a.para}: ${c.title}`); continue; }
-    console.log(`   ${c.title}:  subtype ${c.subtype ?? "—"} → ${a.para}`);
-    console.log(`     ${a.porque}`);
-    ajustes.push({ id: c.id, para: a.para, title: c.title });
+    console.log(`     edicao     ← ${edicao.title}    [compartilhado]`);
+    console.log(`     publicacao ← "${pub.title}" → "${p.publicacao}"`);
+    console.log(`                  subtype ${pub.subtype ?? "—"} → publicacao, vence — → ${EVENTO}`);
+    criar.push({ ...p, pub });
   }
 
-  // ---- 3. o que fica sozinho ----------------------------------------------
-  console.log("\n3. FICAM SEM ENTREGA — decisão deliberada");
-  for (const [id, titulo, porque] of SEM_ENTREGA) {
-    const c = await card(id);
-    console.log(`   ${c ? "" : "(card inexistente) "}${titulo}`);
-    console.log(`     ${porque}`);
-  }
+  console.log("\n3. FORA DESTA RODADA — precisa de decisão");
+  console.log(`   Bloco 6 Reels e bloco 2 anúncios: as 8 peças não têm card próprio.`);
+  console.log(`   "Gravação 17/09 — 3 publicações" (solta) pode ser a mesma diária de`);
+  console.log(`   "Gravação do bloco — 6 Reels" (16/09, no plano) — confirmar antes de usar.`);
 
   if (!APPLY) {
-    console.log("\nDry-run: nada gravado. Revise os nomes e rode com --apply.\n");
+    console.log("\nDry-run: nada gravado. Rode com --apply.\n");
     process.exit(0);
   }
 
-  // ---- aplicar -------------------------------------------------------------
   await db.query("begin");
   try {
-    for (const a of ajustes) {
-      const { rowCount } = await db.query(
-        `update public.tasks set subtype = $2 where id = $1::uuid returning id`, [a.id, a.para]);
-      console.log(rowCount === 1 ? `ok: subtype de "${a.title}" → ${a.para}` : `! subtype de "${a.title}" não mudou`);
+    for (const r of renomear) {
+      await db.query("update public.tasks set title = $2 where id = $1::uuid", [r.id, r.para]);
+      console.log(`ok: renomeado → "${r.para}"`);
     }
 
-    for (const l of paraLigar) {
-      const { rowCount } = await db.query(`
-        insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
-        values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)
-        on conflict do nothing returning parent_id`, [l.parent, l.child, l.step]);
-      console.log(rowCount === 1 ? `ok: ligado ${l.etapa}` : `já existia: ${l.etapa}`);
-    }
-
-    for (const { pub, novaData } of pecas) {
-      // A data anda ANTES de a Entrega nascer: a Entrega herda o vencimento da
-      // publicação, e nascer com a data velha a deixaria atrasada de saída.
-      await db.query(`
-        update public.tasks
-           set due_date = $2::date,
-               start_date = case when start_date is null then null else $2::date end,
-               end_date = case when end_date is null then null else greatest($2::date, end_date) end
-         where id = $1::uuid`, [pub.id, novaData]);
+    for (const c of criar) {
+      // O card de publicação é corrigido ANTES de a Entrega nascer: nome, subtype e
+      // data. Sem o subtype `publicacao` ele não é reconhecível como a etapa que é.
+      await db.query(
+        `update public.tasks set title = $2, subtype = 'publicacao', due_date = $3::date,
+                end_date = case when end_date is null then null else greatest($3::date, end_date) end
+           where id = $1::uuid`, [c.pub.id, c.publicacao, EVENTO]);
 
       const { rows: nova } = await db.query(`
         insert into public.tasks (
@@ -238,16 +168,21 @@ try {
           $3::date, $3::date, $3::date, 0, false, 1,
           true, false, $4::uuid, $5::uuid, $6::uuid, '{}'::jsonb
         ) returning id, title`,
-        [CLIENTE, pub.title, novaData, captacao.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
+        [CLIENTE, c.entrega, EVENTO, edicao.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
       const entregaId = nova[0].id;
 
-      for (const [etapa, filho] of [["roteiro", DIARIA_17_09.roteiro], ["captacao", DIARIA_17_09.captacao], ["publicacao", pub.id]]) {
+      for (const [etapa, filho] of [
+        ["roteiro", COMPARTILHADAS.roteiro],
+        ["captacao", COMPARTILHADAS.captacao],
+        ["edicao", COMPARTILHADAS.edicao],
+        ["publicacao", c.pub.id],
+      ]) {
         await db.query(`
           insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
           values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)
           on conflict do nothing`, [entregaId, filho, stepId(etapa)]);
       }
-      console.log(`ok: Entrega "${nova[0].title}" (${entregaId}) — publicação em ${novaData}, roteiro e captação compartilhados`);
+      console.log(`ok: Entrega "${nova[0].title}" (${entregaId}) com as 4 etapas`);
     }
     await db.query("commit");
     console.log("\nTransação confirmada.\n");
