@@ -42,16 +42,28 @@ const PREENCHER_VAGO = [
   },
 ];
 
-/** As Entregas que a diária de 17/09 produziu. Roteiro e captação são os MESMOS
- *  cards em todas — é o modelo de bloco compartilhado. Publicação nasce vaga. */
+/** Quantos dias as publicações da diária andam para frente.
+ *
+ *  As datas estavam erradas: as publicações venciam ANTES da gravação que as
+ *  originou. 14 e não 7 porque o pedido foi "mais de uma semana", e duas semanas
+ *  preservam o espaçamento relativo entre as peças enquanto jogam todas para depois
+ *  de 17/09. `start_date`/`end_date` andam junto quando existem — deslocar só o
+ *  `due_date` deixaria a janela do card invertida. */
+const DESLOCAR_DIAS = 14;
+
+/** A diária de 17/09 e as três peças que saíram dela. Roteiro e captação são os
+ *  MESMOS cards nas três Entregas — modelo de bloco compartilhado.
+ *
+ *  A conta fecha sem invenção: tirando o Feed, a publicação avulsa e o "Post evento
+ *  26/09" (que preenche o slot vago acima), sobram exatamente três publicações — e a
+ *  captação se chama "Gravação 17/09 — 3 publicações". */
 const DIARIA_17_09 = {
   roteiro: "02954165-13bf-5a44-9811-a3de54cd7d80",  // Roteiros da diária 17/09
   captacao: "56a6b5ea-7c05-5095-86e0-86f94860747a", // Gravação 17/09 — 3 publicações
-  vence: "2026-09-30",
-  pecas: [
-    "Diária 17/09 — Reels 1",
-    "Diária 17/09 — Reels 2",
-    "Diária 17/09 — Reels 3",
+  publicacoes: [
+    { card: "dce78cc2-9736-46c1-bbb2-1ebe53a8a387", nota: "Publicação post Evento — vencia 06/09, antes da gravação" },
+    { card: "fafaf36a-8d7c-468b-8363-ab515d94a999", nota: "Post evento 19/09 — vencia 13/09, antes da gravação" },
+    { card: "19405746-eeb2-4ce6-b6cd-655e8132686c", nota: "Post jogando pratos novos — vencia 13/09; ATENÇÃO, possível duplicata de 'REELS FEED - Jogando pratos novos', que já está ligado ao Plano de Agosto" },
   ],
 };
 
@@ -60,12 +72,16 @@ const DIARIA_17_09 = {
 const SEM_ENTREGA = [
   ["1684c4a4-bb60-4c49-ac5b-15c2f1acdcbe", "Post Feed agenda Mês Setembro", "Feed/carrossel — a própria descrição diz 'Postar em formato Carrossel'; não sai de gravação"],
   ["fea9aae7-8d25-44ac-aab0-9250fa87df80", "Postagem motivo do estresse", "publicação avulsa, por decisão do usuário"],
-  ["dce78cc2-9736-46c1-bbb2-1ebe53a8a387", "Publicação post Evento", "vence 06/09, antes da gravação de 17/09"],
-  ["fafaf36a-8d7c-468b-8363-ab515d94a999", "Post evento 19/09", "vence 13/09, antes da gravação; o evento de 19/09 não tem Entrega própria"],
-  ["1e3260fc-ae42-4bc8-a90a-7195f0cec3bf", "Dia do Consumidor", "edição de card promocional, sem publicação associada"],
-  ["19405746-eeb2-4ce6-b6cd-655e8132686c", "Post jogando pratos novos", "possível duplicata de 'REELS FEED - Jogando pratos novos', que já está ligado ao Plano de Agosto"],
+  ["1e3260fc-ae42-4bc8-a90a-7195f0cec3bf", "Dia do Consumidor", "edição de card promocional ('promoções ativas no Dia do Consumidor'), sem relação com as peças do evento"],
   ["049c13ad-dcd1-45ea-9a92-fb4523758f17", "DIVULGAÇÃO EVENTO - 12/09", "evento de 12/09, marcado 'finalizado' em comentário"],
 ];
+
+const dia = (v) => (v ? new Date(v).toISOString().slice(0, 10) : "—");
+const maisDias = (v, n) => {
+  const d = new Date(v);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
 
 const db = new pg.Client({ connectionString: SUPABASE_DB_URL, ssl: { rejectUnauthorized: false } });
 await db.connect();
@@ -121,16 +137,26 @@ try {
   const roteiro = await card(DIARIA_17_09.roteiro);
   const captacao = await card(DIARIA_17_09.captacao);
   if (!roteiro || !captacao) throw new Error("Cards de roteiro/captação da diária não encontrados.");
-  console.log(`   roteiro  compartilhado: "${roteiro.title}"`);
-  console.log(`   captação compartilhada: "${captacao.title}"`);
-  for (const nome of DIARIA_17_09.pecas) {
-    console.log(`\n   Entrega a criar: "${nome}"  (vence ${DIARIA_17_09.vence})`);
+  console.log(`   roteiro  compartilhado: "${roteiro.title}"  (${dia(roteiro.due_date)})`);
+  console.log(`   captação compartilhada: "${captacao.title}"  (${dia(captacao.due_date)})`);
+
+  const pecas = [];
+  for (const p of DIARIA_17_09.publicacoes) {
+    const pub = await card(p.card);
+    if (!pub) { console.log(`\n   ! card ${p.card} não existe — pulado`); continue; }
+    const novaData = maisDias(pub.due_date, DESLOCAR_DIAS);
+    console.log(`\n   Entrega a criar: "${pub.title}"`);
+    console.log(`     publicação ${dia(pub.due_date)} → ${novaData}   (+${DESLOCAR_DIAS} dias)`);
+    console.log(`     ${p.nota}`);
     console.log(`     roteiro    ← ${roteiro.title}   [compartilhado]`);
     console.log(`     captacao   ← ${captacao.title}  [compartilhado]`);
     console.log(`     edicao     ← vago`);
-    console.log(`     publicacao ← vago`);
+    console.log(`     publicacao ← ${pub.title}`);
+    pecas.push({ pub, novaData });
   }
-  console.log("\n   ⚠ Os nomes acima são PROVISÓRIOS. Troque DIARIA_17_09.pecas antes de aplicar.");
+  if (pecas.length !== 3) {
+    console.log(`\n   ⚠ ${pecas.length} publicações mapeadas, e a captação diz 3. Revise DIARIA_17_09.publicacoes.`);
+  }
 
   // ---- 3. o que fica sozinho ----------------------------------------------
   console.log("\n3. FICAM SEM ENTREGA — decisão deliberada");
@@ -156,7 +182,16 @@ try {
       console.log(rowCount === 1 ? `ok: ligado ${l.etapa}` : `já existia: ${l.etapa}`);
     }
 
-    for (const nome of DIARIA_17_09.pecas) {
+    for (const { pub, novaData } of pecas) {
+      // A data anda ANTES de a Entrega nascer: a Entrega herda o vencimento da
+      // publicação, e nascer com a data velha a deixaria atrasada de saída.
+      await db.query(`
+        update public.tasks
+           set due_date = $2::date,
+               start_date = case when start_date is null then null else $2::date end,
+               end_date = case when end_date is null then null else greatest($2::date, end_date) end
+         where id = $1::uuid`, [pub.id, novaData]);
+
       const { rows: nova } = await db.query(`
         insert into public.tasks (
           client_id, kind, subtype, title, status, priority, assignee,
@@ -167,15 +202,16 @@ try {
           $3::date, $3::date, $3::date, 0, false, 1,
           true, false, $4::uuid, $5::uuid, $6::uuid, '{}'::jsonb
         ) returning id, title`,
-        [CLIENTE, nome, DIARIA_17_09.vence, roteiro.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
+        [CLIENTE, pub.title, novaData, captacao.reviewer_id, DELIVERY_TYPE, WORKFLOW]);
       const entregaId = nova[0].id;
-      for (const [etapa, filho] of [["roteiro", DIARIA_17_09.roteiro], ["captacao", DIARIA_17_09.captacao]]) {
+
+      for (const [etapa, filho] of [["roteiro", DIARIA_17_09.roteiro], ["captacao", DIARIA_17_09.captacao], ["publicacao", pub.id]]) {
         await db.query(`
           insert into public.task_links (parent_id, child_id, relation_kind, workflow_step_id, position)
           values ($1::uuid, $2::uuid, 'workflow_step', $3::uuid, 0)
           on conflict do nothing`, [entregaId, filho, stepId(etapa)]);
       }
-      console.log(`ok: Entrega "${nova[0].title}" criada (${entregaId}) com roteiro e captação compartilhados`);
+      console.log(`ok: Entrega "${nova[0].title}" (${entregaId}) — publicação em ${novaData}, roteiro e captação compartilhados`);
     }
     await db.query("commit");
     console.log("\nTransação confirmada.\n");
