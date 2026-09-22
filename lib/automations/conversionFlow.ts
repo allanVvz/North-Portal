@@ -36,6 +36,7 @@ import { nextStepNotice, withNextStepNotice } from "./nextStepNotice";
 import { getClientById } from "./serviceIntegrations";
 import { reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { attributionOf, conversionModeOf } from "@/lib/reports/conversionMode";
+import { describeInstructions, extractReportInstructions, type ExtractedInstructions } from "@/lib/reports/reportInstructions";
 import type { HistoryPoint } from "@/lib/reports/conversionFocus";
 import {
   attachConversionDocument,
@@ -84,7 +85,19 @@ const FEEDBACK_DESCRIPTION = [
 type OccPayload = Record<string, unknown> & {
   adaptive_source_fingerprint?: string;
   conversion_renderer_revision?: string;
+  report_instructions?: ExtractedInstructions;
 };
+
+/** O que o último comentário humano pediu, guardado na ocorrência por
+ *  `handleConversionRevisionComment`. Tolerante a payload antigo/ausente: sem
+ *  pedido, o relatório sai como sempre saiu. */
+function readReportInstructions(occ: TaskRecord): ExtractedInstructions {
+  const guardado = (occ.payload as OccPayload | null)?.report_instructions;
+  return {
+    instrucoes: Array.isArray(guardado?.instrucoes) ? guardado.instrucoes : [],
+    naoEntendido: Array.isArray(guardado?.naoEntendido) ? guardado.naoEntendido : [],
+  };
+}
 
 export type VisualCommentDecision =
   | { kind: "none" }
@@ -453,6 +466,15 @@ async function generateSalesReport(
   });
   const layoutPlan = planned.layout;
   reportContext.narrative = planned.narrative;
+  // Pedido explícito vence a narrativa do modelo. "Ajuste o comentário: X" põe
+  // X na leitura do período — sem o prefixo da instrução e sem repetir o
+  // parágrafo que já entrou como contexto pelo Feedback. Ver
+  // lib/reports/reportInstructions.ts e o comentário real da CRIS que motivou.
+  const pedidos = readReportInstructions(occ);
+  const narrativaPedida = pedidos.instrucoes.find((i) => i.kind === "narrativa");
+  if (narrativaPedida?.kind === "narrativa") {
+    reportContext.narrative = [{ kind: "pedido", text: narrativaPedida.texto }];
+  }
   const { error: planError } = await admin.from("conversion_reports").update({
     interpretation: {
       ...ext.interpretation,
@@ -576,8 +598,11 @@ async function generateSalesReport(
     reportKind: "conversion",
     // Mesma cortesia do relatório de anúncios: quem abre o card precisa saber se a
     // bola está com ele. A frase vem do workflow versionado da ocorrência.
+    // Resposta item a item quando houve pedido: o que foi aplicado e o que não
+    // foi, com o motivo. A frase pronta dizia sempre a mesma coisa — a Luiza
+    // pediu três ajustes e recebeu "crescimento de seguidores reorganizado".
     text: withNextStepNotice(
-      `Relatório de conversão atualizado — crescimento de seguidores reorganizado e campanhas classificadas por objetivo real. [${fileName}](${urlData.publicUrl})`,
+      `${describeInstructions(pedidos).join(" ") || "Relatório de conversão atualizado."} [${fileName}](${urlData.publicUrl})`,
       await nextStepNotice(admin, occ, CONVERSION_REPORT_STEP_KEY),
     ),
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
@@ -894,6 +919,11 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
 export async function handleConversionRevisionComment(admin: AdminClient, taskId: string, visualRequest?: VisualRequest | null): Promise<void> {
   const card = await getAdminTask(admin, taskId);
   if (!card || card.subtype !== CONVERSION_REPORT_STEP_KEY) return;
+  // O que o último comentário humano PEDE ao relatório (trocar a leitura do
+  // período, esconder um bloco). Fica na ocorrência porque é ela que atravessa
+  // a geração inteira; a etapa guarda o pedido visual, que é outra coisa.
+  const ultimo = [...commentsOf(card.payload)].reverse().find((c) => !AUTOMATION_AUTHORS.has(c.author));
+  const pedidos = ultimo ? extractReportInstructions(ultimo.text) : null;
   const { data, error } = await admin.from("task_links")
     .select("parent_id")
     .eq("child_id", taskId)
@@ -901,7 +931,11 @@ export async function handleConversionRevisionComment(admin: AdminClient, taskId
     .limit(1);
   if (error) throw error;
   const occurrenceId = (data?.[0] as { parent_id?: string } | undefined)?.parent_id;
-  if (occurrenceId) await processConversionFeedback(admin, occurrenceId, visualRequest);
+  if (!occurrenceId) return;
+  if (pedidos && (pedidos.instrucoes.length || pedidos.naoEntendido.length)) {
+    await updateTaskPayload(admin, occurrenceId, { patch: { report_instructions: pedidos } });
+  }
+  await processConversionFeedback(admin, occurrenceId, visualRequest);
 }
 
 /**

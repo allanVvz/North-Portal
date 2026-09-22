@@ -32,7 +32,7 @@ vi.mock("./notify", () => ({
 }));
 vi.mock("./reportLog", () => ({ logReportRun: vi.fn() }));
 
-import { classifyVisualComment, processConversionFeedback, requestVisualClarification } from "./conversionFlow";
+import { classifyVisualComment, handleConversionRevisionComment, processConversionFeedback, requestVisualClarification } from "./conversionFlow";
 
 const OCC = "occ-1";
 const TRAFEGO = "trafego-1";
@@ -186,6 +186,33 @@ describe("conversão depois do Feedback concluído", () => {
     expect(db.task(CONVERSAO)!.status).toBe("revisao");
     expect(conversaoTexts().some((text) => text.includes("Contexto do período atualizado"))).toBe(false);
     expect(conversaoTexts().filter((text) => text.includes("Relatório de conversão atualizado"))).toHaveLength(1);
+  });
+
+  // O comentário REAL da Luiza no relatório da CRIS (22/09 19:20). Antes, as três
+  // instruções não viravam pedido nenhum: o texto caía como contexto e a
+  // automação respondia com uma frase pronta sobre outra coisa.
+  it("pedido de correção vira instrução e a resposta é item a item", async () => {
+    await processConversionFeedback(db.asAdmin(), OCC);
+    await db.rpc("append_task_comment_idempotent", {
+      p_task_id: CONVERSAO,
+      p_author_id: "u1",
+      p_text: "Ajuste o comentário: Direcionamos as campanhas de trafego para perfil e para o site para regiões das capitais de SC e PR também. Remova o comentário sobre seguidores novos. e retire dos dados o % comparativo com o período anterior",
+      p_comment_id: "human-cris-1920",
+    });
+
+    await handleConversionRevisionComment(db.asAdmin(), CONVERSAO);
+
+    // A leitura do período passa a ser o texto dela, sem o prefixo da instrução.
+    const ultimaChamada = hooks.render.mock.calls.at(-1)?.[0];
+    expect(ultimaChamada?.reportContext?.narrative?.[0]?.text).toMatch(/^Direcionamos as campanhas/);
+    expect(ultimaChamada?.reportContext?.narrative?.[0]?.text).not.toMatch(/ajuste o coment/i);
+
+    // E a resposta no card diz o que foi feito, item a item.
+    const resposta = conversaoTexts().at(-1) ?? "";
+    expect(resposta).toContain("Troquei a leitura do período pelo texto que você escreveu.");
+    expect(resposta).toContain("Tirei o comentário sobre seguidores.");
+    expect(resposta).toContain("Tirei o % comparativo com o período anterior.");
+    expect(resposta).not.toContain("crescimento de seguidores reorganizado");
   });
 
   it("falha ao gerar o PDF: a reivindicação é liberada (o retry funciona) e o erro fica visível", async () => {
