@@ -340,8 +340,23 @@ function SalesReportDocument(input: SalesReportInput) {
     const creativeTableForBlock = (block: CampaignBlock) => {
       const rows = creatives.filter((creative) => creative.block === block);
       if (!rows.length) return null;
+      const highlight = [...rows].sort((a, b) => {
+        if (a.costPerResult !== null && b.costPerResult !== null) return a.costPerResult - b.costPerResult;
+        if (a.costPerResult !== null) return -1;
+        if (b.costPerResult !== null) return 1;
+        return b.result - a.result;
+      })[0];
+      const highlightView = creativeCardView(highlight, badges.get(highlight.adId) ?? [], outcome, previews);
       return (
         <View style={{ marginTop: 10 }}>
+          <CreativeCards
+            items={[{
+              ...highlightView,
+              metrics: highlightView.metrics.filter((metric) => metric.label === "investidos" || metric.label === `${highlight.resultUnit}s`),
+            }]}
+            layout={{ maxLines: 2 }}
+          />
+          <View style={{ marginTop: 8 }}>
           <DataTable
             columns={[
               { key: "creative", label: "Criativo", flex: 2.4 },
@@ -354,6 +369,7 @@ function SalesReportDocument(input: SalesReportInput) {
               result: { text: num(creative.result) },
             }))}
           />
+          </View>
         </View>
       );
     };
@@ -368,17 +384,19 @@ function SalesReportDocument(input: SalesReportInput) {
           />
           {funnel.stages.length ? (
             <Section title="Funil">
-              <ProportionalFunnel
-                width={input.layout?.funnel?.width ?? 360}
-                layout={input.layout?.funnel}
-                stages={funnel.stages.map((stage) => ({
-                  label: stage.label,
-                  value: stage.key === "seguidores_novos" ? `+${num(stage.value)}` : num(stage.value),
-                  numeric: stage.value,
-                  base: stage.base,
-                }))}
-                gaps={funnel.gaps}
-              />
+              <View style={{ alignItems: "center", paddingVertical: 2 }}>
+                <ProportionalFunnel
+                  width={Math.min(input.layout?.funnel?.width ?? 300, 300)}
+                  layout={{ ...input.layout?.funnel, maxWidth: 300, nodeWidth: 180 }}
+                  stages={funnel.stages.map((stage) => ({
+                    label: stage.label,
+                    value: stage.key === "seguidores_novos" ? `+${num(stage.value)}` : num(stage.value),
+                    numeric: stage.value,
+                    base: stage.base,
+                  }))}
+                  gaps={funnel.gaps}
+                />
+              </View>
             </Section>
           ) : null}
           {resultItems.length ? <Section title="Resultados informados"><FigureRow items={resultItems} /></Section> : null}
@@ -409,7 +427,6 @@ function SalesReportDocument(input: SalesReportInput) {
               />
             </Section>
           ) : null}
-          {audienceGrowthSection}
           {conversionHistorySection}
           <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} />
         </Page>
