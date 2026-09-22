@@ -203,6 +203,10 @@ export const taskPayloadSchema = z.object({
   flow_prev_task_id: z.unknown().optional(),
   automation_actor: z.unknown().optional(),
   traffic_revision_instruction: z.unknown().optional(),
+  /** O que o último comentário humano pediu ao relatório de conversão — trocar
+   *  a leitura do período, esconder um bloco (lib/reports/reportInstructions.ts).
+   *  Fica na ocorrência, que atravessa a geração inteira. */
+  report_instructions: z.unknown().optional(),
   // Recorrência — template
   recurrence_group: z.unknown().optional(),
   recurrence_cycle: z.unknown().optional(),

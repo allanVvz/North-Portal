@@ -102,16 +102,69 @@ describe("funil", () => {
     expect(w[2]).toBeLessThan(w[1]);
   });
 
-  it("conversas: os mesmos cliques da faixa de números, sem visita ao site no meio", () => {
-    const t: MediaTotals = { ...mediaTotals(crisCur), landingViews: 180 };
-    const f = mediaFunnel(t, "conversas");
-    expect(f.map((s) => s.label)).toEqual(["Alcance", "Cliques", "Conversas"]);
-    expect(f[1].value).toBe(t.clicks);
+  // "Um funil verdadeiro": a silhueta tem que ser honesta em qualquer combinação
+  // de números reais, não só nas duas fixtures acima. Estas propriedades são o
+  // contrato geométrico — se alguma cair, o desenho passou a mentir.
+  it.each([
+    [[16424, 474, 23]],
+    [[12569, 404, 562]],
+    [[10702, 742, 15]],
+    [[5976, 162, 66]],
+    [[1000, 999, 998]],
+    [[100, 1]],
+    [[7, 5, 3, 2, 1]],
+    [[50000, 12000, 3000, 400, 21]],
+  ])("silhueta honesta para %j", (values) => {
+    const w = funnelWidths(values);
+    expect(w).toHaveLength(values.length);
+    // 1. nunca alarga para baixo — um funil que engorda não é funil;
+    for (let i = 1; i < w.length; i += 1) expect(w[i]).toBeLessThan(w[i - 1]);
+    // 2. cabe na caixa e nunca some;
+    for (const width of w) {
+      expect(width).toBeGreaterThanOrEqual(0.36);
+      expect(width).toBeLessThanOrEqual(1);
+    }
+    // 3. o topo é a boca do funil.
+    expect(w[0]).toBeGreaterThanOrEqual(0.94);
   });
 
-  it("conta sem conversa vai do alcance às visitas ao perfil", () => {
-    const t: MediaTotals = { ...mediaTotals(crisCur), profileVisits: 562 };
-    expect(mediaFunnel(t, "visitas").map((s) => s.key)).toEqual(["alcance", "visitas"]);
+  it("ordem de grandeza maior continua mais larga que a menor", () => {
+    const w = funnelWidths([10000, 1000, 100]);
+    expect(w[0] - w[1]).toBeGreaterThan(0);
+    expect(w[1] - w[2]).toBeGreaterThan(0);
+  });
+
+  // A regra antiga era "sem visita ao site no meio": ela existia para a visita ao
+  // site não virar um degrau ENTRE cliques e conversas, o que produziria uma taxa
+  // falsa (a conversa não sai do site). O modelo novo respeita a mesma restrição
+  // por outro caminho: site e perfil são o MESMO nível, lado a lado, nunca em
+  // sequência. Com landing page view disponível, é ela que nomeia a visita ao site.
+  it("conversas: a visita ao site é um nível, nunca um degrau entre cliques e conversas", () => {
+    const t: MediaTotals = { ...mediaTotals(crisCur), landingViews: 180, profileVisits: null };
+    const f = mediaFunnel(t, "conversas");
+    expect(f.map((s) => s.label)).toEqual(["Alcance", "Visitas ao site", "Conversas"]);
+    expect(f[1].value).toBe(180);
+  });
+
+  it("sem landing page view, o que se pode afirmar é o clique — e o rótulo diz isso", () => {
+    const t: MediaTotals = { ...mediaTotals(crisCur), landingViews: null, profileVisits: null };
+    const f = mediaFunnel(t, "conversas");
+    expect(f[1].label).toBe(t.linkClicks !== null ? "Cliques no link" : "Cliques");
+  });
+
+  it("site e perfil juntos viram um nível só, partido ao meio", () => {
+    const t: MediaTotals = { ...mediaTotals(crisCur), landingViews: 180, profileVisits: 562 };
+    const nivel = mediaFunnel(t, "conversas")[1];
+    expect(nivel.key).toBe("entradas");
+    expect(nivel.parts?.map((part) => [part.label, part.value])).toEqual([["Visitas ao site", 180], ["Visitas ao perfil", 562]]);
+    expect(nivel.value).toBe(742);
+  });
+
+  it("conta só de perfil vai do alcance às visitas ao perfil, sem nível dividido", () => {
+    const t: MediaTotals = { ...mediaTotals(crisCur), profileVisits: 562, landingViews: null, linkClicks: null, clicks: null };
+    const f = mediaFunnel(t, "visitas");
+    expect(f.map((s) => s.key)).toEqual(["alcance", "visitas_perfil"]);
+    expect(f[1].parts).toBeUndefined();
   });
 
   it("taxa só entre etapas da mesma fonte", () => {

@@ -271,7 +271,11 @@ export function dominantBlock(objectives: ObjectiveRow[]): CampaignBlock | null 
 
 // ---- funil -------------------------------------------------------------------------------
 
-export type FunnelStage = { key: string; label: string; value: number; source: "midia" | "feedback"; base?: boolean };
+/** Uma metade de um nível dividido: duas portas de entrada que acontecem no
+ *  MESMO passo da jornada, não uma depois da outra. */
+export type FunnelPart = { key: string; label: string; value: number };
+
+export type FunnelStage = { key: string; label: string; value: number; source: "midia" | "feedback"; base?: boolean; parts?: FunnelPart[] };
 
 /** Etapas da mídia até o desfecho: alcance → cliques → conversas, ou alcance →
  *  visitas ao perfil. Os cliques são os MESMOS da faixa de números (nunca o
@@ -281,12 +285,32 @@ export type FunnelStage = { key: string; label: string; value: number; source: "
 export function mediaFunnel(t: MediaTotals, outcome: MediaOutcome): FunnelStage[] {
   const out: FunnelStage[] = [];
   if (t.reach) out.push({ key: "alcance", label: "Alcance", value: t.reach, source: "midia" });
-  if (outcome === "visitas") {
-    if (t.profileVisits) out.push({ key: "visitas", label: "Visitas ao perfil", value: t.profileVisits, source: "midia" });
-    return out;
+
+  // Site e perfil são o MESMO nível: duas portas de entrada da mesma campanha de
+  // tráfego, não uma depois da outra. Quando as duas existem, o nível vira um
+  // trapézio dividido ao meio, cada lado com seu número e seu rótulo.
+  //
+  // O rótulo segue a métrica que de fato existe: "Visitas ao site" só quando há
+  // landing page view; sem ela, o que se pode afirmar é o clique.
+  const site = t.landingViews !== null
+    ? { key: "visitas_site", label: "Visitas ao site", value: t.landingViews }
+    : t.linkClicks !== null
+      ? { key: "cliques_link", label: "Cliques no link", value: t.linkClicks }
+      : t.clicks !== null
+        ? { key: "cliques", label: "Cliques", value: t.clicks }
+        : null;
+  const perfil = t.profileVisits !== null ? { key: "visitas_perfil", label: "Visitas ao perfil", value: t.profileVisits } : null;
+  const entradas = [site, perfil].filter((p): p is FunnelPart => p !== null && p.value > 0);
+
+  if (entradas.length === 2) {
+    out.push({ key: "entradas", label: "Visitas", value: entradas[0].value + entradas[1].value, source: "midia", parts: entradas });
+  } else if (entradas.length === 1) {
+    out.push({ ...entradas[0], source: "midia" });
   }
-  if (t.clicks) out.push({ key: "cliques", label: "Cliques", value: t.clicks, source: "midia" });
-  if (t.conversations !== null) out.push({ key: "conversas", label: "Conversas", value: t.conversations, source: "midia" });
+
+  if (outcome !== "visitas" && t.conversations !== null) {
+    out.push({ key: "conversas", label: "Conversas", value: t.conversations, source: "midia" });
+  }
   return out;
 }
 

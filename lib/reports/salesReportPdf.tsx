@@ -436,6 +436,7 @@ function SalesReportDocument(input: SalesReportInput) {
                     value: stage.key === "seguidores_novos" ? `+${num(stage.value)}` : num(stage.value),
                     numeric: stage.value,
                     base: stage.base,
+                    parts: stage.parts?.map((part) => ({ label: part.label, value: num(part.value), numeric: part.value })),
                   }))}
                   gaps={funnel.gaps}
                 />

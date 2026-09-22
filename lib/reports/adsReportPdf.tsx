@@ -256,7 +256,12 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
           <View style={T.twoCol} wrap={false}>
             <ProportionalFunnel
               width={analysis.insights.length ? 290 : 360}
-              stages={funnel.map((s) => ({ label: s.label, value: num(s.value), numeric: s.value }))}
+              stages={funnel.map((s) => ({
+                label: s.label,
+                value: num(s.value),
+                numeric: s.value,
+                parts: s.parts?.map((part) => ({ label: part.label, value: num(part.value), numeric: part.value })),
+              }))}
               gaps={funnel.slice(1).map((s, i) => stageGap(funnel[i], s))}
             />
             {analysis.insights.length ? (

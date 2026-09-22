@@ -102,10 +102,19 @@ describe("figuras de apoio", () => {
 });
 
 describe("funil do resultado", () => {
-  it("seguidores: alcance → visitas → seguidores novos, sempre em forma trapezoidal", () => {
+  // Site e perfil passaram a ocupar o MESMO nível ("entradas"), desenhado como um
+  // trapézio partido ao meio: são duas portas de entrada da mesma jornada, não
+  // uma depois da outra.
+  it("seguidores: alcance → entradas → seguidores novos, sempre em forma trapezoidal", () => {
     const f = resultFunnel(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 1251 }, media: baitaMedia, followersGain: 37, prevFollowersTotal: 1214 }));
-    expect(f.stages.map((s) => s.key)).toEqual(["alcance", "visitas", "seguidores_novos"]);
-    expect(f.gaps).toEqual(["4,47% visitaram", ""]);
+    expect(f.stages.map((s) => s.key)).toEqual(["alcance", "entradas", "seguidores_novos"]);
+    const entradas = f.stages[1];
+    // Sem landing page view na fixture, o lado do site é o clique — o rótulo
+    // acompanha a métrica que existe, em vez de prometer uma visita que a API
+    // não confirmou.
+    expect(entradas.parts?.map((part) => part.label)).toEqual(["Cliques no link", "Visitas ao perfil"]);
+    // O valor do nível é a soma das duas metades — é ele que dá a largura do trapézio.
+    expect(entradas.value).toBe((entradas.parts ?? []).reduce((total, part) => total + part.value, 0));
   });
 
   it("usa a base do perfil como percentual positivo da etapa final", () => {
@@ -115,7 +124,7 @@ describe("funil do resultado", () => {
 
   it("em campanha de mensagens, conversas antecedem seguidores", () => {
     const f = resultFunnel(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 8000 }, media: baitaMedia, followersGain: 47, hasMessageObjective: true }));
-    expect(f.stages.map((stage) => stage.key)).toEqual(["alcance", "cliques", "conversas", "seguidores_novos"]);
+    expect(f.stages.map((stage) => stage.key)).toEqual(["alcance", "entradas", "conversas", "seguidores_novos"]);
   });
 
   it("em campanha de tráfego para o perfil, seguidores fecham o funil", () => {
@@ -123,13 +132,13 @@ describe("funil do resultado", () => {
       kind: "midia", cur: { ...nada, seguidores: 8000 }, media: baitaMedia,
       followersGain: 47, prevFollowersGain: 90, hasProfileObjective: true,
     }));
-    expect(f.stages.map((stage) => stage.key)).toEqual(["alcance", "cliques", "conversas", "seguidores_novos"]);
+    expect(f.stages.map((stage) => stage.key)).toEqual(["alcance", "entradas", "conversas", "seguidores_novos"]);
     expect(f.stages.at(-1)).toMatchObject({ label: "Seguidores · +0,59%", value: 47 });
   });
 
   it("vendas: termina em vendas; taxa só entre agendamento e venda", () => {
     const f = resultFunnel(ctx({ cur: { ...nada, vendas: 5, agendamentos: 8 } }));
-    expect(f.stages.map((s) => s.key)).toEqual(["alcance", "cliques", "conversas", "agendamentos", "vendas"]);
+    expect(f.stages.map((s) => s.key)).toEqual(["alcance", "entradas", "conversas", "agendamentos", "vendas"]);
     expect(f.gaps[2]).toBe("");
     expect(f.gaps[3]).toBe("62,5% viraram venda");
   });

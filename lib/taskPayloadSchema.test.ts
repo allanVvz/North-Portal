@@ -42,6 +42,7 @@ const CHAVES_GRAVADAS = [
   "recurrence_last_cadence",
   "recurrence_parent_id",
   "recurrence_revision",
+  "report_instructions",
   "statusLabel",
   "statusTone",
   "traffic_revision_instruction",

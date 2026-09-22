@@ -226,7 +226,12 @@ export function ComparisonFigure({ items }: { items: { label: string; from: stri
 
 // ---- funil ---------------------------------------------------------------------------------
 
-export type FunnelView = { label: string; value: string; numeric: number; base?: boolean; source?: string };
+export type FunnelView = {
+  label: string; value: string; numeric: number; base?: boolean; source?: string;
+  /** Nível dividido: duas portas de entrada no MESMO passo da jornada (site e
+   *  perfil). O trapézio do nível é partido ao meio, um lado para cada. */
+  parts?: { label: string; value: string; numeric: number }[];
+};
 export type FunnelLayout = { width?: number; maxWidth?: number; nodeWidth?: number; labelMode?: "inside" | "below" | "outside"; lastLevelWidth?: number; gap?: number; maxLabelLines?: number };
 
 const STAGE_H = 28;
@@ -244,6 +249,10 @@ export function ProportionalFunnel({ stages, gaps, width = 300, layout }: { stag
   const baseWidth = Math.min(layout?.lastLevelWidth ?? visualWidth * 0.62, 220);
   const labelLimit = Math.max(1, layout?.maxLabelLines ?? 2) * 28;
   const clampLabel = (value: string) => value.length <= labelLimit ? value : `${value.slice(0, labelLimit - 1).trimEnd()}…`;
+  // Um nível dividido é um trapézio só, partido no meio por uma fresta — as duas
+  // metades continuam formando a mesma silhueta do funil.
+  const cx = visualWidth / 2;
+  const SPLIT = 5;
   return (
     <View style={{ width: visualWidth, alignItems: "center" }}>
       {flow.map((stage, i) => {
@@ -256,17 +265,72 @@ export function ProportionalFunnel({ stages, gaps, width = 300, layout }: { stag
           <View key={`${stage.label}:${stage.source ?? ""}`} style={{ alignItems: "center", width: visualWidth }} wrap={false}>
             <View style={{ width: visualWidth, height: STAGE_H, position: "relative" }}>
               <Svg viewBox={`0 0 ${visualWidth} ${STAGE_H}`} style={{ position: "absolute", top: 0, left: 0, width: visualWidth, height: STAGE_H }}>
-                <Path
-                  d={`M ${(visualWidth - top) / 2} 0 L ${(visualWidth + top) / 2} 0 L ${(visualWidth + bottom) / 2} ${STAGE_H} L ${(visualWidth - bottom) / 2} ${STAGE_H} Z`}
-                  fill={fills[Math.min(i, fills.length - 1)]}
-                />
+                {stage.parts && stage.parts.length === 2 ? (
+                  <>
+                    <Path
+                      d={`M ${(visualWidth - top) / 2} 0 L ${cx - SPLIT / 2} 0 L ${cx - SPLIT / 2} ${STAGE_H} L ${(visualWidth - bottom) / 2} ${STAGE_H} Z`}
+                      fill={fills[Math.min(i, fills.length - 1)]}
+                    />
+                    <Path
+                      d={`M ${cx + SPLIT / 2} 0 L ${(visualWidth + top) / 2} 0 L ${(visualWidth + bottom) / 2} ${STAGE_H} L ${cx + SPLIT / 2} ${STAGE_H} Z`}
+                      fill={fills[Math.min(i + 1, fills.length - 1)]}
+                    />
+                  </>
+                ) : (
+                  <Path
+                    d={`M ${(visualWidth - top) / 2} 0 L ${(visualWidth + top) / 2} 0 L ${(visualWidth + bottom) / 2} ${STAGE_H} L ${(visualWidth - bottom) / 2} ${STAGE_H} Z`}
+                    fill={fills[Math.min(i, fills.length - 1)]}
+                  />
+                )}
               </Svg>
-              <Text style={{ position: "absolute", top: 7, left: 0, width: visualWidth, textAlign: "center", fontSize: 11, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
+              {stage.parts && stage.parts.length === 2 ? (
+                // Cada número vai no centro REAL da sua metade — não no centro da
+                // caixa. A metade esquerda vai da borda inclinada até a fresta, e
+                // esse meio não é visualWidth/4.
+                <>
+                  {stage.parts.map((part, side) => {
+                    const meio = (top + bottom) / 2;
+                    const centro = side === 0
+                      ? ((visualWidth - meio) / 2 + (cx - SPLIT / 2)) / 2
+                      : ((cx + SPLIT / 2) + (visualWidth + meio) / 2) / 2;
+                    return (
+                      <Text
+                        key={part.label}
+                        style={{ position: "absolute", top: 7, left: centro - visualWidth / 4, width: visualWidth / 2, textAlign: "center", fontSize: 10, fontWeight: 700, color: "#ffffff" }}
+                      >
+                        {part.value}
+                      </Text>
+                    );
+                  })}
+                </>
+              ) : (
+                <Text style={{ position: "absolute", top: 7, left: 0, width: visualWidth, textAlign: "center", fontSize: 11, fontWeight: 700, color: "#ffffff" }}>{stage.value}</Text>
+              )}
             </View>
-            <View style={{ width: labelWidth, alignItems: "center", marginTop: 3 }}>
-              <Text style={{ width: labelWidth, textAlign: "center", fontSize: 6.5, lineHeight: 1.2, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.25 }}>{clampLabel(stage.label)}</Text>
-              {stage.source ? <Text style={{ width: labelWidth, textAlign: "center", fontSize: 6.5, lineHeight: 1.2, color: MUTED }}>{stage.source}</Text> : null}
-            </View>
+            {stage.parts && stage.parts.length === 2 ? (
+              // O rótulo fica sob o centro da sua metade, alinhado com o número.
+              <View style={{ width: visualWidth, height: 9, position: "relative", marginTop: 3 }}>
+                {stage.parts.map((part, side) => {
+                  const meio = (top + bottom) / 2;
+                  const centro = side === 0
+                    ? ((visualWidth - meio) / 2 + (cx - SPLIT / 2)) / 2
+                    : ((cx + SPLIT / 2) + (visualWidth + meio) / 2) / 2;
+                  return (
+                    <Text
+                      key={part.label}
+                      style={{ position: "absolute", top: 0, left: centro - visualWidth / 4, width: visualWidth / 2, textAlign: "center", fontSize: 6.5, lineHeight: 1.2, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.25 }}
+                    >
+                      {clampLabel(part.label)}
+                    </Text>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={{ width: labelWidth, alignItems: "center", marginTop: 3 }}>
+                <Text style={{ width: labelWidth, textAlign: "center", fontSize: 6.5, lineHeight: 1.2, fontWeight: 600, color: SEC, textTransform: "uppercase", letterSpacing: 0.25 }}>{clampLabel(stage.label)}</Text>
+                {stage.source ? <Text style={{ width: labelWidth, textAlign: "center", fontSize: 6.5, lineHeight: 1.2, color: MUTED }}>{stage.source}</Text> : null}
+              </View>
+            )}
             {i < flow.length - 1 || base ? (
               <Text style={{ width: labelWidth, fontSize: 7.5, color: MUTED, minHeight: layout?.gap ?? GAP_H, paddingTop: 3, textAlign: "center" }}>{gaps[i] ?? ""}</Text>
             ) : null}
