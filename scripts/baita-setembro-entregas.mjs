@@ -6,19 +6,18 @@
 //
 // O estado encontrado em produção:
 //   - existem 2 Entregas "criativo" e apenas UM slot vago em toda a Baita
-//     (a publicação de "Evento Baita 26/09");
+//     (a publicação de "Evento Baita 26/09"), preenchido por "Post evento 26/09";
 //   - "Gravação 17/09 — 3 publicações" e "Roteiros da diária 17/09" estão soltos e
 //     são compartilháveis: um card pode ser etapa de VÁRIAS Entregas, porque
 //     `task_links` é único por (parent_id, child_id) e (parent_id, workflow_step_id),
 //     nunca por child_id;
-//   - as 3 peças que saíram da diária de 17/09 NÃO existem como card. A única
-//     publicação que vence depois da gravação é "Post evento 26/09", e ela pertence
-//     à Entrega que já existe. Por isso as Entregas da diária são CRIADAS aqui, com
-//     roteiro e captação compartilhados e publicação vaga.
+//   - as datas das publicações estavam erradas — venciam ANTES da gravação que as
+//     originou. Corrigidas, as três peças da diária aparecem e a conta fecha com o
+//     título da captação.
 //
-// Os nomes em DIARIA_17_09.pecas são provisórios e estão aqui para serem trocados:
-// o dry-run imprime exatamente o que seria criado. Edite esta constante, rode o
-// dry-run de novo, e só então aplique.
+// A Entrega recebe o título da própria publicação que entrega, como já acontece em
+// "Reels Dj Sereno" — nomear peça de conteúdo que não se sabe qual é seria inventar
+// história.
 //
 // Uso: node scripts/baita-setembro-entregas.mjs [--apply]
 
@@ -63,6 +62,12 @@ const DIARIA_17_09 = {
   publicacoes: [
     { card: "dce78cc2-9736-46c1-bbb2-1ebe53a8a387", nota: "Publicação post Evento — vencia 06/09, antes da gravação" },
     { card: "fafaf36a-8d7c-468b-8363-ab515d94a999", nota: "Post evento 19/09 — vencia 13/09, antes da gravação" },
+    // A terceira peça. A descrição a identifica sem ambiguidade: "Posta VÍDEO do
+    // motivo do estresse. Mencionando O EVENTO DO FINAL DE SEMANA na legenda e se
+    // couber, também no vídeo." Vídeo é reels (a regra da gravação vale), fala do
+    // mesmo evento das outras duas, e vence antes da gravação — o mesmo padrão de
+    // data errada. É ela que fecha as 3 publicações do título da captação.
+    { card: "fea9aae7-8d25-44ac-aab0-9250fa87df80", nota: "Postagem motivo do estresse — vídeo sobre o evento; vencia 09/09, antes da gravação" },
   ],
 };
 
@@ -71,8 +76,9 @@ const DIARIA_17_09 = {
  *  "Post jogando pratos novos" é a MESMA peça que "REELS FEED - Jogando pratos
  *  novos" (já ligado ao Plano de Agosto) — um reels só, ainda não publicado. Como os
  *  outros cards dessa peça não existem, ela não compõe Entrega: fica como task de
- *  edição, solta. Por isso ela saiu de DIARIA_17_09 e a diária tem 2 publicações, e
- *  não 3, apesar do título da captação. */
+ *  edição, solta. Tirá-la daqui não quebrou a conta das 3 publicações — o lugar dela
+ *  era ocupado por "Postagem motivo do estresse", que a descrição identifica como
+ *  vídeo sobre o mesmo evento. */
 const AJUSTAR_SUBTYPE = [
   { card: "19405746-eeb2-4ce6-b6cd-655e8132686c", de: null, para: "edicao", porque: "mesma peça de 'REELS FEED - Jogando pratos novos'; sem os outros cards, não compõe Entrega" },
 ];
@@ -81,7 +87,6 @@ const AJUSTAR_SUBTYPE = [
  *  deliberada, e não esquecimento. */
 const SEM_ENTREGA = [
   ["1684c4a4-bb60-4c49-ac5b-15c2f1acdcbe", "Post Feed agenda Mês Setembro", "Feed/carrossel — a própria descrição diz 'Postar em formato Carrossel'; não sai de gravação"],
-  ["fea9aae7-8d25-44ac-aab0-9250fa87df80", "Postagem motivo do estresse", "publicação avulsa, por decisão do usuário"],
   ["1e3260fc-ae42-4bc8-a90a-7195f0cec3bf", "Dia do Consumidor", "edição de card promocional ('promoções ativas no Dia do Consumidor'), sem relação com as peças do evento"],
   ["049c13ad-dcd1-45ea-9a92-fb4523758f17", "DIVULGAÇÃO EVENTO - 12/09", "evento de 12/09, marcado 'finalizado' em comentário"],
   ["19405746-eeb2-4ce6-b6cd-655e8132686c", "Post jogando pratos novos", "um reels só, ainda não publicado; mesma peça de 'REELS FEED - Jogando pratos novos'. Sem os outros cards não compõe Entrega — fica como task de edição (ver AJUSTAR_SUBTYPE)"],
@@ -165,12 +170,11 @@ try {
     console.log(`     publicacao ← ${pub.title}`);
     pecas.push({ pub, novaData });
   }
-  // O título da captação diz "3 publicações", mas só 2 peças têm card próprio: a
-  // terceira ("jogando pratos") é a mesma de um card já ligado ao Plano de Agosto e
-  // não tem as demais etapas, então virou task de edição solta. A divergência é
-  // deliberada e fica registrada em vez de virar uma Entrega vazia.
-  console.log(`\n   ${pecas.length} Entrega(s) da diária — a captação diz 3 publicações;`);
-  console.log(`   a terceira é a mesma peça de "REELS FEED - Jogando pratos novos" e fica como edição solta.`);
+  // O título da captação diz "3 publicações" e as três têm card. A peça que sobrava
+  // ("jogando pratos") era a mesma de um card já ligado ao Plano de Agosto — por isso
+  // ela saiu daqui e virou edição solta, sem quebrar a conta.
+  console.log(`
+   ${pecas.length} Entrega(s) da diária — bate com as 3 publicações do título da captação.`);
 
   // ---- 2b. corrigir subtype -------------------------------------------------
   console.log(`\n2b. CORRIGIR SUBTYPE`);
