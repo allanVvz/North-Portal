@@ -23,7 +23,7 @@ import { workflowByVersionId, workflowStepByKey } from "@/lib/workflows";
 import type { Period } from "@/app/admin/performance/insights";
 import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import { feedbackTemplate } from "@/lib/ai/commentParser";
-import { CONVERSION_METRICS_DEFAULT, metricTagDef, metricTagLabel, needsRichExtraction } from "@/lib/metricTags";
+import { CONVERSION_METRICS_DEFAULT, metricTagDef, needsRichExtraction } from "@/lib/metricTags";
 import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
@@ -73,7 +73,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // A render revision is part of idempotency, not of feedback extraction.
 // Bumping it regenerates only open/current occurrences and leaves earlier
 // documents and append-only snapshots available as audit history.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v3";
+const CONVERSION_RENDERER_REVISION = "segment-summary-v4";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
@@ -265,15 +265,6 @@ export async function prepareFeedbackCard(admin: AdminClient, occ: TaskRecord): 
   return (await getAdminTask(admin, card.id)) ?? card;
 }
 
-/** Só as métricas que o gestor de fato informou. Listar "Vendas: 0" para quem
- *  não falou de vendas é a automação afirmando um resultado que ninguém deu —
- *  e o gestor lê isso como erro do sistema. */
-function resumoDe(valores: Record<string, number | null>, tags: string[]): string {
-  const ditas = tags.filter((t) => valores[t] !== null && valores[t] !== undefined);
-  if (!ditas.length) return "nenhuma métrica identificada no comentário";
-  return ditas.map((t) => `${metricTagLabel(t)}: ${valores[t]}`).join(" · ");
-}
-
 /** O que vai para `task_metrics`: a chave da métrica NÃO informada simplesmente
  *  não existe na linha. Mantém o jsonb como `Record<string,string>` (a tela de
  *  Performance lê esse mesmo formato em `listPublishedTasks`) e faz a série
@@ -389,7 +380,8 @@ async function generateSalesReport(
   admin: AdminClient,
   config: AutomationConfigRow,
   occ: TaskRecord,
-  card2: TaskRecord,
+  conversionCard: TaskRecord,
+  feedbackCard: TaskRecord,
   ext: AdaptiveMetricExtract,
   traffic: TrafficReportRow,
   cadence: RecurringCadence,
@@ -543,14 +535,14 @@ async function generateSalesReport(
   const { data: existingRows, error: existingError } = await admin
     .from("documents")
     .select("id")
-    .eq("task_id", card2.id)
+    .eq("task_id", conversionCard.id)
     .eq("name", fileName)
     .limit(1);
   if (existingError) throw existingError;
   const existingId = (existingRows?.[0] as { id?: string } | undefined)?.id;
   if (existingId) return existingId;
 
-  const path = documentStoragePath(client.slug, `relatorio-conversao-${period.to}-${Date.now()}.pdf`, card2.id);
+  const path = documentStoragePath(client.slug, `relatorio-conversao-${period.to}-${Date.now()}.pdf`, conversionCard.id);
   const { error: uploadError } = await admin.storage.from(DOCUMENT_BUCKET).upload(path, pdf, {
     contentType: "application/pdf",
     upsert: false,
@@ -560,7 +552,7 @@ async function generateSalesReport(
 
   const { data: docRows, error: docError } = await admin.from("documents").insert({
     client_id: clientId,
-    task_id: card2.id,
+    task_id: conversionCard.id,
     name: fileName,
     doc_type: "relatorio",
     status: "publicado",
@@ -579,7 +571,9 @@ async function generateSalesReport(
   }
 
   // Atômico e idempotente: nada de reler o payload para regravá-lo inteiro.
-  await replaceAutomaticReportAttachment(admin, card2.id, {
+  // Keep the resulting PDF immediately after the manager's feedback instead
+  // of creating an extra generated-summary thread in the conversion card.
+  await replaceAutomaticReportAttachment(admin, feedbackCard.id, {
     reportKind: "conversion",
     // Mesma cortesia do relatório de anúncios: quem abre o card precisa saber se a
     // bola está com ele. A frase vem do workflow versionado da ocorrência.
@@ -590,7 +584,7 @@ async function generateSalesReport(
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de
     // 128 caracteres do id. (card, período) já identifica a conversão — o retry
     // que reencontra o documento já retorna antes de chegar aqui.
-    commentId: automationCommentId("conversion-report", card2.id, layoutPlan.fingerprint.slice(0, 16), fileName),
+    commentId: automationCommentId("conversion-report", feedbackCard.id, version),
   });
   return (docRows?.[0] as { id: string } | undefined)?.id ?? null;
 }
@@ -757,11 +751,6 @@ async function processOccurrence(
     }
 
     const sourceAt = sourceCommentAt ?? card2.completed_at;
-    const ganhoComparativo = ext.seguidoresGanho != null && ext.seguidoresGanhoAnterior != null
-      ? ` Comparação de seguidores novos: ${ext.seguidoresGanho} contra ${ext.seguidoresGanhoAnterior} (${ext.seguidoresGanho - ext.seguidoresGanhoAnterior >= 0 ? "+" : ""}${ext.seguidoresGanho - ext.seguidoresGanhoAnterior}; ${ext.seguidoresGanhoAnterior === 0 ? "sem base percentual" : `${((ext.seguidoresGanho - ext.seguidoresGanhoAnterior) / ext.seguidoresGanhoAnterior * 100).toFixed(2).replace(".", ",")}%`}).`
-      : "";
-    const resumo = `Contexto do período atualizado — ${resumoDe(ext.valores, tags)}.${ganhoComparativo}`;
-
     // Pai: só os marcadores estruturais (sem comentário — invisível). O status do
     // pai NUNCA é escrito aqui: ele é a projeção da etapa aberta (o banco recusa
     // escrita direta — trigger tasks_reject_manual_rollup_status) e acompanha o
@@ -771,10 +760,6 @@ async function processOccurrence(
     occ = marked?.task ?? occ;
 
     conversionTaskId = card3.id;
-    await updateTaskPayload(admin, card3.id, {
-      text: resumo,
-      commentId: automationCommentId("conversion-summary", card3.id, claim.id),
-    });
     const started = await transitionTaskStatus(admin, card3.id, {
       to: "em_producao",
       from: ["backlog", "parada", "em_producao", "revisao", "aprovado", "aprovacao"],
@@ -782,7 +767,7 @@ async function processOccurrence(
     });
     if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
     card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, reportFingerprint, claim.id, visualRequest);
+    const documentId = await generateSalesReport(admin, config, occ, card3, card2, ext, traffic, cadence, period, sourceCommentAt, reportFingerprint, claim.id, visualRequest);
     await attachConversionDocument(admin, claim.id, documentId);
     await supersedePriorConversionReports(admin, {
       id: claim.id,
