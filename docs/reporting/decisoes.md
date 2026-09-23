@@ -36,6 +36,15 @@ Cada linha diz o que foi decidido e por quê. O detalhe de implementação mora 
 | 22/09 | CPM sai do relatório de conversão; permanece exclusivo do relatório de anúncios | "cpm é somente para o relatório de trafego" |
 | 22/09 | Comentário de correção da Luiza vira instrução estruturada (`lib/reports/reportInstructions.ts`), não só texto solto no contexto | O pedido "ajuste o comentário: X / remova o comentário sobre Y / retire o % comparativo" caía inteiro, cru e duplicado, em `context[]` — nada do que ela pediu mudava o PDF |
 | 22/09 | Resposta da automação no card vira item a item (`describeInstructions`), nunca frase pronta | A frase canônica não correspondia ao que foi realmente aplicado |
+| 23/09 | Visitas ao site/perfil e conversas passam a ser somadas só dos posts do próprio bloco de objetivo (`objectiveScopedMediaTotals`) | A Meta atribui link click/landing view a qualquer anúncio com link, mesmo numa campanha de perfil — a Baita (sem campanha de site) tinha uma "Visitas ao site" fantasma no funil |
+| 23/09 | Seguidores em `trafego_perfil` deixa de depender do template declarar KPI pro bloco (`CampaignBlocksSection` conta o bloco como presente também via `extraKpis`) | Um template customizado futuro que esquecesse de declarar o bloco faria o card de seguidores sumir por completo, mesmo com dado real |
+| 23/09 | KPI "Novos seguidores" mostra "% vs. semana anterior" ou "% da base", nunca mais "+66 informados" (repetia o próprio valor do card) | Reaproveita a mesma escolha do funil (`positiveFollowerFallback`), sem % nenhum quando não há nenhuma das duas referências |
+| 23/09 | Total de seguidores igual ao ganho (comentário ambíguo, achado real na FALKE) vira "não informado", nunca "100% da base" | "Seguidores: 66" sem dizer se é total ou ganho alegava que a conta inteira tinha 66 seguidores; a automação passa a pedir a referência no comentário de resposta |
+| 23/09 | "Outros criativos" vira "Todos os criativos" — o destaque não é mais excluído da lista | Igual ao relatório de anúncios já fazia; a lista ficava incompleta |
+| 23/09 | Card de Destaque (padrão "wide") não é mais forçado à largura da folha inteira | Com poucas métricas, sobrava um espaço morto grande à direita — largura agora proporcional ao conteúdo, com fundo levemente tonalizado |
+| 23/09 | Bloco por objetivo (KPIs + destaque + criativos) volta a ser atômico na paginação (`wrap={false}` incondicional) | Só ficava protegido contra quebra de página quando não tinha detalhe — o relatório de conversão é o único que sempre tem |
+| 23/09 | Página ganha mais respiro (`paddingVertical` 16→28, rodapé 10→14) | Pedido de mais offset no topo/rodapé de cada página |
+| 23/09 | `adaptiveFeedback.ts` não duplica mais em "Leitura da semana" um comentário que já virou narrativa tratada (prefixo "Ajuste o comentário:") | Achado real na CRIS (22/09): a mesma frase aparecia duas vezes, uma limpa e outra crua |
 
 ## Criativos
 
@@ -102,11 +111,13 @@ Par da semana sem IA ≈ US$ 0,0002 (≈ R$ 0,001). Com a IA lendo o comentário
   números) e os do bloco por objetivo podem repetir o mesmo dado — Luiza pediu
   "rodar uma validação de templates para esses contextos, não duplicar dados".
   Falta desenhar como detectar "1 campanha == 1 bloco" e suprimir a redundância.
-- **Design do card de destaque por objetivo (relatado 22/09, não iniciado)**:
-  "tem muito espaço negativo, a fonte a hierarquia, o design deve melhorar".
-  Abordagem combinada: proposta de layout seguida de validação visual no PDF
-  gerado (Chrome), não um requisito fechado de antemão.
-- **Campanha "VENDAS | SITE | 03/06 — CÓPIA" na CRIS (achado 22/09)**: apareceu
-  como destaque real num PDF de produção — parece um teste/duplicata de
-  campanha que não deveria concorrer por espaço no relatório. Não confirmado
-  com o cliente se é para excluir do relatório ou corrigir na Meta.
+- **Campanha "VENDAS | SITE | 03/06 — CÓPIA" na CRIS (achado 22/09, ainda
+  presente em 23/09)**: continua aparecendo como destaque real no PDF —
+  parece um teste/duplicata de campanha que não deveria concorrer por espaço
+  no relatório. Não confirmado com o cliente se é para excluir do relatório
+  ou corrigir na Meta.
+- **Design do card de destaque (feito em 23/09)**: largura deixou de ser
+  forçada à folha inteira, mas o valor `320` (`reportBlocks.tsx`, padrão
+  "wide") e o fundo `C.surface2` foram uma primeira proposta validada
+  visualmente nos 3 PDFs reais — pode precisar de mais um ajuste fino se,
+  com mais métricas ou badges, o conteúdo apertar contra a borda.
