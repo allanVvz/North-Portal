@@ -4046,7 +4046,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   --tm-scale: 1.1;
   --tm-cover-h: 88px;
   zoom: var(--tm-scale);
-  width: min(1680px, calc(((100vw / var(--ui-scale)) - 24px) / var(--tm-scale)));
+  width: min(1760px, calc(((100vw / var(--ui-scale)) - 24px) / var(--tm-scale)));
   height: min(880px, calc(((100dvh / var(--ui-scale)) - 64px) / var(--tm-scale)));
   max-height: calc(((100dvh / var(--ui-scale)) - 64px) / var(--tm-scale));
   overflow-x: hidden;
@@ -4056,17 +4056,24 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    sincronia deixaria uma tira da imagem aparecendo abaixo do cabeçalho. */
 .tm-lg .tm-head { min-height: var(--tm-cover-h); gap: 18px; padding: 24px 32px 19px; }
 .tm-lg .tm-head:not(.tm-head-plain) { display: grid; grid-template-columns: minmax(260px, 460px) minmax(280px, 1fr) auto; }
-.tm-head-identity { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.tm-lg .tm-head-text { min-width: 0; max-width: 460px; }
-.tm-lg .tm-title-input { font-size: clamp(19px, 1.6vw, 24px); line-height: 1.2; letter-spacing: -.01em; }
+.tm-head-identity { display: flex; align-items: center; gap: 14px; min-width: 0; overflow: visible; }
+/* O título nunca quebra em duas linhas, nem fica truncado — cresce pelo que
+   precisar e, se for mais largo que a coluna, sobrepõe o stepper/progresso
+   ao lado (pedido explícito: melhor sobrepor do que quebrar ou cortar). */
+.tm-lg .tm-head-text { min-width: 0; max-width: none; overflow: visible; }
+.tm-lg .tm-title-input {
+  font-size: clamp(19px, 1.6vw, 24px); line-height: 1.2; letter-spacing: -.01em;
+  field-sizing: content; width: auto; min-width: 100%; max-width: none;
+  white-space: nowrap; overflow: visible; position: relative; z-index: 2;
+}
 .tm-lg .tm-title-input { margin-bottom: 1px; }
 .tm-lg .tm-head-client { gap: 5px; padding-top: 3px; line-height: 1.35; }
 .tm-layout { display: grid; grid-template-columns: 1fr; min-width: 0; flex: 1; min-height: 0; overflow-y: auto; }
-/* Coluna de comentários ~10% mais larga (340/420 -> 375/462): links do Drive e
-   revisões longas quebravam em três linhas na largura anterior. O que a coluna
-   ganha sai da principal, então descrição e atributos encolhem um pouco junto
-   (ver .tm-desc-input / .tm-cell abaixo). */
-.tm-layout:has(.tm-side) { grid-template-columns: minmax(0,1fr) minmax(375px, 462px); align-items: stretch; }
+/* Coluna de comentários mais larga (375/462 -> 410/520): o dropdown de editar
+   um comentário (menu "···") ficava sob o corte da coluna, meio invisível.
+   O que a coluna ganha sai da principal, então descrição e atributos encolhem
+   um pouco junto (ver .tm-desc-input / .tm-cell abaixo). */
+.tm-layout:has(.tm-side) { grid-template-columns: minmax(0,1fr) minmax(410px, 520px); align-items: stretch; }
 .tm-main { display: flex; flex-direction: column; min-width: 0; min-height: 100%; }
 /* Internal, elegant panel (inset card) instead of a bordered "external" column */
 .tm-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 20px 24px 24px 8px; padding: 20px 20px 18px; background: linear-gradient(180deg, var(--a-inset), color-mix(in srgb, var(--a-inset) 76%, var(--a-surface))); border: 1px solid var(--a-border); border-radius: 18px; }

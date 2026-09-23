@@ -712,12 +712,37 @@ export default function TaskModal({
     : null;
   const canCrossClientPlan = Boolean(liveTask && kd.isPlan && draft.clientSlug === "north");
   const canCrossClientRecurrence = Boolean(liveTask && isRecurringParent && draft.clientSlug === "north");
+  // Um Plano da ADM North pode reunir card de QUALQUER cliente (permissão já
+  // aplicada no servidor — POST /relations e o PATCH de plan_id), mas
+  // `clientTasks` é só o que a TELA que abriu o modal já carregou, que nunca
+  // inclui outro cliente. Sem isto, o combobox de "vincular card existente"
+  // não achava nada pra buscar mesmo quando a permissão já deixava linkar —
+  // bug real relatado (2026-09-2x): a permissão funcionava, a busca não tinha
+  // com o que trabalhar. Busca o quadro cross-client inteiro (mesma fonte do
+  // filtro "Todos", `listAllTasks`) uma vez, só quando este card é
+  // efetivamente um Plano da North.
+  const [crossClientPool, setCrossClientPool] = useState<TaskRecord[]>([]);
+  useEffect(() => {
+    if (!canCrossClientPlan) { setCrossClientPool([]); return; }
+    let cancelled = false;
+    fetch("/api/admin/tasks")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { tasks: TaskRecord[] } | null) => { if (!cancelled && data?.tasks) setCrossClientPool(data.tasks); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [canCrossClientPlan]);
+  const linkCandidatePool = useMemo(() => {
+    if (!canCrossClientPlan || !crossClientPool.length) return clientTasks;
+    const merged = new Map(clientTasks.map((t) => [t.id, t]));
+    for (const t of crossClientPool) if (!merged.has(t.id)) merged.set(t.id, t);
+    return [...merged.values()];
+  }, [clientTasks, canCrossClientPlan, crossClientPool]);
   const linkableCandidates = liveTask
     // Ter uma entrega como pai não impede entrar num plano, e já pertencer a
     // OUTRO plano também não — um card pode ser membro de vários Planos de
     // Ação ao mesmo tempo. O que continua impedido é oferecer de novo um card
     // que já é membro DESTE plano especificamente.
-    ? clientTasks.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && (canCrossClientPlan || t.client_id === liveTask.client_id))
+    ? linkCandidatePool.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && (canCrossClientPlan || t.client_id === liveTask.client_id))
     : [];
   // Candidatos a "vincular como execução" de um molde de recorrência: mesmo
   // cliente, não pode ser molde de nenhuma recorrência nem já ser execução de
@@ -810,12 +835,18 @@ export default function TaskModal({
       .map((parent) => ({ parent, relation: "referencia" as const, subtitle: "Referência · fora do progresso" }))
     : [];
   // Ordem: pertencimento estrutural, recorrência temporal, depois contexto.
-  const parentBoxes = [
+  // UMA caixa "Faz parte de" pra tudo isso junto (entrega + cada Plano +
+  // recorrência) — um card que pertence a vários Planos ao mesmo tempo (a
+  // agregação da ADM North) listava uma caixa inteira repetida por Plano,
+  // cada uma com o mesmo rótulo e a mesma moldura; agora é uma linha por
+  // relação dentro da MESMA caixa (ver CardParentBox). Referência continua
+  // com rótulo e caixa própria ("Relacionado a") — semântica diferente,
+  // fora do rollup da família.
+  const belongsToBoxes = [
     ...(entregaSlot?.parent ? [{ parent: entregaSlot.parent, relation: "entrega" as const, subtitle: entregaSlot.subtitle, progress: entregaSlot.progress }] : []),
     ...workflowBoxes,
     ...planBoxes,
     ...(recorrenciaSlot?.parent ? [{ parent: recorrenciaSlot.parent, relation: "recorrencia" as const, subtitle: recorrenciaSlot.subtitle, progress: recorrenciaSlot.progress }] : []),
-    ...referenceBoxes,
   ];
   // Um slot cujo id já se conhece mas cujo card pai ainda não chegou (fetch em
   // voo) — o placeholder de carregamento usa isto, e só isto, em vez de
@@ -1755,17 +1786,18 @@ export default function TaskModal({
                 Renderiza ANTES da caixa de Etapas de propósito — plano em
                 cima, etapas abaixo, quando os dois existem no mesmo card. O
                 stepper editável e o 🔗 ficam do lado da entrega. */}
-            {parentBoxes.map((box) => (
-              <CardParentBox
-                key={box.parent.id}
-                parent={box.parent}
-                relation={box.relation}
-                subtitle={box.subtitle}
-                progress={"progress" in box ? box.progress : undefined}
-                canOpen={Boolean(onOpenRelatedTask) && !busy}
-                onOpen={() => void openRelatedTask(box.parent)}
-              />
-            ))}
+            <CardParentBox
+              label="Faz parte de"
+              items={belongsToBoxes}
+              canOpen={Boolean(onOpenRelatedTask) && !busy}
+              onOpen={(parent) => void openRelatedTask(parent)}
+            />
+            <CardParentBox
+              label="Relacionado a"
+              items={referenceBoxes}
+              canOpen={Boolean(onOpenRelatedTask) && !busy}
+              onOpen={(parent) => void openRelatedTask(parent)}
+            />
             {/* Deriva de `pendingParentBox` (mesmos slots que geram as caixas
                 acima, entrega/plano(s)/recorrência) — não repete a
                 combinação de flags aqui. */}
