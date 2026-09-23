@@ -74,7 +74,10 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // A render revision is part of idempotency, not of feedback extraction.
 // Bumping it regenerates only open/current occurrences and leaves earlier
 // documents and append-only snapshots available as audit history.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v11";
+// v12 (22/09): sem destaque acima dos KPIs, sem Frequência, "%" só quando é
+// ganho > 1%, sem CPM — bump força a regeneração das ocorrências já geradas
+// em v11 (Baita/CRIS/FALKE) na próxima vez que a etapa for reprocessada.
+const CONVERSION_RENDERER_REVISION = "segment-summary-v12";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
