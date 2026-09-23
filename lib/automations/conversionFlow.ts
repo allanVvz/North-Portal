@@ -86,7 +86,11 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // v15 (23/09): mensagens volta a ser a ÚLTIMA etapa do funil quando existe
 // campanha de mensagens — antes vinha antes de seguidores (achado real na
 // FALKE), contrariando a regra combinada em 22/09.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v15";
+// v16 (23/09): ganho + base de seguidores na mesma frase ("21 novos, perfil já
+// tinha 30000") agora soma pro total real (30021) em vez de ficar ambíguo e
+// ser descartado — achado real na CRIS, corrigido na fonte (commentParser.ts)
+// e replicado no fallback de IA (extractMetrics.ts).
+const CONVERSION_RENDERER_REVISION = "segment-summary-v16";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",

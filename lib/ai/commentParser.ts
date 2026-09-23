@@ -335,6 +335,17 @@ export function parseFeedbackComment(text: string, tags: string[]): ParsedCommen
     }
   }
 
+  // "21 novos seguidores. O perfil já estava com 30000": depois do desambiguador
+  // acima, `valores.seguidores` fica igual ao ganho (21) — um valor ambíguo, não
+  // um total de verdade. A base que a pessoa TAMBÉM informou (`valoresAnteriores`)
+  // dá o total real (30000 + 21 = 30021); sem esta soma, o total ambíguo era só
+  // descartado rio abaixo (renderer/snapshot) e "seguidores" sumia do relatório
+  // mesmo com o dado completo no comentário — achado real na CRIS, 23/09.
+  if (tags.includes("seguidores") && valores.seguidores !== null && valores.seguidores === acc.seguidoresGanho
+    && valoresAnteriores.seguidores !== null) {
+    valores.seguidores = valoresAnteriores.seguidores + acc.seguidoresGanho;
+  }
+
   // Mesmas regras de parseMetricJson: receita declarada vence a soma das vendas
   // descritas; agendamento nunca abaixo de venda quando os dois foram informados.
   if (tags.includes("receita") && valores.receita === null) {

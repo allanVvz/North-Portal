@@ -5,7 +5,7 @@ import { parseFeedbackComment } from "./commentParser";
 // mesma métrica de um jeito, e os três produziram resultados diferentes:
 //
 //   Baita  → seguidores 8066 / novos 66   (certo)
-//   CRIS   → {} — os seguidores sumiram do PDF
+//   CRIS   → {} — os seguidores sumiram do PDF (23/09: corrigido, ver abaixo)
 //   FALKE  → seguidores 66 / novos 66     (e o PDF chamou 66 de "Total do perfil")
 //
 // A regra confirmada com o usuário: o número informado é SEMPRE o ganho
@@ -17,13 +17,15 @@ const TAGS = ["vendas", "agendamentos", "seguidores", "receita"];
 describe("comentários reais de 15–21/09", () => {
   // O caso que sumiu do PDF: o ganho e a base do perfil na mesma frase. Antes o
   // parser via 21 e 30000 como dois valores da mesma métrica, marcava AMBIGUOUS
-  // e descartava os dois.
+  // e descartava os dois. Hoje resolve os dois papéis (ganho × base) e, quando
+  // os dois são conhecidos, soma pra dar o total real (23/09) — antes disso o
+  // total ficava travado no valor do ganho e era descartado rio abaixo.
   it("CRIS: '21 novos seguidores. O perfil já estava com mias de 30000 seguidores'", () => {
     const r = parseFeedbackComment("21 novos seguidores. O perfil já estava com mias de 30000 seguidores", TAGS);
     expect(r.state).not.toBe("AMBIGUOUS");
     expect(r.seguidoresGanho).toBe(21);
-    expect(r.valores.seguidores).toBe(21);
     expect(r.valoresAnteriores.seguidores).toBe(30000);
+    expect(r.valores.seguidores).toBe(30021);
   });
 
   // Mesmo formato, com erro de digitação na palavra depois do número
@@ -34,8 +36,8 @@ describe("comentários reais de 15–21/09", () => {
       TAGS,
     );
     expect(r.seguidoresGanho).toBe(66);
-    expect(r.valores.seguidores).toBe(66);
     expect(r.valoresAnteriores.seguidores).toBe(8000);
+    expect(r.valores.seguidores).toBe(8066);
   });
 
   it("Baita (2º comentário): dois totais → total atual e anterior, sem ganho declarado", () => {

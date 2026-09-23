@@ -48,15 +48,29 @@ function buildSystem(tags: string[], rich: boolean): string {
   // lib/metricTags.ts): a série temporal precisa de uma grandeza só, e o total
   // é a única que dá pra comparar entre semanas. Regra só entra quando a tag
   // foi pedida — sem ela, é ruído no prompt.
+  //
+  // Reformulado em 23/09 (achado real na CRIS: "21 novos seguidores. O perfil
+  // já estava com mias de 30000 seguidores" chegava como AMBIGUOUS/sumia do
+  // relatório). A instrução antiga mandava usar 0 quando só o ganho era dito —
+  // exatamente o erro que este módulo documenta no topo do arquivo como
+  // proibido ("ausência nunca vira zero"). Agora pede ganho e base separados
+  // (mesmos campos que o parser determinístico já produz em
+  // commentParser.ts), e o total só é o que a pessoa disse OU a soma dos dois
+  // quando ela informou ambos — nunca um ganho sozinho fingindo de total.
   const seguidoresSpec = tags.includes("seguidores")
-    ? `\n- "seguidores" é o TOTAL de seguidores do perfil ao FIM do período, nunca o ganho da semana: "foi de 812 pra 829" → 829; "chegamos a 1.240 seguidores" → 1240. Se o texto só disser o ganho ("ganhamos 17 seguidores") sem o total, use 0.`
+    ? `\n- Seguidores tem TRÊS formas de aparecer, nunca misture:
+  1. Total direto: "chegamos a 1.240 seguidores", "foi de 812 pra 829" → valores.seguidores = 829 (o número final).
+  2. Só o ganho, sem base: "ganhamos 17 seguidores" → seguidoresGanho = 17; NÃO preencha valores.seguidores (omita a chave; nunca 0 — ausência de base não é ausência de seguidores).
+  3. Ganho E base na mesma frase: "21 novos seguidores, o perfil já tinha 30000" → seguidoresGanho = 21, seguidoresGanhoAnterior = 30000, valores.seguidores = 30021 (a soma — é o total real desta semana).
+  Se o texto comparar duas semanas ("período anterior 90 novos, este período 47") isso também é seguidoresGanho (47) + seguidoresGanhoAnterior (90), não valores.seguidores.`
     : "";
   const linhasSpec = rich
     ? `\nPara CADA venda ou agendamento que o texto detalhe (com valor em reais, ou fonte de anúncio #1/#2/#3, ou se fechou/foi só agendado), acrescente um item em "linhas": {"servico":<string|null>,"valor":<número|null>,"fonte":<"1"|"2"|"3"|null>,"status":<"agendado"|"fechado"|null>}. Uma venda detalhada no meio de várias contadas ("3 vendas, uma de R$1.400 pela #2") gera 1 linha. Sem nenhum detalhe → "linhas": [].`
     : `\nNão precisa de "linhas": use [].`;
+  const seguidoresFields = tags.includes("seguidores") ? `,"seguidoresGanho":<número|null>,"seguidoresGanhoAnterior":<número|null>` : "";
   return `Você extrai métricas que um responsável relatou num comentário sobre a semana.
 Responda APENAS com JSON, sem texto antes ou depois:
-{"valores":{${tags.map((t) => `"${t}":<número>`).join(",")}},"linhas":[]}
+{"valores":{${tags.map((t) => `"${t}":<número>`).join(",")}},"linhas":[]${seguidoresFields}}
 Regras:
 - "valores" só tem chave para a métrica que o texto MENCIONA, dentre estas: ${lista}.
 - O número é a quantidade/valor total relatado para aquela métrica. Valor em reais é número puro (sem "R$", sem separador de milhar).
@@ -113,7 +127,7 @@ export function parseMetricJson(text: string, tags: string[]): MetricExtract {
   } catch {
     return { valores: vazio(), linhas: [], note: "resposta da IA ilegível" };
   }
-  const obj = (parsed ?? {}) as { valores?: unknown; linhas?: unknown };
+  const obj = (parsed ?? {}) as { valores?: unknown; linhas?: unknown; seguidoresGanho?: unknown; seguidoresGanhoAnterior?: unknown };
   const rawValores = (obj.valores ?? {}) as Record<string, unknown>;
   const valores: Record<string, number | null> = Object.fromEntries(tags.map((t) => [t, toNumberOrNull(rawValores[t])]));
   const linhas = Array.isArray(obj.linhas)
@@ -132,8 +146,20 @@ export function parseMetricJson(text: string, tags: string[]): MetricExtract {
   if (valores.agendamentos !== null && valores.vendas !== null && valores.agendamentos < valores.vendas) {
     valores.agendamentos = valores.vendas;
   }
-  const algo = Object.values(valores).some((v) => v !== null) || linhas.length > 0;
-  return { valores, linhas, note: algo ? "llm" : "nada identificado" };
+  let seguidoresGanho: number | null | undefined;
+  let seguidoresGanhoAnterior: number | null | undefined;
+  if (tags.includes("seguidores")) {
+    seguidoresGanho = toNumberOrNull(obj.seguidoresGanho);
+    seguidoresGanhoAnterior = toNumberOrNull(obj.seguidoresGanhoAnterior);
+    // Mesma regra do parser determinístico (commentParser.ts): ganho + base
+    // conhecidos e nenhum total direto informado → o total real é a soma, não
+    // um valor ambíguo que rio abaixo seria descartado (achado real na CRIS).
+    if (valores.seguidores === null && seguidoresGanho !== null && seguidoresGanhoAnterior !== null) {
+      valores.seguidores = seguidoresGanhoAnterior + seguidoresGanho;
+    }
+  }
+  const algo = Object.values(valores).some((v) => v !== null) || linhas.length > 0 || seguidoresGanho != null;
+  return { valores, linhas, note: algo ? "llm" : "nada identificado", seguidoresGanho, seguidoresGanhoAnterior };
 }
 
 export async function extractMetrics(commentText: string, tags: string[]): Promise<MetricExtract> {

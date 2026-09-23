@@ -81,6 +81,36 @@ describe("parseMetricJson", () => {
     );
     expect(r.valores.receita).toBe(10000);
   });
+
+  // Reformulado em 23/09 junto com o parser determinístico (achado real na
+  // CRIS): a IA agora reporta ganho/base de seguidores em campos próprios,
+  // nunca fingindo um total sozinho e nunca 0 pra "só disse o ganho".
+  describe("seguidores — ganho e base (23/09)", () => {
+    it("ganho e base na mesma resposta → total é a soma, não um valor ambíguo", () => {
+      const r = parseMetricJson(
+        '{"valores":{},"linhas":[],"seguidoresGanho":21,"seguidoresGanhoAnterior":30000}',
+        TAGS,
+      );
+      expect(r.seguidoresGanho).toBe(21);
+      expect(r.seguidoresGanhoAnterior).toBe(30000);
+      expect(r.valores.seguidores).toBe(30021);
+    });
+
+    it("só o ganho, sem base → seguidores fica null, nunca 0", () => {
+      const r = parseMetricJson('{"valores":{},"linhas":[],"seguidoresGanho":17,"seguidoresGanhoAnterior":null}', TAGS);
+      expect(r.seguidoresGanho).toBe(17);
+      expect(r.valores.seguidores).toBeNull();
+      expect(r.note).toBe("llm");
+    });
+
+    it("total direto informado vence a soma (a pessoa já deu o número final)", () => {
+      const r = parseMetricJson(
+        '{"valores":{"seguidores":1240},"linhas":[],"seguidoresGanho":null,"seguidoresGanhoAnterior":null}',
+        TAGS,
+      );
+      expect(r.valores.seguidores).toBe(1240);
+    });
+  });
 });
 
 describe("extractMetrics", () => {
