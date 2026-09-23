@@ -1704,7 +1704,6 @@ export async function listFlowDeliveries(): Promise<FlowDelivery[]> {
 // structural_member/workflow_step são propriedade; reuso N:N deve ser escrito
 // como reference, nunca como um segundo pai estrutural.
 
-type LinkRow = { parent_id: string; child_id: string; slot: string | null; relation_kind: TaskParentLink["relation_kind"] };
 type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
 
 /** Ids dos filhos de um conjunto de pais, em uma consulta. */
@@ -1748,27 +1747,29 @@ export async function workflowStepIsTaken(parentId: string, workflowStepId: stri
   return ((data as { child_id: string }[] | null) ?? []).some((l) => l.child_id !== ignoreChildId);
 }
 
-export async function unlinkTasks(parentId: string, childId: string): Promise<void> {
-  const supabase = await createClient();
+export async function unlinkTasks(parentId: string, childId: string, db?: SupabaseLike): Promise<void> {
+  const supabase = db ?? await createClient();
   const { error } = await supabase.from("task_links").delete().eq("parent_id", parentId).eq("child_id", childId);
   if (error) fail(error);
 }
 
-/** Escreve o pai estrutural de Plano. A interface antiga ainda é aditiva até
- * os quatro vínculos históricos serem reconciliados; código novo não deve
- * usar esta função para reuso — use `linkTasks(..., null, "reference")`. Só
- * `parentId === null` solta os elos estruturais de Plano. Etapas e referências
- * nunca são tocadas aqui. */
-export async function setTaskPlanLink(taskId: string, parentId: string | null, crossClient = false): Promise<void> {
+/** Escreve o elo estrutural de Plano que o `<select>` de "Plano de Ação"
+ * representa — e só ESSE. Um card pode pertencer a vários Planos ao mesmo
+ * tempo (`planParentIdsOf`, N:N), mas o controle é de valor único:
+ * `planParentIdOf` escolhe UM arbitrariamente pra mostrar. `previousParentId`
+ * é o id que o campo mostrava quando o formulário carregou (mandado pelo
+ * cliente) — troca só aquele elo por `parentId`, nunca os outros.
+ *
+ * Bug real 2026-09-2x: a versão antiga não recebia `previousParentId` e,
+ * quando `parentId === null` ("— Sem plano —"), soltava TODOS os elos
+ * estruturais do card de uma vez — um admin limpando o único plano que via no
+ * campo derrubava, sem perceber, qualquer outro plano que o card já
+ * pertencesse (cenário que passa a ser comum com a agregação da ADM North,
+ * ver relations POST). */
+export async function setTaskPlanLink(taskId: string, parentId: string | null, previousParentId: string | null, crossClient = false): Promise<void> {
   const supabase = crossClient ? createAdminClient() : await createClient();
-  const { data, error } = await supabase.from("task_links").select("parent_id,child_id,relation_kind,slot").eq("child_id", taskId);
-  if (error) fail(error);
-  const current = ((data as LinkRow[] | null) ?? []).filter((l) => l.relation_kind === "structural_member");
-  if (parentId === null) {
-    for (const link of current) await unlinkTasks(link.parent_id, taskId);
-    return;
-  }
-  if (!current.some((l) => l.parent_id === parentId)) await linkTasks(parentId, taskId, null, "structural_member", supabase);
+  if (previousParentId && previousParentId !== parentId) await unlinkTasks(previousParentId, taskId, supabase);
+  if (parentId && parentId !== previousParentId) await linkTasks(parentId, taskId, null, "structural_member", supabase);
 }
 
 // ---- Planos de Ação (admin) --------------------------------------------------

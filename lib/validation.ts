@@ -283,6 +283,13 @@ export const taskCreateSchema = taskFieldsShape;
 // route resolves it to client_id since tasks has no slug column of its own.
 export const taskPatchSchema = taskFieldsShape.partial().omit({ slug: true }).extend({
   slug: slugSchema.nullable().optional(),
+  // O `<select>` de Plano de Ação mostra só UM plano quando o card pertence a
+  // vários (`planParentIdOf` escolhe arbitrariamente) — sem isto, trocar ou
+  // limpar esse campo não tem como saber QUAL elo estrutural o controle
+  // representava, e `setTaskPlanLink` soltava TODOS de uma vez. O cliente
+  // manda o id que o campo mostrava quando o card foi carregado; a rota troca
+  // só esse, preservando qualquer outro plano que o card já tivesse.
+  plan_id_previous: z.string().uuid().nullable().optional(),
   payload_patch: z.object({
     barTone: taskTone.nullable().optional(),
     statusLabel: z.string().max(80).nullable().optional(),

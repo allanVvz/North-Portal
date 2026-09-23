@@ -193,7 +193,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // escreve um ELO, não uma coluna: `plan_id` passou a significar só
     // "ocorrência de recorrência". setTaskPlanLink mexe apenas no elo sem
     // slot, para não derrubar as ligações de etapa de uma corrente.
-    const { plan_id: planLink, ...taskPatch } = patch as Record<string, unknown>;
+    //
+    // `plan_id_previous` é o id que o `<select>` mostrava quando o card foi
+    // carregado — o campo só representa UM plano por vez, mesmo quando o
+    // card pertence a vários (`planParentIdOf` escolhe arbitrariamente). Sem
+    // isto, `setTaskPlanLink` não tem como saber QUAL elo trocar e soltava
+    // todos de uma vez quando o campo era limpo.
+    const { plan_id: planLink, plan_id_previous: planLinkPrevious, ...taskPatch } = patch as Record<string, unknown>;
     let task = await updateTaskGroup(id, baseTask, taskPatch, session.userId);
     let crossClientPlanLink = false;
     if (planLink !== undefined) {
@@ -208,7 +214,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           if (parentClient?.slug !== "north") throw new HttpError(403, "Somente Planos de Ação da ADM North podem reunir cards de outros clientes.");
         }
       }
-      await setTaskPlanLink(id, typeof planLink === "string" && planLink ? planLink : null, crossClientPlanLink);
+      // O elo sendo TROCADO (o anterior) também pode ser cross-client — soltar
+      // um vínculo com um Plano da North exige o mesmo cliente admin que
+      // criou o vínculo, senão a RLS comum recusa o DELETE.
+      if (typeof planLinkPrevious === "string" && planLinkPrevious && planLinkPrevious !== planLink) {
+        const previousPlan = await getTaskById(planLinkPrevious);
+        if (previousPlan && previousPlan.client_id !== current.client_id) crossClientPlanLink = true;
+      }
+      await setTaskPlanLink(
+        id,
+        typeof planLink === "string" && planLink ? planLink : null,
+        typeof planLinkPrevious === "string" && planLinkPrevious ? planLinkPrevious : null,
+        crossClientPlanLink,
+      );
     }
     if (payload_patch) task = await updateTaskPayloadPatch(id, payload_patch);
     if (assignee_profile_ids !== undefined) await setTaskAssigneeProfiles(task.id, assignee_profile_ids);

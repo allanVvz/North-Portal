@@ -205,15 +205,17 @@ export default function TaskDetailPanel({
         ) : null}
         {!isPlan ? (
           <div className="tdp-attr">
-            {/* Controle de valor único: escolher um plano ADICIONA aquele elo
-                sem soltar outro(s) plano(s) a que o card já pertença
-                (setTaskPlanLink é aditivo); só "— Sem plano —" solta todos de
-                uma vez. `planParentIdOf` mostra só um quando há mais de um —
-                ver `planParentIdsOf` para a lista completa. */}
+            {/* Controle de valor único: `planParentIdOf` mostra só um plano
+                quando o card pertence a vários (a caixa "Faz parte de" no
+                modal mostra todos — ver `planParentIdsOf`). Trocar ou limpar
+                mexe só NESSE elo — manda o valor atual como `plan_id_previous`
+                pra `setTaskPlanLink` saber qual, sem tocar em outro plano que
+                o card já pertença (bug real até 2026-09-2x: limpar soltava
+                todos de uma vez). */}
             <span>Plano de Ação</span>
             <select
               value={planParentIdOf(task) ?? ""} disabled={busy}
-              onChange={(e) => patch({ plan_id: e.target.value || null })}
+              onChange={(e) => patch({ plan_id: e.target.value || null, plan_id_previous: planParentIdOf(task) })}
             >
               <option value="">— Sem plano —</option>
               {planCandidates.filter((p) => p.id !== task.id).map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}

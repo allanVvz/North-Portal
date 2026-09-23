@@ -280,6 +280,12 @@ export default function TaskModal({
   onDeleted: (id: string) => void;
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(task, slug, prefill));
+  // O id que o campo "Plano de Ação" mostrava quando o formulário foi
+  // carregado — não é estado de UI (não precisa re-render), só a referência
+  // que o PATCH manda como `plan_id_previous` pra `setTaskPlanLink` saber QUAL
+  // elo trocar, sem tocar em outro plano que o card já pertença. Atualizado
+  // nos mesmos 3 pontos que recriam `draft` a partir de um TaskRecord.
+  const planIdBaselineRef = useRef<string>(task ? planParentIdOf(task) ?? "" : "");
   // "Rotina" é a quinta porta de criação, e é só isso: uma porta.
   //
   // Ela NÃO é um kind. Recorrência é a coluna `recurrence_cadence`, ortogonal
@@ -430,6 +436,9 @@ export default function TaskModal({
       reviewer_id: effectiveReviewerId,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
+      // O elo que ESTE campo representa, pra setTaskPlanLink trocar só ele —
+      // ver planIdBaselineRef acima.
+      plan_id_previous: kd.isPlan ? null : planIdBaselineRef.current || null,
       requires_review: deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids),
       requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
       due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
@@ -457,6 +466,12 @@ export default function TaskModal({
       onTaskPatchedRef.current?.(next);
     }
     setLiveTask(task as TaskRecord);
+    // A troca (se houve) já foi confirmada pelo servidor — atualiza a
+    // referência pra um próximo autosave saber o elo atual, não o de quando o
+    // modal abriu. Sem isto, trocar A→B e depois B→A de novo na mesma sessão
+    // não fazia nada na segunda vez: o servidor via plan_id_previous="A" ===
+    // plan_id="A" e achava que nada tinha mudado.
+    planIdBaselineRef.current = planParentIdOf(task as TaskRecord) ?? "";
     onTaskPatchedRef.current?.(task as TaskRecord);
   }, []);
   const autosave = useTaskAutosave({ taskId: liveTask?.id ?? "", values: autosaveValues, enabled: mode === "edit" && Boolean(liveTask), textKeys: ["title", "description"], valid: Boolean(draft.title.trim()), onSaved: acceptAutosave });
@@ -918,6 +933,7 @@ export default function TaskModal({
       if (liveTask?.id === updated.id) {
         setLiveTask(updated);
         setDraft(draftFrom(updated, slug, prefill));
+        planIdBaselineRef.current = planParentIdOf(updated) ?? "";
       }
       onTaskPatched?.(updated);
     } catch (cause) {
@@ -1186,6 +1202,7 @@ export default function TaskModal({
         if (!retried && body?.code === "recurrence_schedule_changed" && body.parent) {
           setLiveTask(body.parent);
           setDraft(draftFrom(body.parent, slug, prefill));
+          planIdBaselineRef.current = planParentIdOf(body.parent) ?? "";
           onTaskPatched?.(body.parent);
           setBusy(false);
           await completeCycle(true, body.parent);
@@ -1245,6 +1262,7 @@ export default function TaskModal({
       reviewer_id: effectiveReviewerId,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
+      plan_id_previous: kd.isPlan ? null : planIdBaselineRef.current || null,
       // requires_* são derivados de quem é revisor/aprovador — "Sem
       // revisor"/"Sem aprovação" pula a etapa. Um cliente com a etapa
       // desligada nunca exige, independente do draft; e um revisor que é o
@@ -1286,6 +1304,7 @@ export default function TaskModal({
         throw new Error(responseBody?.error ?? "Não foi possível salvar a tarefa.");
       }
       const savedTask = await res.json() as TaskRecord;
+      planIdBaselineRef.current = planParentIdOf(savedTask) ?? "";
       // Activities queued while the plan itself had no id yet: link the
       // existing ones and create the brand-new ones now that it does.
       if (!liveTask && isNewPlan && pendingMembers.length) {
@@ -1606,10 +1625,13 @@ export default function TaskModal({
                 </Cell>
               ) : null}
               {/* Vínculo com plano (não para o próprio plano). Controle de
-                  valor único: escolher um plano ADICIONA aquele elo sem
-                  soltar outro(s) a que o card já pertença — um card pode
-                  estar em mais de um Plano ao mesmo tempo; só "— Sem plano —"
-                  solta todos de uma vez (setTaskPlanLink). */}
+                  valor único: um card pode estar em mais de um Plano ao mesmo
+                  tempo (a caixa "Faz parte de" mostra todos), mas este campo só
+                  representa UM — o que `planIdBaselineRef` guardou quando o
+                  card foi carregado. Trocar ou limpar mexe só NESSE elo;
+                  qualquer outro plano que o card já pertença fica intacto
+                  (bug real até 2026-09-2x: limpar aqui soltava todos de uma
+                  vez — ver setTaskPlanLink). */}
               {!kd.isPlan && !(mode === "new" && effectiveScope === "routine") ? (
                 <Cell icon="◆" label="Plano de Ação" hidden={!visible("plan_link")}>
                   <select value={draft.plan_id} onChange={(e) => set("plan_id", e.target.value)}>
