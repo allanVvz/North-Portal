@@ -104,6 +104,28 @@ export function mediaTotals(posts: MetaPost[]): MediaTotals {
   };
 }
 
+/** Como `mediaTotals`, mas site/perfil/conversas restritos aos posts que de
+ *  fato resolvem para aquele bloco de objetivo — a Meta atribui link
+ *  click/landing view a qualquer anúncio com link (bio, CTA), mesmo numa
+ *  campanha de perfil, então somar sem filtrar vazava "Visitas ao site"
+ *  fantasma no funil de um cliente sem essa campanha (Baita, 23/09). Alcance,
+ *  investimento e impressões continuam de conta inteira — são métricas de
+ *  conta, não de objetivo. */
+export function objectiveScopedMediaTotals(posts: MetaPost[], postBlock: (post: MetaPost) => CampaignBlock): MediaTotals {
+  const totals = mediaTotals(posts);
+  const site = mediaTotals(posts.filter((p) => postBlock(p) === "trafego_site"));
+  const perfil = mediaTotals(posts.filter((p) => postBlock(p) === "trafego_perfil"));
+  const mensagens = mediaTotals(posts.filter((p) => postBlock(p) === "mensagens"));
+  return {
+    ...totals,
+    landingViews: site.landingViews,
+    linkClicks: site.linkClicks,
+    clicks: site.clicks,
+    profileVisits: perfil.profileVisits,
+    conversations: mensagens.conversations,
+  };
+}
+
 // ---- desfecho da mídia ------------------------------------------------------------------
 
 /** O desfecho que a mídia entrega para ESTE cliente: conversa quando existe

@@ -250,9 +250,18 @@ export function CampaignBlocksSection({
   const kpisFor = (block: CampaignBlock) => blockKpisOf(config, block).filter((def) =>
     !(def.metric && hidden.has(def.metric)) && !(def.ratio && (hidden.has(def.ratio[0]) || hidden.has(def.ratio[1]))),
   );
-  const blocksPresent = CAMPAIGN_BLOCKS.filter((block) =>
-    posts.some((p) => postBlock(p) === block) && kpisFor(block).length,
-  );
+  // Um bloco entra mesmo sem KPI de template declarado quando há `extraKpis`
+  // real (hoje só seguidores, sempre em `trafego_perfil`) — "cada objetivo tem
+  // sua métrica" não pode depender de o template lembrar de declarar o bloco
+  // (23/09: garantia estrutural, não um acidente de todo template builtin
+  // declarar `trafego_perfil` hoje).
+  const blocksPresent = CAMPAIGN_BLOCKS.filter((block) => {
+    if (!posts.some((p) => postBlock(p) === block)) return false;
+    if (kpisFor(block).length) return true;
+    const cur = posts.filter((p) => postBlock(p) === block);
+    const prev = prevPosts.filter((p) => postBlock(p) === block);
+    return Boolean(extraKpis?.(block, cur, prev)?.length);
+  });
   if (!blocksPresent.length) return null;
 
   return (
@@ -264,7 +273,13 @@ export function CampaignBlocksSection({
         const extra = extraKpis?.(block, cur, prev) ?? [];
         const detailContent = detail?.(block, cur, prev) ?? null;
         return (
-          <View style={S.blockGroup} key={block} wrap={!detailContent ? false : true}>
+          // Sempre atômico (23/09): com `detail` (destaque + criativos, só no
+          // relatório de conversão) o react-pdf podia quebrar em qualquer
+          // ponto do bloco — entre KPIs e destaque, ou entre o destaque e a
+          // lista de criativos. Preferir empurrar o bloco inteiro para a
+          // página seguinte a quebrá-lo no meio (mesmo comportamento que o
+          // relatório de anúncios já tinha, por nunca passar `detail`).
+          <View style={S.blockGroup} key={block} wrap={false}>
             <View style={S.blockHead}>
               <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
             </View>

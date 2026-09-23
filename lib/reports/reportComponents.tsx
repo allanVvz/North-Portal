@@ -20,7 +20,10 @@ import type { ComponentProps, ReactNode } from "react";
 // Layout COMPACTO. As seções que o operador esconde no template não são
 // renderizadas, então a folha respira conforme ele apara.
 export const REPORT_STYLES = StyleSheet.create({
-  page: { paddingVertical: 16, paddingHorizontal: 20, fontFamily: "Inter", fontSize: 7.5, color: C.ink, backgroundColor: C.surface },
+  // paddingVertical maior que o footer (bottom:24 abaixo) por design: o fluxo
+  // normal já para de correr acima do rodapé, então nunca colidem — a folga
+  // extra (23/09) é só pra dar respiro visual no topo/rodapé de cada página.
+  page: { paddingVertical: 28, paddingHorizontal: 20, fontFamily: "Inter", fontSize: 7.5, color: C.ink, backgroundColor: C.surface },
   header: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 7, paddingBottom: 5, borderBottomWidth: 1, borderBottomColor: C.border },
   title: { fontFamily: "Inter", fontWeight: 700, fontSize: 11.5, color: C.ink },
   subtitle: { fontSize: 7, color: C.muted, marginTop: 1 },
@@ -87,7 +90,7 @@ export const REPORT_STYLES = StyleSheet.create({
   contextLine: { fontFamily: "Inter", fontWeight: 600, fontSize: 8, color: C.ink },
 
   empty: { fontSize: 7, color: C.muted, paddingVertical: 3 },
-  footer: { position: "absolute", bottom: 10, left: 20, right: 20, fontSize: 6.3, color: C.muted, textAlign: "center" },
+  footer: { position: "absolute", bottom: 14, left: 20, right: 20, fontSize: 6.3, color: C.muted, textAlign: "center" },
 });
 
 const S = REPORT_STYLES;

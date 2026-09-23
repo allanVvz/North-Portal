@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { TaskComment } from "@/lib/comments";
 import { extractMetrics, type ConversionRow, type MetricExtract } from "./extractMetrics";
+import { extractReportInstructions } from "@/lib/reports/reportInstructions";
 
 export type CommentIntent = "informacao" | "correcao" | "confirmacao" | "contexto" | "regeneracao" | "misto";
 export type MetricPrecision = "exata" | "aproximada" | "faixa" | "estimada";
@@ -172,8 +173,16 @@ export async function consolidateAdaptiveFeedback(comments: readonly SourcedComm
       });
     }
     if (parsed.linhas.length) linhas = parsed.linhas;
+    // "Ajuste o comentário: X" já vira a narrativa do PDF em outro lugar
+    // (reportInstructions.ts/conversionFlow.ts), limpa e sem o prefixo. Sem
+    // este pulo, o mesmo texto caía cru aqui TAMBÉM e "Leitura da semana"
+    // mostrava a mesma frase duas vezes — uma certa, uma com "Ajuste o
+    // comentário:" grudado (achado real na CRIS, 22/09).
+    const jaVirouNarrativa = extractReportInstructions(comment.text).instrucoes.some((i) => i.kind === "narrativa");
     const analysis = operationalAnalysis(comment.text);
-    if (analysis) {
+    if (jaVirouNarrativa) {
+      // nada — a narrativa cobre este comentário sozinha.
+    } else if (analysis) {
       context.push({ sourceCommentAt: comment.at, sourceTaskId: comment.taskId, author: comment.author, text: analysis });
     } else if ((intent === "contexto" || intent === "misto" || (!metricPresent && intent !== "regeneracao")) && comment.text.trim()) {
       context.push({ sourceCommentAt: comment.at, sourceTaskId: comment.taskId, author: comment.author, text: evidence(comment.text) });

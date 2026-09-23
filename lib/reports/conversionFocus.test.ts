@@ -146,11 +146,13 @@ describe("funil do resultado", () => {
 
 describe("fallback positivo de seguidores", () => {
   it("mantém o ganho quando acompanha ou supera a referência", () => {
-    expect(positiveFollowerFallback(ctx({ kind: "seguidores", followersGain: 47, prevFollowersGain: 40, cur: { ...nada, seguidores: 8000 } }))).toEqual({ label: "Seguidores · +17,5%", value: 47, gained: true });
+    expect(positiveFollowerFallback(ctx({ kind: "seguidores", followersGain: 47, prevFollowersGain: 40, cur: { ...nada, seguidores: 8000 } })))
+      .toEqual({ label: "Seguidores · +17,5%", value: 47, gained: true, comparisonPct: 17.5, comparisonBasis: "semana_anterior" });
   });
 
   it("usa a base atual quando o ganho perde ritmo", () => {
-    expect(positiveFollowerFallback(ctx({ kind: "seguidores", followersGain: 47, prevFollowersGain: 90, cur: { ...nada, seguidores: 8000 } }))).toEqual({ label: "Seguidores · +0,59%", value: 47, gained: true });
+    expect(positiveFollowerFallback(ctx({ kind: "seguidores", followersGain: 47, prevFollowersGain: 90, cur: { ...nada, seguidores: 8000 } })))
+      .toEqual({ label: "Seguidores · +0,59%", value: 47, gained: true, comparisonPct: 0.5875, comparisonBasis: "base_total" });
   });
 });
 

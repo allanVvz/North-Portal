@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   creativeBadges, creativeHighlights, creativeRows, deltaOf, funnelWidths, mediaAlert, mediaAnalysis, mediaFunnel,
-  mediaTotals, objectiveRows, stageGap, weeklyTrend,
+  mediaTotals, objectiveRows, objectiveScopedMediaTotals, stageGap, weeklyTrend,
   type MediaTotals,
 } from "./adsInsights";
 import type { MetaPost } from "@/lib/windsor";
@@ -41,6 +41,44 @@ describe("mediaTotals", () => {
     expect(t.conversations).toBe(23);
     expect(t.ctr).toBeCloseTo((474 / 25000) * 100);
     expect(t.costPerConversation).toBeCloseTo(8.04, 2);
+  });
+});
+
+describe("objectiveScopedMediaTotals — site/perfil/conversas só do próprio objetivo (23/09)", () => {
+  it("clique/landing view incidental numa campanha de perfil não vira 'visitas ao site' fantasma", () => {
+    // Caso real: Baita não tem campanha de site, mas a Meta reportou 2
+    // cliques de link incidentais (bio/CTA) na campanha de perfil.
+    const config = { ...DEFAULT_BUILTIN_TEMPLATE.config, campaignBlocks: { Perfil: "trafego_perfil" as const } };
+    const posts = [
+      post({ campaignName: "Perfil", metrics: { custo: 74.88, alcance: 10913, profileVisits: 342, cliquesLink: 2, landingPageViews: 2 } }),
+    ];
+    const { postBlock } = blockResolver(config, posts);
+    const t = objectiveScopedMediaTotals(posts, postBlock);
+    expect(t.profileVisits).toBe(342);
+    expect(t.landingViews).toBeNull();
+    expect(t.linkClicks).toBeNull();
+    expect(t.clicks).toBeNull();
+    // Alcance é de conta inteira, não escopado por objetivo.
+    expect(t.reach).toBe(10913);
+  });
+
+  it("com campanha de site real, visitas ao site aparecem normalmente", () => {
+    const config = { ...DEFAULT_BUILTIN_TEMPLATE.config, campaignBlocks: { Site: "trafego_site" as const } };
+    const posts = [post({ campaignName: "Site", metrics: { custo: 68.62, alcance: 5933, cliquesLink: 41 } })];
+    const { postBlock } = blockResolver(config, posts);
+    const t = objectiveScopedMediaTotals(posts, postBlock);
+    expect(t.linkClicks).toBe(41);
+  });
+
+  it("conversas ficam restritas ao bloco de mensagens", () => {
+    const config = { ...DEFAULT_BUILTIN_TEMPLATE.config, campaignBlocks: { Perfil: "trafego_perfil" as const, Msg: "mensagens" as const } };
+    const posts = [
+      post({ campaignName: "Perfil", metrics: { custo: 10, contatos: 3 } }),
+      post({ campaignName: "Msg", metrics: { custo: 20, contatos: 17 } }),
+    ];
+    const { postBlock } = blockResolver(config, posts);
+    const t = objectiveScopedMediaTotals(posts, postBlock);
+    expect(t.conversations).toBe(17);
   });
 });
 

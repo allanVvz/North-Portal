@@ -75,6 +75,18 @@ describe("consolidateAdaptiveFeedback", () => {
     expect(result.interpretation.context[0]?.text).toBe("Nesta semana, as duas campanhas seguiram trabalhando em conjunto: perfil ampliando a audiência, enquanto mensagens geram oportunidades diretas.");
   });
 
+  it("não duplica o pedido 'ajuste o comentário' como contexto — ele já virou narrativa em outro lugar", async () => {
+    const result = await consolidateAdaptiveFeedback([
+      comment(
+        "Ajuste o comentário: Direcionamos as campanhas de trafego para perfil e para o site para regiões das capitais de SC e PR também, buscando alcançar pessoas mais de longe. Remova o comentário sobre seguidores novos. e retire dos dados o % comparativo com o período anterior",
+        "2026-09-22T19:20:34.334993+00:00",
+        "conversao",
+      ),
+    ], tags);
+
+    expect(result.interpretation.context).toEqual([]);
+  });
+
   it("registra o trade-off quando um valor mais recente diverge sem correção explícita", async () => {
     const result = await consolidateAdaptiveFeedback([
       comment("Vendas: 5", "2026-09-18T10:00:00.000Z"),

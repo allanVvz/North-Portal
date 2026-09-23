@@ -46,22 +46,34 @@ export type FocusContext = {
   hasProfileObjective?: boolean;
 };
 
+export type FollowerComparisonBasis = "semana_anterior" | "base_total" | null;
+
 /** Escolhe um único dado de seguidores para o resumo visual. O comparativo é
  * usado somente para preferir a leitura positiva mais estável: quando o ganho
- * semanal perde ritmo, a base atual do perfil substitui esse comparativo. */
-export function positiveFollowerFallback(x: Pick<FocusContext, "followersGain" | "prevFollowersGain" | "cur">): { label: string; value: number; gained: boolean } | null {
+ * semanal perde ritmo, a base atual do perfil substitui esse comparativo.
+ * `comparisonPct`/`comparisonBasis` saem separados do `label` para o card
+ * "Novos seguidores" (`salesReportPdf.tsx`) reaproveitar a mesma escolha sem
+ * reprocessar o texto do funil. */
+export function positiveFollowerFallback(x: Pick<FocusContext, "followersGain" | "prevFollowersGain" | "cur">): { label: string; value: number; gained: boolean; comparisonPct: number | null; comparisonBasis: FollowerComparisonBasis } | null {
   if (x.followersGain === null || x.followersGain <= 0) return null;
   // Ganho que acompanha a semana anterior: percentual de evolução semanal.
   // Ganho abaixo da referência: percentual positivo sobre a base do perfil.
-  const comparisonPct = x.prevFollowersGain !== null && x.prevFollowersGain > 0 && x.followersGain >= x.prevFollowersGain
-    ? ((x.followersGain - x.prevFollowersGain) / x.prevFollowersGain) * 100
+  const comparisonBasis: FollowerComparisonBasis = x.prevFollowersGain !== null && x.prevFollowersGain > 0 && x.followersGain >= x.prevFollowersGain
+    ? "semana_anterior"
     : x.cur.seguidores !== null && x.cur.seguidores > 0
-      ? (x.followersGain / x.cur.seguidores) * 100
+      ? "base_total"
       : x.prevFollowersGain !== null && x.prevFollowersGain > 0
+        ? "semana_anterior"
+        : null;
+  const comparisonPct = comparisonBasis === "semana_anterior" && x.prevFollowersGain !== null && x.followersGain >= x.prevFollowersGain
+    ? ((x.followersGain - x.prevFollowersGain) / x.prevFollowersGain) * 100
+    : comparisonBasis === "base_total" && x.cur.seguidores !== null
+      ? (x.followersGain / x.cur.seguidores) * 100
+      : comparisonBasis === "semana_anterior" && x.prevFollowersGain !== null
         ? (x.followersGain / x.prevFollowersGain) * 100
         : null;
   const suffix = comparisonPct === null ? "" : ` · +${pctText(comparisonPct)}`;
-  return { label: `Seguidores${suffix}`, value: x.followersGain, gained: true };
+  return { label: `Seguidores${suffix}`, value: x.followersGain, gained: true, comparisonPct, comparisonBasis };
 }
 
 const none: Delta = { pct: null, tone: "neutral", text: "sem semana anterior" };

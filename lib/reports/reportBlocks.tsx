@@ -456,18 +456,18 @@ function clampCardName(value: string, maxLines: number): string {
   return value.length <= limit ? value : `${value.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
-function CreativeCard({ item: c, width, imageSize, horizontal, maxLines, prominent = false }: {
-  item: CreativeCardView; width: number; imageSize: number; horizontal: boolean; maxLines: number; prominent?: boolean;
+function CreativeCard({ item: c, width, imageSize, horizontal, maxLines, prominent = false, warm = false }: {
+  item: CreativeCardView; width: number; imageSize: number; horizontal: boolean; maxLines: number; prominent?: boolean; warm?: boolean;
 }) {
   return (
-    <View style={[T.card, { width, maxWidth: width, minWidth: 0, flexDirection: horizontal ? "row" : "column", minHeight: prominent ? 190 : undefined }]} wrap={false}>
+    <View style={[T.card, warm ? { backgroundColor: C.surface2, paddingRight: 6 } : {}, { width, maxWidth: width, minWidth: 0, flexDirection: horizontal ? "row" : "column", minHeight: prominent ? 190 : undefined }]} wrap={false}>
       <Thumb src={c.preview} size={imageSize} kind={c.objectType} />
       <View style={horizontal ? { flex: 1, gap: 4, minWidth: 0 } : { gap: 4, minWidth: 0 }}>
         {c.badges.slice(0, 2).map((b) => (
           <Text key={b.label} style={[T.cardBadge, { color: b.tone === "bad" ? C.danger : b.tone === "good" ? C.tealText : SEC }]}>{b.label}</Text>
         ))}
         <Text style={T.cardName}>{clampCardName(c.name, maxLines)}</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2, justifyContent: warm ? "space-between" : "flex-start" }}>
           {c.metrics.slice(0, 4).map((m) => (
             <View key={m.label} style={{ minWidth: horizontal ? 54 : 46 }}>
               <Text style={T.cardMetricValue}>{m.value}</Text>
@@ -501,7 +501,12 @@ export function CreativeCards({ items, layout }: { items: CreativeCardView[]; la
   const pattern = creativeCardsPattern(n);
   const gap = 8;
   const maxLines = layout?.maxLines ?? 2;
-  if (pattern === "wide") return <CreativeCard item={items[0]} width={W} imageSize={112} horizontal maxLines={maxLines} />;
+  // Um card só nunca precisa da folha inteira (531pt) — forçado a isso, a
+  // coluna de texto (poucas métricas, sem badge) sobrava em branco à direita
+  // (23/09: "muito espaço negativo" no Destaque por objetivo). Largura
+  // proporcional ao conteúdo, alinhada à esquerda, com um fundo morno em vez
+  // do card branco padrão para marcar que é um destaque, não uma linha da lista.
+  if (pattern === "wide") return <CreativeCard item={items[0]} width={Math.min(W, 320)} imageSize={112} horizontal maxLines={maxLines} warm />;
   if (pattern === "pair") {
     const width = (W - gap) / 2;
     return <View style={[T.cardRow, { gap, width: W }]} wrap={false}>{items.map((item) => <CreativeCard key={item.name} item={item} width={width} imageSize={78} horizontal maxLines={maxLines} />)}</View>;

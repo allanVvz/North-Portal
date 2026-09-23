@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_BUILTIN_TEMPLATE, type CampaignBlock, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { MetaPost } from "@/lib/windsor";
 import { BUILTIN_PERFORMANCE_TEMPLATES } from "@/lib/performanceTemplates";
-import { blockKpisOf, blockResolver, kpiForDef, showsDelta } from "./campaignBlockKpis";
+import { blockKpisOf, blockResolver, CampaignBlocksSection, kpiForDef, showsDelta } from "./campaignBlockKpis";
 
 const templateById = (id: string) => BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === id)!;
 
@@ -139,5 +139,48 @@ describe("CPM some do relatório de conversão via hideMetrics", () => {
     // relatório de anúncios precisa dele; é `hideMetrics={["cpm"]}` em
     // salesReportPdf.tsx que o esconde só na conversão.
     expect(refs).toContain("cpm");
+  });
+});
+
+describe("seguidores não pode depender do template lembrar de declarar o bloco", () => {
+  it("trafego_perfil aparece via extraKpis mesmo com blockKpis vazio (23/09, garantia estrutural)", () => {
+    const bareConfig: PerformanceTemplateConfig = {
+      ...DEFAULT_BUILTIN_TEMPLATE.config,
+      reportKpiPolicy: "perfil_negocio_local",
+      blockKpis: {},
+    };
+    const posts = [ad({ optimizationGoal: "PROFILE_VISIT" })];
+    const element = CampaignBlocksSection({
+      config: bareConfig,
+      posts,
+      prevPosts: [],
+      adPosts: posts,
+      extraKpis: (block: CampaignBlock) => (block === "trafego_perfil"
+        ? [{ label: "Novos seguidores", value: 66, previous: null, kind: "number" as const, inverse: false, notIntegrated: false }]
+        : []),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any) as any;
+
+    expect(element).not.toBeNull();
+    const blocks = element.props.children[1];
+    expect(blocks).toHaveLength(1);
+  });
+
+  it("sem extraKpis e sem KPI de template, o bloco não aparece (nada real para mostrar)", () => {
+    const bareConfig: PerformanceTemplateConfig = {
+      ...DEFAULT_BUILTIN_TEMPLATE.config,
+      reportKpiPolicy: "perfil_negocio_local",
+      blockKpis: {},
+    };
+    const posts = [ad({ optimizationGoal: "PROFILE_VISIT" })];
+    const element = CampaignBlocksSection({
+      config: bareConfig,
+      posts,
+      prevPosts: [],
+      adPosts: posts,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any) as any;
+
+    expect(element).toBeNull();
   });
 });

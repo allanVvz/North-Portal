@@ -597,6 +597,17 @@ async function generateSalesReport(
     throw docError;
   }
 
+  // Sem base nem semana anterior, o card "Novos seguidores" não tem % nenhum
+  // pra mostrar (ver `positiveFollowerFallback`/salesReportPdf.tsx, 23/09) — a
+  // automação pede a referência em vez de deixar o vazio silencioso.
+  const followerGainForAsk = ext.seguidoresGanho ?? null;
+  const followerPrevGainForAsk = ext.seguidoresGanhoAnterior ?? effectivePrevTotals?.seguidoresNovos ?? null;
+  const followerTotalForAsk = typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null;
+  const followerBaseAsk = followerGainForAsk !== null && followerGainForAsk > 0
+    && followerPrevGainForAsk === null && followerTotalForAsk === null
+    ? ` Pra mostrar o crescimento de seguidores em %, me conta quantos ${client.name} tem no total — ainda não tenho essa referência.`
+    : "";
+
   // Atômico e idempotente: o PDF pertence à etapa que o produziu (Conversão),
   // nunca ao Feedback humano que serviu apenas como uma das fontes.
   await replaceAutomaticReportAttachment(admin, conversionCard.id, {
@@ -607,7 +618,7 @@ async function generateSalesReport(
     // foi, com o motivo. A frase pronta dizia sempre a mesma coisa — a Luiza
     // pediu três ajustes e recebeu "crescimento de seguidores reorganizado".
     text: withNextStepNotice(
-      `${describeInstructions(pedidos).join(" ") || "Relatório de conversão atualizado."} [${fileName}](${urlData.publicUrl})`,
+      `${describeInstructions(pedidos).join(" ") || "Relatório de conversão atualizado."} [${fileName}](${urlData.publicUrl})${followerBaseAsk}`,
       await nextStepNotice(admin, occ, CONVERSION_REPORT_STEP_KEY),
     ),
     // Sem o `path`: ele carrega slug + uuid + timestamp e estouraria o limite de

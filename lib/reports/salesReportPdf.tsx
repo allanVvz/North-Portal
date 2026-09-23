@@ -24,10 +24,10 @@ import { registerReportFonts } from "./reportFonts";
 import { blockResolver, CampaignBlocksSection } from "./campaignBlockKpis";
 import { attributionOf, type InformedTotals } from "./conversionMode";
 import {
-  creativeBadges, creativeHighlights, creativeRows, mediaOutcome, mediaTotals, money, num, objectiveRows,
+  creativeBadges, creativeHighlights, creativeRows, mediaOutcome, money, num, objectiveRows, objectiveScopedMediaTotals, pctText,
   type Badge, type MediaOutcome, signed,
 } from "./adsInsights";
-import { costLadder, focusOf, heroFor, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
+import { costLadder, focusOf, heroFor, positiveFollowerFallback, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
 import type { ReportContext } from "./conversionReportPlanning";
 import type { HideTarget } from "./reportInstructions";
@@ -170,16 +170,16 @@ function SalesReportDocument(input: SalesReportInput) {
     : null);
 
   const focus = focusOf(cur);
-  const media = mediaTotals(campaignPosts);
+  const { postBlock } = blockResolver(config, adPosts);
+  const media = objectiveScopedMediaTotals(campaignPosts, postBlock);
   if (input.trafficFinalView?.reach !== null && input.trafficFinalView?.reach !== undefined) media.reach = input.trafficFinalView.reach;
-  const prevMedia = prevCampaignPosts.some((p) => p.source === "paid") ? mediaTotals(prevCampaignPosts) : null;
+  const prevMedia = prevCampaignPosts.some((p) => p.source === "paid") ? objectiveScopedMediaTotals(prevCampaignPosts, postBlock) : null;
   const ctx: FocusContext = { kind: focus, cur, prev, media, prevMedia, followersGain, prevFollowersGain, prevFollowersTotal };
 
   const comparedRange = prevTotals?.from && prevTotals?.to ? { from: prevTotals.from, to: prevTotals.to } : prev || prevMedia ? previousPeriod(period) : null;
 
   // ---- mídia e criativos ----
   const outcome: MediaOutcome = focus === "seguidores" ? "visitas" : mediaOutcome(media);
-  const { postBlock } = blockResolver(config, adPosts);
   // Em templates com Mensagens, a conversa é uma etapa real da jornada antes
   // do resultado de seguidores — mesmo quando o foco do feedback é perfil.
   ctx.hasMessageObjective = campaignPosts.some((post) => postBlock(post) === "mensagens");
@@ -384,25 +384,24 @@ function SalesReportDocument(input: SalesReportInput) {
         <View style={{ marginTop: 10 }}>
           {groups.map(([campaignName, campaignCreatives]) => {
             const highlight = [...campaignCreatives].sort((a, b) => (b.result - a.result) || (b.spend - a.spend))[0];
-            // O destaque não se repete na lista. A lista mantém o preview
-            // pequeno de cada peça restante, como no relatório anterior.
-            const remaining = campaignCreatives
-              .filter((creative) => creative.adId !== highlight.adId)
-              .sort((a, b) => (b.result - a.result) || (b.spend - a.spend));
+            // Todos os criativos entram na lista, o destaque incluso (23/09):
+            // "outros criativos" virou "todos os criativos" a pedido — antes
+            // excluía o destaque, deixando a lista incompleta.
+            const todos = [...campaignCreatives].sort((a, b) => (b.result - a.result) || (b.spend - a.spend));
             return (
               <View key={campaignName} style={{ marginTop: 8 }}>
                 <Text style={[T.cardBadge, { color: "#54706b", marginBottom: 4 }]}>{campaignName}</Text>
                 <Text style={[T.cardMetricLabel, { marginBottom: 4 }]}>Destaque</Text>
                 <CreativeCards items={[cardFor(highlight)]} layout={{ maxLines: 2 }} />
-                {remaining.length ? <View style={{ marginTop: 8 }}>
+                {todos.length ? <View style={{ marginTop: 8 }}>
                   <DataTable
                     columns={[
                       { key: "thumb", label: "", width: 26 },
-                      { key: "creative", label: "Outros criativos", flex: 2.4 },
+                      { key: "creative", label: "Todos os criativos", flex: 2.4 },
                       { key: "investment", label: "Investimento", align: "right" },
                       { key: "result", label: highlight.resultLabel, align: "right", flex: 1.2 },
                     ]}
-                    rows={remaining.map((creative) => ({
+                    rows={todos.map((creative) => ({
                       thumb: { text: "", image: previews?.[creative.adId]?.dataUri ?? null },
                       creative: { text: creative.name, strong: true },
                       investment: { text: money(creative.spend) },
@@ -464,10 +463,21 @@ function SalesReportDocument(input: SalesReportInput) {
             extraKpis={(block) => {
               if (esconde("seguidores")) return [];
               if (block !== "trafego_perfil" || followersGain === null || followersGain <= 0) return [];
+              // "+66 informados" repetia o próprio valor do card (23/09) — usa
+              // a mesma comparação do funil (vs. semana anterior, com
+              // fallback pra % da base total) e, sem nenhuma das duas
+              // referências, não mostra delta nenhum em vez de um número
+              // redundante (ver nota pedindo a base em conversionFlow.ts).
+              const followerCompare = positiveFollowerFallback({ followersGain, prevFollowersGain, cur });
+              const followerDelta = followerCompare?.comparisonPct == null ? null
+                : followerCompare.comparisonBasis === "semana_anterior"
+                  ? `+${pctText(followerCompare.comparisonPct)} vs. semana anterior`
+                  : `+${pctText(followerCompare.comparisonPct)} da base`;
               return [
                 {
                   label: "Novos seguidores", value: followersGain, previous: null,
-                  kind: "number", inverse: false, deltaText: `+${num(followersGain)} informados`, deltaTone: "good" as const,
+                  kind: "number", inverse: false, deltaText: followerDelta ?? undefined,
+                  deltaTone: "good" as const, showDelta: followerDelta !== null,
                 },
                 ...(input.custoPorNovoSeguidor !== null && input.custoPorNovoSeguidor !== undefined
                   ? [{
