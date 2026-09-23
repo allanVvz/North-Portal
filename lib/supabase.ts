@@ -57,7 +57,7 @@ import {
   type PerformanceTemplate,
   type PerformanceTemplateConfig,
 } from "./performanceTemplates";
-import { taskProgress, checkpointsProgress, dedupePlanMembers, isRollupParent, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
+import { taskProgress, checkpointsProgress, dedupePlanMembers, isRollupParent, kindDef, kindLabel, kindTone, subtypeLabel } from "./taskCatalog";
 import { deliveryTypeProblem, findType, isDeliveryType, listTaskTypes, type TaskBehavior } from "./taskTypes";
 import { publishedWorkflowForKind } from "./workflows";
 import { advanceFlowAfterUpdate } from "./flows/advance";
@@ -1385,6 +1385,42 @@ export type RecurringTask = TaskRecord & Omit<RecurringTaskRecord, "id" | "clien
   template_status?: TaskRecord["status"];
 };
 
+/** Uma execução pode ser, ela mesma, um Plano de Ação de verdade (ex. "PLANO
+ * SEMANAL - ALLAN", ocorrência de "REUNIÃO ROTINA - ALLAN", dona de
+ * atividades reais como "REVISÃO - SLIDES PROMOCIONAIS 2K"). O merge de
+ * comentários da família (`familyCardsOf`, lib/comments.ts) já soma essas
+ * atividades com o histórico cruzado de recorrência — mas só se elas
+ * chegarem no `clientTasks` do modal. A tela de Rotinas inicializa
+ * `clientTasks` só com `routine.executions`, então os membros do plano
+ * precisam vir embutidos ali, não num array separado que o cliente nunca lê.
+ * Muta `executionsByParent` na MESMA lista que vira `routine.executions`. */
+async function attachPlanExecutionMembers(supabase: SupabaseLike, executionsByParent: Map<string, TaskRecord[]>): Promise<void> {
+  const planExecutionIds = [...executionsByParent.values()]
+    .flat()
+    .filter((execution) => kindDef(execution.kind).isPlan)
+    .map((execution) => execution.id);
+  if (!planExecutionIds.length) return;
+  const memberIds = await childIdsOf(supabase, planExecutionIds);
+  if (!memberIds.length) return;
+  const { data: memberRows, error: memberError } = await supabase
+    .from("tasks")
+    .select(TASK_COLUMNS_WITH_ASSIGNEES)
+    .in("id", memberIds);
+  if (memberError) fail(memberError);
+  const members = ((memberRows as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
+  // Cada membro entra na lista de execuções do MOLDE (não da execução-plano
+  // específica) — o molde carrega consigo tudo que qualquer uma de suas
+  // execuções precisa.
+  for (const [moldeId, executions] of executionsByParent) {
+    const planIdsOfThisMolde = new Set(executions.filter((e) => kindDef(e.kind).isPlan).map((e) => e.id));
+    if (!planIdsOfThisMolde.size) continue;
+    const childrenOfThisMolde = members.filter((member) =>
+      (member.parents ?? []).some((p) => planIdsOfThisMolde.has(p.id) && (p.relation_kind === "structural_member" || p.relation_kind === "workflow_step")),
+    );
+    if (childrenOfThisMolde.length) executionsByParent.set(moldeId, [...executions, ...childrenOfThisMolde]);
+  }
+}
+
 /** Cross-client recurring routine feed. Deliberately independent of ActionPlan. */
 export async function listRecurringTasks(): Promise<RecurringTask[]> {
   const supabase = await createClient();
@@ -1415,6 +1451,9 @@ export async function listRecurringTasks(): Promise<RecurringTask[]> {
       if (list) list.push(execution); else executionsByParent.set(execution.plan_id, [execution]);
     }
   }
+
+  await attachPlanExecutionMembers(supabase, executionsByParent);
+
   return parents
     .map(({ clients, ...task }) => {
       const client = Array.isArray(clients) ? clients[0] : clients;
