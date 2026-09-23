@@ -210,12 +210,14 @@ describe("conversão depois do Feedback concluído", () => {
     // E a resposta no card diz o que foi feito, item a item.
     const resposta = conversaoTexts().at(-1) ?? "";
     expect(resposta).toContain("Troquei a leitura do período pelo texto que você escreveu.");
-    expect(resposta).toContain("Tirei o comentário sobre seguidores.");
+    // "Remova o comentário sobre seguidores novos" é o TEXTO sendo trocado, não
+    // um dado a esconder — já coberto pela troca da narrativa (23/09).
+    expect(resposta).not.toContain("Tirei o comentário sobre seguidores.");
     expect(resposta).toContain("Tirei o % comparativo com o período anterior.");
     expect(resposta).not.toContain("crescimento de seguidores reorganizado");
 
     // E os dois pedidos de remoção chegam ao renderer como alvos escondidos.
-    expect(ultimaChamada?.hidden).toEqual(["seguidores", "percentual_comparativo"]);
+    expect(ultimaChamada?.hidden).toEqual(["percentual_comparativo"]);
   });
 
   // Achado real na FALKE (23/09): "Seguidores: 66" sem dizer se é total ou

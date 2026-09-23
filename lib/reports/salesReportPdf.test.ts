@@ -228,4 +228,20 @@ describe("renderSalesReportPdf", { timeout: 30_000 }, () => {
     });
     expect(isPdf(buf)).toBe(true);
   });
+
+  // Preview visual com os MESMOS dados de teste, para conferir capa, seções e
+  // funil sem regerar nada em produção. Inerte no CI:
+  //   PREVIEW_OUT=scratch/preview.pdf npx vitest run lib/reports/salesReportPdf.test.ts
+  it.skipIf(!process.env.PREVIEW_OUT)("grava um preview visual em PREVIEW_OUT", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const buf = await renderSalesReportPdf({
+      ...base,
+      seguidores: 30021,
+      seguidoresNovos: 21,
+      custoPorNovoSeguidor: 1.07,
+      prevSeguidoresNovos: 15,
+    });
+    writeFileSync(process.env.PREVIEW_OUT as string, buf);
+    expect(isPdf(buf)).toBe(true);
+  });
 });

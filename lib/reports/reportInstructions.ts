@@ -19,9 +19,15 @@
 // que não soube fazer — em vez de ignorar em silêncio.
 
 /** Um alvo que pode ser escondido a pedido. Nomes do vocabulário da operação,
- *  não do renderer. */
+ *  não do renderer.
+ *
+ *  "seguidores" NÃO entra aqui de propósito (23/09): o KPI de novos seguidores,
+ *  o custo por seguidor e a etapa do funil são conteúdo estrutural da campanha
+ *  de tráfego para o perfil — existem sempre que aquele objetivo existe, como
+ *  "visitas ao perfil" ou "cliques no site". Tratá-los como escondíveis foi o
+ *  que fez "Remova o comentário sobre seguidores novos" apagar o KPI e o funil
+ *  inteiros da CRIS, quando o pedido era sobre o TEXTO no fim do relatório. */
 export type HideTarget =
-  | "seguidores"
   | "percentual_comparativo"
   | "alcance"
   | "impressoes"
@@ -55,11 +61,19 @@ const REMOCAO = /\b(?:remov\w*|retir\w*|tir\w*|exclu\w*|ocult\w*|esconde\w*|apag
 
 const ALVOS: { alvo: HideTarget; teste: RegExp }[] = [
   { alvo: "percentual_comparativo", teste: /%|percentual|porcentagem|comparativ|compara(?:cao|tivo)|periodo anterior|semana anterior/ },
-  { alvo: "seguidores", teste: /seguidor/ },
   { alvo: "alcance", teste: /alcance/ },
   { alvo: "impressoes", teste: /impress/ },
   { alvo: "cliques", teste: /clique/ },
 ];
+
+/** "Remova O COMENTÁRIO sobre seguidores" fala do TEXTO no fim do relatório,
+ *  não do dado. A distinção é o objeto gramatical do verbo: quando o que se
+ *  pede para tirar é "o comentário"/"a análise"/"o texto", nenhum KPI e nenhuma
+ *  etapa do funil saem — quem resolve isso é a narrativa (o texto novo que ela
+ *  mandou entra no lugar do antigo). Sem esta regra, a palavra "seguidores"
+ *  dentro da frase virava um pedido para esconder o dado, e o KPI + o funil da
+ *  CRIS sumiam a cada geração (achado real, 23/09). */
+const ALVO_E_TEXTO = /^\s*(?:o\s+|a\s+)?(?:coment[aá]rio|an[aá]lise|texto|leitura)\b/i;
 
 /** Uma frase com verbo de pedido mas sem alvo reconhecido ainda é um pedido —
  *  e precisa ser dito no card, não engolido. */
@@ -95,7 +109,18 @@ export function extractReportInstructions(comment: string): ExtractedInstruction
 
   const vistos = new Set<HideTarget>();
   for (const trecho of restante.matchAll(REMOCAO)) {
-    const escopo = fold(trecho[1] ?? "");
+    const bruto = trecho[1] ?? "";
+    // Pedido sobre o TEXTO, não sobre o dado (ver ALVO_E_TEXTO). Com narrativa
+    // na mesma mensagem, o pedido já está atendido — ela mandou o texto novo
+    // justamente para entrar no lugar do antigo; nada a acrescentar na resposta.
+    if (ALVO_E_TEXTO.test(bruto)) {
+      if (!narrativa) {
+        const frase = limparTexto(trecho[0]);
+        if (frase.length > 3) naoEntendido.push(frase);
+      }
+      continue;
+    }
+    const escopo = fold(bruto);
     const alvo = ALVOS.find((a) => a.teste.test(escopo))?.alvo;
     if (alvo) {
       if (!vistos.has(alvo)) {
@@ -117,7 +142,6 @@ export function extractReportInstructions(comment: string): ExtractedInstruction
 }
 
 const ROTULO: Record<HideTarget, string> = {
-  seguidores: "o comentário sobre seguidores",
   percentual_comparativo: "o % comparativo com o período anterior",
   alcance: "o alcance",
   impressoes: "as impressões",

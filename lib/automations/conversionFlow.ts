@@ -90,7 +90,11 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // tinha 30000") agora soma pro total real (30021) em vez de ficar ambíguo e
 // ser descartado — achado real na CRIS, corrigido na fonte (commentParser.ts)
 // e replicado no fallback de IA (extractMetrics.ts).
-const CONVERSION_RENDERER_REVISION = "segment-summary-v16";
+// v17 (23/09): "remova o comentário sobre X" deixa de esconder o DADO X (era o
+// que apagava KPI e funil de seguidores da CRIS); capa editorial com título
+// "Relatório de tráfego pago", período em evidência e texto de apresentação;
+// seções com régua, título Fraunces e mais respiro; funil com mais destaque.
+const CONVERSION_RENDERER_REVISION = "segment-summary-v17";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",

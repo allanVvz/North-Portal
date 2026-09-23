@@ -42,10 +42,31 @@ export const T = StyleSheet.create({
   subtitle: { fontSize: 7.5, color: MUTED, marginTop: 2 },
   pill: { fontSize: 6.5, fontWeight: 600, color: SEC, borderWidth: 1, borderColor: LINE, backgroundColor: TEAL.wash, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 8 },
 
+  // Cabeçalho EDITORIAL — só o relatório de conversão, o que vai para o
+  // cliente. O de anúncios é interno e dá o espaço para densidade de dado, não
+  // para respiro (23/09). Aqui a hierarquia é: cliente (o nome dele é o que
+  // importa, grande e centralizado), depois o tipo de relatório, depois o
+  // período — que antes era uma linha cinza de 7,5pt perdida embaixo do título.
+  headerEditorial: { alignItems: "center", backgroundColor: TEAL.wash, borderRadius: 10, paddingTop: 20, paddingBottom: 18, paddingHorizontal: 28, marginBottom: 6 },
+  headerEditorialClient: { fontSize: 8, letterSpacing: 2.4, textTransform: "uppercase", fontWeight: 700, color: TEAL.d2, textAlign: "center", marginTop: 8 },
+  headerEditorialTitle: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 25, color: TEAL.d1, textAlign: "center", marginTop: 7, lineHeight: 1.12 },
+  headerEditorialRule: { width: 44, height: 2.5, borderRadius: 2, backgroundColor: TEAL.d4, marginTop: 11 },
+  headerEditorialPeriod: { fontSize: 10, fontWeight: 700, color: TEAL.d2, textAlign: "center", marginTop: 11 },
+  headerEditorialIntro: { fontSize: 8.5, color: SEC, textAlign: "center", marginTop: 7, lineHeight: 1.45, maxWidth: 400 },
+
   section: { marginTop: 16 },
   sectionTitle: { fontSize: 9, fontWeight: 700, color: INK },
   sectionAside: { fontSize: 7.5, color: MUTED },
   sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 8, gap: 12 },
+
+  // Seções EDITORIAIS: o título vira marco visível da página em vez de um
+  // negrito de 9pt quase do tamanho do corpo. Régua curta acima, mais ar antes
+  // e depois — é o que separa uma seção da outra quando alguém folheia o PDF.
+  sectionEditorial: { marginTop: 26 },
+  sectionHeadEditorial: { marginBottom: 12 },
+  sectionRule: { width: 26, height: 2, borderRadius: 2, backgroundColor: TEAL.d4, marginBottom: 7 },
+  sectionTitleEditorial: { fontFamily: "Fraunces", fontWeight: 600, fontSize: 14, color: INK, lineHeight: 1.2 },
+  sectionAsideEditorial: { fontSize: 8, color: MUTED, marginTop: 3, lineHeight: 1.35 },
 
   headline: { fontSize: 12, fontWeight: 600, color: INK, lineHeight: 1.3, marginTop: 12 },
 
@@ -101,7 +122,27 @@ export const T = StyleSheet.create({
 
 // ---- estrutura --------------------------------------------------------------------------
 
-export function PageHeader({ eyebrow, title, subtitle, pill }: { eyebrow: string; title: string; subtitle: string; pill: string }) {
+/** `variant="editorial"` é o relatório que vai para o CLIENTE (conversão):
+ *  centralizado, nome do cliente em destaque, período legível. O padrão
+ *  (`compact`) é o relatório interno de anúncios, onde o cabeçalho cede espaço
+ *  para o dado. */
+export function PageHeader({ eyebrow, title, subtitle, pill, intro, variant = "compact" }: {
+  eyebrow: string; title: string; subtitle: string; pill: string; intro?: string; variant?: "compact" | "editorial";
+}) {
+  if (variant === "editorial") {
+    return (
+      <View style={T.headerEditorial}>
+        <Svg viewBox={`0 0 ${COMPASS_VIEWBOX} ${COMPASS_VIEWBOX}`} style={{ width: 28, height: 28 }}>
+          {compassShapes.map((shape, i) => <CompassNode key={i} shape={shape} ink={C.tealStrong} />)}
+        </Svg>
+        <Text style={T.headerEditorialClient}>{eyebrow}</Text>
+        <Text style={T.headerEditorialTitle}>{title}</Text>
+        <View style={T.headerEditorialRule} />
+        <Text style={T.headerEditorialPeriod}>{subtitle}</Text>
+        {intro ? <Text style={T.headerEditorialIntro}>{intro}</Text> : null}
+      </View>
+    );
+  }
   return (
     <View style={T.header}>
       <View style={T.headerLeft}>
@@ -122,15 +163,22 @@ export function PageHeader({ eyebrow, title, subtitle, pill }: { eyebrow: string
 /** `lead` é o primeiro bloco da seção, preso ao título num bloco que não quebra:
  *  o título nunca fica sozinho no pé da página (o `minPresenceAhead` do react-pdf
  *  não segurou quando o bloco seguinte era uma linha de cartões). */
-export function Section({ title, aside, lead, children, wrap = true, breakBefore = false }: { title: string; aside?: string; lead?: ReactNode; children?: ReactNode; wrap?: boolean; breakBefore?: boolean }) {
-  const head = (
+export function Section({ title, aside, lead, children, wrap = true, breakBefore = false, variant = "compact" }: { title: string; aside?: string; lead?: ReactNode; children?: ReactNode; wrap?: boolean; breakBefore?: boolean; variant?: "compact" | "editorial" }) {
+  const editorial = variant === "editorial";
+  const head = editorial ? (
+    <View style={T.sectionHeadEditorial} minPresenceAhead={80}>
+      <View style={T.sectionRule} />
+      <Text style={T.sectionTitleEditorial}>{cap(title)}</Text>
+      {aside ? <Text style={T.sectionAsideEditorial}>{aside}</Text> : null}
+    </View>
+  ) : (
     <View style={T.sectionHead} minPresenceAhead={60}>
       <Text style={T.sectionTitle}>{cap(title)}</Text>
       {aside ? <Text style={T.sectionAside}>{aside}</Text> : null}
     </View>
   );
       return (
-        <View style={T.section} wrap={wrap} break={breakBefore}>
+        <View style={editorial ? T.sectionEditorial : T.section} wrap={wrap} break={breakBefore}>
           {lead ? <><View wrap={false}>{head}</View>{lead}</> : head}
       {children}
     </View>

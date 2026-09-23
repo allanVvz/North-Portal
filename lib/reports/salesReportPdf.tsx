@@ -39,6 +39,16 @@ import {
 
 registerReportFonts();
 
+/** O nome que o CLIENTE lê na capa. Internamente a etapa, o card, o subtype e o
+ *  arquivo continuam "relatório de conversão" (`relatorio_conversao`) — este é
+ *  só o rótulo editorial do PDF, pedido em 23/09. Não use esta constante para
+ *  nomear card, documento ou automação. */
+const PDF_TITLE = "Relatório de tráfego pago";
+
+/** Uma linha de apresentação abaixo do período: diz ao cliente o que ele está
+ *  prestes a ler, antes do funil. */
+const PDF_INTRO = "O caminho que o investimento em anúncios percorreu na semana — do alcance até o resultado — e a leitura de quem acompanha a conta.";
+
 export type SalesReportInput = {
   clientName: string;
   period: Period;
@@ -222,13 +232,13 @@ function SalesReportDocument(input: SalesReportInput) {
     : highlights.length > 1 ? "Os criativos que mais contribuíram" : "O criativo que mais contribuiu";
 
   const creativeSection = highlights.length ? (
-    <Section title={creativeSectionTitle} lead={<CreativeCards items={highlights.map((h) => creativeCardView(h.row, h.badges, outcome, previews))} layout={input.layout?.creativeCards} />} />
+    <Section variant="editorial" title={creativeSectionTitle} lead={<CreativeCards items={highlights.map((h) => creativeCardView(h.row, h.badges, outcome, previews))} layout={input.layout?.creativeCards} />} />
   ) : null;
 
   // O que a API não entrega vem do comentário. Fica em faixa própria, e não
   // misturado às figuras de mídia, para o cliente ler de onde veio cada número.
   const informadosSection = (input.informados ?? []).length ? (
-    <Section title="Informado pela equipe">
+    <Section variant="editorial" title="Informado pela equipe">
       <FigureRow items={(input.informados ?? []).map((m) => ({
         label: m.label,
         value: m.kind === "money" ? money(m.value) : num(m.value),
@@ -238,7 +248,7 @@ function SalesReportDocument(input: SalesReportInput) {
   ) : null;
 
   const mediaSection = objectives.length ? (
-    <Section title="A mídia da semana" aside={media.spend !== null ? `${money(media.spend)} investidos` : undefined}>
+    <Section variant="editorial" title="A mídia da semana" aside={media.spend !== null ? `${money(media.spend)} investidos` : undefined}>
       <DataTable
         columns={[
           { key: "obj", label: "Objetivo", flex: 1.5 },
@@ -264,7 +274,7 @@ function SalesReportDocument(input: SalesReportInput) {
     || input.adaptiveContext.tradeoffs.length
     || input.adaptiveContext.claims.some((claim) => claim.precision !== "exata")
   ) ? (
-    <Section title="Contexto e leitura do período">
+    <Section variant="editorial" title="Contexto e leitura do período">
       {input.adaptiveContext.context.map((item) => (
         <Text key={`${item.sourceTaskId}:${item.sourceCommentAt}`} style={T.note}>
           Contexto informado por {item.author}: {item.text}
@@ -293,11 +303,11 @@ function SalesReportDocument(input: SalesReportInput) {
     .slice(0, narrativePlan.maxParagraphs ?? 1)
     .map((item) => ({ ...item, text: clipNarrative(item.text) }));
   const conversionNarrative = aiNarrative.length ? (
-    <Section title="Leitura do período" breakBefore={narrativePlan.placement === "next_page"}>
+    <Section variant="editorial" title="Leitura do período" breakBefore={narrativePlan.placement === "next_page"}>
       {aiNarrative.map((item, index) => <Text key={`${item.kind}:${index}`} style={T.narrativeText}>{item.text}</Text>)}
     </Section>
   ) : focus === "seguidores" && followersGain !== null ? (
-    <Section title="Leitura do período" breakBefore={narrativePlan.placement === "next_page"}>
+    <Section variant="editorial" title="Leitura do período" breakBefore={narrativePlan.placement === "next_page"}>
       <Text style={T.narrativeText}>
         O crescimento semanal permaneceu positivo{prevFollowersGain !== null && followersGain < prevFollowersGain ? ", mesmo com ritmo abaixo da referência anterior" : ""}. A base total continuou avançando. {media.profileVisits !== null ? `As ${num(media.profileVisits)} visitas ao perfil compõem a jornada observada, ` : "As visitas ao perfil compõem a jornada observada, "}mas não permitem atribuir automaticamente cada novo seguidor aos anúncios.
       </Text>
@@ -310,7 +320,7 @@ function SalesReportDocument(input: SalesReportInput) {
   ].filter((metric): metric is { label: string; current: number; previous: number | null } => metric !== null);
 
   const audienceGrowthSection = audienceRows.length ? (
-    <Section title="Crescimento de audiência" aside="Resultado informado">
+    <Section variant="editorial" title="Crescimento de audiência" aside="Resultado informado">
       <DataTable
         columns={[
           { key: "metric", label: "Indicador", flex: 1.8 }, { key: "current", label: "Atual", align: "right" },
@@ -330,7 +340,7 @@ function SalesReportDocument(input: SalesReportInput) {
   ) : null;
 
   const conversionHistorySection = series.filter((point) => [point.vendas, point.agendamentos, point.receita, point.seguidores].some((value) => value !== null)).length >= 3 ? (
-    <Section title="Histórico de conversão">
+    <Section variant="editorial" title="Histórico de conversão">
       <DataTable
         columns={[
           { key: "period", label: "Período", flex: 1.2 }, { key: "followers", label: "Seguidores", align: "right" },
@@ -420,17 +430,23 @@ function SalesReportDocument(input: SalesReportInput) {
         <Page size="A4" style={T.page} wrap>
           <PageHeader
             eyebrow={clientName}
-            title="Relatório de conversão"
+            title={PDF_TITLE}
             subtitle={`${fullDay(period.from)} a ${fullDay(period.to)}`}
             pill="Conversão"
+            intro={PDF_INTRO}
+            variant="editorial"
           />
           {funnel.stages.length ? (
-            <Section title="Funil">
-              <View style={{ alignItems: "center", paddingVertical: 2 }}>
+            // Primeiro objeto do relatório e o que conta a história inteira em
+            // uma imagem: ganha título próprio, uma linha de leitura e espaço
+            // de verdade em volta, em vez de ser mais uma seção de 2pt de
+            // respiro (23/09).
+            <Section variant="editorial" title="A jornada da semana" aside="De quantas pessoas o anúncio alcançou até o que elas fizeram">
+              <View style={{ alignItems: "center", paddingTop: 6, paddingBottom: 10 }}>
                 <ProportionalFunnel
-                  width={Math.min(input.layout?.funnel?.width ?? 300, 300)}
-                  layout={{ ...input.layout?.funnel, maxWidth: 300, nodeWidth: 180 }}
-                  stages={funnel.stages.filter((stage) => !(esconde("seguidores") && stage.key === "seguidores_novos")).map((stage) => ({
+                  width={Math.min(input.layout?.funnel?.width ?? 330, 330)}
+                  layout={{ ...input.layout?.funnel, maxWidth: 330, nodeWidth: 198 }}
+                  stages={funnel.stages.map((stage) => ({
                     label: stage.label,
                     value: stage.key === "seguidores_novos" ? `+${num(stage.value)}` : num(stage.value),
                     numeric: stage.value,
@@ -442,7 +458,7 @@ function SalesReportDocument(input: SalesReportInput) {
               </View>
             </Section>
           ) : null}
-          {resultItems.length ? <Section title="Resultados informados"><FigureRow items={resultItems} /></Section> : null}
+          {resultItems.length ? <Section variant="editorial" title="Resultados informados"><FigureRow items={resultItems} /></Section> : null}
           {informadosSection}
           <CampaignBlocksSection
             config={config}
@@ -461,7 +477,10 @@ function SalesReportDocument(input: SalesReportInput) {
             // tudo, sempre.
             deltaPolicy="positive_only"
             extraKpis={(block) => {
-              if (esconde("seguidores")) return [];
+              // Seguidores e custo por seguidor pertencem ao objetivo de
+              // tráfego para o perfil e aparecem sempre que há ganho informado
+              // — nunca são escondidos por pedido (ver HideTarget em
+              // reportInstructions.ts, 23/09).
               if (block !== "trafego_perfil" || followersGain === null || followersGain <= 0) return [];
               // "+66 informados" repetia o próprio valor do card (23/09) — usa
               // a mesma comparação do funil (vs. semana anterior, com
@@ -490,12 +509,12 @@ function SalesReportDocument(input: SalesReportInput) {
             detail={(block) => creativeTableForBlock(block)}
           />
           {operationalReading.length ? (
-            <Section title="Leitura da semana">
+            <Section variant="editorial" title="Leitura da semana">
               <AnalysisList items={operationalReading} />
             </Section>
           ) : null}
           {conversoes.length ? (
-            <Section title="Conversões informadas">
+            <Section variant="editorial" title="Conversões informadas">
               <DataTable
                 columns={[
                   { key: "servico", label: "Serviço", flex: 2.4 },
@@ -523,7 +542,7 @@ function SalesReportDocument(input: SalesReportInput) {
   const tableHasCost = creatives.some((r) => r.costPerResult !== null);
   const tableHasShare = creatives.some((r) => r.resultShare !== null);
   const allAdsSection = creatives.length ? (
-    <Section title="Contribuição dos anúncios" aside="Todos os anúncios relevantes do período" breakBefore>
+    <Section variant="editorial" title="Contribuição dos anúncios" aside="Todos os anúncios relevantes do período" breakBefore>
       <DataTable columns={[
         { key: "name", label: "Anúncio", flex: tableHasCampaign ? 1.8 : 2.4 },
         ...(tableHasCampaign ? [{ key: "campaign", label: "Campanha / objetivo", flex: 1.5 }] : []),
@@ -547,10 +566,12 @@ function SalesReportDocument(input: SalesReportInput) {
       <Page size="A4" style={T.page} wrap>
         <PageHeader
           eyebrow={clientName}
-          title="Relatório de conversão"
+          title={PDF_TITLE}
           subtitle={`${fullDay(period.from)} a ${fullDay(period.to)}${comparedRange ? ` · comparado com ${shortDay(comparedRange.from)} a ${shortDay(comparedRange.to)}` : ""}`}
           pill="Conversão"
-        />
+          intro={PDF_INTRO}
+          variant="editorial"
+          />
 
         {/* O destaque acima da faixa de KPIs (manchete + número de 30pt) saiu por
             decisão do usuário: repetia o que a faixa e o funil já dizem, e no
@@ -560,7 +581,7 @@ function SalesReportDocument(input: SalesReportInput) {
         {adaptiveSection}
         {conversionNarrative}
         {funnel.stages.length ? (
-          <Section title={focus === "seguidores" ? "Do alcance ao perfil" : focus === "midia" ? "Do alcance às conversas" : "Do alcance à venda"}>
+          <Section variant="editorial" title={focus === "seguidores" ? "Do alcance ao perfil" : focus === "midia" ? "Do alcance às conversas" : "Do alcance à venda"}>
             <View style={T.twoCol}>
               <ProportionalFunnel width={analysis.insights.length ? 290 : (input.layout?.funnel?.width ?? 360)} layout={input.layout?.funnel} stages={funnel.stages.map((s) => ({ label: s.label, source: s.source === "feedback" ? "resultado informado" : "mídia", value: s.key === "seguidores_novos" ? `+${num(s.value)}` : num(s.value), numeric: s.value, base: s.base }))} gaps={focus === "seguidores" ? [] : funnel.gaps} />
               {analysis.insights.length ? (
@@ -584,7 +605,7 @@ function SalesReportDocument(input: SalesReportInput) {
           <>
             {ladder.length || origins.length ? (
               // A taxa agendamento → venda já está no funil; aqui fica o custo e a origem.
-              <Section title={origins.length ? "Custo e origem das vendas" : "Custo de mídia por etapa"}>
+              <Section variant="editorial" title={origins.length ? "Custo e origem das vendas" : "Custo de mídia por etapa"}>
                 <View style={T.twoCol}>
                   <View style={{ flex: 1 }}>
                     {ladder.length ? (
@@ -607,7 +628,7 @@ function SalesReportDocument(input: SalesReportInput) {
               </Section>
             ) : null}
             {conversoes.length ? (
-              <Section title="Vendas descritas" aside={cur.vendas !== null && conversoes.length < cur.vendas ? `${conversoes.length} de ${cur.vendas} descritas` : undefined}>
+              <Section variant="editorial" title="Vendas descritas" aside={cur.vendas !== null && conversoes.length < cur.vendas ? `${conversoes.length} de ${cur.vendas} descritas` : undefined}>
                 <DataTable
                   columns={[
                     { key: "servico", label: "Serviço", flex: 2.4 },

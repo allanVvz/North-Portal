@@ -8,8 +8,12 @@ const COMENTARIO_CRIS = "Ajuste o comentário: Direcionamos as campanhas de traf
 describe("extractReportInstructions — o comentário da CRIS", () => {
   const r = extractReportInstructions(COMENTARIO_CRIS);
 
-  it("lê as três instruções", () => {
-    expect(r.instrucoes).toHaveLength(3);
+  // "Remova o comentário sobre seguidores novos" fala do TEXTO no fim do
+  // relatório, não do dado: ela mandou o texto novo justamente para entrar no
+  // lugar do antigo. Lido como "esconder seguidores", isso apagava o KPI e a
+  // etapa do funil da CRIS a cada geração (corrigido em 23/09).
+  it("lê duas instruções — o pedido sobre o comentário é a própria narrativa", () => {
+    expect(r.instrucoes).toHaveLength(2);
     expect(r.naoEntendido).toEqual([]);
   });
 
@@ -28,15 +32,14 @@ describe("extractReportInstructions — o comentário da CRIS", () => {
     expect(texto).not.toMatch(/remova|retire/i);
   });
 
-  it("entende os dois pedidos de remoção", () => {
+  it("só o % comparativo é escondido — seguidores é dado, não texto", () => {
     const alvos = r.instrucoes.filter((i) => i.kind === "esconder").map((i) => (i.kind === "esconder" ? i.alvo : ""));
-    expect(alvos).toEqual(["seguidores", "percentual_comparativo"]);
+    expect(alvos).toEqual(["percentual_comparativo"]);
   });
 
   it("a resposta é item a item, não uma frase pronta", () => {
     expect(describeInstructions(r)).toEqual([
       "Troquei a leitura do período pelo texto que você escreveu.",
-      "Tirei o comentário sobre seguidores.",
       "Tirei o % comparativo com o período anterior.",
     ]);
   });
@@ -72,7 +75,19 @@ describe("extractReportInstructions — outras formas de pedir", () => {
   });
 
   it("o mesmo alvo pedido duas vezes entra uma vez só", () => {
-    const r = extractReportInstructions("remova os seguidores. retire o comentário sobre seguidores novos");
-    expect(r.instrucoes).toEqual([{ kind: "esconder", alvo: "seguidores" }]);
+    const r = extractReportInstructions("remova o alcance. retire o alcance das boxes também");
+    expect(r.instrucoes).toEqual([{ kind: "esconder", alvo: "alcance" }]);
+  });
+
+  // A distinção que o módulo precisa fazer: pedido sobre TEXTO × pedido sobre DADO.
+  it("'remova o comentário sobre seguidores' sozinho não esconde dado — volta como não entendido", () => {
+    const r = extractReportInstructions("remova o comentário sobre seguidores novos");
+    expect(r.instrucoes).toEqual([]);
+    expect(r.naoEntendido).toHaveLength(1);
+  });
+
+  it("'retire os seguidores' também não esconde: o dado é estrutural do objetivo de perfil", () => {
+    const r = extractReportInstructions("retire os seguidores do relatório");
+    expect(r.instrucoes.filter((i) => i.kind === "esconder")).toEqual([]);
   });
 });
