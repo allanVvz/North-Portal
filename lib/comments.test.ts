@@ -194,6 +194,52 @@ describe("familyThreadOf", () => {
     const atividade = { ...card("y", "criativo", [{ author: "B", text: "do filho", at: "2026-09-02T09:00:00Z" }]), parents: [elo("x", null)] };
     expect(familyThreadOf(salvoComum, [salvoComum, atividade], "plano_acao").map((c) => c.text)).toEqual(["meu", "do filho"]);
   });
+
+  // Bug real (2026-09-2x): "PLANO SEMANAL - ALLAN" é ocorrência de "REUNIÃO
+  // ROTINA - ALLAN" (recurrence_parent_id) E é ele mesmo um Plano de Ação
+  // com atividade própria real ("REVISÃO - SLIDES PROMOCIONAIS 2K", elo
+  // structural_member). O if/else antigo escolhia só o histórico de
+  // recorrência e a atividade própria nunca aparecia no thread do plano.
+  it("uma ocorrência de recorrência que também é Plano soma histórico cruzado E membros do plano", () => {
+    const molde = { ...card("molde", "plano_acao", [{ author: "A", text: "abertura da rotina", at: "2026-09-01T09:00:00Z" }]), recurrence_cadence: "semanal" as const };
+    const planoSemanal = card("plano-semanal", "plano_acao", [{ author: "B", text: "escopo da semana", at: "2026-09-08T09:00:00Z" }], { recurrence_parent_id: "molde" });
+    const revisaoSlides = { ...card("revisao", "criativo", [{ author: "C", text: "slides prontos", at: "2026-09-09T09:00:00Z" }]), parents: [elo("plano-semanal", null)] };
+    const quadro = [molde, planoSemanal, revisaoSlides];
+    expect(familyThreadOf(planoSemanal, quadro).map((c) => c.text)).toEqual([
+      "abertura da rotina",
+      "escopo da semana",
+      "slides prontos",
+    ]);
+    expect(familyThreadOf(planoSemanal, quadro).map((c) => c.taskId)).toEqual(["molde", "plano-semanal", "revisao"]);
+  });
+
+  // Regressão: ocorrência de recorrência que NÃO é Plano continua só com o
+  // histórico cruzado — o lado "membros do plano" da união fica vazio
+  // quando kindDef(kind).isPlan é falso.
+  it("uma ocorrência de recorrência que NÃO é Plano continua só com o histórico cruzado", () => {
+    const moldeComum = { ...card("molde-c", "criativo", [{ author: "A", text: "abertura", at: "2026-09-01T09:00:00Z" }]), recurrence_cadence: "semanal" as const };
+    const ocorrencia = card("ocorr-c", "criativo", [{ author: "B", text: "ciclo desta semana", at: "2026-09-08T09:00:00Z" }], { recurrence_parent_id: "molde-c" });
+    expect(familyThreadOf(ocorrencia, [moldeComum, ocorrencia]).map((c) => c.text)).toEqual(["abertura", "ciclo desta semana"]);
+  });
+
+  // Categoria de entrega permanece exclusiva mesmo numa OCORRÊNCIA (não só
+  // no molde, linha 184 acima): uma entrega-ocorrência de fluxo recorrente
+  // nunca junta histórico de recorrência, só as etapas dela.
+  it("uma entrega-ocorrência de fluxo recorrente continua só com as etapas, não com o histórico cruzado", () => {
+    const moldeFluxo = { ...card("molde-f", "criativo", []), workflow_version_id: "workflow-v1", recurrence_cadence: "semanal" as const };
+    const entregaOcorrencia = {
+      id: "entrega-f",
+      kind: "criativo",
+      workflow_version_id: "workflow-v1",
+      payload: { comments: [{ author: "A", text: "briefing da semana", at: "2026-09-08T09:00:00Z" }], recurrence_parent_id: "molde-f" },
+      parents: [] as ReturnType<typeof elo>[],
+    };
+    const etapa = { ...card("etapa-f", "criativo", [{ author: "B", text: "roteiro pronto", at: "2026-09-09T09:00:00Z" }]), parents: [elo("entrega-f", "roteiro", 10)] };
+    expect(familyThreadOf(entregaOcorrencia, [moldeFluxo, entregaOcorrencia, etapa]).map((c) => c.text)).toEqual([
+      "briefing da semana",
+      "roteiro pronto",
+    ]);
+  });
 });
 
 describe("formatCommentTime", () => {

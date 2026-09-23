@@ -98,7 +98,7 @@ export function isFamilyParent(task: Pick<FamilyMember, "id" | "kind" | "payload
 /** Os cards cujo thread aparece junto neste: ele mesmo e a família. Sempre
  *  começa pelo próprio card, e nunca repete um id.
  *
- *  Ordem de prioridade, de propósito, um card só cai numa categoria:
+ *  Categorias 1 e 2 são EXCLUSIVAS — um card cai numa das duas e para aí:
  *  1. O card É O MOLDE de uma recorrência (`isRecurrenceTemplate`) → os
  *     ciclos, sempre — mesmo quando o molde também carrega marcas herdadas
  *     de fluxo (entrega recorrente) ou é ele mesmo um Plano de Ação (ex.
@@ -108,24 +108,39 @@ export function isFamilyParent(task: Pick<FamilyMember, "id" | "kind" | "payload
  *     vincular uma execução nova nunca aparecer no thread do molde, porque
  *     o merge nem olhava pra lista certa.
  *  2. Senão, é uma entrega DE VERDADE (uma ocorrência com etapas próprias)
- *     → as etapas — regra documentada em isFamilyParent.
- *  3. Senão, é uma OCORRÊNCIA de recorrência (aponta pra um molde) → o
- *     histórico cruzado de ciclos (ATA 14/09).
- *  4. Senão, é um Plano de Ação → as atividades. */
+ *     → só as etapas, nunca o histórico cruzado de recorrência mesmo quando
+ *     a entrega também é uma ocorrência — juntar comentários de ciclos
+ *     antigos numa entrega seria ruído (regra documentada em isFamilyParent).
+ *
+ *  Categorias 3 e 4 SOMAM — um card pode cair nas duas ao mesmo tempo: um
+ *  Plano de Ação "semanal" pode ser, ele mesmo, uma OCORRÊNCIA de uma rotina
+ *  recorrente (ex. "PLANO SEMANAL - ALLAN", ocorrência de "REUNIÃO ROTINA -
+ *  ALLAN") e AINDA ASSIM ter atividades reais próprias (ex. "REVISÃO -
+ *  SLIDES PROMOCIONAIS 2K"). Tratar isso como um if/else escolhia só um dos
+ *  dois lados e o comentário da atividade nunca aparecia no plano — bug real
+ *  2026-09-2x. Por isso os dois entram juntos:
+ *  3. Se aponta pra um molde (`recurrenceParentIdOf`) → o histórico cruzado
+ *     de ciclos-irmãos (ATA 14/09).
+ *  4. Se é um Plano de Ação → as atividades próprias. */
 export function familyCardsOf<T extends FamilyMember>(task: T, tasks: readonly T[], kind = task.kind): T[] {
   if (!isFamilyParent(task, kind)) return [task];
-  const templateId = isRecurrenceTemplate(task)
-    ? task.id
-    : isFlowDelivery(task)
-      ? null
-      : recurrenceParentIdOf(task);
-  const members = templateId
-    ? [...tasks.filter((t) => t.id === templateId), ...recurrenceExecutionsOf(templateId, tasks)]
-    : isFlowDelivery(task)
-      ? flowStepsOf(task.id, tasks)
-      : kindDef(kind).isPlan
-        ? actionPlanMembersOf(task.id, tasks)
-        : [];
+  if (isRecurrenceTemplate(task)) {
+    return mergeFamily(task, recurrenceExecutionsOf(task.id, tasks));
+  }
+  if (isFlowDelivery(task)) {
+    return mergeFamily(task, flowStepsOf(task.id, tasks));
+  }
+  const recurrenceTemplateId = recurrenceParentIdOf(task);
+  const members = [
+    ...(recurrenceTemplateId
+      ? [...tasks.filter((t) => t.id === recurrenceTemplateId), ...recurrenceExecutionsOf(recurrenceTemplateId, tasks)]
+      : []),
+    ...(kindDef(kind).isPlan ? actionPlanMembersOf(task.id, tasks) : []),
+  ];
+  return mergeFamily(task, members);
+}
+
+function mergeFamily<T extends FamilyMember>(task: T, members: readonly T[]): T[] {
   const seen = new Set([task.id]);
   const family = [task];
   for (const member of members) {
