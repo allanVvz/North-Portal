@@ -30,6 +30,12 @@ Cada linha diz o que foi decidido e por quê. O detalhe de implementação mora 
 | 15/09 | Histórico pelo número de semanas: 1 = nada, 2 = "antes → depois", 3+ = gráfico | Gráfico de 2 pontos não conta nada que a comparação não diga |
 | 15/09 | Em seguidores, a comparação de 2 semanas sai quando só repete a figura principal | "1.214 → 1.251" aparecia três vezes |
 | 15/09 | Tabela comparativa por objetivo preservada; campanhas só quando há mais campanhas que objetivos | É o que o gestor usa para decidir verba |
+| 22/09 | Destaque acima dos KPIs (`Headline`+`HeroFigure`) removido de todos os focos, só no relatório de conversão | Luiza: "o destaque acima dos kpis não deve existir" — duplicava o que os cards por objetivo já mostram |
+| 22/09 | Frequência sai como KPI fixo dos dois relatórios | Só devia aparecer "quando for um fator preocupante (acima de 5x ou 10x)"; o gatilho fica pendente (ver Pendências) |
+| 22/09 | "%" de variação dentro do KPI vira opcional, **só no relatório de conversão** — exibe apenas ganho > 1%, nunca queda | Luiza: "não mostrar % que represente algo ruim, a não ser que peça". Relatório de anúncios continua mostrando tudo, sempre |
+| 22/09 | CPM sai do relatório de conversão; permanece exclusivo do relatório de anúncios | "cpm é somente para o relatório de trafego" |
+| 22/09 | Comentário de correção da Luiza vira instrução estruturada (`lib/reports/reportInstructions.ts`), não só texto solto no contexto | O pedido "ajuste o comentário: X / remova o comentário sobre Y / retire o % comparativo" caía inteiro, cru e duplicado, em `context[]` — nada do que ela pediu mudava o PDF |
+| 22/09 | Resposta da automação no card vira item a item (`describeInstructions`), nunca frase pronta | A frase canônica não correspondia ao que foi realmente aplicado |
 
 ## Criativos
 
@@ -81,3 +87,26 @@ Par da semana sem IA ≈ US$ 0,0002 (≈ R$ 0,001). Com a IA lendo o comentário
 - Aprovação determinística do Feedback por comentário de revisor (hoje a
   aprovação continua manual).
 - Atribuição de receita por fonte no relatório de anúncios (hoje só no de resultados).
+- **Frequência como alerta crítico (22/09)**: hoje ela simplesmente não aparece
+  em nenhum dos dois relatórios. Falta decidir o piso (5x ou 10x, ajustável por
+  feedback) e o mecanismo de alerta condicional — hoje `showsDelta`/`hideMetrics`
+  só sabem esconder, não "mostrar só acima de um limiar".
+- **"A não ser que peça" para CPM e "%" ruim (22/09)**: a política atual do
+  relatório de conversão (`hideMetrics={["cpm"]}`, `deltaPolicy="positive_only"`
+  em `salesReportPdf.tsx`) é fixa — não existe ainda um caminho para o pedido de
+  revisão da Luiza (via `reportInstructions.ts`) reativar CPM ou uma queda
+  específica quando ela pedir explicitamente. Precisa de um `HideTarget` reverso
+  (revelar, não só esconder) ou de instruções por chamada em vez de props fixas.
+- **1 campanha só (relatado 22/09, não iniciado)**: quando o cliente tem uma
+  única campanha num bloco, os KPIs do cabeçalho (`reportContext`/faixa de
+  números) e os do bloco por objetivo podem repetir o mesmo dado — Luiza pediu
+  "rodar uma validação de templates para esses contextos, não duplicar dados".
+  Falta desenhar como detectar "1 campanha == 1 bloco" e suprimir a redundância.
+- **Design do card de destaque por objetivo (relatado 22/09, não iniciado)**:
+  "tem muito espaço negativo, a fonte a hierarquia, o design deve melhorar".
+  Abordagem combinada: proposta de layout seguida de validação visual no PDF
+  gerado (Chrome), não um requisito fechado de antemão.
+- **Campanha "VENDAS | SITE | 03/06 — CÓPIA" na CRIS (achado 22/09)**: apareceu
+  como destaque real num PDF de produção — parece um teste/duplicata de
+  campanha que não deveria concorrer por espaço no relatório. Não confirmado
+  com o cliente se é para excluir do relatório ou corrigir na Meta.
