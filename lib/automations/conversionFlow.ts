@@ -77,7 +77,11 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // v12 (22/09): sem destaque acima dos KPIs, sem Frequência, "%" só quando é
 // ganho > 1%, sem CPM — bump força a regeneração das ocorrências já geradas
 // em v11 (Baita/CRIS/FALKE) na próxima vez que a etapa for reprocessada.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v12";
+// v13 (23/09): site/perfil/conversas escopados por objetivo, seguidores
+// garantido mesmo sem KPI de template, "Novos seguidores" sem redundância,
+// "Todos os criativos" (destaque incluso), card de destaque sem espaço
+// morto, bloco atômico na paginação.
+const CONVERSION_RENDERER_REVISION = "segment-summary-v13";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
