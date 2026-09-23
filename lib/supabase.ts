@@ -1385,39 +1385,54 @@ export type RecurringTask = TaskRecord & Omit<RecurringTaskRecord, "id" | "clien
   template_status?: TaskRecord["status"];
 };
 
-/** Uma execução pode ser, ela mesma, um Plano de Ação de verdade (ex. "PLANO
- * SEMANAL - ALLAN", ocorrência de "REUNIÃO ROTINA - ALLAN", dona de
- * atividades reais como "REVISÃO - SLIDES PROMOCIONAIS 2K"). O merge de
- * comentários da família (`familyCardsOf`, lib/comments.ts) já soma essas
- * atividades com o histórico cruzado de recorrência — mas só se elas
- * chegarem no `clientTasks` do modal. A tela de Rotinas inicializa
- * `clientTasks` só com `routine.executions`, então os membros do plano
- * precisam vir embutidos ali, não num array separado que o cliente nunca lê.
- * Muta `executionsByParent` na MESMA lista que vira `routine.executions`. */
+/** Uma execução pode ser, ela mesma, um Plano de Ação (ou uma Entrega de
+ * fluxo) de verdade, dona de uma árvore própria — ex. "PLANO SEMANAL -
+ * ALLAN", ocorrência de "REUNIÃO ROTINA - ALLAN", com a atividade real
+ * "REVISÃO - SLIDES PROMOCIONAIS 2K", que por sua vez pode ter suas próprias
+ * etapas. O merge de comentários da família (`familyCardsOf`,
+ * lib/comments.ts) é RECURSIVO — mostra a árvore inteira (Rotina → Plano →
+ * Entrega → Task) — mas só sobre o que já está em `clientTasks`. A tela de
+ * Rotinas inicializa `clientTasks` só com `routine.executions`, então cada
+ * nível da árvore precisa vir embutido ali, não em consultas separadas que o
+ * cliente nunca lê.
+ *
+ * Desce nível por nível (BFS, não 1 salto só): busca os filhos de toda
+ * execução que seja Plano ou Entrega de fluxo, soma os que forem novos, e
+ * repete a partir dos filhos que também sejam container (Plano/Entrega) —
+ * até não sobrar filho novo ou até `MAX_DEPTH`, que é só uma trava de
+ * segurança (o banco já recusa `structural_member` circular). Muta
+ * `executionsByParent` na MESMA lista que vira `routine.executions`. */
 async function attachPlanExecutionMembers(supabase: SupabaseLike, executionsByParent: Map<string, TaskRecord[]>): Promise<void> {
-  const planExecutionIds = [...executionsByParent.values()]
-    .flat()
-    .filter((execution) => kindDef(execution.kind).isPlan)
-    .map((execution) => execution.id);
-  if (!planExecutionIds.length) return;
-  const memberIds = await childIdsOf(supabase, planExecutionIds);
-  if (!memberIds.length) return;
-  const { data: memberRows, error: memberError } = await supabase
-    .from("tasks")
-    .select(TASK_COLUMNS_WITH_ASSIGNEES)
-    .in("id", memberIds);
-  if (memberError) fail(memberError);
-  const members = ((memberRows as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
-  // Cada membro entra na lista de execuções do MOLDE (não da execução-plano
-  // específica) — o molde carrega consigo tudo que qualquer uma de suas
-  // execuções precisa.
-  for (const [moldeId, executions] of executionsByParent) {
-    const planIdsOfThisMolde = new Set(executions.filter((e) => kindDef(e.kind).isPlan).map((e) => e.id));
-    if (!planIdsOfThisMolde.size) continue;
-    const childrenOfThisMolde = members.filter((member) =>
-      (member.parents ?? []).some((p) => planIdsOfThisMolde.has(p.id) && (p.relation_kind === "structural_member" || p.relation_kind === "workflow_step")),
-    );
-    if (childrenOfThisMolde.length) executionsByParent.set(moldeId, [...executions, ...childrenOfThisMolde]);
+  const MAX_DEPTH = 6;
+  const seen = new Set<string>();
+  for (const executions of executionsByParent.values()) for (const execution of executions) seen.add(execution.id);
+
+  const isContainer = (task: TaskRecord) => kindDef(task.kind).isPlan || isFlowDelivery(task);
+  let frontier = [...executionsByParent.entries()].flatMap(([moldeId, executions]) =>
+    executions.filter(isContainer).map((execution) => ({ id: execution.id, moldeId })),
+  );
+
+  for (let depth = 0; frontier.length && depth < MAX_DEPTH; depth++) {
+    const childIds = [...new Set(await childIdsOf(supabase, frontier.map((f) => f.id)))].filter((id) => !seen.has(id));
+    if (!childIds.length) break;
+    const { data: childRows, error: childError } = await supabase
+      .from("tasks")
+      .select(TASK_COLUMNS_WITH_ASSIGNEES)
+      .in("id", childIds);
+    if (childError) fail(childError);
+    const children = ((childRows as unknown as (TaskRecord & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
+    const nextFrontier: typeof frontier = [];
+    for (const child of children) {
+      seen.add(child.id);
+      const parentIds = new Set((child.parents ?? []).filter((p) => p.relation_kind === "structural_member" || p.relation_kind === "workflow_step").map((p) => p.id));
+      const owningMoldeIds = new Set(frontier.filter((f) => parentIds.has(f.id)).map((f) => f.moldeId));
+      for (const moldeId of owningMoldeIds) {
+        const list = executionsByParent.get(moldeId);
+        if (list) list.push(child); else executionsByParent.set(moldeId, [child]);
+        if (isContainer(child)) nextFrontier.push({ id: child.id, moldeId });
+      }
+    }
+    frontier = nextFrontier;
   }
 }
 

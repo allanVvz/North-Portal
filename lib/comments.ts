@@ -4,7 +4,7 @@
 
 import { kindDef } from "./taskCatalog";
 import { isRecurrenceTemplate } from "./recurrenceState";
-import { actionPlanMembersOf, flowStepsOf, isFlowDelivery, recurrenceExecutionsOf, recurrenceParentIdOf } from "./taskRelations";
+import { actionPlanMembersOf, flowStepsOf, isFlowDelivery, recurrenceExecutionsOf } from "./taskRelations";
 import type { TaskRecord } from "./validation";
 
 export type TaskComment = {
@@ -70,85 +70,63 @@ type FamilyMember = Pick<TaskRecord, "id" | "kind" | "payload" | "parents"> & {
   workflow_version_id?: TaskRecord["workflow_version_id"];
 };
 
-/** O molde de recorrência a que o card pertence (ele mesmo, se for o molde). */
-function recurrenceTemplateIdOf(task: Pick<FamilyMember, "id" | "payload" | "recurrence_cadence">): string | null {
-  if (isRecurrenceTemplate(task)) return task.id;
-  return recurrenceParentIdOf(task);
-}
-
 /** Este card mostra o thread da FAMÍLIA, ou só o próprio?
  *
  * Um Plano de Ação mostra ele + as atividades, uma entrega mostra ela + as
  * etapas — o card filho de plano/entrega mostra só os próprios comentários,
  * senão a mesma conversa apareceria duplicada dos dois lados.
  *
- * Recorrência SOMA o histórico inteiro (ATA 14/09): o molde e todos os ciclos
- * mostram a mesma conversa, de qualquer ciclo que se abra. Uma rotina é uma
- * demanda só que se repete, e o que se falou no ciclo passado é contexto do
- * ciclo de agora. (Até 14/09 a recorrência ficava de fora por ser "ruído".)
- * Uma entrega-ocorrência de fluxo recorrente continua juntando as etapas dela,
- * porque a regra de entrega vem antes.
+ * Recorrência NÃO soma histórico entre ciclos-irmãos (revisto 2026-09-2x — a
+ * regra antiga, da ATA 14/09, fazia abrir uma execução mostrar comentário de
+ * OUTRA execução da mesma rotina, e duas execuções são irmãs, não a mesma
+ * conversa). O molde continua mostrando os ciclos quando ABERTO ELE MESMO —
+ * isso é o molde mostrando os próprios filhos, não um ciclo lendo o irmão.
  *
  * `kind` separado do card para a tela de edição poder perguntar pelo tipo que
  * está no formulário, ainda não salvo. */
 export function isFamilyParent(task: Pick<FamilyMember, "id" | "kind" | "payload" | "recurrence_cadence">, kind = task.kind): boolean {
-  return Boolean(kindDef(kind).isPlan || isFlowDelivery(task) || recurrenceTemplateIdOf(task));
+  return Boolean(kindDef(kind).isPlan || isFlowDelivery(task) || isRecurrenceTemplate(task));
 }
 
-/** Os cards cujo thread aparece junto neste: ele mesmo e a família. Sempre
- *  começa pelo próprio card, e nunca repete um id.
+/** Os cards cujo thread aparece junto neste: ele mesmo e TODA a árvore de
+ *  descendentes — recursivo (revisto 2026-09-2x: Rotina → Plano → Entrega →
+ *  Task mostra os 4 níveis juntos, não só 1 salto). Nunca repete um id
+ *  (protege contra ciclo no grafo, embora o banco já recuse estrutura
+ *  circular).
  *
- *  Categorias 1 e 2 são EXCLUSIVAS — um card cai numa das duas e para aí:
- *  1. O card É O MOLDE de uma recorrência (`isRecurrenceTemplate`) → os
- *     ciclos, sempre — mesmo quando o molde também carrega marcas herdadas
- *     de fluxo (entrega recorrente) ou é ele mesmo um Plano de Ação (ex.
- *     "REUNIÃO ROTINA - ALLAN"): o molde em si nunca tem etapa nem
- *     atividade PRÓPRIA, só ciclos. Isto vem ANTES de entrega/plano de
- *     propósito — checar isFlowDelivery ou isPlan primeiro (como era) fazia
- *     vincular uma execução nova nunca aparecer no thread do molde, porque
- *     o merge nem olhava pra lista certa.
- *  2. Senão, é uma entrega DE VERDADE (uma ocorrência com etapas próprias)
- *     → só as etapas, nunca o histórico cruzado de recorrência mesmo quando
- *     a entrega também é uma ocorrência — juntar comentários de ciclos
- *     antigos numa entrega seria ruído (regra documentada em isFamilyParent).
- *
- *  Categorias 3 e 4 SOMAM — um card pode cair nas duas ao mesmo tempo: um
- *  Plano de Ação "semanal" pode ser, ele mesmo, uma OCORRÊNCIA de uma rotina
- *  recorrente (ex. "PLANO SEMANAL - ALLAN", ocorrência de "REUNIÃO ROTINA -
- *  ALLAN") e AINDA ASSIM ter atividades reais próprias (ex. "REVISÃO -
- *  SLIDES PROMOCIONAIS 2K"). Tratar isso como um if/else escolhia só um dos
- *  dois lados e o comentário da atividade nunca aparecia no plano — bug real
- *  2026-09-2x. Por isso os dois entram juntos:
- *  3. Se aponta pra um molde (`recurrenceParentIdOf`) → o histórico cruzado
- *     de ciclos-irmãos (ATA 14/09).
- *  4. Se é um Plano de Ação → as atividades próprias. */
+ *  Em cada nó da árvore, na ordem abaixo (um nó pode cair em mais de uma,
+ *  ex. um molde que também é Plano de Ação — soma os dois):
+ *  1. O nó É O MOLDE de uma recorrência (`isRecurrenceTemplate`) → desce nos
+ *     ciclos. O molde em si nunca tem etapa/atividade PRÓPRIA, só ciclos —
+ *     por isso não soma com as regras 2/3 abaixo.
+ *  2. Senão, é uma Entrega de fluxo (`isFlowDelivery`) → desce nas etapas.
+ *  3. É um Plano de Ação (`kindDef(kind).isPlan`) → desce nos membros
+ *     (`structural_member`). Uma ocorrência de recorrência que também é
+ *     Plano (ex. "PLANO SEMANAL - ALLAN") cai só aqui — nunca lê os
+ *     ciclos-irmãos do molde de que é ocorrência, só a própria árvore. */
 export function familyCardsOf<T extends FamilyMember>(task: T, tasks: readonly T[], kind = task.kind): T[] {
   if (!isFamilyParent(task, kind)) return [task];
-  if (isRecurrenceTemplate(task)) {
-    return mergeFamily(task, recurrenceExecutionsOf(task.id, tasks));
-  }
-  if (isFlowDelivery(task)) {
-    return mergeFamily(task, flowStepsOf(task.id, tasks));
-  }
-  const recurrenceTemplateId = recurrenceParentIdOf(task);
-  const members = [
-    ...(recurrenceTemplateId
-      ? [...tasks.filter((t) => t.id === recurrenceTemplateId), ...recurrenceExecutionsOf(recurrenceTemplateId, tasks)]
-      : []),
-    ...(kindDef(kind).isPlan ? actionPlanMembersOf(task.id, tasks) : []),
-  ];
-  return mergeFamily(task, members);
+  const seen = new Set<string>();
+  const family: T[] = [];
+  collectFamily(task, kind, tasks, seen, family);
+  return family;
 }
 
-function mergeFamily<T extends FamilyMember>(task: T, members: readonly T[]): T[] {
-  const seen = new Set([task.id]);
-  const family = [task];
-  for (const member of members) {
-    if (seen.has(member.id)) continue;
-    seen.add(member.id);
-    family.push(member);
+function collectFamily<T extends FamilyMember>(node: T, nodeKind: string, tasks: readonly T[], seen: Set<string>, family: T[]): void {
+  if (seen.has(node.id)) return;
+  seen.add(node.id);
+  family.push(node);
+  if (isRecurrenceTemplate(node)) {
+    for (const cycle of recurrenceExecutionsOf(node.id, tasks)) collectFamily(cycle, cycle.kind, tasks, seen, family);
+    return;
   }
-  return family;
+  if (isFlowDelivery(node)) {
+    for (const step of flowStepsOf(node.id, tasks)) collectFamily(step, step.kind, tasks, seen, family);
+    return;
+  }
+  if (kindDef(nodeKind).isPlan) {
+    for (const member of actionPlanMembersOf(node.id, tasks)) collectFamily(member, member.kind, tasks, seen, family);
+  }
 }
 
 /** O thread que um card mostra — a regra completa, em um lugar só.

@@ -195,31 +195,43 @@ describe("familyThreadOf", () => {
     expect(familyThreadOf(salvoComum, [salvoComum, atividade], "plano_acao").map((c) => c.text)).toEqual(["meu", "do filho"]);
   });
 
-  // Bug real (2026-09-2x): "PLANO SEMANAL - ALLAN" é ocorrência de "REUNIÃO
-  // ROTINA - ALLAN" (recurrence_parent_id) E é ele mesmo um Plano de Ação
-  // com atividade própria real ("REVISÃO - SLIDES PROMOCIONAIS 2K", elo
+  // Bug real (2026-09-2x), parte 1: "PLANO SEMANAL - ALLAN" é ocorrência de
+  // "REUNIÃO ROTINA - ALLAN" (recurrence_parent_id) E é ele mesmo um Plano de
+  // Ação com atividade própria real ("REVISÃO - SLIDES PROMOCIONAIS 2K", elo
   // structural_member). O if/else antigo escolhia só o histórico de
   // recorrência e a atividade própria nunca aparecia no thread do plano.
-  it("uma ocorrência de recorrência que também é Plano soma histórico cruzado E membros do plano", () => {
+  it("uma ocorrência de recorrência que também é Plano mostra a própria árvore, nunca o comentário do molde", () => {
     const molde = { ...card("molde", "plano_acao", [{ author: "A", text: "abertura da rotina", at: "2026-09-01T09:00:00Z" }]), recurrence_cadence: "semanal" as const };
     const planoSemanal = card("plano-semanal", "plano_acao", [{ author: "B", text: "escopo da semana", at: "2026-09-08T09:00:00Z" }], { recurrence_parent_id: "molde" });
     const revisaoSlides = { ...card("revisao", "criativo", [{ author: "C", text: "slides prontos", at: "2026-09-09T09:00:00Z" }]), parents: [elo("plano-semanal", null)] };
     const quadro = [molde, planoSemanal, revisaoSlides];
-    expect(familyThreadOf(planoSemanal, quadro).map((c) => c.text)).toEqual([
-      "abertura da rotina",
-      "escopo da semana",
-      "slides prontos",
-    ]);
-    expect(familyThreadOf(planoSemanal, quadro).map((c) => c.taskId)).toEqual(["molde", "plano-semanal", "revisao"]);
+    expect(familyThreadOf(planoSemanal, quadro).map((c) => c.text)).toEqual(["escopo da semana", "slides prontos"]);
+    expect(familyThreadOf(planoSemanal, quadro).map((c) => c.taskId)).toEqual(["plano-semanal", "revisao"]);
   });
 
-  // Regressão: ocorrência de recorrência que NÃO é Plano continua só com o
-  // histórico cruzado — o lado "membros do plano" da união fica vazio
-  // quando kindDef(kind).isPlan é falso.
-  it("uma ocorrência de recorrência que NÃO é Plano continua só com o histórico cruzado", () => {
-    const moldeComum = { ...card("molde-c", "criativo", [{ author: "A", text: "abertura", at: "2026-09-01T09:00:00Z" }]), recurrence_cadence: "semanal" as const };
-    const ocorrencia = card("ocorr-c", "criativo", [{ author: "B", text: "ciclo desta semana", at: "2026-09-08T09:00:00Z" }], { recurrence_parent_id: "molde-c" });
-    expect(familyThreadOf(ocorrencia, [moldeComum, ocorrencia]).map((c) => c.text)).toEqual(["abertura", "ciclo desta semana"]);
+  // Bug real (2026-09-2x), parte 2: revisto depois de ver em produção — duas
+  // execuções da MESMA rotina são irmãs, não a mesma conversa. Abrir "PLANO
+  // SEMANAL - ALLAN" não pode mostrar comentário de "PORTAL NORTH - ALLAN",
+  // mesmo as duas sendo ocorrência do mesmo molde "REUNIÃO ROTINA - ALLAN".
+  it("duas execuções irmãs da mesma rotina não compartilham comentário entre si", () => {
+    const molde = { ...card("molde", "plano_acao", [{ author: "A", text: "abertura da rotina", at: "2026-09-01T09:00:00Z" }]), recurrence_cadence: "semanal" as const };
+    const planoSemanal = card("plano-semanal", "plano_acao", [{ author: "B", text: "escopo da semana", at: "2026-09-08T09:00:00Z" }], { recurrence_parent_id: "molde" });
+    const portalNorth = card("portal-north", "plano_acao", [{ author: "C", text: "status do portal", at: "2026-09-08T10:00:00Z" }], { recurrence_parent_id: "molde" });
+    const quadro = [molde, planoSemanal, portalNorth];
+    expect(familyThreadOf(planoSemanal, quadro).map((c) => c.text)).toEqual(["escopo da semana"]);
+    expect(familyThreadOf(portalNorth, quadro).map((c) => c.text)).toEqual(["status do portal"]);
+  });
+
+  // A família passou a ser RECURSIVA (revisto 2026-09-2x): Rotina → Plano →
+  // Entrega → Task mostra os 4 níveis juntos quando o Plano (ou a Rotina) é
+  // aberto, não só 1 salto.
+  it("a família é recursiva: Plano mostra a Entrega dela E as Tasks da Entrega", () => {
+    const plano = card("plano-r", "plano_acao", [{ author: "A", text: "kickoff", at: "2026-09-01T09:00:00Z" }]);
+    const entrega = { ...card("entrega-r", "criativo", [{ author: "B", text: "briefing da entrega", at: "2026-09-02T09:00:00Z" }]), workflow_version_id: "workflow-v1", parents: [elo("plano-r", null)] };
+    const etapa = { ...card("etapa-r", "criativo", [{ author: "C", text: "etapa concluída", at: "2026-09-03T09:00:00Z" }]), parents: [elo("entrega-r", "roteiro", 10)] };
+    const quadro = [plano, entrega, etapa];
+    expect(familyThreadOf(plano, quadro).map((c) => c.text)).toEqual(["kickoff", "briefing da entrega", "etapa concluída"]);
+    expect(familyThreadOf(plano, quadro).map((c) => c.taskId)).toEqual(["plano-r", "entrega-r", "etapa-r"]);
   });
 
   // Categoria de entrega permanece exclusiva mesmo numa OCORRÊNCIA (não só
