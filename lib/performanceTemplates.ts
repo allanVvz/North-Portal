@@ -344,9 +344,16 @@ const perfilKpis: BlockKpiDef[] = [
   { label: "Custo por visita", ratio: [CUSTO, "profileVisits"] },
   { label: "Investimento", metric: CUSTO },
   { label: "Alcance", metric: ALCANCE },
-  { label: "Frequência", metric: "frequencia" },
   { label: "CPM", metric: "cpm" },
 ];
+// Frequência saiu como métrica fixa (22/09): repetição de anúncio só importa
+// quando é alta o bastante para cansar o público, e um número sempre visível
+// não distingue 1,2x de 4,8x. Vira alerta condicional — roadmap em
+// docs/reporting/decisoes.md, "Pendências conhecidas".
+// CPM é exclusivo do relatório de anúncios: `hideMetrics` em
+// `CampaignBlocksSection` o tira quando quem chama é o relatório de conversão
+// (ver lib/reports/salesReportPdf.tsx). Nenhum dos dois muda o array acima —
+// ele continua a fonte única para o relatório de anúncios.
 
 const siteKpis: BlockKpiDef[] = [
   { label: "Investimento", metric: CUSTO },

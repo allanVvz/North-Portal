@@ -153,10 +153,16 @@ export function DeltaText({ current, previous, inverse, suffix = " vs. anterior"
 }
 
 export function KpiCard({
-  label, value, previous, kind, inverse, notIntegrated = false, hint, unit, deltaText, deltaTone = "neutral", deltaSuffix,
+  label, value, previous, kind, inverse, notIntegrated = false, hint, unit, deltaText, deltaTone = "neutral", deltaSuffix, showDelta = true,
 }: {
   label: string; value: NullableMetric; previous: NullableMetric;
   kind: MetricKind; inverse: boolean; notIntegrated?: boolean; hint?: string;
+  /** Falso esconde a linha de variação inteira — nem "%" nem "sem comparativo".
+   *  É como o relatório de conversão faz o “%” ser opcional (decisão de 22/09):
+   *  uma queda, ou um ganho pequeno demais para significar algo, some do card
+   *  em vez de virar um placeholder. Ignorado quando `notIntegrated`, que já
+   *  tem sua própria linha fixa. */
+  showDelta?: boolean;
   /** Sufixo colado no valor ("×" num ROAS). Um número sem unidade — "18,4" —
    *  não se explica sozinho para quem não é de mídia. */
   unit?: string;
@@ -178,9 +184,11 @@ export function KpiCard({
       </Text>
       {notIntegrated
         ? <Text style={[S.delta, S.deltaGap]}>Sem integração</Text>
-        : deltaText
-          ? <Text style={[S.delta, toneStyle]}>{deltaText}</Text>
-          : <DeltaText current={value} previous={previous} inverse={inverse} suffix={deltaSuffix} />}
+        : !showDelta
+          ? null
+          : deltaText
+            ? <Text style={[S.delta, toneStyle]}>{deltaText}</Text>
+            : <DeltaText current={value} previous={previous} inverse={inverse} suffix={deltaSuffix} />}
       {hint ? <Text style={S.kpiHint}>{hint}</Text> : null}
     </View>
   );

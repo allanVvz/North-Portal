@@ -22,8 +22,10 @@ describe("moldes por perfil de cliente", () => {
     // novo seguidor R$ 0,88"), os quatro primeiros vêm da Marketing API e ficam
     // aqui; os dois de seguidores vivem no relatório de CONVERSÃO, porque o
     // número chega pelo comentário e não pela API.
+    // Frequência saiu como métrica fixa (22/09): só aparece quando for um
+    // fator preocupante, o que ainda não está implementado (roadmap).
     expect(labels("builtin-perfil-negocio-local", "trafego_perfil")).toEqual([
-      "Visitas ao perfil", "Custo por visita", "Investimento", "Alcance", "Frequência", "CPM",
+      "Visitas ao perfil", "Custo por visita", "Investimento", "Alcance", "CPM",
     ]);
   });
 
@@ -47,7 +49,7 @@ describe("moldes por perfil de cliente", () => {
 
   it("Estética automotiva traz os três blocos (Karpinski, UTZIG, FALKE, CRIS)", () => {
     expect(labels("builtin-estetica-automotiva", "trafego_perfil")).toEqual([
-      "Visitas ao perfil", "Custo por visita", "Investimento", "Alcance", "Frequência", "CPM",
+      "Visitas ao perfil", "Custo por visita", "Investimento", "Alcance", "CPM",
     ]);
     expect(labels("builtin-estetica-automotiva", "trafego_site")).toEqual([
       "Investimento", "Alcance", "Cliques no link", "Custo por clique",

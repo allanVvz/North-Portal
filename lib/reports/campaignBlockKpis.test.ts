@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BUILTIN_TEMPLATE, type CampaignBlock, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { MetaPost } from "@/lib/windsor";
-import { blockResolver } from "./campaignBlockKpis";
+import { BUILTIN_PERFORMANCE_TEMPLATES } from "@/lib/performanceTemplates";
+import { blockKpisOf, blockResolver, kpiForDef, showsDelta } from "./campaignBlockKpis";
+
+const templateById = (id: string) => BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === id)!;
 
 const config = (campaignBlocks: Record<string, CampaignBlock> = {}): PerformanceTemplateConfig => ({
   ...DEFAULT_BUILTIN_TEMPLATE.config,
@@ -59,5 +62,82 @@ describe("blockResolver", () => {
 
     expect(postBlock(ad({ campaignId: "profile", campaignName: "Baita", objective: "LINK_CLICKS" }))).toBe("trafego_perfil");
     expect(postBlock(ad({ campaignId: "site", campaignName: "Landing", objective: "LINK_CLICKS" }))).toBe("trafego_site");
+  });
+});
+
+// Decisão de 22/09: o relatório de conversão nunca mostra CPM (exclusivo do
+// relatório de anúncios) e só mostra "%" de variação quando é ganho > 1% —
+// negativo ou pouco relevante fica sem a linha inteira. O relatório de
+// anúncios continua com a política "always" (mostra tudo, sempre) e nunca
+// declara `hideMetrics`.
+describe("showsDelta — política do relatório de conversão", () => {
+  it('"always" (relatório de anúncios) mostra mesmo queda ou variação mínima', () => {
+    expect(showsDelta("always", 80, 100, false)).toBe(true);
+    expect(showsDelta("always", 100.1, 100, false)).toBe(true);
+    expect(showsDelta("always", null, null, false)).toBe(true);
+  });
+
+  it('"positive_only" (relatório de conversão) esconde queda', () => {
+    expect(showsDelta("positive_only", 80, 100, false)).toBe(false);
+  });
+
+  it('"positive_only" esconde ganho pequeno demais (piso de 1%)', () => {
+    expect(showsDelta("positive_only", 100.5, 100, false)).toBe(false);
+  });
+
+  it('"positive_only" mostra ganho representativo (> 1%)', () => {
+    expect(showsDelta("positive_only", 105, 100, false)).toBe(true);
+  });
+
+  it('"positive_only" respeita métrica inversa (custo caindo é bom)', () => {
+    expect(showsDelta("positive_only", 90, 100, true)).toBe(true);
+    expect(showsDelta("positive_only", 110, 100, true)).toBe(false);
+  });
+
+  it('"positive_only" sem período anterior nunca mostra', () => {
+    expect(showsDelta("positive_only", 100, null, false)).toBe(false);
+    expect(showsDelta("positive_only", 100, 0, false)).toBe(false);
+  });
+});
+
+describe("kpiForDef — showDelta chega pronto no KpiCard", () => {
+  const cur = [ad({ metrics: { custo: 100, alcance: 1000 } })];
+  const prevQueda = [ad({ metrics: { custo: 100, alcance: 1200 } })];
+  const prevGanho = [ad({ metrics: { custo: 100, alcance: 800 } })];
+  const cm = DEFAULT_BUILTIN_TEMPLATE.config.prefs.customMetrics;
+
+  it("métrica direta: queda de alcance não mostra delta em positive_only", () => {
+    const kpi = kpiForDef({ label: "Alcance", metric: "alcance" }, cur, prevQueda, cm, "positive_only");
+    expect(kpi.showDelta).toBe(false);
+    expect(kpi.value).toBe(1000);
+  });
+
+  it("métrica direta: ganho de alcance mostra delta em positive_only", () => {
+    const kpi = kpiForDef({ label: "Alcance", metric: "alcance" }, cur, prevGanho, cm, "positive_only");
+    expect(kpi.showDelta).toBe(true);
+  });
+
+  it("relatório de anúncios (política padrão) sempre mostra, mesmo em queda", () => {
+    const kpi = kpiForDef({ label: "Alcance", metric: "alcance" }, cur, prevQueda, cm);
+    expect(kpi.showDelta).toBe(true);
+  });
+
+  it("razão (custo por clique): mais barato é ganho, mesmo com valor caindo", () => {
+    const curClick = [ad({ metrics: { custo: 100, cliquesLink: 50 } })];
+    const prevClickCaro = [ad({ metrics: { custo: 100, cliquesLink: 25 } })];
+    const kpi = kpiForDef({ label: "Custo por clique", ratio: ["custo", "cliquesLink"] }, curClick, prevClickCaro, cm, "positive_only");
+    expect(kpi.showDelta).toBe(true);
+  });
+});
+
+describe("CPM some do relatório de conversão via hideMetrics", () => {
+  it("blockKpisOf ainda declara CPM no template — o corte é do chamador (salesReportPdf), não do template", () => {
+    const config = templateById("builtin-perfil-negocio-local").config;
+    const defs = blockKpisOf(config, "trafego_perfil");
+    const refs = defs.flatMap((d) => [d.metric, ...(d.ratio ?? [])]);
+    // Reflete o template builtin-perfil-negocio-local: CPM está lá porque o
+    // relatório de anúncios precisa dele; é `hideMetrics={["cpm"]}` em
+    // salesReportPdf.tsx que o esconde só na conversão.
+    expect(refs).toContain("cpm");
   });
 });

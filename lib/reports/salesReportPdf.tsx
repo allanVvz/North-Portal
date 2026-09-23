@@ -453,6 +453,14 @@ function SalesReportDocument(input: SalesReportInput) {
             prevPosts={esconde("percentual_comparativo") ? [] : prevCampaignPosts}
             adPosts={adPosts}
             kicker="Mídia por objetivo"
+            // CPM é exclusivo do relatório de anúncios (decisão de 22/09) — a
+            // conversão nunca mostra, mesmo quando o template do cliente o declara.
+            hideMetrics={["cpm"]}
+            // % opcional: só aparece quando é ganho > 1%. Queda ou variação
+            // pequena não vira placeholder — a linha inteira some do card. O
+            // relatório de anúncios não usa esta política; continua mostrando
+            // tudo, sempre.
+            deltaPolicy="positive_only"
             extraKpis={(block) => {
               if (esconde("seguidores")) return [];
               if (block !== "trafego_perfil" || followersGain === null || followersGain <= 0) return [];

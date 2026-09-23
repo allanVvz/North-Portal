@@ -149,32 +149,56 @@ export function blockResolver(config: PerformanceTemplateConfig, ads: MetaPost[]
   return { blockOf, postBlock };
 }
 
-function kpiForDef(
+/** Quando a política é "só ganho relevante" (relatório de conversão, decisão da
+ *  Luiza 22/09), a variação só aparece acima de 1% E a favor da métrica — uma
+ *  queda, ou um ganho pequeno demais para significar algo, fica sem % nenhum,
+ *  a linha inteira some do card. O relatório de anúncios continua mostrando
+ *  tudo sempre (política "always", o padrão). */
+export type DeltaPolicy = "always" | "positive_only";
+const RELEVANT_DELTA_MIN_PCT = 1;
+
+export function showsDelta(policy: DeltaPolicy, value: number | null, previous: number | null, inverse: boolean): boolean {
+  if (policy === "always") return true;
+  if (value === null || previous === null || previous === 0) return false;
+  const pct = ((value - previous) / previous) * 100;
+  const good = inverse ? pct <= 0 : pct >= 0;
+  return good && Math.abs(pct) > RELEVANT_DELTA_MIN_PCT;
+}
+
+export function kpiForDef(
   def: BlockKpi,
   cur: MetaPost[],
   prev: MetaPost[],
   cm: PerformanceTemplateConfig["prefs"]["customMetrics"],
+  deltaPolicy: DeltaPolicy = "always",
 ) {
   if (def.ratio) {
     const [num, den] = def.ratio;
+    const value = ratio(resolveAcquisitionMetric(cur, num, cm), resolveAcquisitionMetric(cur, den, cm));
+    const previous = ratio(resolveAcquisitionMetric(prev, num, cm), resolveAcquisitionMetric(prev, den, cm));
     return {
       label: def.label,
-      value: ratio(resolveAcquisitionMetric(cur, num, cm), resolveAcquisitionMetric(cur, den, cm)),
-      previous: ratio(resolveAcquisitionMetric(prev, num, cm), resolveAcquisitionMetric(prev, den, cm)),
+      value,
+      previous,
       kind: "money" as const,
       inverse: true,
       notIntegrated: false,
+      showDelta: showsDelta(deltaPolicy, value, previous, true),
     };
   }
   const ref = def.metric as MetricRef;
   const zero = ZERO_NOT_DASH.has(ref);
+  const value = resolveAcquisitionMetric(cur, ref, cm) ?? (zero ? 0 : null);
+  const previous = resolveAcquisitionMetric(prev, ref, cm) ?? (zero ? 0 : null);
+  const inverse = metricRefInverse(ref, cm);
   return {
     label: def.label,
-    value: resolveAcquisitionMetric(cur, ref, cm) ?? (zero ? 0 : null),
-    previous: resolveAcquisitionMetric(prev, ref, cm) ?? (zero ? 0 : null),
+    value,
+    previous,
     kind: metricRefKind(ref, cm),
-    inverse: metricRefInverse(ref, cm),
+    inverse,
     notIntegrated: zero ? false : isNotIntegrated(ref, cm),
+    showDelta: showsDelta(deltaPolicy, value, previous, inverse),
   };
 }
 
@@ -195,6 +219,8 @@ export function CampaignBlocksSection({
   extraKpis,
   detail,
   footer,
+  hideMetrics,
+  deltaPolicy = "always",
 }: {
   config: PerformanceTemplateConfig;
   posts: MetaPost[];
@@ -210,11 +236,22 @@ export function CampaignBlocksSection({
   /** Conteúdo específico do objetivo, renderizado logo após seus KPIs. */
   detail?: (block: CampaignBlock, cur: MetaPost[], prev: MetaPost[]) => ReactNode;
   footer?: string;
+  /** KPIs do template que este relatório NÃO mostra, mesmo declarados no
+   *  bloco — hoje só o CPM, exclusivo do relatório de anúncios (decisão de
+   *  22/09: a conversão nunca mostra CPM). */
+  hideMetrics?: readonly MetricRef[];
+  /** "always" (padrão, relatório de anúncios: mostra tudo sempre) ou
+   *  "positive_only" (relatório de conversão: só ganho > 1%). */
+  deltaPolicy?: DeltaPolicy;
 }) {
   const cm = config.prefs.customMetrics;
   const { postBlock } = blockResolver(config, adPosts);
+  const hidden = new Set(hideMetrics ?? []);
+  const kpisFor = (block: CampaignBlock) => blockKpisOf(config, block).filter((def) =>
+    !(def.metric && hidden.has(def.metric)) && !(def.ratio && (hidden.has(def.ratio[0]) || hidden.has(def.ratio[1]))),
+  );
   const blocksPresent = CAMPAIGN_BLOCKS.filter((block) =>
-    posts.some((p) => postBlock(p) === block) && blockKpisOf(config, block).length,
+    posts.some((p) => postBlock(p) === block) && kpisFor(block).length,
   );
   if (!blocksPresent.length) return null;
 
@@ -232,7 +269,7 @@ export function CampaignBlocksSection({
               <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
             </View>
             <View style={S.grid}>
-              {blockKpisOf(config, block).map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm)} />)}
+              {kpisFor(block).map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm, deltaPolicy)} />)}
               {extra.map((k) => <KpiCard key={k.label} {...k} />)}
             </View>
             {detailContent}
