@@ -122,9 +122,12 @@ describe("funil do resultado", () => {
     expect(f.stages.at(-1)).toMatchObject({ key: "seguidores_novos", label: "Seguidores · +0,59%", value: 47 });
   });
 
-  it("em campanha de mensagens, conversas antecedem seguidores", () => {
+  it("em campanha de mensagens, seguidores antecedem conversas — mensagens é sempre a última etapa", () => {
+    // Mensagens é o objetivo mais recente da jornada; não pode aparecer no
+    // meio dela. Achado real na FALKE (23/09): o funil mostrava perfil →
+    // conversas → seguidores, na ordem errada.
     const f = resultFunnel(ctx({ kind: "seguidores", cur: { ...nada, seguidores: 8000 }, media: baitaMedia, followersGain: 47, hasMessageObjective: true }));
-    expect(f.stages.map((stage) => stage.key)).toEqual(["alcance", "entradas", "conversas", "seguidores_novos"]);
+    expect(f.stages.map((stage) => stage.key)).toEqual(["alcance", "entradas", "seguidores_novos", "conversas"]);
   });
 
   it("em campanha de tráfego para o perfil, seguidores fecham o funil", () => {

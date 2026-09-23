@@ -330,10 +330,20 @@ export function mediaFunnel(t: MediaTotals, outcome: MediaOutcome): FunnelStage[
     out.push({ ...entradas[0], source: "midia" });
   }
 
-  if (outcome !== "visitas" && t.conversations !== null) {
-    out.push({ key: "conversas", label: "Conversas", value: t.conversations, source: "midia" });
+  if (outcome !== "visitas") {
+    const conversas = conversasStage(t);
+    if (conversas) out.push(conversas);
   }
   return out;
+}
+
+/** Etapa "Conversas" isolada de `mediaFunnel`: quando o funil precisa de outra
+ *  etapa entre "entradas" e mensagens (seguidores, achado real na FALKE
+ *  23/09 — mensagens é sempre o objetivo mais recente da jornada, nunca vem
+ *  antes de seguidores), o chamador monta a ordem final e usa esta função só
+ *  para o valor/rótulo, sem duplicar a lógica de `mediaFunnel`. */
+export function conversasStage(t: MediaTotals): FunnelStage | null {
+  return t.conversations !== null ? { key: "conversas", label: "Conversas", value: t.conversations, source: "midia" } : null;
 }
 
 /** Taxa entre etapas: só na mesma fonte e só quando a etapa seguinte é menor.

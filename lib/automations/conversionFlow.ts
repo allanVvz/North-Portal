@@ -83,7 +83,10 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // morto, bloco atômico na paginação.
 // v14 (23/09): total de seguidores ambíguo (igual ao ganho, achado real na
 // FALKE) deixa de virar "+100% da base" — trata como não informado.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v14";
+// v15 (23/09): mensagens volta a ser a ÚLTIMA etapa do funil quando existe
+// campanha de mensagens — antes vinha antes de seguidores (achado real na
+// FALKE), contrariando a regra combinada em 22/09.
+const CONVERSION_RENDERER_REVISION = "segment-summary-v15";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",

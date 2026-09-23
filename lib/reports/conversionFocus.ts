@@ -10,7 +10,7 @@ import { formatAcquisitionValue } from "@/app/admin/performance/acquisitionInsig
 import type { Attribution, InformedTotals } from "./conversionMode";
 import { salesHeadline } from "./salesHeadline";
 import {
-  deltaOf, mediaFunnel, money, num, pctChange, pctRound, pctText, signed, stageGap,
+  conversasStage, deltaOf, mediaFunnel, money, num, pctChange, pctRound, pctText, signed, stageGap,
   type Delta, type FunnelStage, type MediaTotals,
 } from "./adsInsights";
 
@@ -220,7 +220,11 @@ export function resultFunnel(x: FocusContext): ResultFunnel {
   const { cur, media } = x;
   let stages: FunnelStage[];
   if (x.kind === "seguidores") {
-    stages = mediaFunnel(media, x.hasMessageObjective ? "conversas" : "visitas");
+    // Nunca inclui "conversas" aqui — quando há campanha de mensagens, ela
+    // entra DEPOIS de seguidores (ver abaixo). Mensagens é sempre o objetivo
+    // mais recente da jornada; não pode aparecer no meio dela (achado real
+    // na FALKE, 23/09: o funil mostrava perfil → conversas → seguidores).
+    stages = mediaFunnel(media, "visitas");
   } else {
     stages = mediaFunnel(media, "conversas");
     if ((x.kind === "vendas" || x.kind === "agendamentos") && cur.agendamentos !== null) stages.push({ key: "agendamentos", label: "Agendamentos", value: cur.agendamentos, source: "feedback" });
@@ -229,6 +233,10 @@ export function resultFunnel(x: FocusContext): ResultFunnel {
   const follower = positiveFollowerFallback(x);
   if (follower && (x.kind === "seguidores" || x.hasProfileObjective || x.hasMessageObjective)) {
     stages.push({ key: "seguidores_novos", label: follower.label, value: follower.value, source: "feedback" });
+  }
+  if (x.kind === "seguidores" && x.hasMessageObjective) {
+    const conversas = conversasStage(media);
+    if (conversas) stages.push(conversas);
   }
   return { stages, gaps: stages.slice(1).map((s, i) => stageGap(stages[i], s)) };
 }
