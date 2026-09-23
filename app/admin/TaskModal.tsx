@@ -903,13 +903,24 @@ export default function TaskModal({
   }
 
   async function linkMember(taskId: string, planId: string | null) {
+    setError("");
     try {
       const res = await fetch(`/api/admin/tasks/${taskId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan_id: planId }),
       });
-      if (res.ok) onTaskPatched?.(await res.json());
-    } catch { /* leave as-is; user can retry */ }
+      // Erro engolido em silêncio (2026-09-2x): um card que já tem um Plano
+      // "dono" (não-North) recusa um segundo — a resposta vinha 4xx/5xx e o
+      // combobox não avisava nada, parecia que o clique não fazia nada.
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        setError(body?.error ?? "Não foi possível vincular o card.");
+        return;
+      }
+      onTaskPatched?.(await res.json());
+    } catch {
+      setError("Não foi possível vincular o card.");
+    }
   }
 
   async function linkRecurrenceExecution(taskId: string) {
