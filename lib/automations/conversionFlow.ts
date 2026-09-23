@@ -81,7 +81,9 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // garantido mesmo sem KPI de template, "Novos seguidores" sem redundância,
 // "Todos os criativos" (destaque incluso), card de destaque sem espaço
 // morto, bloco atômico na paginação.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v13";
+// v14 (23/09): total de seguidores ambíguo (igual ao ganho, achado real na
+// FALKE) deixa de virar "+100% da base" — trata como não informado.
+const CONVERSION_RENDERER_REVISION = "segment-summary-v14";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
@@ -422,6 +424,15 @@ async function generateSalesReport(
   const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews, trafficFinalView } = traffic.snapshot ?? {};
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
+  // "Seguidores: 66" sem dizer se é total ou ganho já saía como os dois
+  // (FALKE, achado 23/09): a limpeza em `metrics.seguidores` (mais abaixo, na
+  // gravação de task_metrics) não alcançava o relatório desta semana, que lia
+  // `ext.valores.seguidores` cru — o card de seguidores chegou a alegar
+  // "+100% da base" (base = ganho = 66). Mesma regra aqui: total igual ao
+  // ganho é ambíguo, trata como não informado.
+  const seguidoresTotal = typeof ext.valores.seguidores === "number" && ext.valores.seguidores !== ext.seguidoresGanho
+    ? ext.valores.seguidores
+    : null;
   const [prevTotals, history, previews, followers] = await Promise.all([
     previousPeriodTotals(admin, clientId, period.from),
     conversionHistory(admin, clientId, period.to),
@@ -440,7 +451,7 @@ async function generateSalesReport(
       vendas: typeof ext.valores.vendas === "number" ? ext.valores.vendas : null,
       agendamentos: typeof ext.valores.agendamentos === "number" ? ext.valores.agendamentos : null,
       receita: typeof ext.valores.receita === "number" ? ext.valores.receita : null,
-      seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
+      seguidores: seguidoresTotal,
       seguidoresNovos: ext.seguidoresGanho ?? null,
     },
     previousMetrics: {
@@ -536,7 +547,7 @@ async function generateSalesReport(
     // Ganho e total do perfil são grandezas diferentes. Quando o comentário
     // diz "47 seguidores novos", não trate 47 como total e não o subtraia da
     // base anterior; o ganho vai explicitamente para a figura de conversão.
-    seguidores: typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null,
+    seguidores: seguidoresTotal,
     seguidoresNovos: ext.seguidoresGanho ?? null,
     custoPorNovoSeguidor: ext.custoPorNovoSeguidor ?? null,
     prevSeguidoresNovos: ext.seguidoresGanhoAnterior ?? effectivePrevTotals?.seguidoresNovos ?? null,
@@ -606,9 +617,8 @@ async function generateSalesReport(
   // automação pede a referência em vez de deixar o vazio silencioso.
   const followerGainForAsk = ext.seguidoresGanho ?? null;
   const followerPrevGainForAsk = ext.seguidoresGanhoAnterior ?? effectivePrevTotals?.seguidoresNovos ?? null;
-  const followerTotalForAsk = typeof ext.valores.seguidores === "number" ? ext.valores.seguidores : null;
   const followerBaseAsk = followerGainForAsk !== null && followerGainForAsk > 0
-    && followerPrevGainForAsk === null && followerTotalForAsk === null
+    && followerPrevGainForAsk === null && seguidoresTotal === null
     ? ` Pra mostrar o crescimento de seguidores em %, me conta quantos ${client.name} tem no total — ainda não tenho essa referência.`
     : "";
 

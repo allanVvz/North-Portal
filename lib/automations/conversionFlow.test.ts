@@ -218,6 +218,27 @@ describe("conversão depois do Feedback concluído", () => {
     expect(ultimaChamada?.hidden).toEqual(["seguidores", "percentual_comparativo"]);
   });
 
+  // Achado real na FALKE (23/09): "Seguidores: 66" sem dizer se é total ou
+  // ganho fazia ext.valores.seguidores === ext.seguidoresGanho — o PDF
+  // renderizava "+100% da base" (base = ganho = 66), uma alegação absurda
+  // pra uma conta com milhares de alcance. A limpeza em task_metrics não
+  // alcançava o que alimenta o renderer.
+  it("ganho igual ao total é ambíguo — trata o total como não informado, não como 66/66", async () => {
+    hooks.extract.mockResolvedValue({
+      valores: { vendas: null, agendamentos: null, receita: null, seguidores: 66 },
+      seguidoresGanho: 66,
+      linhas: [],
+      note: "parser",
+    });
+
+    await processConversionFeedback(db.asAdmin(), OCC);
+
+    const ultimaChamada = hooks.render.mock.calls.at(-1)?.[0];
+    expect(ultimaChamada?.seguidores).toBeNull();
+    expect(ultimaChamada?.seguidoresNovos).toBe(66);
+    expect(ultimaChamada?.reportContext?.metrics?.seguidores).toBeNull();
+  });
+
   it("falha ao gerar o PDF: a reivindicação é liberada (o retry funciona) e o erro fica visível", async () => {
     hooks.render.mockRejectedValueOnce(new Error("react-pdf falhou"));
 
