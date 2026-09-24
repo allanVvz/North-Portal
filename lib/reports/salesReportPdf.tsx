@@ -13,6 +13,7 @@
 //
 // Regras: ausência não vira seção nem nota; uma única nota metodológica no rodapé.
 
+import { Fragment } from "react";
 import { Document, Page, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import { previousPeriod, type Period } from "@/app/admin/performance/insights";
 import type { PerformanceTemplateConfig } from "@/lib/performanceTemplates";
@@ -390,9 +391,13 @@ function SalesReportDocument(input: SalesReportInput) {
           ],
         };
       };
+      // Fragmentos pelo mesmo motivo de `CampaignBlocksSection`: a unidade
+      // indivisível (nome + "Destaque" + card) tem que ser filha direta da
+      // página. Dentro de um View quebrável, como primeiro filho, ela seria
+      // desenhada por cima do rodapé quando não coubesse.
       return (
-        <View style={{ marginTop: 10 }}>
-          {groups.map(([campaignName, campaignCreatives]) => {
+        <>
+          {groups.map(([campaignName, campaignCreatives], gi) => {
             const highlight = [...campaignCreatives].sort((a, b) => (b.result - a.result) || (b.spend - a.spend))[0];
             // Todos os criativos entram na lista, o destaque incluso (23/09):
             // "outros criativos" virou "todos os criativos" a pedido — antes
@@ -405,8 +410,8 @@ function SalesReportDocument(input: SalesReportInput) {
               // — e a tabela lê-se sozinha, tem cabeçalho próprio ("Todos os
               // criativos"). O que nunca se separa é nome da campanha + rótulo
               // "Destaque" + o card: os três são uma frase só.
-              <View key={campaignName} style={{ marginTop: 8 }}>
-                <View wrap={false}>
+              <Fragment key={campaignName}>
+                <View wrap={false} style={{ marginTop: gi === 0 ? 18 : 8 }}>
                   <Text style={[T.cardBadge, { color: "#54706b", marginBottom: 4 }]}>{campaignName}</Text>
                   <Text style={[T.cardMetricLabel, { marginBottom: 4 }]}>Destaque</Text>
                   <CreativeCards items={[cardFor(highlight)]} layout={{ maxLines: 2 }} />
@@ -427,10 +432,10 @@ function SalesReportDocument(input: SalesReportInput) {
                     }))}
                   />
                 </View> : null}
-              </View>
+              </Fragment>
             );
           })}
-        </View>
+        </>
       );
     };
     return (

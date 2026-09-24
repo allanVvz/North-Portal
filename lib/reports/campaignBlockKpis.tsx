@@ -11,7 +11,7 @@
 // taggeada.
 
 import { Text, View } from "@react-pdf/renderer";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { ratio, resolveAcquisitionMetric } from "@/app/admin/performance/acquisitionInsights";
 import { isNotIntegrated } from "@/app/admin/performance/insights";
 import { metricRefInverse, metricRefKind } from "@/app/admin/performance/performanceLabels";
@@ -302,8 +302,18 @@ export function CampaignBlocksSection({
   });
   if (!blocksPresent.length) return null;
 
+  // Fragmentos, não `<View>`: cada unidade indivisível precisa ser filha DIRETA
+  // da página (os dois relatórios renderizam esta seção direto na `<Page>`).
+  //
+  // O react-pdf não consegue mover um View quebrável cujo PRIMEIRO filho é
+  // indivisível e não cabe: o pai ficaria vazio na página atual, então ele
+  // desenha o filho assim mesmo — por cima do rodapé. Foi o que saiu no
+  // relatório interno da CRIS de 15–21/09 (24/09): a terceira linha de KPIs do
+  // bloco de site ("Compras / Custo por compra") sobre o rodapé da página 1.
+  // A página sabe mover um bloco indivisível inteiro; um View intermediário,
+  // não. Antes funcionava por acaso: o primeiro filho era o texto do kicker.
   return (
-    <View style={S.section}>
+    <>
       {blocksPresent.map((block, i) => {
         const cur = posts.filter((p) => postBlock(p) === block);
         const prev = prevPosts.filter((p) => postBlock(p) === block);
@@ -324,30 +334,19 @@ export function CampaignBlocksSection({
         );
         return (
           // O bloco PODE quebrar, mas só no encaixe entre os KPIs e os criativos
-          // (24/09). Atômico inteiro, como era desde 23/09, o bloco de ~350pt
-          // pulava a página toda quando não cabia: a página 1 da CRIS ficava com
-          // ~330pt de branco morto e o kicker "MÍDIA POR OBJETIVO" órfão embaixo.
-          // A garantia de 23/09 continua de pé onde importa — nada quebra DENTRO
-          // da grade de KPIs nem dentro de um grupo de campanha (cada um é
-          // `wrap={false}` por conta própria); o que passa a ser permitido é a
-          // costura entre as duas metades, que é exatamente onde um leitor
-          // esperaria virar a página.
-          <View style={S.blockGroup} key={block}>
-            {i === 0 ? (
-              // O kicker vai grudado na primeira cabeça: sozinho ele é só um
-              // rótulo de 8pt, satisfaz qualquer folga e fica para trás.
-              <View wrap={false}>
-                <Text style={S.kicker}>{kicker}</Text>
-                {cabeca}
-              </View>
-            ) : (
-              <View wrap={false}>{cabeca}</View>
-            )}
+          // (24/09). Atômico inteiro, o bloco de ~350pt pulava a página toda
+          // quando não cabia e deixava ~330pt de branco morto. O que nunca se
+          // separa: kicker (no primeiro), título e grade de KPIs.
+          <Fragment key={block}>
+            <View style={S.blockGroup} wrap={false}>
+              {i === 0 ? <Text style={S.kicker}>{kicker}</Text> : null}
+              {cabeca}
+            </View>
             {detailContent}
-          </View>
+          </Fragment>
         );
       })}
       {footer ? <Text style={S.empty}>{footer}</Text> : null}
-    </View>
+    </>
   );
 }
