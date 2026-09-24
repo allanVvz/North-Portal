@@ -660,14 +660,15 @@ export async function regenerateTrafficReport(admin: AdminClient, taskId: string
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
   const today = await runDayOfFirstRevision(admin, ctx);
   const { fileName, url, report } = await fillReportCard(admin, ctx.trafficTask, ctx.mold, ctx.config, windsor, meta, today, ctx.occ.id, null);
-  await updateTaskPayload(admin, ctx.trafficTask.id, {
+  // `replaceAutomaticReportAttachment`, não `updateTaskPayload`: a RPC remove os
+  // comentários automáticos de anexo que já existem no card e põe este no lugar,
+  // sob lock e sem tocar em comentário humano. Somar um comentário por geração
+  // era o que enchia Anexos de "relatórios" que eram a mesma semana redesenhada
+  // — todo link de arquivo em comentário vira um ícone lá (24/09). O id é
+  // chaveado pelo PERÍODO: regerar a mesma semana duas vezes é idempotente.
+  await replaceAutomaticReportAttachment(admin, ctx.trafficTask.id, {
+    reportKind: "ads",
     text: `North Ai regerou o relatório com o layout atual — mesmo período, mesmos números: [${fileName}](${url})`,
-    // Chaveado pelo PERÍODO, não pela revisão: a manutenção REESCREVE o próprio
-    // comentário em vez de somar um por regeração. Chavear por revisão (como faz
-    // o caminho de revisão logo abaixo, e ali está certo — cada pedido humano é
-    // um evento distinto) deixava um comentário novo a cada redesenho, e todo
-    // link de arquivo em comentário vira um ícone em Anexos: o card acumulava
-    // "relatórios" que eram a mesma semana redesenhada (24/09).
     commentId: automationCommentId("ads-rerender", ctx.trafficTask.id, report.period_to),
   });
   return { fileName, url, revision: report.revision };

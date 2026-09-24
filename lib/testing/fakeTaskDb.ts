@@ -375,18 +375,20 @@ export class FakeTaskDb {
     const isAutomatic = (id: unknown) => {
       const value = String(id ?? "");
       return kind === "ads"
-        ? value.startsWith("ads-report:") || value.startsWith("ads-revision:")
+        ? value.startsWith("ads-report:") || value.startsWith("ads-revision:") || value.startsWith("ads-rerender:")
         : value.startsWith("conversion-report:") || value.startsWith("sales-report:");
     };
     if (comments.some((comment) => comment.id === args.p_comment_id)) {
       return { data: { inserted: false, task: { ...task } }, error: null };
     }
+    // Remove TODOS os automáticos do mesmo tipo, não só o último (migração
+    // 20260924140000): cada card de etapa cobre uma semana, então todo
+    // comentário automático de anexo nele fala do mesmo relatório.
     let previousCommentId: string | null = null;
     for (let i = comments.length - 1; i >= 0; i -= 1) {
       if (!isAutomatic(comments[i].id)) continue;
-      previousCommentId = String(comments[i].id);
+      previousCommentId ??= String(comments[i].id);
       comments.splice(i, 1);
-      break;
     }
     const comment = { id: String(args.p_comment_id), author: String(args.p_comment_author ?? "Northia"), text: String(args.p_comment_text), at: new Date().toISOString() };
     comments.push(comment);
