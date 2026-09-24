@@ -42,6 +42,7 @@ import {
   attachConversionDocument,
   claimConversionReport,
   currentTrafficReport,
+  detachSupersededReportDocuments,
   finalizationMoment,
   finalizeTrafficReport,
   recordConversionInterpretationSnapshot,
@@ -622,6 +623,12 @@ async function generateSalesReport(
     await admin.storage.from(DOCUMENT_BUCKET).remove([path]);
     throw docError;
   }
+
+  // Mesma regra do relatório de tráfego: a versão anterior desta semana sai do
+  // card. `supersedePriorConversionReports` marca a linha, mas é o `task_id` do
+  // documento que decide o que o card mostra.
+  const docIdConversao = (docRows?.[0] as { id: string } | undefined)?.id ?? null;
+  await detachSupersededReportDocuments(admin, { taskId: conversionCard.id, periodTo: period.to, keepDocumentId: docIdConversao });
 
   // Sem base nem semana anterior, o card "Novos seguidores" não tem % nenhum
   // pra mostrar (ver `positiveFollowerFallback`/salesReportPdf.tsx, 23/09) — a

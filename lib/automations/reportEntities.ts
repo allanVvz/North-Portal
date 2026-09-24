@@ -311,6 +311,36 @@ export async function supersedePriorConversionReports(
   if (error) throw error;
 }
 
+/** Tira do CARD os relatórios do mesmo período que o recém-gerado substitui.
+ *
+ *  `supersedePriorConversionReports` marca a linha como superseded mas deixa o
+ *  documento pendurado — e o card lista todo documento com o seu `task_id`. O
+ *  resultado, toda regeração: dois PDFs da mesma semana no mesmo card, um deles
+ *  desatualizado, sem nada dizendo qual é qual (achado real 24/09, nos 6 cards da
+ *  cascata de 15–21/09).
+ *
+ *  Desliga em vez de apagar, de propósito. O arquivo e a linha continuam
+ *  existindo — na biblioteca de documentos do cliente, fora do card — e
+ *  re-pendurar é um `update` de um campo. Apagar seria irreversível e não é
+ *  necessário para resolver o que incomoda, que é o card mostrar dois.
+ *
+ *  Casa `doc_date` com o fim do período: um relatório de OUTRA semana no mesmo
+ *  card não é duplicata, é histórico, e continua pendurado. */
+export async function detachSupersededReportDocuments(
+  admin: AdminClient,
+  input: { taskId: string; periodTo: string; keepDocumentId: string | null },
+): Promise<number> {
+  let q = admin.from("documents")
+    .update({ task_id: null })
+    .eq("task_id", input.taskId)
+    .eq("doc_type", "relatorio")
+    .eq("doc_date", input.periodTo);
+  if (input.keepDocumentId) q = q.neq("id", input.keepDocumentId);
+  const { data, error } = await q.select("id");
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
 /** Desfaz a reivindicação quando a geração falhou, para o retry não ficar
  *  bloqueado por um registro sem PDF. */
 export async function releaseConversionReport(admin: AdminClient, id: string): Promise<void> {

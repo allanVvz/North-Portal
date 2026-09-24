@@ -24,7 +24,7 @@ import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
 import { runConversionFlow } from "./conversionFlow";
-import { nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
+import { detachSupersededReportDocuments, nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
 import { logReportRun } from "./reportLog";
 import { materializeFirstStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
@@ -249,6 +249,12 @@ async function fillReportCard(
     throw docError;
   }
 
+  // Só o recém-gerado fica pendurado no card: a revisão anterior da MESMA semana
+  // sai de cena (continua na biblioteca do cliente). Sem isto o card acumulava
+  // um PDF por regeração, todos do mesmo período.
+  const novoDocId = (docRows?.[0] as { id: string } | undefined)?.id ?? null;
+  await detachSupersededReportDocuments(admin, { taskId: actingTask.id, periodTo: period.to, keepDocumentId: novoDocId });
+
   // O registro estruturado: os posts EXATAMENTE como entraram no PDF. É daqui que
   // a Automação 2 lê a mídia da semana, em vez de refazer a busca (A3). Sem
   // revisor não há revisão humana a esperar — a geração já é a versão final.
@@ -260,7 +266,7 @@ async function fillReportCard(
     period,
     revision,
     snapshot: { campaignPosts: currentPosts, prevCampaignPosts: prevPosts, adPosts: currentAdPosts, prevAdPosts, previews, trafficFinalView: trafficFinalViewOf(revisionInstruction) },
-    documentId: (docRows?.[0] as { id: string } | undefined)?.id ?? null,
+    documentId: novoDocId,
     finalizedAt: actingTask.reviewer_id ? null : new Date().toISOString(),
   });
 
