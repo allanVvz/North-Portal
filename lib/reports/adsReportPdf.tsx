@@ -243,7 +243,7 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
         {objectives.length >= 2 ? <FigureRow items={figures.slice(0, 2)} /> : null}
         {alert ? <AlertLine text={alert} /> : null}
 
-        <Section title={`Do alcance ${outcome === "conversas" ? "às conversas" : "às visitas ao perfil"}`}>
+        <Section title={`Do alcance ${outcome === "conversas" ? "às conversas" : "às visitas ao perfil"}`} keepTogether>
           <View style={T.twoCol} wrap={false}>
             <ProportionalFunnel
               width={analysis.insights.length ? 290 : 360}
@@ -366,7 +366,7 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
         ) : null}
 
         {daily.length ? (
-          <Section title="Dia a dia da semana">
+          <Section title="Dia a dia da semana" keepTogether>
             <ColumnsChart
               periods={daily.map((d) => shortDay(d.day))}
               series={[
@@ -378,7 +378,7 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
         ) : null}
 
         {platforms.length ? (
-          <Section title="Onde a verba foi veiculada">
+          <Section title="Onde a verba foi veiculada" keepTogether>
             <RankBars
               rows={platforms.map((p) => ({
                 label: PLATFORM_LABEL[p.platform],
@@ -390,7 +390,7 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
         ) : null}
 
         {trend.length >= 3 ? (
-          <Section title={`Últimas ${trend.length} semanas`}>
+          <Section title={`Últimas ${trend.length} semanas`} keepTogether>
             <SmallMultiples
               charts={[
                 { title: "Investimento", periods: trend.map((t) => shortDay(t.weekTo)), values: trend.map((t) => t.spend), format: (v) => money(v) },
@@ -402,7 +402,7 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
         ) : null}
 
         {revisionInstruction ? (
-          <Section title="Revisão solicitada">
+          <Section title="Revisão solicitada" keepTogether>
             <Text style={T.note}>{revisionInstruction}</Text>
           </Section>
         ) : null}

@@ -399,10 +399,18 @@ function SalesReportDocument(input: SalesReportInput) {
             // excluía o destaque, deixando a lista incompleta.
             const todos = [...campaignCreatives].sort((a, b) => (b.result - a.result) || (b.spend - a.spend));
             return (
+              // O grupo da campanha quebra em UM lugar só: entre o card de
+              // destaque e a tabela (24/09). Mantê-lo atômico inteiro deixava
+              // ~250pt de branco no pé da página toda vez que o grupo não coubesse
+              // — e a tabela lê-se sozinha, tem cabeçalho próprio ("Todos os
+              // criativos"). O que nunca se separa é nome da campanha + rótulo
+              // "Destaque" + o card: os três são uma frase só.
               <View key={campaignName} style={{ marginTop: 8 }}>
-                <Text style={[T.cardBadge, { color: "#54706b", marginBottom: 4 }]}>{campaignName}</Text>
-                <Text style={[T.cardMetricLabel, { marginBottom: 4 }]}>Destaque</Text>
-                <CreativeCards items={[cardFor(highlight)]} layout={{ maxLines: 2 }} />
+                <View wrap={false}>
+                  <Text style={[T.cardBadge, { color: "#54706b", marginBottom: 4 }]}>{campaignName}</Text>
+                  <Text style={[T.cardMetricLabel, { marginBottom: 4 }]}>Destaque</Text>
+                  <CreativeCards items={[cardFor(highlight)]} layout={{ maxLines: 2 }} />
+                </View>
                 {todos.length ? <View style={{ marginTop: 8 }}>
                   <DataTable
                     columns={[

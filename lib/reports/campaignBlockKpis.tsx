@@ -304,20 +304,15 @@ export function CampaignBlocksSection({
 
   return (
     <View style={S.section}>
-      <Text style={S.kicker}>{kicker}</Text>
-      {blocksPresent.map((block) => {
+      {blocksPresent.map((block, i) => {
         const cur = posts.filter((p) => postBlock(p) === block);
         const prev = prevPosts.filter((p) => postBlock(p) === block);
         const extra = extraKpis?.(block, cur, prev) ?? [];
         const detailContent = detail?.(block, cur, prev) ?? null;
-        return (
-          // Sempre atômico (23/09): com `detail` (destaque + criativos, só no
-          // relatório de conversão) o react-pdf podia quebrar em qualquer
-          // ponto do bloco — entre KPIs e destaque, ou entre o destaque e a
-          // lista de criativos. Preferir empurrar o bloco inteiro para a
-          // página seguinte a quebrá-lo no meio (mesmo comportamento que o
-          // relatório de anúncios já tinha, por nunca passar `detail`).
-          <View style={S.blockGroup} key={block} wrap={false}>
+        // Título + KPIs são uma unidade: nunca um cabeçalho de objetivo sozinho
+        // no pé da página, nunca meia grade de KPI.
+        const cabeca = (
+          <>
             <View style={S.blockHead}>
               <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
             </View>
@@ -325,6 +320,29 @@ export function CampaignBlocksSection({
               {kpisFor(block).map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm, deltaPolicy)} />)}
               {extra.map((k) => <KpiCard key={k.label} {...k} />)}
             </View>
+          </>
+        );
+        return (
+          // O bloco PODE quebrar, mas só no encaixe entre os KPIs e os criativos
+          // (24/09). Atômico inteiro, como era desde 23/09, o bloco de ~350pt
+          // pulava a página toda quando não cabia: a página 1 da CRIS ficava com
+          // ~330pt de branco morto e o kicker "MÍDIA POR OBJETIVO" órfão embaixo.
+          // A garantia de 23/09 continua de pé onde importa — nada quebra DENTRO
+          // da grade de KPIs nem dentro de um grupo de campanha (cada um é
+          // `wrap={false}` por conta própria); o que passa a ser permitido é a
+          // costura entre as duas metades, que é exatamente onde um leitor
+          // esperaria virar a página.
+          <View style={S.blockGroup} key={block}>
+            {i === 0 ? (
+              // O kicker vai grudado na primeira cabeça: sozinho ele é só um
+              // rótulo de 8pt, satisfaz qualquer folga e fica para trás.
+              <View wrap={false}>
+                <Text style={S.kicker}>{kicker}</Text>
+                {cabeca}
+              </View>
+            ) : (
+              <View wrap={false}>{cabeca}</View>
+            )}
             {detailContent}
           </View>
         );

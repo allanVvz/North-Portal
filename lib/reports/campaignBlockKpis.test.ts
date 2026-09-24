@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BUILTIN_TEMPLATE, type CampaignBlock, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
+import { CAMPAIGN_BLOCK_LABEL, DEFAULT_BUILTIN_TEMPLATE, type CampaignBlock, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { MetaPost } from "@/lib/windsor";
 import { BUILTIN_PERFORMANCE_TEMPLATES } from "@/lib/performanceTemplates";
 import { BLOCK_KPIS_DEFAULT, blockKpisOf, blockResolver, CampaignBlocksSection, kpiForDef, showsDelta } from "./campaignBlockKpis";
@@ -142,6 +142,41 @@ describe("CPM some do relatório de conversão via hideMetrics", () => {
   });
 });
 
+/** Rótulos dos KpiCard na árvore renderizada, em ordem.
+ *
+ *  Anda a árvore em vez de indexar `props.children[1]...[0]`: a diagramação do
+ *  bloco mudou duas vezes (23/09 atômico, 24/09 quebrável no encaixe, com o
+ *  kicker grudado na primeira cabeça) e a cada vez os índices fixos quebravam
+ *  seis testes que não têm nada a ver com paginação. O que estes testes
+ *  afirmam é QUAIS KPIs saem, não onde eles moram na árvore.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function kpiLabels(node: any): string[] {
+  if (node === null || node === undefined || typeof node === "boolean") return [];
+  if (Array.isArray(node)) return node.flatMap(kpiLabels);
+  if (typeof node !== "object") return [];
+  const label = node.props?.label;
+  if (typeof label === "string" && "value" in (node.props ?? {})) return [label];
+  return kpiLabels(node.props?.children);
+}
+
+/** Quantos blocos por objetivo a seção renderizou. Cada bloco tem exatamente
+ *  uma cabeça com o rótulo do objetivo. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function blockCount(element: any): number {
+  const labels = Object.values(CAMPAIGN_BLOCK_LABEL);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const walk = (node: any): number => {
+    if (node === null || node === undefined || typeof node === "boolean") return 0;
+    if (Array.isArray(node)) return node.reduce((n, c) => n + walk(c), 0);
+    if (typeof node !== "object") return 0;
+    const kids = node.props?.children;
+    if (typeof kids === "string" && labels.includes(kids)) return 1;
+    return walk(kids);
+  };
+  return walk(element);
+}
+
 // Uma regra fixa por relatório, em vez de condicional por política de template.
 describe("kpiSource — o template manda na conversão, não no relatório interno", () => {
   const posts = [ad({ optimizationGoal: "PROFILE_VISIT", metrics: { custo: 10, alcance: 100, profileVisits: 5 } })];
@@ -155,8 +190,7 @@ describe("kpiSource — o template manda na conversão, não no relatório inter
       ...(kpiSource ? { kpiSource } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any) as any;
-    const blocos = element.props.children[1];
-    return blocos[0].props.children[1].props.children[0].map((card: { props: { label: string } }) => card.props.label);
+    return kpiLabels(element);
   };
 
   it("padrão (conversão) respeita a lista curada do template do cliente", () => {
@@ -187,8 +221,7 @@ describe("KPI optional — aparece com dado, some sem", () => {
       adPosts: posts,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any) as any;
-    const blocos = element.props.children[1];
-    return blocos[0].props.children[1].props.children[0].map((c: { props: { label: string } }) => c.props.label);
+    return kpiLabels(element);
   };
 
   it("conta com compras no período mostra o desfecho", () => {
@@ -230,8 +263,8 @@ describe("seguidores não pode depender do template lembrar de declarar o bloco"
     } as any) as any;
 
     expect(element).not.toBeNull();
-    const blocks = element.props.children[1];
-    expect(blocks).toHaveLength(1);
+    expect(blockCount(element)).toBe(1);
+    expect(kpiLabels(element)).toEqual(["Novos seguidores"]);
   });
 
   it("sem extraKpis e sem KPI de template, o bloco não aparece (nada real para mostrar)", () => {

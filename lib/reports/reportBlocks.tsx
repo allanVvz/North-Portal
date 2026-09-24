@@ -168,7 +168,19 @@ export function PageHeader({ eyebrow, title, subtitle, pill, intro, variant = "c
 /** `lead` é o primeiro bloco da seção, preso ao título num bloco que não quebra:
  *  o título nunca fica sozinho no pé da página (o `minPresenceAhead` do react-pdf
  *  não segurou quando o bloco seguinte era uma linha de cartões). */
-export function Section({ title, aside, lead, children, wrap = true, breakBefore = false, variant = "compact" }: { title: string; aside?: string; lead?: ReactNode; children?: ReactNode; wrap?: boolean; breakBefore?: boolean; variant?: "compact" | "editorial" }) {
+/** `keepTogether` trata a seção inteira como bloco indivisível.
+ *
+ *  `minPresenceAhead` sozinho não resolve título órfão (achado real 24/09, na
+ *  Baita e na FALKE): ele exige 60pt de folga adiante, e 60pt sobrando é
+ *  suficiente para o título FICAR — mas o gráfico embaixo dele tem ~145pt, então
+ *  quebra para a página seguinte. Resultado: "Dia a dia da semana" e "Últimas 6
+ *  semanas" apareciam sozinhos no pé de uma página, com ~110pt de branco morto
+ *  abaixo, e o gráfico órfão abrindo a próxima.
+ *
+ *  Vale para seção CURTA e de altura conhecida (gráficos, funil). Seção longa
+ *  (tabela de criativos) continua quebrável: torná-la atômica jogaria uma página
+ *  inteira adiante e criaria MAIS branco do que resolve. */
+export function Section({ title, aside, lead, children, wrap = true, keepTogether = false, breakBefore = false, variant = "compact" }: { title: string; aside?: string; lead?: ReactNode; children?: ReactNode; wrap?: boolean; keepTogether?: boolean; breakBefore?: boolean; variant?: "compact" | "editorial" }) {
   const editorial = variant === "editorial";
   const head = editorial ? (
     <View style={T.sectionHeadEditorial} minPresenceAhead={80}>
@@ -183,7 +195,7 @@ export function Section({ title, aside, lead, children, wrap = true, breakBefore
     </View>
   );
       return (
-        <View style={editorial ? T.sectionEditorial : T.section} wrap={wrap} break={breakBefore}>
+        <View style={editorial ? T.sectionEditorial : T.section} wrap={keepTogether ? false : wrap} break={breakBefore}>
           {lead ? <><View wrap={false}>{head}</View>{lead}</> : head}
       {children}
     </View>
