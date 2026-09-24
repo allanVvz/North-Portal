@@ -105,6 +105,44 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   await page.screenshot({ path: testInfo.outputPath("real-raw-targets-narrow.png") });
 });
 
+test("Previews e finais usam páginas separadas na pasta do Criativo", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  const indexResponse = await page.request.get("/api/admin/drive/baita/materials");
+  expect(indexResponse.ok()).toBe(true);
+  const index = await indexResponse.json() as { workspaces: Array<{ creative_task_id: string }> };
+  const creativeId = index.workspaces[0].creative_task_id;
+  const workspaceResponse = await page.request.get(`/api/admin/tasks/${creativeId}/drive-workspace`);
+  expect(workspaceResponse.ok()).toBe(true);
+  const payload = await workspaceResponse.json() as { context: unknown; workspace: Record<string, unknown> & { assets: unknown[]; final_versions: unknown[] } };
+  const now = new Date().toISOString();
+  const previews = Array.from({ length: 13 }, (_, index) => ({
+    id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    drive_file_id: `e2e-preview-page-${index + 1}`, name: `Preview ${index + 1}.mp4`, mime_type: "video/mp4", size_bytes: 100,
+    role: "preview", state: "active", web_view_link: null, created_at: now,
+  }));
+  const finalAssets = Array.from({ length: 13 }, (_, index) => ({
+    id: `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    drive_file_id: `e2e-final-page-${index + 1}`, name: `Final ${index + 1}.mp4`, mime_type: "video/mp4", size_bytes: 100,
+    role: "final", state: "active", web_view_link: null, created_at: now,
+  }));
+  const versions = finalAssets.map((asset, index) => ({ id: `30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, asset_id: asset.id, version_number: index + 1, state: index === 12 ? "current" : "superseded", promoted_at: now }));
+  await page.route(`**/api/admin/tasks/${creativeId}/drive-workspace`, async (route) => {
+    if (route.request().method() !== "GET") { await route.continue(); return; }
+    await route.fulfill({ json: { ...payload, workspace: { ...payload.workspace, assets: [...payload.workspace.assets, ...previews, ...finalAssets], final_versions: [...payload.workspace.final_versions, ...versions] } } });
+  });
+  await page.goto(`/admin/operacao?area=planos-entregas&task=${creativeId}`);
+  await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
+  await page.locator(".creative-drive-tabs button").filter({ hasText: "Previews" }).click();
+  await expect(page.locator(".creative-drive-file")).toHaveCount(12, { timeout: 30_000 });
+  await page.locator(".creative-drive-pagination").getByRole("button", { name: "Próxima" }).click();
+  await expect(page.locator(".creative-drive-file")).toHaveCount(1);
+  await page.locator(".creative-drive-tabs button").filter({ hasText: "Finais" }).click();
+  await expect(page.locator(".creative-drive-history-row")).toHaveCount(12);
+  await page.locator(".creative-drive-pagination").getByRole("button", { name: "Próxima" }).click();
+  await expect(page.locator(".creative-drive-history-row")).toHaveCount(1);
+});
+
 test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o vínculo aparece no Criativo", async ({ page }) => {
   test.setTimeout(240_000);
   await login(page);
