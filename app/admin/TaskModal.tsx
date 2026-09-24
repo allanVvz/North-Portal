@@ -535,7 +535,13 @@ export default function TaskModal({
     for (const item of commentsOf(card)) for (const part of splitCommentText(item.text)) {
       if (!("url" in part)) continue;
       const doc = attachableDocs.find((candidate) => candidate.file_url === part.url);
-      if (doc) byId.set(doc.id, doc);
+      // Um link em comentário promove o documento aos anexos do card — é assim
+      // que uma etapa compartilhada aparece uma vez só. Mas documento DESLIGADO
+      // (`task_id` nulo) foi deliberadamente tirado de todos os cards, e não
+      // pode voltar por um link antigo: era o que mantinha duas versões do
+      // mesmo relatório semanal na lista, porque o comentário da revisão
+      // anterior ainda apontava o PDF que ela gerou (24/09).
+      if (doc && doc.task_id !== null) byId.set(doc.id, doc);
     }
     return { card, docs: Array.from(byId.values()) };
   }).filter((group) => group.docs.length), [materialCards, attachableDocs]);

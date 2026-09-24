@@ -662,7 +662,13 @@ export async function regenerateTrafficReport(admin: AdminClient, taskId: string
   const { fileName, url, report } = await fillReportCard(admin, ctx.trafficTask, ctx.mold, ctx.config, windsor, meta, today, ctx.occ.id, null);
   await updateTaskPayload(admin, ctx.trafficTask.id, {
     text: `North Ai regerou o relatório com o layout atual — mesmo período, mesmos números: [${fileName}](${url})`,
-    commentId: automationCommentId("ads-rerender", ctx.trafficTask.id, report.revision),
+    // Chaveado pelo PERÍODO, não pela revisão: a manutenção REESCREVE o próprio
+    // comentário em vez de somar um por regeração. Chavear por revisão (como faz
+    // o caminho de revisão logo abaixo, e ali está certo — cada pedido humano é
+    // um evento distinto) deixava um comentário novo a cada redesenho, e todo
+    // link de arquivo em comentário vira um ícone em Anexos: o card acumulava
+    // "relatórios" que eram a mesma semana redesenhada (24/09).
+    commentId: automationCommentId("ads-rerender", ctx.trafficTask.id, report.period_to),
   });
   return { fileName, url, revision: report.revision };
 }
