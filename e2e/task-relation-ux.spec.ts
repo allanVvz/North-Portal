@@ -87,7 +87,10 @@ test("Plano oferece criação e vínculo no mesmo controle", async ({ page }, te
   expect(response.ok()).toBe(true);
   const { tasks } = await response.json() as { tasks: TaskRecord[] };
   const plan = tasks.find((task) => task.id === "7e1a162d-ff0f-414e-ad50-bea8b472fbcd");
+  const creative = tasks.find((task) => task.title === "Reels - Equilibrando a bebida");
+  const firstStep = tasks.find((task) => task.parents.some((parent) => parent.id === creative?.id && parent.slot === "roteiro"));
   expect(plan).toBeTruthy();
+  expect(creative && firstStep).toBeTruthy();
   await page.goto(`/admin/operacao?area=planos-entregas&task=${plan!.id}`);
   const input = page.getByRole("combobox", { name: "Adicionar ao plano" });
   await expect(input).toBeVisible({ timeout: 30_000 });
@@ -104,4 +107,20 @@ test("Plano oferece criação e vínculo no mesmo controle", async ({ page }, te
   await expect(panel.getByRole("group", { name: "Tipo do novo card" })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("plan-create-narrow.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
+
+  let createCalls = 0;
+  await page.route("**/api/admin/tasks?scope=task", (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({ title: "Equilibrando copos", kind: "criativo", plan_id: plan!.id });
+    createCalls++;
+    return route.fulfill({ status: 201, json: firstStep });
+  });
+  await page.route(`**/api/admin/tasks?parentId=${plan!.id}`, (route) => route.fulfill({ json: { tasks: [creative] } }));
+  await page.getByRole("button", { name: "Criar Criativo" }).click();
+  await expect.poll(() => createCalls).toBe(1);
+  const next = page.locator(".tm-relation-next");
+  await expect(next).toContainText(creative!.title);
+  await next.getByRole("button", { name: /Abrir card e organizar etapas/ }).click();
+  await expect(page.getByRole("textbox", { name: "Título da tarefa" })).toHaveValue(creative!.title);
+  await page.getByRole("button", { name: "Voltar para o card anterior" }).click();
+  await expect(page.getByRole("textbox", { name: "Título da tarefa" })).toHaveValue(plan!.title);
 });
