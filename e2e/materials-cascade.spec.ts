@@ -284,6 +284,17 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   expect(posts).toEqual(ids.map((creativeId) => ({ creativeId, driveFileId: raw.id })));
   await page.getByRole("button", { name: "Já classificados" }).click();
   await expect(tile).toBeVisible();
+  await tile.getByRole("button", { name: "Ampliar IMG_0420.MOV" }).click();
+  const previewEyebrows = page.locator(".creative-drive-preview-eyebrow");
+  await expect(previewEyebrows).toHaveCount(2);
+  await expect(previewEyebrows.filter({ hasText: taskRows[0].title })).toHaveCount(1);
+  await expect(previewEyebrows.filter({ hasText: taskRows[1].title })).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath("raw-preview-two-deliveries-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(previewEyebrows).toHaveCount(2);
+  await page.screenshot({ path: testInfo.outputPath("raw-preview-two-deliveries-narrow.png") });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole("button", { name: "Pendentes", exact: true }).click();
   await expect(tile).toHaveCount(0);
   await firstTarget.getByRole("button", { name: `Ver brutos pendentes para ${taskRows[0].title}` }).click();
@@ -318,6 +329,9 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   await expect(classifiedTile).toHaveCount(0);
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   const ownTile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw.id}"]`);
+  await ownTile.getByRole("button", { name: "Ampliar IMG_0420.MOV" }).click();
+  await expect(page.locator(".creative-drive-preview-eyebrow")).toHaveCount(1);
+  await expect(page.locator(".creative-drive-preview-eyebrow")).toContainText(taskRows[1].title);
   await ownTile.getByRole("button", { name: "Selecionar IMG_0420.MOV" }).click();
   await page.locator(".creative-drive-target").filter({ hasText: taskRows[0].title }).getByRole("button", { name: `Classificar brutos em ${taskRows[0].title}` }).click();
   await page.locator(".creative-drive-target").filter({ hasText: taskRows[0].title }).getByRole("button", { name: "Abrir" }).click();

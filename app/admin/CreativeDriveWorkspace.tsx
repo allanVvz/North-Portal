@@ -303,6 +303,8 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
     const rawAsset = source.assets.find((asset) => asset.role === "raw" && asset.state === "active" && asset.drive_file_id === fileId);
     return Boolean(rawAsset && source.raw_links.some((link) => link.asset_id === rawAsset.id));
   }
+  const previewIsRaw = preview?.source === "Roteiro" || preview?.source === "Captação" || preview?.source === "Bruto classificado";
+  const previewLinks = preview && previewIsRaw ? targets.filter((target) => linkedToTarget(target.id, preview.id)) : [];
   const visibleSources = orderedSources.filter(({ file }) => rawFilter === "all" || (rawFilter === "linked") === linkedToTarget(rawTargetId, file.id));
   const rawTarget = targets.find((target) => target.id === rawTargetId);
   useEffect(() => { setRawPage((page) => Math.min(page, Math.max(1, Math.ceil(visibleSources.length / RAW_PAGE_SIZE)))); }, [visibleSources.length]);
@@ -317,7 +319,9 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
     <div className="tm-head tm-head-tone-purple"><span className="tm-head-ico" aria-hidden>▣</span><div className="tm-head-text"><strong className="docprev-title">Materiais · {activeTab === "raw" ? rawTarget?.title ?? currentTarget?.title ?? "Criativo" : currentTarget?.title ?? "Criativo"}</strong><span className="admin-sub">Drive · Preview e histórico de finais</span></div><button type="button" className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button></div>
     {error || notice || busy === "assign" ? <div className={`creative-drive-toast${error ? " error" : ""}`} role={error ? "alert" : "status"}><span>{error || (busy === "assign" ? "Classificando brutos…" : notice)}</span>{notice && noticeTargetId && !error ? <button type="button" onClick={() => { setActiveTaskId(noticeTargetId); setActiveTab("classified"); setNotice(""); }}>Ver pasta</button> : null}</div> : null}
     <div className="tm-layout"><div className="tm-main creative-drive-main" ref={main}>
-      {preview ? <div className="creative-drive-preview"><iframe key={preview.id} src={`https://drive.google.com/file/d/${encodeURIComponent(preview.id)}/preview`} title={`Preview de ${preview.name}`} loading="lazy" /><div className="creative-drive-preview-caption"><b>{preview.name}</b><span>{preview.source}</span>{preview.url ? <a href={preview.url} target="_blank" rel="noreferrer">Abrir no Drive ↗</a> : null}</div></div> : null}
+      {preview ? <div className="creative-drive-preview">
+        {previewLinks.length ? <div className="creative-drive-preview-links" aria-label="Entregas vinculadas ao bruto"><span className="creative-drive-preview-links-label">Vinculado a</span>{previewLinks.map((target) => <span className="creative-drive-preview-eyebrow" key={target.id} title={target.title}>{target.title}</span>)}</div> : null}
+        <iframe key={preview.id} src={`https://drive.google.com/file/d/${encodeURIComponent(preview.id)}/preview`} title={`Preview de ${preview.name}`} loading="lazy" /><div className="creative-drive-preview-caption"><b>{preview.name}</b><span>{preview.source}</span>{preview.url ? <a href={preview.url} target="_blank" rel="noreferrer">Abrir no Drive ↗</a> : null}</div></div> : null}
       {workspace?.last_error || (activeTab === "raw" && workspace?.source_error) ? <p className="creative-drive-error" role="alert">{workspace?.last_error || workspace?.source_error}</p> : null}
       {!payload && !error ? <p className="admin-sub">Carregando materiais…</p> : null}
       {payload && (!workspace || workspace.status !== "ready") ? <button type="button" className="admin-btn primary" disabled={Boolean(busy)} onClick={() => void provision()}>{busy === "provision" ? "Preparando…" : "Preparar pastas do Criativo"}</button> : null}
