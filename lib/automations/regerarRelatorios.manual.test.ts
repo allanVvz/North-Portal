@@ -55,15 +55,32 @@ describe.skipIf(!process.env.RUN_REGEN)("regera tráfego + conversão com o layo
       return `${data?.status ?? "?"} | ${(payload?.comments?.at(-1)?.text ?? "(sem comentário)").replace(/\s+/g, " ").slice(0, 170)}`;
     };
 
+    // `fetch failed` do undici chega como TypeError sem mensagem útil: o motivo
+    // real (DNS, TLS, timeout, e QUAL host) mora em `error.cause`, e o vitest não
+    // o imprime. Sem isto, uma falha de rede vira "Unknown Error" e não dá para
+    // distinguir um blip de um serviço fora do ar (24/09).
+    const comCausa = async <T>(etapa: string, fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await fn();
+      } catch (error) {
+        const causa = (error as { cause?: unknown }).cause;
+        const detalhe = causa instanceof Error
+          ? `${causa.name}: ${causa.message}${(causa as { code?: string }).code ? ` [${(causa as { code?: string }).code}]` : ""}`
+          : causa !== undefined ? String(causa) : "(sem cause)";
+        console.error(`FALHA em ${etapa}: ${(error as Error).message} — causa: ${detalhe}`);
+        throw error;
+      }
+    };
+
     // 1. Relatório de anúncios (interno). Etapa aprovada continua regerável:
     //    aprovar é sobre conteúdo, e o conteúdo não muda.
-    const r = await regenerateTrafficReport(admin, trafego);
+    const r = await comCausa("tráfego", () => regenerateTrafficReport(admin, trafego));
     console.log("TRÁFEGO  ", r ? `rev ${r.revision} · ${r.fileName}` : "IGNORADO (etapa não resolvida)");
     expect(r, "regenerateTrafficReport devolveu null — etapa/config não resolvida").not.toBeNull();
 
     // 2. Relatório de conversão (o que vai ao cliente). Depende do relatório de
     //    tráfego final acima, por isso nesta ordem.
-    await regenerateConversionReport(admin, conversao);
+    await comCausa("conversão", () => regenerateConversionReport(admin, conversao));
     console.log("CONVERSÃO", await ultimo(conversao));
   }, 240_000);
 });
