@@ -90,6 +90,22 @@ export function blockKpisOf(config: PerformanceTemplateConfig, block: CampaignBl
     : config.blockKpis[block] ?? [];
 }
 
+/** De onde sai a lista de KPIs de cada bloco.
+ *
+ *  Uma regra fixa por relatório, em vez de um condicional por política de
+ *  template (23/09):
+ *
+ *  - `"template"` — relatório de CONVERSÃO, o que vai ao cliente. O template é
+ *    o contrato editorial: mostra o que aquele cliente combinou ver.
+ *  - `"all"` — relatório de ANÚNCIOS, interno. O time vê tudo que a API
+ *    entrega para aquele objetivo; o template não corta nada aqui, só
+ *    continua dizendo a QUAL objetivo cada campanha pertence. */
+export type KpiSource = "template" | "all";
+
+function blockKpisFor(config: PerformanceTemplateConfig, block: CampaignBlock, source: KpiSource): BlockKpi[] {
+  return source === "all" ? BLOCK_KPIS_DEFAULT[block] : blockKpisOf(config, block);
+}
+
 /** Classifica uma evidência isolada, sem deixar o nome da campanha vazar para
  * uma etapa anterior da precedência. `outro` significa "evidência inconclusiva"
  * aqui; uma classificação manual explícita como `outro` continua soberana. */
@@ -221,6 +237,7 @@ export function CampaignBlocksSection({
   footer,
   hideMetrics,
   deltaPolicy = "always",
+  kpiSource = "template",
 }: {
   config: PerformanceTemplateConfig;
   posts: MetaPost[];
@@ -243,11 +260,13 @@ export function CampaignBlocksSection({
   /** "always" (padrão, relatório de anúncios: mostra tudo sempre) ou
    *  "positive_only" (relatório de conversão: só ganho > 1%). */
   deltaPolicy?: DeltaPolicy;
+  /** "template" (padrão, conversão) ou "all" (anúncios, interno). Ver KpiSource. */
+  kpiSource?: KpiSource;
 }) {
   const cm = config.prefs.customMetrics;
   const { postBlock } = blockResolver(config, adPosts);
   const hidden = new Set(hideMetrics ?? []);
-  const kpisFor = (block: CampaignBlock) => blockKpisOf(config, block).filter((def) =>
+  const kpisFor = (block: CampaignBlock) => blockKpisFor(config, block, kpiSource).filter((def) =>
     !(def.metric && hidden.has(def.metric)) && !(def.ratio && (hidden.has(def.ratio[0]) || hidden.has(def.ratio[1]))),
   );
   // Um bloco entra mesmo sem KPI de template declarado quando há `extraKpis`

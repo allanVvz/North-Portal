@@ -23,7 +23,7 @@ import { registerReportFonts } from "./reportFonts";
 import { blockResolver, CampaignBlocksSection } from "./campaignBlockKpis";
 import {
   OUTCOME_WORDS, creativeBadges, creativeHighlights, creativeRows, deltaOf, dominantBlock, mediaAlert, mediaAnalysis,
-  dailySeries, mediaFunnel, mediaOutcome, mediaTotals, money, num, objectiveRows, outcomeCost, outcomeValue, platformSplit, stageGap, weeklyTrend,
+  dailySeries, mediaFunnel, mediaOutcome, mediaTotals, objectiveScopedMediaTotals, money, num, objectiveRows, outcomeCost, outcomeValue, platformSplit, stageGap, weeklyTrend,
   type Badge, type CreativeRow, type MediaOutcome, type ObjectiveRow,
 } from "./adsInsights";
 import type { PreviewAsset } from "./creativePreviews";
@@ -150,10 +150,13 @@ function campaignsOf(posts: MetaPost[], blockOf: (id: string | undefined, name: 
 
 function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPosts, prevAdPosts, trendPosts, previews, revisionInstruction, generatedAt }: AdsReportInput) {
   const { blockOf, postBlock } = blockResolver(config, adPosts);
-  const cur = mediaTotals(posts);
+  // Mesma regra do relatório de conversão: visitas ao site, ao perfil e
+  // conversas contam só das campanhas daquele objetivo (a Meta atribui clique
+  // de link a qualquer anúncio com link). Uma regra só, os dois relatórios.
+  const cur = objectiveScopedMediaTotals(posts, postBlock);
   const revision = revisionAdjustments(revisionInstruction);
   if (revision.reach !== null) cur.reach = revision.reach;
-  const prev = prevPosts.some((p) => p.source === "paid") ? mediaTotals(prevPosts) : null;
+  const prev = prevPosts.some((p) => p.source === "paid") ? objectiveScopedMediaTotals(prevPosts, postBlock) : null;
   const prevRange = previousPeriod(period);
   const comparedWith = prev ? `comparado com ${shortDay(prevRange.from)} a ${shortDay(prevRange.to)}` : "primeira semana registrada";
 
@@ -185,10 +188,13 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
   const daily = dailySeries(posts, period, outcome);
   const platforms = platformSplit(posts, outcome);
   const campaigns = campaignsOf(posts, (id, name, objective) => blockOf(id, name, objective));
-  // Segment templates reproduce an approved operational summary. They are not
-  // generic Meta dashboards, so no aggregate or creative-level metric can
-  // bypass the per-block KPI allow-list below.
-  const operationalOnly = config.reportKpiPolicy !== "generic";
+  // Até 22/09 um template segmentado cortava este relatório inteiro para
+  // header + blocos por objetivo (`operationalOnly`), na ideia de que ele
+  // reproduzia o resumo operacional aprovado. Com os dois relatórios separados
+  // por papel (23/09) isso caiu: ESTE é o relatório interno, e o time vê tudo —
+  // funil, criativos, dia a dia, plataformas, tendência. O template continua
+  // mandando em UMA coisa aqui, a classificação da campanha por objetivo; o que
+  // o cliente vê é decidido no relatório de conversão, não neste.
 
   const d = (c: number | null, p: number | null, dir: "higher_is_better" | "lower_is_better" | "neutral") => (prev ? deltaOf(c, p, dir) : null);
   const figures: FigureItem[] = [
@@ -214,29 +220,6 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
   const creativesTitle = leadCreative
     ? `${leadCreative.row.name} ${leadCreative.badges[0].key === "mais_conversas" ? "liderou as conversas" : leadCreative.badges[0].key === "mais_cliques" && !revision.hideClicks ? "liderou os cliques" : "se destacou na semana"}`
     : "Criativos";
-
-  if (operationalOnly) {
-    return (
-      <Document>
-        <Page size="A4" style={T.page} wrap>
-          <PageHeader
-            eyebrow={clientName}
-            title="Relatório de anúncios"
-            subtitle={`${fullDay(period.from)} a ${fullDay(period.to)}`}
-            pill="Relatório 1"
-          />
-          <CampaignBlocksSection
-            config={config}
-            posts={posts}
-            prevPosts={prevPosts}
-            adPosts={adPosts}
-            kicker="Resultados por objetivo"
-          />
-          <Footer left={`North · ${clientName} · gerado em ${generatedAt.toLocaleDateString("pt-BR")}`} />
-        </Page>
-      </Document>
-    );
-  }
 
   return (
     <Document>
@@ -293,6 +276,9 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
           posts={posts}
           prevPosts={prevPosts}
           adPosts={adPosts}
+          // Interno: o time vê todos os KPIs do objetivo, não a lista curada
+          // que o cliente combinou ver (23/09).
+          kpiSource="all"
           kicker="Resultados por objetivo"
         />
 

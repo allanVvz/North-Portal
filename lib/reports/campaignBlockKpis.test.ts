@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_BUILTIN_TEMPLATE, type CampaignBlock, type PerformanceTemplateConfig } from "@/lib/performanceTemplates";
 import type { MetaPost } from "@/lib/windsor";
 import { BUILTIN_PERFORMANCE_TEMPLATES } from "@/lib/performanceTemplates";
-import { blockKpisOf, blockResolver, CampaignBlocksSection, kpiForDef, showsDelta } from "./campaignBlockKpis";
+import { BLOCK_KPIS_DEFAULT, blockKpisOf, blockResolver, CampaignBlocksSection, kpiForDef, showsDelta } from "./campaignBlockKpis";
 
 const templateById = (id: string) => BUILTIN_PERFORMANCE_TEMPLATES.find((t) => t.id === id)!;
 
@@ -139,6 +139,35 @@ describe("CPM some do relatório de conversão via hideMetrics", () => {
     // relatório de anúncios precisa dele; é `hideMetrics={["cpm"]}` em
     // salesReportPdf.tsx que o esconde só na conversão.
     expect(refs).toContain("cpm");
+  });
+});
+
+// Uma regra fixa por relatório, em vez de condicional por política de template.
+describe("kpiSource — o template manda na conversão, não no relatório interno", () => {
+  const posts = [ad({ optimizationGoal: "PROFILE_VISIT", metrics: { custo: 10, alcance: 100, profileVisits: 5 } })];
+
+  const labelsRenderizados = (kpiSource?: "template" | "all") => {
+    const element = CampaignBlocksSection({
+      config: templateById("builtin-ecommerce").config,
+      posts,
+      prevPosts: [],
+      adPosts: posts,
+      ...(kpiSource ? { kpiSource } : {}),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any) as any;
+    const blocos = element.props.children[1];
+    return blocos[0].props.children[1].props.children[0].map((card: { props: { label: string } }) => card.props.label);
+  };
+
+  it("padrão (conversão) respeita a lista curada do template do cliente", () => {
+    // builtin-ecommerce declara 4 KPIs para trafego_perfil.
+    expect(labelsRenderizados()).toEqual(["Investimento", "Alcance", "Visitas ao perfil", "Custo por visita"]);
+  });
+
+  it('"all" (anúncios, interno) mostra o conjunto completo do objetivo, ignorando a curadoria', () => {
+    const labels = labelsRenderizados("all");
+    expect(labels).toEqual(BLOCK_KPIS_DEFAULT.trafego_perfil.map((k) => k.label));
+    expect(labels).toContain("Mensagens");
   });
 });
 
