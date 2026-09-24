@@ -664,12 +664,22 @@ export async function regenerateTrafficReport(admin: AdminClient, taskId: string
   // comentários automáticos de anexo que já existem no card e põe este no lugar,
   // sob lock e sem tocar em comentário humano. Somar um comentário por geração
   // era o que enchia Anexos de "relatórios" que eram a mesma semana redesenhada
-  // — todo link de arquivo em comentário vira um ícone lá (24/09). O id é
-  // chaveado pelo PERÍODO: regerar a mesma semana duas vezes é idempotente.
+  // — todo link de arquivo em comentário vira um ícone lá (24/09).
+  //
+  // O id é chaveado pela REVISÃO, e isso é exigência da RPC, não preferência:
+  // ela começa com uma guarda de idempotência que devolve no-op quando o
+  // `commentId` já existe no card. Chaveado pelo período (tentativa de 24/09
+  // 13:50), a segunda regeração da mesma semana batia nessa guarda e não fazia
+  // nada — nem removia os antigos nem inseria o novo, deixando o card com o PDF
+  // novo anexado e o comentário apontando o anterior. Com um id novo a cada
+  // revisão a guarda deixa passar, a RPC limpa todos os automáticos e sobra
+  // exatamente um. A idempotência que importa continua valendo: refazer a MESMA
+  // revisão reencontra o mesmo id e vira no-op, que é o caso que a guarda existe
+  // para cobrir.
   await replaceAutomaticReportAttachment(admin, ctx.trafficTask.id, {
     reportKind: "ads",
     text: `North Ai regerou o relatório com o layout atual — mesmo período, mesmos números: [${fileName}](${url})`,
-    commentId: automationCommentId("ads-rerender", ctx.trafficTask.id, report.period_to),
+    commentId: automationCommentId("ads-rerender", ctx.trafficTask.id, report.revision),
   });
   return { fileName, url, revision: report.revision };
 }

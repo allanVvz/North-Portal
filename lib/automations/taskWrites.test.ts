@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFakeTaskDb, type Row } from "@/lib/testing/fakeTaskDb";
-import { automationCommentId, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
+import { automationCommentId, replaceAutomaticReportAttachment, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import { markTaskParada } from "./errorHandling";
 
 vi.mock("./notify", () => ({
@@ -195,5 +195,79 @@ describe("markTaskParada", () => {
     await markTaskParada(db.asAdmin(), "step", "Falha ao gerar o relatório");
     expect(db.task("step")!.status).toBe("aprovado");
     expect(db.comments("step")).toHaveLength(0);
+  });
+});
+
+// O card de etapa cobre UMA semana, então todo comentário automático de anexo
+// nele fala do mesmo relatório: mais de um é sempre duplicata. Este bloco fixa a
+// interação entre as duas metades da regra, que foi onde errei duas vezes
+// seguidas em 24/09 — a RPC limpa os antigos, mas só DEPOIS de passar pela
+// guarda de idempotência do `commentId`.
+describe("replaceAutomaticReportAttachment — um anexo automático por card", () => {
+  const cardComTresAutomaticos = () => createFakeTaskDb({
+    tasks: [{
+      id: "step",
+      status: "em_producao",
+      payload: {
+        comments: [
+          { id: "ads-revision:step:5", author: "Automação", text: "revisão: [r5.pdf](http://x/r5)", at: "2026-09-22T13:07:00.000Z" },
+          { id: "humano-1", author: "Luiza", text: "tira o CPM", at: "2026-09-22T19:00:00.000Z" },
+          { id: "ads-rerender:step:6", author: "Automação", text: "regerado: [r6.pdf](http://x/r6)", at: "2026-09-24T09:45:00.000Z" },
+          { id: "ads-rerender:step:2026-09-21", author: "Automação", text: "regerado: [r7.pdf](http://x/r7)", at: "2026-09-24T16:50:00.000Z" },
+        ],
+      },
+    }],
+  });
+  const ids = (db: ReturnType<typeof createFakeTaskDb>) =>
+    ((db.task("step")!.payload as Row).comments as Row[]).map((c) => String(c.id));
+
+  it("id novo: varre TODOS os automáticos e deixa um, preservando o humano", async () => {
+    const db = cardComTresAutomaticos();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await replaceAutomaticReportAttachment(db as any, "step", {
+      reportKind: "ads", text: "regerado: [r8.pdf](http://x/r8)", commentId: "ads-rerender:step:8",
+    });
+    expect(ids(db)).toEqual(["humano-1", "ads-rerender:step:8"]);
+  });
+
+  it("prefixo de manutenção conta como anexo automático", async () => {
+    // `ads-rerender:` nasceu depois da RPC e ficava de fora do casamento de
+    // prefixos, virando um comentário novo a cada regeração.
+    const db = cardComTresAutomaticos();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await replaceAutomaticReportAttachment(db as any, "step", {
+      reportKind: "ads", text: "x: [r8.pdf](http://x/r8)", commentId: "ads-report:step:novo",
+    });
+    expect(ids(db).filter((id) => id.startsWith("ads-rerender:"))).toEqual([]);
+  });
+
+  it("REGRESSÃO — id repetido é no-op: não limpa nem insere", async () => {
+    // Chavear o id pelo PERÍODO fazia a segunda regeração da mesma semana bater
+    // aqui: o card ficava com o PDF novo anexado e o comentário apontando o
+    // anterior. Por isso o id da manutenção é chaveado pela REVISÃO.
+    const db = cardComTresAutomaticos();
+    const antes = ids(db);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = await replaceAutomaticReportAttachment(db as any, "step", {
+      reportKind: "ads", text: "regerado: [r8.pdf](http://x/r8)", commentId: "ads-rerender:step:2026-09-21",
+    });
+    expect(r?.inserted).toBe(false);
+    expect(ids(db)).toEqual(antes);
+  });
+
+  it("um id de revisão novo nunca colide com o anterior", () => {
+    expect(automationCommentId("ads-rerender", "step", 8)).not.toBe(automationCommentId("ads-rerender", "step", 7));
+  });
+
+  it("conversação: anexo de conversão não mexe no de anúncios", async () => {
+    const db = cardComTresAutomaticos();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await replaceAutomaticReportAttachment(db as any, "step", {
+      reportKind: "conversion", text: "conversao: [v19.pdf](http://x/v19)", commentId: "conversion-report:step:v19",
+    });
+    expect(ids(db)).toEqual([
+      "ads-revision:step:5", "humano-1", "ads-rerender:step:6", "ads-rerender:step:2026-09-21",
+      "conversion-report:step:v19",
+    ]);
   });
 });
