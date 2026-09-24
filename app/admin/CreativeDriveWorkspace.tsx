@@ -12,8 +12,16 @@ type Target = { id: string; title: string };
 type FileItem = { id: string; name: string; mimeType: string; size: number | null; url: string | null; source: string; assetId?: string };
 type SourceKind = "script" | "capture";
 type SourcePages = Record<SourceKind, string | null>;
+type MaterialTab = "raw" | "classified" | "preview" | "final";
+const RAW_PAGE_SIZE = 24;
+const ASSET_PAGE_SIZE = 12;
 const emptySources = (): Record<SourceKind, DriveFile[]> => ({ script: [], capture: [] });
 const emptyPages = (): SourcePages => ({ script: null, capture: null });
+
+function Pagination({ page, total, onPrevious, onNext, hasMore = false, busy = false }: { page: number; total: number; onPrevious: () => void; onNext: () => void; hasMore?: boolean; busy?: boolean }) {
+  const pages = Math.max(1, Math.ceil(total));
+  return <nav className="creative-drive-pagination" aria-label="Paginação de materiais"><button type="button" className="admin-btn ghost" disabled={page === 1 || busy} onClick={onPrevious}>Anterior</button><span>Página {page} de {hasMore ? `${pages}+` : pages}</span><button type="button" className="admin-btn ghost" disabled={(page >= pages && !hasMore) || busy} onClick={onNext}>Próxima</button></nav>;
+}
 
 async function json<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({})) as T & { error?: string };
@@ -21,11 +29,12 @@ async function json<T>(response: Response): Promise<T> {
   return body;
 }
 
-export default function CreativeDriveWorkspace({ taskId, targets, summaries, initialAssetId, selectedAssetIds, onSelectedAssetIdsChange, onChanged, onBack, onClose }: {
+export default function CreativeDriveWorkspace({ taskId, targets, summaries, initialAssetId, initialTab = "raw", selectedAssetIds, onSelectedAssetIdsChange, onChanged, onBack, onClose }: {
   taskId: string;
   targets: Target[];
   summaries: CreativeMaterialWorkspace[];
   initialAssetId?: string | null;
+  initialTab?: MaterialTab;
   selectedAssetIds: string[];
   onSelectedAssetIdsChange: (ids: string[]) => void;
   onChanged: () => void;
@@ -42,6 +51,11 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const [extraSources, setExtraSources] = useState(emptySources);
   const [nextPages, setNextPages] = useState<SourcePages>(emptyPages);
   const [loadingMore, setLoadingMore] = useState<SourceKind | null>(null);
+  const [activeTab, setActiveTab] = useState<MaterialTab>(initialAssetId ? "classified" : initialTab);
+  const [rawPage, setRawPage] = useState(1);
+  const [classifiedPage, setClassifiedPage] = useState(1);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [finalPage, setFinalPage] = useState(1);
   const input = useRef<HTMLInputElement>(null);
   const main = useRef<HTMLDivElement>(null);
   const targetRail = useRef<HTMLElement>(null);
@@ -50,13 +64,18 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const load = useCallback(async (preserveSources = false) => {
     const next = await json<Payload>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-workspace`, { cache: "no-store" }));
     setPayload(next);
+    if (initialAssetId && !preserveSources) {
+      const asset = next.workspace?.assets.find((item) => item.id === initialAssetId);
+      if (asset) setActiveTab(asset.role === "raw" ? "classified" : asset.role === "final" ? "final" : "preview");
+    }
     if (!preserveSources) {
       setExtraSources(emptySources());
       setNextPages(next.workspace?.source_next_page_token ?? emptyPages());
     }
-  }, [activeTaskId]);
+  }, [activeTaskId, initialAssetId]);
   useEffect(() => {
     setPayload(null); setSelected(null); setError(""); setExtraSources(emptySources()); setNextPages(emptyPages());
+    setRawPage(1); setClassifiedPage(1); setPreviewPage(1); setFinalPage(1);
     void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar o Drive."));
   }, [load]);
 
@@ -91,6 +110,9 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
       onChanged();
       const targetName = targets.find((target) => target.id === targetId)?.title ?? "Criativo";
       setNotice(created ? `${created} arquivo(s) classificado(s) em ${targetName}. Os originais continuam na Captação.` : `Os arquivos já estão vinculados a ${targetName}.`);
+      setSelectedRawIds([]);
+      setActiveTab("classified");
+      if (targetId !== activeTaskId) setActiveTaskId(targetId);
     } catch (cause) {
       if (created) { await load(true).catch(() => undefined); onChanged(); }
       setError(`${created} vínculo(s) criado(s). ${cause instanceof Error ? cause.message : "Falha ao classificar os brutos."}`);
@@ -107,11 +129,17 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
     if (ids.length) void assignRaw(targetId, ids);
   }
   async function unlinkRaw(assetId: string, fileId: string) {
-    await changed(async () => {
+    setBusy(fileId); setError(""); setNotice("");
+    try {
       await action({ action: "unlink_raw", assetId });
       onSelectedAssetIdsChange(selectedAssetIds.filter((id) => id !== assetId));
       setSelectedRawIds((previous) => previous.filter((id) => id !== fileId));
-    }, fileId);
+      setSelected((previous) => previous?.assetId === assetId ? null : previous);
+      await load(true);
+      onChanged();
+      setNotice("Vínculo removido deste Criativo. O bruto original continua na Captação.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao desassociar o bruto."); }
+    finally { setBusy(""); }
   }
   async function upload(file: File) {
     await changed(async () => {
@@ -131,7 +159,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   }
   async function loadMore(kind: SourceKind) {
     const token = nextPages[kind];
-    if (!token) return;
+    if (!token) return false;
     setLoadingMore(kind); setError("");
     try {
       const params = new URLSearchParams({ kind, pageToken: token });
@@ -141,23 +169,43 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
         return { ...previous, [kind]: [...previous[kind], ...page.files.filter((file) => !seen.has(file.id))] };
       });
       setNextPages((previous) => ({ ...previous, [kind]: page.nextPageToken }));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao carregar mais brutos."); }
+      return page.files.length > 0;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao carregar mais brutos."); return false; }
     finally { setLoadingMore(null); }
+  }
+
+  async function nextRawPage() {
+    if (rawPage * RAW_PAGE_SIZE < sources.length) { setRawPage((page) => page + 1); return; }
+    const kind = nextPages.script ? "script" : nextPages.capture ? "capture" : null;
+    if (!kind) return;
+    if (await loadMore(kind)) setRawPage((page) => page + 1);
   }
 
   const workspace = payload?.workspace;
   const assetsById = useMemo(() => new Map((workspace?.assets ?? []).map((asset) => [asset.id, asset])), [workspace]);
   const linked = useMemo(() => new Map((workspace?.assets ?? []).filter((asset) => asset.role === "raw" && workspace?.raw_links.some((row) => row.asset_id === asset.id)).map((asset) => [asset.drive_file_id, asset.id])), [workspace]);
   const sources = useMemo(() => [
-    ...(workspace?.source_files.script ?? []).concat(extraSources.script).map((file) => ({ file, source: "Roteiro" })),
-    ...(workspace?.source_files.capture ?? []).concat(extraSources.capture).map((file) => ({ file, source: "Captação" })),
+    ...(workspace?.source_files.script ?? []).map((file) => ({ file, source: "Roteiro" })),
+    ...(workspace?.source_files.capture ?? []).map((file) => ({ file, source: "Captação" })),
+    ...extraSources.script.map((file) => ({ file, source: "Roteiro" })),
+    ...extraSources.capture.map((file) => ({ file, source: "Captação" })),
   ], [workspace, extraSources]);
-  const files: FileItem[] = (workspace?.assets ?? []).filter((asset) => asset.role !== "raw" && asset.state === "active").map((asset) => ({
+  const linkedAssetIds = useMemo(() => new Set((workspace?.raw_links ?? []).map((link) => link.asset_id)), [workspace]);
+  const classifiedAssets = (workspace?.assets ?? []).filter((asset) => asset.role === "raw" && asset.state === "active" && linkedAssetIds.has(asset.id));
+  const previewAssets = (workspace?.assets ?? []).filter((asset) => asset.role === "preview" && asset.state === "active");
+  const finalVersions = workspace?.final_versions ?? [];
+  useEffect(() => { setClassifiedPage((page) => Math.min(page, Math.max(1, Math.ceil(classifiedAssets.length / ASSET_PAGE_SIZE)))); }, [classifiedAssets.length]);
+  useEffect(() => { setPreviewPage((page) => Math.min(page, Math.max(1, Math.ceil(previewAssets.length / ASSET_PAGE_SIZE)))); }, [previewAssets.length]);
+  useEffect(() => { setFinalPage((page) => Math.min(page, Math.max(1, Math.ceil(finalVersions.length / ASSET_PAGE_SIZE)))); }, [finalVersions.length]);
+  const files: FileItem[] = (workspace?.assets ?? []).filter((asset) => asset.state === "active" && (asset.role !== "raw" || linkedAssetIds.has(asset.id))).map((asset) => ({
     id: asset.drive_file_id, assetId: asset.id, name: asset.name, mimeType: asset.mime_type, size: asset.size_bytes,
-    url: asset.web_view_link, source: asset.role === "final" ? "Final" : "Preview",
+    url: asset.web_view_link, source: asset.role === "final" ? "Final" : asset.role === "raw" ? "Bruto classificado" : "Preview",
   }));
   const current = workspace?.final_versions.find((item) => item.state === "current");
-  const preview = selected ?? files.find((file) => file.assetId === initialAssetId) ?? files.find((file) => file.assetId === current?.asset_id) ?? files[0] ?? null;
+  const initialFile = files.find((file) => file.assetId === initialAssetId);
+  const preview = selected ?? (activeTab === "classified" && initialFile?.source === "Bruto classificado" ? initialFile : null)
+    ?? (activeTab === "final" ? (initialFile?.source === "Final" ? initialFile : files.find((file) => file.assetId === current?.asset_id)) : null)
+    ?? (activeTab === "preview" ? (initialFile?.source === "Preview" ? initialFile : files.find((file) => file.source === "Preview")) : null) ?? null;
   const currentTarget = targets.find((target) => target.id === activeTaskId);
   const targetSummaries = summaries.filter((summary) => summary.capture_task_id === payload?.context.captureTaskId);
   function linkedToTarget(targetId: string, fileId: string): boolean {
@@ -177,14 +225,14 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
     <div className="tm-head tm-head-tone-purple"><span className="tm-head-ico" aria-hidden>▣</span><div className="tm-head-text"><strong className="docprev-title">Materiais · {currentTarget?.title ?? "Criativo"}</strong><span className="admin-sub">Drive · Preview e histórico de finais</span></div><button type="button" className="kb-modal-close" onClick={onClose} aria-label="Fechar">✕</button></div>
     <div className="tm-layout"><div className="tm-main creative-drive-main" ref={main}>
       {preview ? <div className="creative-drive-preview"><iframe key={preview.id} src={`https://drive.google.com/file/d/${encodeURIComponent(preview.id)}/preview`} title={`Preview de ${preview.name}`} loading="lazy" /><div className="creative-drive-preview-caption"><b>{preview.name}</b><span>{preview.source}</span>{preview.url ? <a href={preview.url} target="_blank" rel="noreferrer">Abrir no Drive ↗</a> : null}</div></div> : null}
-      {workspace?.last_error || workspace?.source_error ? <p className="creative-drive-error" role="alert">{workspace?.last_error || workspace?.source_error}</p> : null}
+      {workspace?.last_error || (activeTab === "raw" && workspace?.source_error) ? <p className="creative-drive-error" role="alert">{workspace?.last_error || workspace?.source_error}</p> : null}
       {!payload && !error ? <p className="admin-sub">Carregando materiais…</p> : null}
       {payload && (!workspace || workspace.status !== "ready") ? <button type="button" className="admin-btn primary" disabled={Boolean(busy)} onClick={() => void provision()}>{busy === "provision" ? "Preparando…" : "Preparar pastas do Criativo"}</button> : null}
       {workspace?.status === "ready" ? <>
-        <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos da captação</strong><small>{rawCountLabel}</small></div><p className="admin-sub">Selecione miniaturas e toque em uma pasta à direita, ou arraste uma ou várias miniaturas para a pasta do Criativo. Clique na imagem para ampliar. O bruto original fica na Captação. {workspace.capture_workspace?.daily_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.capture_workspace.daily_folder_id)}`} target="_blank" rel="noreferrer">Abrir a diária no Drive ↗</a> : null}</p>
+        <nav className="creative-drive-tabs" aria-label="Tipos de materiais">{([ ["raw", "Brutos da captação", null], ["classified", "Classificados", classifiedAssets.length], ["preview", "Previews", previewAssets.length], ["final", "Finais", finalVersions.length] ] as const).map(([tab, label, count]) => <button type="button" key={tab} className={activeTab === tab ? "on" : ""} aria-current={activeTab === tab ? "page" : undefined} onClick={() => { setActiveTab(tab); setSelected(null); }}>{label}{count !== null ? <small>{count}</small> : null}</button>)}</nav>
+        {activeTab === "raw" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos da captação</strong><small>{rawCountLabel}</small></div><p className="admin-sub">Selecione miniaturas e toque em uma pasta à direita, ou arraste uma ou várias miniaturas para a pasta do Criativo. Clique na imagem para ampliar. O bruto original fica na Captação. {workspace.capture_workspace?.daily_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.capture_workspace.daily_folder_id)}`} target="_blank" rel="noreferrer">Abrir a diária no Drive ↗</a> : null}</p>
           {selectedRawIds.length ? <p className="creative-drive-selected" role="status">{selectedRawIds.length} bruto(s) selecionado(s). Toque em uma pasta de Criativo para classificar.</p> : null}
-          {notice ? <p className="creative-drive-selected" role="status">{notice}</p> : null}
-          <div className="creative-drive-gallery">{sources.map(({ file, source }, index) => {
+          <div className="creative-drive-gallery">{sources.slice((rawPage - 1) * RAW_PAGE_SIZE, rawPage * RAW_PAGE_SIZE).map(({ file, source }, index) => {
             const isMedia = file.mimeType.startsWith("image/") || file.mimeType.startsWith("video/");
             const checked = selectedRawIds.includes(file.id);
             const kind = file.mimeType.startsWith("video/") ? "Vídeo" : file.mimeType.startsWith("image/") ? "Foto" : "Arquivo";
@@ -198,29 +246,32 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
               <input type="checkbox" aria-label={`Selecionar bruto ${file.name}`} checked={checked} disabled={Boolean(busy)} onChange={() => toggleRaw(file.id)} />
               <button type="button" className="creative-drive-tile-preview" aria-label={`Ampliar ${file.name}`} onClick={() => { setSelected({ id: file.id, name: file.name, mimeType: file.mimeType, size: null, url: file.webViewLink, source }); main.current?.scrollTo({ top: 0, behavior: "smooth" }); main.current?.parentElement?.scrollTo({ top: 0, behavior: "smooth" }); }}>
                 <span className={`creative-drive-tile-art${file.mimeType.startsWith("video/") ? " video" : ""}`} aria-hidden>{isMedia ? <img src={file.thumbnailUrl ?? `/api/admin/drive/thumbnail/${encodeURIComponent(file.id)}`} alt="" loading="lazy" onError={(event) => { const image = event.currentTarget; if (file.thumbnailUrl && !image.dataset.fallback) { image.dataset.fallback = "1"; image.src = `/api/admin/drive/thumbnail/${encodeURIComponent(file.id)}`; } else image.style.display = "none"; }} /> : null}<span>{file.mimeType.startsWith("video/") ? "▶" : file.mimeType.startsWith("image/") ? "▧" : "▤"}</span></span>
-                <span className="creative-drive-tile-caption"><b>{kind} {index + 1}</b><small>{source}{linked.get(file.id) ? " · vinculado aqui" : ""}</small></span>
+                <span className="creative-drive-tile-caption"><b>{kind} {(rawPage - 1) * RAW_PAGE_SIZE + index + 1}</b><small>{source}{linked.get(file.id) ? " · vinculado aqui" : ""}</small></span>
               </button>
               {linked.get(file.id) ? <button type="button" className="creative-drive-tile-unlink" disabled={Boolean(busy)} onClick={() => void unlinkRaw(linked.get(file.id)!, file.id)}>Remover vínculo</button> : null}
             </div>;
           })}</div>
-          {nextPages.script ? <button type="button" className="admin-btn ghost" disabled={Boolean(loadingMore || busy)} onClick={() => void loadMore("script")}>{loadingMore === "script" ? "Carregando…" : "Carregar mais do Roteiro"}</button> : null}
-          {nextPages.capture ? <button type="button" className="admin-btn ghost" disabled={Boolean(loadingMore || busy)} onClick={() => void loadMore("capture")}>{loadingMore === "capture" ? "Carregando…" : "Carregar mais da Captação"}</button> : null}
+          {sources.length ? <Pagination page={rawPage} total={Math.ceil(sources.length / RAW_PAGE_SIZE)} hasMore={Boolean(nextPages.script || nextPages.capture)} busy={Boolean(loadingMore || busy)} onPrevious={() => setRawPage((page) => page - 1)} onNext={() => void nextRawPage()} /> : null}
           {!sources.length && !workspace.source_error ? <p className="admin-sub">Nenhum bruto encontrado nesta diária.</p> : null}
-        </section>
-        <section className="creative-drive-section"><div className="creative-drive-row"><strong>Preview</strong><button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => input.current?.click()}>{busy === "upload" ? "Enviando…" : "Enviar arquivo"}</button><input ref={input} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} /></div>
-          {files.map((file) => <div className="creative-drive-file" key={file.assetId}><input type="checkbox" checked={selectedAssetIds.includes(file.assetId!)} aria-label={`Anexar ${file.name} ao comentário`} onChange={() => onSelectedAssetIdsChange(selectedAssetIds.includes(file.assetId!) ? selectedAssetIds.filter((id) => id !== file.assetId) : [...selectedAssetIds, file.assetId!])} /><button type="button" className="creative-drive-file-name" onClick={() => setSelected(file)}><b>{file.name}</b><small>{file.source}</small></button>{file.source === "Preview" ? <button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => void version("promote", file.assetId!)}>Promover</button> : null}</div>)}
-          {!files.length ? <p className="admin-sub">Envie o primeiro Preview.</p> : null}
-        </section>
+        </section> : null}
+        {activeTab === "classified" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos classificados em {currentTarget?.title ?? "este Criativo"}</strong><small>{classifiedAssets.length} vínculo(s)</small></div><p className="admin-sub">Cada arquivo abaixo é um atalho. Desassociar remove apenas o vínculo deste Criativo; o original permanece na Captação.</p>
+          <div className="creative-drive-gallery">{classifiedAssets.slice((classifiedPage - 1) * ASSET_PAGE_SIZE, classifiedPage * ASSET_PAGE_SIZE).map((asset, index) => <div className="creative-drive-tile" key={asset.id} data-classified-asset-id={asset.id}><button type="button" className="creative-drive-tile-preview" onClick={() => { setSelected(files.find((file) => file.assetId === asset.id) ?? null); main.current?.scrollTo({ top: 0, behavior: "smooth" }); }} aria-label={`Visualizar bruto classificado ${asset.name}`}><span className={`creative-drive-tile-art${asset.mime_type.startsWith("video/") ? " video" : ""}`} aria-hidden><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><span className="creative-drive-tile-caption"><b>{asset.mime_type.startsWith("video/") ? "Vídeo" : "Foto"} {(classifiedPage - 1) * ASSET_PAGE_SIZE + index + 1}</b><small title={asset.name}>{asset.name}</small></span></button><div className="creative-drive-tile-actions"><a href={asset.web_view_link ?? `https://drive.google.com/file/d/${encodeURIComponent(asset.drive_file_id)}/view`} target="_blank" rel="noreferrer">Abrir</a><a href={`/api/admin/tasks/${activeTaskId}/drive-assets/${asset.id}/download`}>Baixar</a><button type="button" disabled={Boolean(busy)} onClick={() => void unlinkRaw(asset.id, asset.drive_file_id)}>Desassociar</button></div></div>)}</div>
+          {classifiedAssets.length ? <Pagination page={classifiedPage} total={Math.ceil(classifiedAssets.length / ASSET_PAGE_SIZE)} onPrevious={() => setClassifiedPage((page) => page - 1)} onNext={() => setClassifiedPage((page) => page + 1)} /> : <p className="admin-sub">Nenhum bruto classificado neste Criativo.</p>}
+        </section> : null}
+        {activeTab === "preview" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Previews de {currentTarget?.title ?? "este Criativo"}</strong><button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => input.current?.click()}>{busy === "upload" ? "Enviando…" : "Enviar arquivo"}</button><input ref={input} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} /></div>
+          {previewAssets.slice((previewPage - 1) * ASSET_PAGE_SIZE, previewPage * ASSET_PAGE_SIZE).map((asset) => <div className="creative-drive-file" key={asset.id}><input type="checkbox" checked={selectedAssetIds.includes(asset.id)} aria-label={`Anexar ${asset.name} ao comentário`} onChange={() => onSelectedAssetIdsChange(selectedAssetIds.includes(asset.id) ? selectedAssetIds.filter((id) => id !== asset.id) : [...selectedAssetIds, asset.id])} /><button type="button" className="creative-drive-file-name" onClick={() => setSelected(files.find((file) => file.assetId === asset.id) ?? null)}><b>{asset.name}</b><small>Preview</small></button><button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => void version("promote", asset.id)}>Promover</button></div>)}
+          {previewAssets.length ? <Pagination page={previewPage} total={Math.ceil(previewAssets.length / ASSET_PAGE_SIZE)} onPrevious={() => setPreviewPage((page) => page - 1)} onNext={() => setPreviewPage((page) => page + 1)} /> : <p className="admin-sub">Envie o primeiro Preview.</p>}
+        </section> : null}
+        {activeTab === "final" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Histórico de finais</strong><small>{finalVersions.length} versão(ões)</small></div><div className="creative-drive-history">{finalVersions.slice((finalPage - 1) * ASSET_PAGE_SIZE, finalPage * ASSET_PAGE_SIZE).map((item) => { const asset = assetsById.get(item.asset_id); return <div className="creative-drive-history-row" key={item.id}><button type="button" onClick={() => asset && setSelected(files.find((file) => file.assetId === asset.id) ?? null)}><b>v{item.version_number} · {asset?.name ?? "Arquivo"}</b><small>{item.state === "current" ? "Atual" : item.state === "trashed" ? "Removida" : "Anterior"}</small></button><button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => void version(item.state === "trashed" ? "restore_final" : "trash_final", item.id)}>{item.state === "trashed" ? "Restaurar" : "Remover"}</button></div>; })}</div>{finalVersions.length ? <Pagination page={finalPage} total={Math.ceil(finalVersions.length / ASSET_PAGE_SIZE)} onPrevious={() => setFinalPage((page) => page - 1)} onNext={() => setFinalPage((page) => page + 1)} /> : <p className="admin-sub">Ainda não há finais promovidos.</p>}</section> : null}
       </> : null}
     </div><aside className="tm-side creative-drive-side">
       {targets.length ? <section className="tm-box docprev-cellbox" ref={targetRail}><p className="tm-box-label">Pastas dos Criativos</p><p className="admin-sub">Arraste brutos para a pasta, ou selecione as miniaturas e toque nela.</p><div className="creative-drive-targets">{targets.map((target) => <div key={target.id} className={`creative-drive-target${target.id === activeTaskId ? " on" : ""}`}
         onDragOver={(event) => { if (!draggedRawIds.current.length) return; event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
         onDrop={(event) => dropRaw(event, target.id)}>
-        <button type="button" className="creative-drive-target-assign" disabled={Boolean(busy)} onClick={() => selectedRawIds.length ? void assignRaw(target.id) : setActiveTaskId(target.id)} aria-label={`${selectedRawIds.length ? "Classificar brutos em" : "Abrir pasta"} ${target.title}`}><span aria-hidden>▣</span><span><b>{target.title}</b><small>{targetSummaries.find((summary) => summary.creative_task_id === target.id)?.raw_links.length ?? 0} bruto(s) vinculado(s)</small></span></button>
-        <button type="button" className="creative-drive-target-open" disabled={Boolean(busy)} onClick={() => setActiveTaskId(target.id)}>Abrir</button>
+        <button type="button" className="creative-drive-target-assign" disabled={Boolean(busy)} onClick={() => { if (selectedRawIds.length) void assignRaw(target.id); else { setActiveTaskId(target.id); setActiveTab("classified"); } }} aria-label={`${selectedRawIds.length ? "Classificar brutos em" : "Abrir pasta"} ${target.title}`}><span aria-hidden>▣</span><span><b>{target.title}</b><small>{target.id === activeTaskId ? classifiedAssets.length : targetSummaries.find((summary) => summary.creative_task_id === target.id)?.raw_links.length ?? 0} bruto(s) vinculado(s)</small></span></button>
+        <button type="button" className="creative-drive-target-open" disabled={Boolean(busy)} onClick={() => { setActiveTaskId(target.id); setActiveTab("classified"); }}>Abrir</button>
       </div>)}</div></section> : null}
       <section className="tm-box docprev-cellbox"><p className="tm-box-label">Detalhes</p><div className="docprev-cells"><div className="tm-cell"><div className="tm-cell-body"><span className="tm-cell-label">Arquivo</span><span className="tm-cell-static docprev-cell-wrap">{preview?.name ?? "—"}</span></div></div><div className="tm-cell"><div className="tm-cell-body"><span className="tm-cell-label">Origem</span><span className="tm-cell-static">{preview?.source ?? "—"}</span></div></div><div className="tm-cell"><div className="tm-cell-body"><span className="tm-cell-label">Formato</span><span className="tm-cell-static docprev-cell-wrap">{preview?.mimeType ?? "—"}</span></div></div>{preview?.size != null ? <div className="tm-cell"><div className="tm-cell-body"><span className="tm-cell-label">Tamanho</span><span className="tm-cell-static">{formatFileSize(preview.size)}</span></div></div> : null}</div></section>
-      {workspace?.final_versions.length ? <section className="tm-box docprev-cellbox"><p className="tm-box-label">Histórico de finais</p><div className="creative-drive-history">{workspace.final_versions.map((item) => { const asset = assetsById.get(item.asset_id); return <div className="creative-drive-history-row" key={item.id}><button type="button" onClick={() => asset && setSelected({ id: asset.drive_file_id, assetId: asset.id, name: asset.name, mimeType: asset.mime_type, size: asset.size_bytes, url: asset.web_view_link, source: `Final v${item.version_number}` })}><b>v{item.version_number} · {asset?.name ?? "Arquivo"}</b><small>{item.state === "current" ? "Atual" : item.state === "trashed" ? "Removida" : "Anterior"}</small></button><button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => void version(item.state === "trashed" ? "restore_final" : "trash_final", item.id)}>{item.state === "trashed" ? "Restaurar" : "Remover"}</button></div>; })}</div></section> : null}
     </aside></div>
     {error || notice || busy === "assign" ? <div className={`creative-drive-toast${error ? " error" : ""}`} role={error ? "alert" : "status"}>{error || (busy === "assign" ? "Classificando brutos…" : notice)}</div> : null}
     <footer className="kb-modal-actions"><span>{selectedRawIds.length ? `${selectedRawIds.length} bruto(s) para classificar` : selectedAssetIds.length ? `${selectedAssetIds.length} arquivo(s) para o próximo comentário` : ""}</span><span />{selectedRawIds.length ? <button type="button" className="admin-btn primary" onClick={() => targetRail.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>Escolher pasta</button> : null}<button type="button" className="admin-btn ghost" onClick={onBack}>Voltar ao card</button></footer>
