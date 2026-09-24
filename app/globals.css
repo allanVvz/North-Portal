@@ -5704,11 +5704,30 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .creative-drive-file-name { display: grid; flex: 1; min-width: 0; text-align: left; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .creative-drive-file-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creative-drive-file-name small { color: var(--a-muted); }
+.creative-drive-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; min-width: 0; }
+.creative-drive-tile { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); cursor: grab; }
+.creative-drive-tile:active { cursor: grabbing; }
+.creative-drive-tile.selected { border-color: var(--a-teal); box-shadow: 0 0 0 2px var(--a-teal-soft); }
+.creative-drive-tile > input { position: absolute; z-index: 2; top: 9px; left: 9px; width: 18px; height: 18px; margin: 0; accent-color: var(--a-teal); cursor: pointer; }
+.creative-drive-tile-preview { display: grid; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.creative-drive-tile-art { position: relative; display: grid; place-items: center; aspect-ratio: 4 / 3; overflow: hidden; background: var(--a-inset); color: var(--a-muted); font-size: 27px; }
+.creative-drive-tile-art > img { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.creative-drive-tile-art.video > span { position: relative; z-index: 2; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #0008; color: white; font-size: 16px; }
+.creative-drive-tile-caption { display: grid; gap: 2px; min-width: 0; padding: 7px 8px 8px; }
+.creative-drive-tile-caption b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.creative-drive-tile-caption small { color: var(--a-muted); font-size: 10px; }
+.creative-drive-tile-unlink { width: 100%; padding: 4px 8px 6px; border: 0; border-top: 1px solid var(--a-border); background: none; color: var(--a-muted); font: inherit; font-size: 10px; cursor: pointer; }
+.creative-drive-tile-unlink:hover { color: #b42318; }
 .creative-drive-side { overflow-y: auto; gap: 12px; }
 .creative-drive-side .tm-box { margin: 0; }
 .creative-drive-targets, .creative-drive-history { display: grid; gap: 6px; }
-.creative-drive-target { display: grid; gap: 3px; min-width: 0; padding: 9px 10px; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-surface); color: var(--a-ink); text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.creative-drive-target { display: flex; align-items: stretch; gap: 3px; min-width: 0; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-surface); color: var(--a-ink); }
 .creative-drive-target.on { border-color: var(--a-teal); background: var(--a-teal-soft); }
+.creative-drive-target:hover { border-style: dashed; border-color: var(--a-teal); box-shadow: 0 0 0 2px var(--a-teal-soft); }
+.creative-drive-target-assign { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; padding: 9px 6px 9px 9px; border: 0; background: none; color: inherit; text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.creative-drive-target-assign > span:last-child { display: grid; gap: 3px; min-width: 0; }
+.creative-drive-target-assign b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.creative-drive-target-open { padding: 4px 7px; border: 0; border-left: 1px solid var(--a-border); background: none; color: var(--a-teal); font: inherit; font-size: 10px; cursor: pointer; }
 .creative-drive-target small { color: var(--a-muted); }
 .creative-drive-history-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .creative-drive-history-row > button:first-child { display: grid; flex: 1; min-width: 0; text-align: left; border: 0; background: none; color: inherit; cursor: pointer; }
@@ -5732,4 +5751,6 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
   .creative-drive-preview { min-height: 230px; height: 33vh; }
   .creative-drive-side { margin: 0 12px 12px; overflow: visible; }
   .creative-drive-preview-caption { flex-wrap: wrap; }
+  .creative-drive-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .creative-drive-targets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

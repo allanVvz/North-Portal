@@ -142,7 +142,8 @@ export async function resolveCreativeDriveContext(db: Db, creativeTaskId: string
 
 export async function canManageCreativeAssets(db: Db, userId: string, level: string | null, context: CreativeDriveContext): Promise<boolean> {
   if (level === "gerente") return true;
-  const taskIds = [context.creativeTaskId, context.stageTaskId].filter((id): id is string => Boolean(id));
+  const taskIds = [context.creativeTaskId, context.stageTaskId, context.captureTaskId]
+    .filter((id): id is string => Boolean(id));
   const { data, error } = await db.from("task_assignees").select("task_id").eq("profile_id", userId).in("task_id", taskIds);
   failDb(error);
   return Boolean(data?.length);
@@ -324,7 +325,8 @@ export async function linkRawAsset(db: Db, userId: string, creativeTaskId: strin
   }, { onConflict: "workspace_id,drive_file_id", ignoreDuplicates: false }).select("*").single();
   failDb(assetError);
   const shortcutId = await createDriveShortcut({
-    name: file.name, parentId: workspace.creative_folder_id!, targetId: file.id,
+    name: `${context.creativeTitle.slice(0, 180)} — Bruto ${file.id.slice(-8)}${file.name.match(/\.[a-zA-Z0-9]{1,8}$/)?.[0] ?? ""}`,
+    parentId: workspace.creative_folder_id!, targetId: file.id,
     appProperties: { ...creativeDriveAppProperties(context, "raw_shortcut"), asset_id: asset.id },
   });
   const { error } = await db.from("drive_raw_asset_links").upsert({

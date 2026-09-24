@@ -35,7 +35,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const input = bodySchema.parse(await request.json());
     const db = createAdminClient();
     const driveContext = await resolveCreativeDriveContext(db, id);
-    if (!(await canManageCreativeAssets(db, session.userId, session.level, driveContext))) {
+    // Classificação equivale a organizar materiais do card: todos os editores
+    // administrativos já podem editar o card. Upload e finais seguem restritos.
+    const classifyingRaw = input.action === "link_raw" || input.action === "unlink_raw";
+    if (!classifyingRaw && !(await canManageCreativeAssets(db, session.userId, session.level, driveContext))) {
       throw new HttpError(403, "Somente um responsavel pelo Criativo ou pela Edicao pode alterar estes arquivos.");
     }
     switch (input.action) {
