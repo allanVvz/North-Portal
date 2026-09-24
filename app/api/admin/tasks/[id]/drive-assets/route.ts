@@ -4,6 +4,7 @@ import { apiError } from "@/lib/api";
 import {
   canManageCreativeAssets,
   completeCreativeUpload,
+  getCreativeDriveWorkspace,
   linkRawAsset,
   promoteCreativeAsset,
   resolveCreativeDriveContext,
@@ -11,6 +12,7 @@ import {
   startCreativeUpload,
   unlinkRawAsset,
 } from "@/lib/creativeDrive";
+import { getDriveItemMetadata } from "@/lib/googleDriveApi";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError } from "@/lib/validation";
@@ -26,6 +28,33 @@ const bodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("trash_final"), versionId: z.string().uuid() }),
   z.object({ action: z.literal("restore_final"), versionId: z.string().uuid() }),
 ]);
+
+/** Read-only classification preflight for files shown in the current workspace. */
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    await requireAdmin();
+    const { id } = await context.params;
+    if (!UUID.test(id)) throw new HttpError(400, "ID invalido.");
+    const fileId = new URL(request.url).searchParams.get("fileId");
+    if (!fileId || !/^[a-zA-Z0-9_-]{10,200}$/.test(fileId)) throw new HttpError(400, "Arquivo invalido.");
+    const db = createAdminClient();
+    await resolveCreativeDriveContext(db, id);
+    const workspace = await getCreativeDriveWorkspace(db, id);
+    if (!workspace) throw new HttpError(404, "Workspace nao encontrado.");
+    const source = [...workspace.source_files.script, ...workspace.source_files.capture].find((file) => file.id === fileId);
+    if (!source) throw new HttpError(404, "Arquivo nao encontrado na primeira pagina de brutos.");
+    const metadata = await getDriveItemMetadata(fileId);
+    const allowedParents = [workspace.capture_workspace?.script_folder_id, workspace.capture_workspace?.capture_folder_id];
+    return NextResponse.json({
+      payloadValid: bodySchema.safeParse({ action: "link_raw", driveFileId: source.id, name: source.name, mimeType: source.mimeType, webViewLink: source.webViewLink }).success,
+      metadataAccessible: Boolean(metadata),
+      parentMatches: Boolean(metadata?.parents?.some((parent) => allowedParents.includes(parent))),
+      metadataIsShortcut: metadata?.mimeType === "application/vnd.google-apps.shortcut",
+    }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) {
+    return apiError(error);
+  }
+}
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
