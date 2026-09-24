@@ -78,6 +78,7 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   expect(firstPageCount).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Carregar mais da Captação" }).click();
   await expect.poll(() => rawFiles.count(), { timeout: 30_000 }).toBeGreaterThan(firstPageCount);
+  await page.locator(".creative-drive-main").evaluate((element) => { element.scrollTop = 0; });
   await page.screenshot({ path: testInfo.outputPath("real-raw-gallery.png") });
   await raw.getByRole("button", { name: /Ampliar/ }).click();
   const iframe = page.locator(".creative-drive-modal iframe[title^='Preview de']");
@@ -87,6 +88,10 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("real-raw-gallery-narrow.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
+  await raw.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Escolher pasta" }).click();
+  await expect(page.locator(".creative-drive-targets")).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("real-raw-targets-narrow.png") });
 });
 
 test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o vínculo aparece no Criativo", async ({ page }) => {
