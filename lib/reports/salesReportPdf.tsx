@@ -449,7 +449,7 @@ function SalesReportDocument(input: SalesReportInput) {
             // uma imagem: ganha título próprio, uma linha de leitura e espaço
             // de verdade em volta, em vez de ser mais uma seção de 2pt de
             // respiro (23/09).
-            <Section variant="editorial" title="A jornada da semana" aside="De quantas pessoas o anúncio alcançou até o que elas fizeram">
+            <Section variant="editorial" title="A jornada da semana" aside="Todas as campanhas somadas, do alcance ao que as pessoas fizeram. O detalhe de cada objetivo vem logo abaixo.">
               <View style={{ alignItems: "center", paddingTop: 6, paddingBottom: 10 }}>
                 <ProportionalFunnel
                   width={Math.min(input.layout?.funnel?.width ?? 330, 330)}

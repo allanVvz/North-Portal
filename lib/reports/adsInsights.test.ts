@@ -87,12 +87,20 @@ describe("objectiveScopedMediaTotals — a porta de cada etapa do funil", () => 
     const t = objectiveScopedMediaTotals(posts, postBlock);
     expect(t.landingViews).toBe(41);
     expect(t.linkClicks).toBe(349);
-    // Perfil e conversas seguem recortados pelo próprio bloco.
-    expect(t.profileVisits).toBe(132);
-    expect(t.conversations).toBe(17);
+    // Perfil também soma a conta: o @ de todo anúncio leva ao perfil.
+    expect(t.profileVisits).toBe(662);
+    // Conversas também: a campanha de vendas abriu 7 além das 17 da de mensagens.
+    expect(t.conversations).toBe(24);
   });
 
-  it("conversas ficam restritas ao bloco de mensagens", () => {
+  it("conta sem campanha de perfil não ganha etapa de perfil com visitas incidentais", () => {
+    const config = { ...DEFAULT_BUILTIN_TEMPLATE.config, campaignBlocks: { Site: "trafego_site" as const } };
+    const posts = [post({ campaignName: "Site", metrics: { custo: 50, landingPageViews: 20, profileVisits: 80 } })];
+    const { postBlock } = blockResolver(config, posts);
+    expect(objectiveScopedMediaTotals(posts, postBlock).profileVisits).toBeNull();
+  });
+
+  it("conversas somam a conta quando existe campanha de mensagens", () => {
     const config = { ...DEFAULT_BUILTIN_TEMPLATE.config, campaignBlocks: { Perfil: "trafego_perfil" as const, Msg: "mensagens" as const } };
     const posts = [
       post({ campaignName: "Perfil", metrics: { custo: 10, contatos: 3 } }),
@@ -100,7 +108,16 @@ describe("objectiveScopedMediaTotals — a porta de cada etapa do funil", () => 
     ];
     const { postBlock } = blockResolver(config, posts);
     const t = objectiveScopedMediaTotals(posts, postBlock);
-    expect(t.conversations).toBe(17);
+    expect(t.conversations).toBe(20);
+  });
+
+  it("sem campanha de mensagens, conversas incidentais não viram etapa (Baita)", () => {
+    const config = { ...DEFAULT_BUILTIN_TEMPLATE.config, campaignBlocks: { Perfil: "trafego_perfil" as const } };
+    const posts = [post({ campaignName: "Perfil", metrics: { custo: 74.88, profileVisits: 346, contatos: 2 } })];
+    const { postBlock } = blockResolver(config, posts);
+    const t = objectiveScopedMediaTotals(posts, postBlock);
+    expect(t.conversations).toBeNull();
+    expect(t.costPerConversation).toBeNull();
   });
 });
 

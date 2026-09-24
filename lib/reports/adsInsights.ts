@@ -121,7 +121,15 @@ export function mediaTotals(posts: MetaPost[]): MediaTotals {
  *  cliques incidentais na de perfil. A porta é ter o objetivo, não ter o
  *  número.
  *
- *  Perfil e conversas continuam recortados pelo próprio bloco (regra de 23/09).
+ *  Perfil (24/09, mesma regra): com campanha de perfil, soma a conta inteira.
+ *  Na CRIS são 662, não 132 — no Instagram todo anúncio mostra o @ e a foto da
+ *  conta, e quem toca ali cai no perfil. A campanha de vendas teve 231 visitas
+ *  ao perfil contra 29 ao site. É efeito colateral, mas é jornada real.
+ *
+ *  Conversas (24/09, mesma regra): com campanha de mensagens, soma a conta. Na
+ *  CRIS são 24 e não 17 — a campanha de vendas também abriu 7 conversas.
+ *  O custo por conversa acompanha o mesmo total, senão seria investimento da
+ *  conta dividido por conversas de uma campanha só.
  *
  *  O recorte por objetivo de verdade — 29 visitas no bloco de site — mora em
  *  "Mídia por objetivo" (`CampaignBlocksSection`), que filtra os posts de cada
@@ -130,16 +138,17 @@ export function mediaTotals(posts: MetaPost[]): MediaTotals {
 export function objectiveScopedMediaTotals(posts: MetaPost[], postBlock: (post: MetaPost) => CampaignBlock): MediaTotals {
   const totals = mediaTotals(posts);
   const temObjetivo = (block: CampaignBlock) => posts.some((p) => p.source === "paid" && postBlock(p) === block);
-  const perfil = mediaTotals(posts.filter((p) => postBlock(p) === "trafego_perfil"));
-  const mensagens = mediaTotals(posts.filter((p) => postBlock(p) === "mensagens"));
   const site = temObjetivo("trafego_site");
+  const perfil = temObjetivo("trafego_perfil");
+  const mensagens = temObjetivo("mensagens");
   return {
     ...totals,
     landingViews: site ? totals.landingViews : null,
     linkClicks: site ? totals.linkClicks : null,
     clicks: site ? totals.clicks : null,
-    profileVisits: perfil.profileVisits,
-    conversations: mensagens.conversations,
+    profileVisits: perfil ? totals.profileVisits : null,
+    conversations: mensagens ? totals.conversations : null,
+    costPerConversation: mensagens ? totals.costPerConversation : null,
   };
 }
 

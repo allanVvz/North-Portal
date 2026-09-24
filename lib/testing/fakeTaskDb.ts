@@ -62,7 +62,7 @@ export function applyAutomationPayloadUpdate(payload: Row | null | undefined, ar
     if (!already) {
       thread.push({
         ...(args.p_comment_id != null ? { id: args.p_comment_id } : {}),
-        author: args.p_comment_author || "Automação",
+        author: args.p_comment_author || "North Ai",
         text: args.p_comment_text,
         at: now,
       });

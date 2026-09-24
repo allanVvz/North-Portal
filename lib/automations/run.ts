@@ -36,7 +36,7 @@ import { commentsOf } from "@/lib/comments";
 import { markTaskParada } from "./errorHandling";
 import { missedCycleCommentId, shortDate } from "./moldHealth";
 import { nextStepNotice, withNextStepNotice } from "./nextStepNotice";
-import { errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, isAutomationAuthor, type AdminClient } from "./taskAccess";
 import { automationCommentId, replaceAutomaticReportAttachment, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import {
   adsAccountFor,
@@ -697,7 +697,7 @@ export async function handleTrafficRevisionComment(
   // regenerar substituiria o relatório em que o Feedback e a Conversão já se
   // apoiam, e o status `revisao` que a geração grava reabriria a etapa.
   if (trafficTask.completed_at) return;
-  const instruction = options.instruction?.trim() || [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
+  const instruction = options.instruction?.trim() || [...commentsOf(trafficTask.payload)].reverse().find((comment) => !isAutomationAuthor(comment.author))?.text;
   if (!instruction) return;
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
   const today = await runDayOfFirstRevision(admin, ctx);

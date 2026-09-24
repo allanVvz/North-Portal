@@ -12,7 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import type { TaskComment, TaskRecord } from "@/lib/validation";
 import { listMetricsEligibleClientIds } from "./serviceIntegrations";
-import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, AUTOMATION_AUTHOR, type AdminClient } from "./taskAccess";
 import { markTaskParada } from "./errorHandling";
 
 async function metricsSummaryComment(admin: AdminClient, clientId: string): Promise<string> {
@@ -39,7 +39,7 @@ function withAppendedComment(payload: Record<string, unknown> | null | undefined
 // é uma rotina.
 async function cloneSimpleTask(admin: AdminClient, template: TaskRecord, clientId: string, comment: string): Promise<TaskRecord> {
   const id = crypto.randomUUID();
-  const payload = withAppendedComment(template.payload, { author: "Automação", text: comment, at: new Date().toISOString() });
+  const payload = withAppendedComment(template.payload, { author: AUTOMATION_AUTHOR, text: comment, at: new Date().toISOString() });
   const fields = {
     id,
     client_id: clientId,

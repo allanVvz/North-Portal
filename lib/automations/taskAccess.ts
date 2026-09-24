@@ -14,8 +14,22 @@ export type AdminClient = ReturnType<typeof createAdminClient>;
 // account behind it, just a plain free-text label (same column humans use),
 // so the board always shows who/what is driving that card.
 export const AUTOMATION_ASSIGNEE = "North Ai";
-/** Autor gravado nos comentários que uma automação escreve. */
-export const AUTOMATION_AUTHOR = "Automação";
+/** Autor gravado nos comentários que uma automação escreve.
+ *
+ *  O mesmo nome do responsável (24/09): o card mostrava "North Ai" como quem
+ *  toca a etapa e "Automação" como quem comentou — duas identidades para a
+ *  mesma coisa. */
+export const AUTOMATION_AUTHOR = AUTOMATION_ASSIGNEE;
+/** Autor dos comentários automáticos gravados antes de 24/09. Continuam no
+ *  banco com este nome, e precisam continuar sendo lidos como automáticos: é o
+ *  autor que separa "o que a automação disse" de "o que uma pessoa pediu", e
+ *  um comentário antigo lido como humano viraria instrução de revisão. */
+export const LEGACY_AUTOMATION_AUTHOR = "Automação";
+
+/** O comentário foi escrito por uma automação (nome atual ou legado)? */
+export function isAutomationAuthor(author: string | null | undefined): boolean {
+  return author === AUTOMATION_AUTHOR || author === LEGACY_AUTOMATION_AUTHOR;
+}
 
 // Rows read via the admin client never carry the task_assignees join
 // (mergeTaskAssigneeRow is a session-path concern) — assignee_profile_ids is
@@ -46,7 +60,7 @@ export function errorMessage(error: unknown): string {
 // a standard/generic line today, one appended per cycle, never rewriting or
 // collapsing prior ones. Shared so run.ts (success) and errorHandling.ts
 // (failure) never diverge in how a comment gets appended.
-export function appendedCommentPayload(payload: Record<string, unknown> | null | undefined, text: string, author = "Automação"): Record<string, unknown> {
+export function appendedCommentPayload(payload: Record<string, unknown> | null | undefined, text: string, author = AUTOMATION_AUTHOR): Record<string, unknown> {
   const comment: TaskComment = { author, text, at: new Date().toISOString() };
   return { ...(payload ?? {}), comments: [...commentsOf(payload), comment].slice(-200) };
 }

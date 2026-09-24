@@ -29,7 +29,7 @@ import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
 import { loadStoredPreviews } from "./creativeAssets";
 import { assignResponsibilityHolders } from "./responsibleOwners";
-import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, type AdminClient } from "./taskAccess";
+import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, isAutomationAuthor, type AdminClient } from "./taskAccess";
 import { automationCommentId, replaceAutomaticReportAttachment, transitionTaskStatus, updateTaskPayload } from "./taskWrites";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { nextStepNotice, withNextStepNotice } from "./nextStepNotice";
@@ -57,7 +57,7 @@ import type { AutomationConfigRow, RunOutcome } from "./run";
 import { buildNorthAIContext, buildReportContext, planWithNorthAI } from "@/lib/reports/conversionReportPlanning";
 import { visualRequestSchema, type VisualRequest } from "@/lib/northai/aiContracts";
 
-const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
+const AUTOMATION_AUTHORS = { has: isAutomationAuthor };
 
 // A Automação 2 não depende mais de um provedor de IA: o pedido de feedback traz
 // um modelo, lido pelo parser determinístico (lib/ai/commentParser.ts). Antes ela
@@ -95,7 +95,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // que apagava KPI e funil de seguidores da CRIS); capa editorial com título
 // "Relatório de tráfego pago", período em evidência e texto de apresentação;
 // seções com régua, título Fraunces e mais respiro; funil com mais destaque.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v20";
+const CONVERSION_RENDERER_REVISION = "segment-summary-v21";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",

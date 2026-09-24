@@ -271,3 +271,31 @@ describe("replaceAutomaticReportAttachment — um anexo automático por card", (
     ]);
   });
 });
+
+// O autor é o que separa "o que a automação disse" de "o que uma pessoa pediu".
+// Ao renomear o autor para "North Ai" (24/09), os comentários antigos continuam
+// no banco como "Automação" — se deixassem de ser reconhecidos, viravam
+// instrução de revisão humana na próxima geração.
+describe("isAutomationAuthor — nome atual e legado", () => {
+  it("o autor atual é o mesmo nome do responsável nos cards", async () => {
+    const { AUTOMATION_AUTHOR, AUTOMATION_ASSIGNEE } = await import("./taskAccess");
+    expect(AUTOMATION_AUTHOR).toBe("North Ai");
+    expect(AUTOMATION_AUTHOR).toBe(AUTOMATION_ASSIGNEE);
+  });
+
+  it("reconhece o nome atual e o legado; pessoa nunca", async () => {
+    const { isAutomationAuthor } = await import("./taskAccess");
+    expect(isAutomationAuthor("North Ai")).toBe(true);
+    expect(isAutomationAuthor("Automação")).toBe(true);
+    expect(isAutomationAuthor("Luiza")).toBe(false);
+    expect(isAutomationAuthor("")).toBe(false);
+    expect(isAutomationAuthor(null)).toBe(false);
+  });
+
+  it("comentário novo da automação sai com o nome North Ai", async () => {
+    const db = world();
+    await updateTaskPayload(db as never, "step", { text: "relatório pronto", commentId: "x:1" });
+    const comments = (db.task("step")!.payload as Row).comments as Row[];
+    expect(comments.at(-1)?.author).toBe("North Ai");
+  });
+});
