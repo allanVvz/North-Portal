@@ -341,7 +341,11 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
                 event.dataTransfer.effectAllowed = "copy";
                 event.dataTransfer.setData("application/x-north-raw-ids", JSON.stringify(ids));
               }} onDragEnd={() => { draggedRawIds.current = []; }}>
-              <button type="button" className="creative-drive-tile-preview" disabled={Boolean(busy)} aria-pressed={checked} aria-label={`Selecionar ${displayName}`} onClick={(event) => selectRaw(event, file.id)} onDoubleClick={() => { setSelected({ id: file.id, name: displayName, mimeType: file.mimeType, size: null, url: file.webViewLink, source }); main.current?.scrollTo({ top: 0, behavior: "smooth" }); }}>
+              <button type="button" className="creative-drive-tile-preview" disabled={Boolean(busy)} aria-pressed={checked} aria-label={`Selecionar ${displayName}`} onClick={(event) => {
+                selectRaw(event, file.id);
+                setSelected({ id: file.id, name: displayName, mimeType: file.mimeType, size: null, url: file.webViewLink, source });
+                if (!event.ctrlKey && !event.metaKey && !event.shiftKey) requestAnimationFrame(() => main.current?.querySelector(".creative-drive-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+              }} onDoubleClick={() => { setSelected({ id: file.id, name: displayName, mimeType: file.mimeType, size: null, url: file.webViewLink, source }); main.current?.scrollTo({ top: 0, behavior: "smooth" }); }}>
                 <span className={`creative-drive-tile-art${file.mimeType.startsWith("video/") ? " video" : ""}`} aria-hidden>{isMedia ? <img src={file.thumbnailUrl ?? `/api/admin/drive/thumbnail/${encodeURIComponent(file.id)}`} alt="" loading="lazy" onError={(event) => { const image = event.currentTarget; if (file.thumbnailUrl && !image.dataset.fallback) { image.dataset.fallback = "1"; image.src = `/api/admin/drive/thumbnail/${encodeURIComponent(file.id)}`; } else image.style.display = "none"; }} /> : null}<span>{file.mimeType.startsWith("video/") ? "▶" : file.mimeType.startsWith("image/") ? "▧" : "▤"}</span></span>
                 <span className="creative-drive-tile-caption"><b title={displayName}>{displayName}</b><small>{driveShotLabel(file)}</small></span>
               </button>

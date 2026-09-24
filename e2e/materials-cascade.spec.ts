@@ -107,6 +107,30 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   await page.screenshot({ path: testInfo.outputPath("real-raw-targets-narrow.png") });
 });
 
+test("selecionar bruto classificado real mostra o Criativo vinculado no preview", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await login(page);
+  const response = await page.request.get("/api/admin/drive/baita/materials");
+  expect(response.ok()).toBe(true);
+  const { workspaces } = await response.json() as { workspaces: CreativeMaterialWorkspace[] };
+  const target = workspaces.find((workspace) => workspace.raw_links.some((link) => workspace.assets.some((asset) => asset.id === link.asset_id && asset.role === "raw" && asset.state === "active")));
+  expect(target, "Nenhum bruto classificado encontrado na BAITA").toBeTruthy();
+  await page.goto(`/admin/operacao?task=${target!.creative_task_id}`);
+  const title = await page.locator(".tm-title-input").inputValue();
+  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
+  const folder = page.locator(".tm-material-list > .tm-material-item").filter({ hasText: title }).first();
+  await expect(folder).toBeVisible({ timeout: 30_000 });
+  await folder.click();
+  await page.getByRole("button", { name: "Brutos da captação" }).click();
+  await page.getByRole("button", { name: "Já classificados" }).click();
+  const tile = page.locator(".creative-drive-gallery.raw .creative-drive-tile").first();
+  await expect(tile).toBeVisible({ timeout: 30_000 });
+  await tile.getByRole("button", { name: /Selecionar/ }).click();
+  await expect(page.locator(".creative-drive-preview")).toBeVisible();
+  await expect(page.locator(".creative-drive-preview-eyebrow")).toContainText(title);
+  await page.screenshot({ path: testInfo.outputPath("real-selected-raw-eyebrow.png") });
+});
+
 test("box do card pagina brutos, previews e finais sem misturar os tipos", async ({ page }) => {
   test.setTimeout(120_000);
   await login(page);
@@ -287,7 +311,8 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   expect(posts).toEqual(ids.map((creativeId) => ({ creativeId, driveFileId: raw.id })));
   await page.getByRole("button", { name: "Já classificados" }).click();
   await expect(tile).toBeVisible();
-  await tile.getByRole("button", { name: "Ampliar IMG_0420.MOV" }).click();
+  await tile.getByRole("button", { name: "Selecionar IMG_0420.MOV" }).click();
+  await expect(page.locator(".creative-drive-preview-caption")).toContainText("IMG_0420.MOV");
   const previewEyebrows = page.locator(".creative-drive-preview-eyebrow");
   await expect(previewEyebrows).toHaveCount(2);
   await expect(previewEyebrows.filter({ hasText: taskRows[0].title })).toHaveCount(1);
@@ -351,7 +376,7 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   await expect(classifiedTile).toHaveCount(0);
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   const ownTile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw.id}"]`);
-  await ownTile.getByRole("button", { name: "Ampliar IMG_0420.MOV" }).click();
+  await ownTile.getByRole("button", { name: "Selecionar IMG_0420.MOV" }).click();
   await expect(page.locator(".creative-drive-preview-eyebrow")).toHaveCount(1);
   await expect(page.locator(".creative-drive-preview-eyebrow")).toContainText(taskRows[1].title);
   await ownTile.getByRole("button", { name: "Selecionar IMG_0420.MOV" }).click();
