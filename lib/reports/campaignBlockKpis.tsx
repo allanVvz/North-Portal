@@ -266,9 +266,22 @@ export function CampaignBlocksSection({
   const cm = config.prefs.customMetrics;
   const { postBlock } = blockResolver(config, adPosts);
   const hidden = new Set(hideMetrics ?? []);
-  const kpisFor = (block: CampaignBlock) => blockKpisFor(config, block, kpiSource).filter((def) =>
-    !(def.metric && hidden.has(def.metric)) && !(def.ratio && (hidden.has(def.ratio[0]) || hidden.has(def.ratio[1]))),
-  );
+  /** KPI `optional` (compra, hoje) só entra quando o período tem o dado: conta
+   *  sem pixel receberia um card escrito "Sem integração" toda semana. Os
+   *  demais continuam aparecendo com "—", que é o certo para uma métrica que a
+   *  conta sempre tem e simplesmente ficou zerada. */
+  const temDado = (def: BlockKpi, posts: MetaPost[]) => {
+    const refs: MetricRef[] = def.ratio ? [def.ratio[0], def.ratio[1]] : def.metric ? [def.metric] : [];
+    return refs.every((ref) => resolveAcquisitionMetric(posts, ref, cm) !== null);
+  };
+  const kpisFor = (block: CampaignBlock) => {
+    const doBloco = posts.filter((p) => postBlock(p) === block);
+    return blockKpisFor(config, block, kpiSource).filter((def) =>
+      !(def.metric && hidden.has(def.metric))
+      && !(def.ratio && (hidden.has(def.ratio[0]) || hidden.has(def.ratio[1])))
+      && (!def.optional || temDado(def, doBloco)),
+    );
+  };
   // Um bloco entra mesmo sem KPI de template declarado quando há `extraKpis`
   // real (hoje só seguidores, sempre em `trafego_perfil`) — "cada objetivo tem
   // sua métrica" não pode depender de o template lembrar de declarar o bloco

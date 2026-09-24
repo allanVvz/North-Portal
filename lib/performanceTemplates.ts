@@ -33,7 +33,16 @@ export const CAMPAIGN_BLOCK_LABEL: Record<CampaignBlock, string> = {
  *  duas (custo ÷ resultado). O `label` é o que o cliente lê, e é por isso que ele
  *  vem do template e não do código: "Mensagens" para uns, "Novas conversas" para
  *  outros, "Custo por novo seguidor" para quem acompanha perfil. */
-export type BlockKpiDef = { label: string; metric?: MetricRef; ratio?: [MetricRef, MetricRef] };
+export type BlockKpiDef = {
+  label: string;
+  metric?: MetricRef;
+  ratio?: [MetricRef, MetricRef];
+  /** KPI que só aparece quando o período tem o dado (24/09). Compra depende do
+   *  pixel: quem não o configurou receberia um card escrito "Sem integração"
+   *  em todo relatório. Sem esta marca o KPI é sempre renderizado, com "—"
+   *  quando falta dado — que é o certo para métrica que a conta sempre tem. */
+  optional?: boolean;
+};
 /**
  * A policy is intentionally part of the persisted template configuration.
  * `blockKpis` is editable data, but a client-facing operational report must
@@ -169,13 +178,16 @@ function sanitizeBlockKpis(raw: unknown, customIds: Set<string>, policy: ReportK
     const kpis: BlockKpiDef[] = [];
     for (const def of defs.slice(0, 8)) {
       if (!def || typeof def !== "object") continue;
-      const { label, metric, ratio } = def as { label?: unknown; metric?: unknown; ratio?: unknown };
+      const { label, metric, ratio, optional } = def as { label?: unknown; metric?: unknown; ratio?: unknown; optional?: unknown };
       if (typeof label !== "string" || !label.trim() || label.length > 60) continue;
+      // `optional` sobrevive à sanitização: sem isto o KPI de compra voltava a
+      // ser obrigatório e uma conta sem pixel recebia "Sem integração" (24/09).
+      const opt = optional === true ? { optional: true as const } : {};
       let parsed: BlockKpiDef | null = null;
       if (Array.isArray(ratio) && ratio.length === 2 && isRef(ratio[0]) && isRef(ratio[1])) {
-        parsed = { label: label.trim(), ratio: [ratio[0], ratio[1]] };
+        parsed = { label: label.trim(), ratio: [ratio[0], ratio[1]], ...opt };
       } else if (isRef(metric)) {
-        parsed = { label: label.trim(), metric };
+        parsed = { label: label.trim(), metric, ...opt };
       }
       if (parsed && (allowedKpisFor(policy, block as CampaignBlock) === null
         || allowedKpisFor(policy, block as CampaignBlock)!.some((allowedKpi) => sameKpi(parsed!, allowedKpi)))) kpis.push(parsed);
@@ -360,6 +372,15 @@ const siteKpis: BlockKpiDef[] = [
   { label: "Alcance", metric: ALCANCE },
   { label: "Cliques no link", metric: "cliquesLink" },
   { label: "Custo por clique", ratio: [CUSTO, "cliquesLink"] },
+  // O desfecho do objetivo de site, como cada bloco já mostra o seu (mensagens
+  // mostra conversas, perfil mostra visitas). O pixel da CRIS registrou 3
+  // compras na semana de 15–21/09 e nenhum dos dois relatórios as mostrava —
+  // o bloco parava no meio do caminho (24/09). `optional`: conta sem pixel não
+  // ganha card vazio. É COMPRA ATRIBUÍDA À CAMPANHA, nunca a venda que a
+  // equipe informa no Feedback (essa é da conta inteira, sem campanha, e vive
+  // no funil).
+  { label: "Compras", metric: "compras", optional: true },
+  { label: "Custo por compra", ratio: [CUSTO, "compras"], optional: true },
 ];
 
 /** "Novas conversas", não "Mensagens": é como a operação conta o desfecho de uma
@@ -388,6 +409,11 @@ const ECOMMERCE_BLOCK_KPIS: Partial<Record<CampaignBlock, BlockKpiDef[]>> = {
     { label: "Investimento", metric: CUSTO },
     { label: "Alcance", metric: ALCANCE },
     { label: "Cliques no link", metric: "cliquesLink" },
+    // Ver siteKpis: compra do pixel é o desfecho deste objetivo. Fica no
+    // template porque a decisão é por cliente — um e-commerce com rastreio
+    // melhor declara aqui receita, ROAS e checkouts sem tocar em código.
+    { label: "Compras", metric: "compras", optional: true },
+    { label: "Custo por compra", ratio: [CUSTO, "compras"], optional: true },
   ],
   trafego_perfil: [
     { label: "Investimento", metric: CUSTO },

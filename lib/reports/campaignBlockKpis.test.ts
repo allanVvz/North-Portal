@@ -171,6 +171,45 @@ describe("kpiSource — o template manda na conversão, não no relatório inter
   });
 });
 
+// Compra do pixel é o desfecho do objetivo de site, mas nem toda conta tem
+// pixel — sem a marca `optional` o cliente receberia "Sem integração" toda
+// semana (24/09).
+describe("KPI optional — aparece com dado, some sem", () => {
+  const siteAd = (metrics: MetaPost["metrics"]) =>
+    ad({ campaignName: "Site", optimizationGoal: "LANDING_PAGE_VIEWS", metrics });
+
+  const labels = (metrics: MetaPost["metrics"]) => {
+    const posts = [siteAd(metrics)];
+    const element = CampaignBlocksSection({
+      config: templateById("builtin-ecommerce").config,
+      posts,
+      prevPosts: [],
+      adPosts: posts,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any) as any;
+    const blocos = element.props.children[1];
+    return blocos[0].props.children[1].props.children[0].map((c: { props: { label: string } }) => c.props.label);
+  };
+
+  it("conta com compras no período mostra o desfecho", () => {
+    const l = labels({ custo: 68.62, alcance: 5933, cliquesLink: 35, compras: 3 });
+    expect(l).toContain("Compras");
+    expect(l).toContain("Custo por compra");
+  });
+
+  it("conta sem pixel não ganha card vazio", () => {
+    const l = labels({ custo: 68.62, alcance: 5933, cliquesLink: 35 });
+    expect(l).not.toContain("Compras");
+    expect(l).not.toContain("Custo por compra");
+    expect(l).toContain("Cliques no link");
+  });
+
+  it("zero compras DITO pelo pixel continua sendo informação — o card fica", () => {
+    const l = labels({ custo: 68.62, alcance: 5933, cliquesLink: 35, compras: 0 });
+    expect(l).toContain("Compras");
+  });
+});
+
 describe("seguidores não pode depender do template lembrar de declarar o bloco", () => {
   it("trafego_perfil aparece via extraKpis mesmo com blockKpis vazio (23/09, garantia estrutural)", () => {
     const bareConfig: PerformanceTemplateConfig = {

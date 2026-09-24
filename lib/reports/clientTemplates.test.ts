@@ -51,8 +51,10 @@ describe("moldes por perfil de cliente", () => {
     expect(labels("builtin-estetica-automotiva", "trafego_perfil")).toEqual([
       "Visitas ao perfil", "Custo por visita", "Investimento", "Alcance", "CPM",
     ]);
+    // Compras entram declaradas mas `optional` (24/09): o bloco só as renderiza
+    // quando o pixel da conta reporta no período — ver kpisFor/temDado.
     expect(labels("builtin-estetica-automotiva", "trafego_site")).toEqual([
-      "Investimento", "Alcance", "Cliques no link", "Custo por clique",
+      "Investimento", "Alcance", "Cliques no link", "Custo por clique", "Compras", "Custo por compra",
     ]);
     expect(labels("builtin-estetica-automotiva", "mensagens")).toEqual([
       "Investimento", "Alcance", "Novas conversas", "Custo por conversa",
@@ -65,7 +67,7 @@ describe("moldes por perfil de cliente", () => {
   });
   it("E-commerce accepts only the CRIS operational blocks", () => {
     expect(labels("builtin-ecommerce", "trafego_site")).toEqual([
-      "Investimento", "Alcance", "Cliques no link",
+      "Investimento", "Alcance", "Cliques no link", "Compras", "Custo por compra",
     ]);
     expect(labels("builtin-ecommerce", "trafego_perfil")).toEqual([
       "Investimento", "Alcance", "Visitas ao perfil", "Custo por visita",
