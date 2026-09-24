@@ -423,6 +423,8 @@ async function generateSalesReport(
   sourceFingerprint: string,
   conversionReportId: string,
   visualRequest?: VisualRequest | null,
+  /** Momento do evento que o comentário representa (manutenção). Null = agora. */
+  commentAt: string | null = null,
 ): Promise<string | null> {
   const clientId = occ.client_id;
   if (!clientId) throw new Error("A ocorrência não pertence a nenhum cliente.");
@@ -644,6 +646,7 @@ async function generateSalesReport(
   // nunca ao Feedback humano que serviu apenas como uma das fontes.
   await replaceAutomaticReportAttachment(admin, conversionCard.id, {
     reportKind: "conversion",
+    commentAt,
     // Mesma cortesia do relatório de anúncios: quem abre o card precisa saber se a
     // bola está com ele. A frase vem do workflow versionado da ocorrência.
     // Resposta item a item quando houve pedido: o que foi aplicado e o que não
@@ -848,14 +851,24 @@ async function processOccurrence(
     occ = marked?.task ?? occ;
 
     conversionTaskId = card3.id;
-    const started = await transitionTaskStatus(admin, card3.id, {
-      to: "em_producao",
-      from: ["backlog", "parada", "em_producao", "revisao", "aprovado", "aprovacao"],
-      extra: { assignee: AUTOMATION_ASSIGNEE },
-    });
-    if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
-    card3 = (await getAdminTask(admin, card3.id)) ?? card3;
-    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, reportFingerprint, claim.id, visualRequest);
+    // Manutenção não toca em status. O fluxo normal passa a etapa por
+    // `em_producao` e devolve em `revisao` — certo quando há conteúdo novo para
+    // alguém revisar, errado quando só o desenho muda: a regeração de 24/09
+    // tirou as três etapas de conversão de "aprovado" e apagou a aprovação.
+    if (!maintenance) {
+      const started = await transitionTaskStatus(admin, card3.id, {
+        to: "em_producao",
+        from: ["backlog", "parada", "em_producao", "revisao", "aprovado", "aprovacao"],
+        extra: { assignee: AUTOMATION_ASSIGNEE },
+      });
+      if (!started) throw new Error("A etapa Relatório de conversão mudou de estado durante o processamento.");
+      card3 = (await getAdminTask(admin, card3.id)) ?? card3;
+    }
+    // O comentário da conversão vem logo DEPOIS do que ela responde — o último
+    // comentário humano ou a conclusão do feedback. Na manutenção é esse o
+    // lugar dele na timeline, não a hora da regeração.
+    const commentAt = maintenance && sourceAt ? new Date(new Date(sourceAt).getTime() + 1000).toISOString() : null;
+    const documentId = await generateSalesReport(admin, config, occ, card3, ext, traffic, cadence, period, sourceCommentAt, reportFingerprint, claim.id, visualRequest, commentAt);
     await attachConversionDocument(admin, claim.id, documentId);
     await supersedePriorConversionReports(admin, {
       id: claim.id,
@@ -863,7 +876,7 @@ async function processOccurrence(
       feedbackTaskId: card2.id,
     });
     // A Entrega passa a Revisão sozinha, projetada desta etapa.
-    await transitionTaskStatus(admin, card3.id, { to: "revisao", from: ["em_producao"] });
+    if (!maintenance) await transitionTaskStatus(admin, card3.id, { to: "revisao", from: ["em_producao"] });
 
     await updateTaskPayload(admin, occ.id, {
       patch: {

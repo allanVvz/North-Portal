@@ -390,8 +390,12 @@ export class FakeTaskDb {
       previousCommentId ??= String(comments[i].id);
       comments.splice(i, 1);
     }
-    const comment = { id: String(args.p_comment_id), author: String(args.p_comment_author ?? "Northia"), text: String(args.p_comment_text), at: new Date().toISOString() };
-    comments.push(comment);
+    const at = args.p_comment_at ? new Date(String(args.p_comment_at)).toISOString() : new Date().toISOString();
+    const comment = { id: String(args.p_comment_id), author: String(args.p_comment_author ?? "North Ai"), text: String(args.p_comment_text), at };
+    // Posição cronológica, como a RPC (migração 20260924190000): antes do primeiro
+    // comentário posterior, comparando como data e nunca como texto.
+    const depois = comments.findIndex((c) => typeof c.at === "string" && new Date(c.at).getTime() > new Date(at).getTime());
+    if (depois === -1) comments.push(comment); else comments.splice(depois, 0, comment);
     payload.comments = comments;
     task.payload = payload;
     task.updated_at = new Date().toISOString();

@@ -64,13 +64,19 @@ export async function updateTaskPayload(
   return { inserted: Boolean(result.inserted), task: asTaskRecord(result.task) };
 }
 
-/** Substitui somente o último comentário automático de anexo do relatório.
- * A RPC remove esse comentário sob lock e preserva comentários humanos feitos
- * enquanto o PDF era renderizado; retries com o mesmo id são idempotentes. */
+/** Troca os comentários automáticos de anexo do relatório por um só.
+ * A RPC remove todos sob lock e preserva comentários humanos feitos enquanto o
+ * PDF era renderizado; retries com o mesmo id são idempotentes.
+ *
+ * `commentAt`: o momento do EVENTO que o comentário representa, quando não é
+ * agora. A regeração de manutenção redesenha um relatório que já existia; com
+ * a hora de agora ele ia para o fim do thread e invertia a cascata no thread da
+ * família (24/09). Com `commentAt` o comentário entra na posição cronológica.
+ * Omitido = agora, que é o certo para uma revisão pedida por alguém. */
 export async function replaceAutomaticReportAttachment(
   admin: AdminClient,
   taskId: string,
-  input: { reportKind: "ads" | "conversion"; text: string; commentId: string; author?: string },
+  input: { reportKind: "ads" | "conversion"; text: string; commentId: string; author?: string; commentAt?: string | null },
 ): Promise<PayloadUpdateResult | null> {
   const { data, error } = await admin.rpc("replace_automatic_report_attachment", {
     p_task_id: taskId,
@@ -78,6 +84,7 @@ export async function replaceAutomaticReportAttachment(
     p_comment_id: input.commentId,
     p_comment_text: input.text,
     p_comment_author: input.author ?? AUTOMATION_AUTHOR,
+    p_comment_at: input.commentAt ?? null,
   });
   if (error) throw error;
   const result = data as { inserted?: boolean; task?: Record<string, unknown> } | null;

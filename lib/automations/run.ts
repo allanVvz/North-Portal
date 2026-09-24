@@ -621,6 +621,19 @@ async function resolveTrafficStepContext(admin: AdminClient, taskId: string): Pr
 /** O dia de execução que reproduz a MESMA janela do relatório original desta
  *  etapa — nunca o dia de hoje. `revision: 1` é a âncora: as revisões seguintes
  *  herdariam qualquer deslocamento já ocorrido. */
+/** Quando o relatório desta etapa nasceu (revisão 1). É o lugar dele na cascata:
+ *  antes do feedback que ele originou. */
+async function firstRevisionGeneratedAt(admin: AdminClient, taskId: string): Promise<string | null> {
+  const { data, error } = await admin
+    .from("traffic_reports")
+    .select("generated_at")
+    .eq("task_id", taskId)
+    .order("revision", { ascending: true })
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0] as { generated_at?: string | null } | undefined)?.generated_at ?? null;
+}
+
 async function runDayOfFirstRevision(admin: AdminClient, ctx: TrafficStepContext): Promise<string> {
   const { data, error } = await admin
     .from("traffic_reports")
@@ -676,10 +689,14 @@ export async function regenerateTrafficReport(admin: AdminClient, taskId: string
   // exatamente um. A idempotência que importa continua valendo: refazer a MESMA
   // revisão reencontra o mesmo id e vira no-op, que é o caso que a guarda existe
   // para cobrir.
+  // No lugar do relatório original na timeline, não agora: redesenhar não é um
+  // evento novo da cascata. Com a hora de agora, o thread da família mostrava o
+  // relatório de anúncios DEPOIS do feedback que ele originou (24/09).
   await replaceAutomaticReportAttachment(admin, ctx.trafficTask.id, {
     reportKind: "ads",
     text: `North Ai regerou o relatório com o layout atual — mesmo período, mesmos números: [${fileName}](${url})`,
     commentId: automationCommentId("ads-rerender", ctx.trafficTask.id, report.revision),
+    commentAt: await firstRevisionGeneratedAt(admin, ctx.trafficTask.id),
   });
   return { fileName, url, revision: report.revision };
 }

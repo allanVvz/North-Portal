@@ -299,3 +299,49 @@ describe("isAutomationAuthor — nome atual e legado", () => {
     expect(comments.at(-1)?.author).toBe("North Ai");
   });
 });
+
+// A regeração de manutenção redesenha um relatório que já existia. Com a hora
+// de agora ela ia para o fim do thread, e no thread da família o relatório de
+// anúncios aparecia DEPOIS do feedback que ele originou (24/09).
+describe("replaceAutomaticReportAttachment — lugar certo na timeline", () => {
+  const card = () => createFakeTaskDb({
+    tasks: [{
+      id: "conv",
+      status: "aprovado",
+      payload: {
+        comments: [
+          { id: "conversion-report:conv:a", author: "North Ai", text: "v20: [x.pdf](http://x/1)", at: "2026-09-24T19:50:00.000Z" },
+          { id: "h1", author: "Luiza", text: "Ajuste o comentário: ...", at: "2026-09-22T19:20:34.334Z" },
+          { id: "h2", author: "Luiza", text: "obrigada", at: "2026-09-23T12:00:00.000Z" },
+        ],
+      },
+    }],
+  });
+  const thread = (db: ReturnType<typeof createFakeTaskDb>) =>
+    ((db.task("conv")!.payload as Row).comments as Row[]).map((c) => `${c.author}@${String(c.at).slice(0, 16)}`);
+
+  it("com commentAt, entra antes do primeiro comentário posterior — não no fim", async () => {
+    const db = card();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await replaceAutomaticReportAttachment(db as any, "conv", {
+      reportKind: "conversion", text: "v21: [y.pdf](http://x/2)", commentId: "conversion-report:conv:b",
+      commentAt: "2026-09-22T19:20:35.334Z",
+    });
+    expect(thread(db)).toEqual([
+      "Luiza@2026-09-22T19:20",
+      "North Ai@2026-09-22T19:20",
+      "Luiza@2026-09-23T12:00",
+    ]);
+  });
+
+  it("sem commentAt continua sendo agora e vai para o fim (revisão pedida é evento novo)", async () => {
+    const db = card();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await replaceAutomaticReportAttachment(db as any, "conv", {
+      reportKind: "conversion", text: "v21: [y.pdf](http://x/2)", commentId: "conversion-report:conv:c",
+    });
+    const t = thread(db);
+    expect(t[t.length - 1]).toMatch(/^North Ai@/);
+    expect(t).toHaveLength(3);
+  });
+});

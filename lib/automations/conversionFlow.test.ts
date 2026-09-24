@@ -32,7 +32,7 @@ vi.mock("./notify", () => ({
 }));
 vi.mock("./reportLog", () => ({ logReportRun: vi.fn() }));
 
-import { classifyVisualComment, handleConversionRevisionComment, processConversionFeedback, requestVisualClarification } from "./conversionFlow";
+import { classifyVisualComment, handleConversionRevisionComment, processConversionFeedback, regenerateConversionReport, requestVisualClarification } from "./conversionFlow";
 
 const OCC = "occ-1";
 const TRAFEGO = "trafego-1";
@@ -252,5 +252,38 @@ describe("conversão depois do Feedback concluído", () => {
     await processConversionFeedback(db.asAdmin(), OCC);
     expect(db.table("conversion_reports")).toHaveLength(1);
     expect(db.task(CONVERSAO)!.status).toBe("revisao");
+  });
+});
+
+// A regeração de manutenção de 24/09 tirou as três etapas de conversão de
+// "aprovado" e pôs a resposta da automação no fim do thread. Redesenhar o PDF
+// não é conteúdo novo para revisar nem um evento novo da cascata.
+describe("regenerateConversionReport — manutenção", () => {
+  const aprovada = () => seed({
+    status: "aprovado",
+    completed_at: "2026-09-22T16:00:00.000Z",
+    payload: { comments: [{ id: "conversion-report:conversao-1:old", author: "Automação", text: "Relatório de conversão atualizado. [a.pdf](http://x/a)", at: "2026-09-22T15:30:00.000Z" }] },
+  });
+
+  it("não desfaz a aprovação nem passa a etapa por produção", async () => {
+    aprovada();
+    await regenerateConversionReport(db.asAdmin(), CONVERSAO);
+    expect(hooks.render).toHaveBeenCalledTimes(1);
+    expect(db.task(CONVERSAO)!.status).toBe("aprovado");
+    expect(db.task(CONVERSAO)!.completed_at).toBe("2026-09-22T16:00:00.000Z");
+    const tentativas = db.updates.filter((u) => u.table === "tasks" && u.id === CONVERSAO && "status" in u.patch);
+    expect(tentativas).toEqual([]);
+  });
+
+  it("o comentário novo fica logo depois do que responde, não na hora da regeração", async () => {
+    aprovada();
+    await regenerateConversionReport(db.asAdmin(), CONVERSAO);
+    const comentarios = db.comments(CONVERSAO);
+    expect(comentarios).toHaveLength(1);
+    expect(String(comentarios[0].author)).toBe("North Ai");
+    // O feedback foi escrito em 22/09 15:00; a resposta entra em seguida.
+    const at = new Date(String(comentarios[0].at)).getTime();
+    expect(at).toBeGreaterThan(new Date("2026-09-22T15:00:00.000Z").getTime());
+    expect(at).toBeLessThan(new Date("2026-09-23T00:00:00.000Z").getTime());
   });
 });
