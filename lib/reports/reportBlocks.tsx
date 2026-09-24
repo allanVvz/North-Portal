@@ -719,7 +719,10 @@ export function SmallMultiples({ charts }: { charts: { title: string; periods: s
       {charts.map((c) => (
         <View key={c.title} style={{ width: cw }}>
           <Text style={[T.figureLabel, { marginBottom: 2 }]}>{c.title}</Text>
-          <LineChart periods={c.periods} values={c.values} width={cw} height={70} format={c.format} />
+          {/* 56, não 70 (24/09): os mini-gráficos tinham muito branco interno,
+              e os 14pt a mais empurravam "Últimas N semanas" inteira para uma
+              página própria — no tráfego da FALKE faltavam 7pt para caber. */}
+          <LineChart periods={c.periods} values={c.values} width={cw} height={56} format={c.format} />
         </View>
       ))}
     </View>

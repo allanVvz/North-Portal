@@ -95,7 +95,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // que apagava KPI e funil de seguidores da CRIS); capa editorial com título
 // "Relatório de tráfego pago", período em evidência e texto de apresentação;
 // seções com régua, título Fraunces e mais respiro; funil com mais destaque.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v19";
+const CONVERSION_RENDERER_REVISION = "segment-summary-v20";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
