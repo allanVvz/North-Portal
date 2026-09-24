@@ -127,6 +127,7 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   const raw = { id: "e2e-material-readonly", name: "Bruto compartilhado.mp4", mimeType: "video/mp4", webViewLink: "https://drive.google.com/file/d/e2e-material-readonly/view" };
   const raw2 = { id: "e2e-material-readonly-2", name: "Segundo bruto.jpg", mimeType: "image/jpeg", webViewLink: "https://drive.google.com/file/d/e2e-material-readonly-2/view" };
   const linked = new Set<string>();
+  let rejectSecondRaw = false;
   const linkedFiles = (id: string) => [raw, raw2].filter((file) => linked.has(`${id}:${file.id}`));
   const assetIdFor = (id: string, fileId: string) => `${id === ids[0] ? "11111111" : "22222222"}-2222-4222-8222-${fileId === raw.id ? "111111111111" : "222222222222"}`;
   const mockedAssets = (id: string) => linkedFiles(id).map((file) => ({ id: assetIdFor(id, file.id), drive_file_id: file.id, name: file.name, mime_type: file.mimeType, size_bytes: null, role: "raw", state: "active", web_view_link: file.webViewLink, created_at: new Date().toISOString() }));
@@ -152,6 +153,7 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
     if (!ids.includes(id)) { await route.abort(); return; }
     if (body.action === "unlink_raw") { for (const file of [raw, raw2]) if (assetIdFor(id, file.id) === body.assetId) linked.delete(`${id}:${file.id}`); await route.fulfill({ json: { ok: true } }); return; }
     if (body.action !== "link_raw") { await route.abort(); return; }
+    if (rejectSecondRaw && body.driveFileId === raw2.id) { await route.fulfill({ status: 400, json: { error: "Bruto inválido para esta pasta." } }); return; }
     posts.push({ creativeId: id, driveFileId: body.driveFileId! });
     linked.add(`${id}:${body.driveFileId}`);
     await route.fulfill({ json: { ok: true } });
@@ -183,6 +185,10 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   await drop(tile, firstTarget);
   await expect.poll(() => posts.length).toBe(3);
   expect(posts.at(-1)).toEqual({ creativeId: ids[0], driveFileId: raw2.id });
+  rejectSecondRaw = true;
+  await secondTarget.getByRole("button", { name: `Classificar brutos em ${taskRows[1].title}` }).click();
+  await expect(page.locator(".creative-drive-toast")).toContainText("Bruto inválido para esta pasta.");
+  rejectSecondRaw = false;
 
   await page.locator(".creative-drive-modal .tm-back").click();
   await page.goto(`/admin/operacao?task=${ids[0]}`);

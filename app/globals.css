@@ -5704,6 +5704,8 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .creative-drive-file-name { display: grid; flex: 1; min-width: 0; text-align: left; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .creative-drive-file-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creative-drive-file-name small { color: var(--a-muted); }
+.creative-drive-toast { position: absolute; z-index: 8; left: 24px; right: 24px; bottom: 62px; max-width: 650px; margin: 0 auto; padding: 10px 14px; border: 1px solid var(--a-teal); border-radius: 10px; background: var(--a-teal-soft); color: var(--a-ink); box-shadow: 0 6px 20px #0002; font-size: 12px; text-align: center; pointer-events: none; }
+.creative-drive-toast.error { border-color: #d92d20; background: #fff4f2; color: #912018; }
 .creative-drive-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; min-width: 0; }
 .creative-drive-tile { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); cursor: grab; }
 .creative-drive-tile:active { cursor: grabbing; }
@@ -5753,4 +5755,5 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
   .creative-drive-preview-caption { flex-wrap: wrap; }
   .creative-drive-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .creative-drive-targets { grid-template-columns: minmax(0, 1fr); }
+  .creative-drive-toast { left: 12px; right: 12px; bottom: 84px; }
 }
