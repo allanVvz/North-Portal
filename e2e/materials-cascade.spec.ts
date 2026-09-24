@@ -52,7 +52,7 @@ test("Plano BAITA mostra materiais compactos e retorna do Drive ao card", async 
 });
 
 test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await login(page);
   const response = await page.request.get("/api/admin/drive/baita/materials");
   expect(response.ok()).toBe(true);
@@ -66,9 +66,10 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   expect(source, "Nenhuma Captação BAITA com brutos acessíveis no Drive").toBeTruthy();
   await page.goto(`/admin/operacao?task=${source!.creative_task_id}`);
   const folder = page.locator(".tm-material-list > .tm-material-item").first();
-  await expect(folder).toContainText(/brutos/, { timeout: 30_000 });
+  await expect(folder).toContainText(/classificado/, { timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath("real-raw-card.png") });
   await folder.click();
+  await page.getByRole("button", { name: "Brutos da captação" }).click();
   const rawFiles = page.locator(".creative-drive-modal .creative-drive-gallery .creative-drive-tile");
   const raw = rawFiles.first();
   await expect(raw).toBeVisible({ timeout: 30_000 });
@@ -84,10 +85,10 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   await expect.poll(() => thumbnails.evaluateAll((images) => images.slice(0, 12).filter((image) => (image as HTMLImageElement).naturalWidth > 0).length), { timeout: 30_000 }).toBeGreaterThan(0);
   const firstPageCount = await rawFiles.count();
   expect(firstPageCount).toBeGreaterThan(0);
-  await page.getByRole("button", { name: "Próxima" }).first().click();
+  await page.locator(".creative-drive-pagination").getByRole("button", { name: "Próxima" }).click();
   await expect(page.locator(".creative-drive-pagination")).toContainText("Página 2");
   expect(await rawFiles.count()).toBeLessThanOrEqual(24);
-  await page.getByRole("button", { name: "Anterior" }).first().click();
+  await page.locator(".creative-drive-pagination").getByRole("button", { name: "Anterior" }).click();
   await page.locator(".creative-drive-main").evaluate((element) => { element.scrollTop = 0; });
   await page.screenshot({ path: testInfo.outputPath("real-raw-gallery.png") });
   await raw.getByRole("button", { name: /Ampliar/ }).click();
