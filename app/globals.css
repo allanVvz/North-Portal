@@ -5753,6 +5753,8 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .tm-classified-raw { display: grid; gap: 0; min-width: 0; overflow: hidden; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-inset); }
 .tm-classified-raw-preview { display: grid; gap: 0; min-width: 0; padding: 0; border: 0; background: none; color: var(--a-ink); font: inherit; font-size: 10px; cursor: pointer; }
 .tm-classified-raw-preview b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 8px; text-align: left; }
+.tm-classified-raw-links { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 7px 7px; text-align: left; }
+.tm-classified-raw-eyebrow { max-width: 100%; padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--a-teal) 24%, var(--a-border)); border-radius: 9px; background: var(--a-teal-soft); color: var(--a-teal-text); font-size: 9px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .tm-classified-raw-thumb { position: relative; display: grid; place-items: center; width: 100%; height: 94px; overflow: hidden; background: #263641; color: white; }
 .tm-classified-raw-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tm-classified-raw-thumb span { position: relative; z-index: 1; color: white; text-shadow: 0 1px 4px #000; }
@@ -5821,6 +5823,8 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .creative-drive-tile-caption { display: grid; gap: 2px; min-width: 0; padding: 7px 8px 8px; }
 .creative-drive-tile-caption b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .creative-drive-tile-caption small { color: var(--a-muted); font-size: 10px; }
+.creative-drive-tile-links { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; padding-top: 4px; }
+.creative-drive-tile-eyebrow { display: inline-block; max-width: 100%; padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--a-teal) 24%, var(--a-border)); border-radius: 9px; background: var(--a-teal-soft); color: var(--a-teal-text); font-size: 9px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .creative-drive-tile-open { position: absolute; z-index: 3; top: 6px; right: 6px; display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid #fff8; border-radius: 6px; background: #101828bd; color: white; font: inherit; cursor: pointer; }
 .creative-drive-linked { position: absolute; z-index: 2; right: 6px; bottom: 48px; padding: 3px 6px; border-radius: 5px; background: #101828c9; color: white; font-size: 10px; pointer-events: none; }
 .creative-drive-download { flex: 1; min-height: 30px; display: grid; place-items: center; border-radius: 6px; background: var(--a-teal-soft) !important; font-weight: 700 !important; }

@@ -22,6 +22,7 @@ export type CreativeMaterialWorkspace = {
   plan_task_id: string;
   capture_task_id: string;
   creative_task_id: string;
+  creative_title?: string | null;
   status: string;
   available_raw_count?: number | null;
   available_raw_limited?: boolean;

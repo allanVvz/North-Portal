@@ -52,7 +52,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const [notice, setNotice] = useState("");
   const [noticeTargetId, setNoticeTargetId] = useState<string | null>(null);
   const [rawTargetId, setRawTargetId] = useState(taskId);
-  const [rawFilter, setRawFilter] = useState<RawFilter>("pending");
+  const [rawFilter, setRawFilter] = useState<RawFilter>("all");
   const [sortOrder, setSortOrder] = useState<"oldest" | "newest">("oldest");
   const [recentLinks, setRecentLinks] = useState<Record<string, string[]>>({});
   const rawAnchor = useRef<string | null>(null);
@@ -94,7 +94,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   }, [activeTaskId, initialAssetId]);
   useEffect(() => {
     setPayload(null); setSelected(null); setError(""); setExtraSources(emptySources()); setNextPages(emptyPages());
-    setRawTargetId(activeTaskId); setRawFilter("pending"); setSelectedRawIds([]); rawAnchor.current = null;
+    setRawTargetId(activeTaskId); setRawFilter("all"); setSelectedRawIds([]); rawAnchor.current = null;
     searchRequest.current += 1; setSearchText(""); setRawQuery(""); setSearchSources(emptySources()); setSearchPages(emptyPages());
     setRawPage(1); setClassifiedPage(1); setPreviewPage(1); setFinalPage(1);
     void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar o Drive."));
@@ -158,6 +158,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
       setRecentLinks((previous) => ({ ...previous, [targetId]: [...new Set([...(previous[targetId] ?? []), ...filesToAssign.map(({ file }) => file.id)])] }));
       setNotice(created ? `${created} bruto(s) vinculado(s) a ${targetName}.` : `Esses brutos já estão em ${targetName}.`);
       setNoticeTargetId(targetId);
+      if (created && targetId === rawTargetId) setRawFilter("all");
       setSelectedRawIds([]);
       rawAnchor.current = null;
     } catch (cause) {
@@ -303,6 +304,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   }
   const previewIsRaw = preview?.source === "Roteiro" || preview?.source === "Captação" || preview?.source === "Bruto classificado";
   const previewLinks = preview && previewIsRaw ? targets.filter((target) => linkedToTarget(target.id, preview.id)) : [];
+  const rawLinksByFile = new Map(sources.map(({ file }) => [file.id, targets.filter((target) => linkedToTarget(target.id, file.id))]));
   const visibleSources = orderedSources.filter(({ file }) => rawFilter === "all" || (rawFilter === "linked") === linkedToTarget(rawTargetId, file.id));
   const rawTarget = targets.find((target) => target.id === rawTargetId);
   useEffect(() => { setRawPage((page) => Math.min(page, Math.max(1, Math.ceil(visibleSources.length / RAW_PAGE_SIZE)))); }, [visibleSources.length]);
@@ -333,6 +335,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
             const kind = file.mimeType.startsWith("video/") ? "Vídeo" : file.mimeType.startsWith("image/") ? "Foto" : "Arquivo";
             const displayName = driveDisplayName(file, `${kind} ${(rawPage - 1) * RAW_PAGE_SIZE + index + 1}`);
             const isLinked = linkedToTarget(rawTargetId, file.id);
+            const fileLinks = rawLinksByFile.get(file.id) ?? [];
             return <div className={`creative-drive-tile${checked ? " selected" : ""}`} key={`${source}-${file.id}`} data-drive-file-id={file.id}
               draggable={!busy} onDragStart={(event) => {
                 const ids = checked ? selectedRawIds : [file.id];
@@ -347,7 +350,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
                 if (!event.ctrlKey && !event.metaKey && !event.shiftKey) requestAnimationFrame(() => main.current?.querySelector(".creative-drive-preview")?.scrollIntoView({ behavior: "smooth", block: "start" }));
               }} onDoubleClick={() => { setSelected({ id: file.id, name: displayName, mimeType: file.mimeType, size: null, url: file.webViewLink, source }); main.current?.scrollTo({ top: 0, behavior: "smooth" }); }}>
                 <span className={`creative-drive-tile-art${file.mimeType.startsWith("video/") ? " video" : ""}`} aria-hidden>{isMedia ? <img src={file.thumbnailUrl ?? `/api/admin/drive/thumbnail/${encodeURIComponent(file.id)}`} alt="" loading="lazy" onError={(event) => { const image = event.currentTarget; if (file.thumbnailUrl && !image.dataset.fallback) { image.dataset.fallback = "1"; image.src = `/api/admin/drive/thumbnail/${encodeURIComponent(file.id)}`; } else image.style.display = "none"; }} /> : null}<span>{file.mimeType.startsWith("video/") ? "▶" : file.mimeType.startsWith("image/") ? "▧" : "▤"}</span></span>
-                <span className="creative-drive-tile-caption"><b title={displayName}>{displayName}</b><small>{driveShotLabel(file)}</small></span>
+                <span className="creative-drive-tile-caption"><b title={displayName}>{displayName}</b><small>{driveShotLabel(file)}</small>{fileLinks.length ? <span className="creative-drive-tile-links" aria-label="Criativos vinculados">{fileLinks.map((target) => <span className="creative-drive-tile-eyebrow" key={target.id} title={target.title}>{target.title}</span>)}</span> : null}</span>
               </button>
               <button type="button" className="creative-drive-tile-open" aria-label={`Ampliar ${displayName}`} onClick={() => { setSelected({ id: file.id, name: displayName, mimeType: file.mimeType, size: null, url: file.webViewLink, source }); main.current?.scrollTo({ top: 0, behavior: "smooth" }); }}>↗</button>
               {isLinked ? <span className="creative-drive-linked" title={`Classificado em ${rawTarget?.title ?? "este Criativo"}`}>Nesta pasta</span> : null}
@@ -356,7 +359,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
           {visibleSources.length || hasMoreSources ? <Pagination page={rawPage} total={Math.ceil(visibleSources.length / RAW_PAGE_SIZE)} hasMore={hasMoreSources} busy={Boolean(loadingMore || busy)} onPrevious={() => setRawPage((page) => page - 1)} onNext={() => void nextRawPage()} /> : <p className="creative-drive-empty">{rawFilter === "pending" ? "Nenhum bruto pendente para este Criativo. Veja Todos ou escolha outra pasta." : rawFilter === "linked" ? "Nenhum bruto classificado neste Criativo." : rawQuery ? "Nenhum bruto encontrado nesta Captação." : "Nenhum bruto nesta diária."}</p>}
         </section> : null}
         {activeTab === "classified" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos classificados em {currentTarget?.title ?? "este Criativo"}</strong><small>{classifiedAssets.length} vínculo(s)</small></div><p className="admin-sub">Cada arquivo abaixo é um atalho. Desassociar remove apenas o vínculo deste Criativo; o original permanece na Captação.</p>
-          <div className="creative-drive-gallery curated">{classifiedAssets.slice((classifiedPage - 1) * ASSET_PAGE_SIZE, classifiedPage * ASSET_PAGE_SIZE).map((asset, index) => { const source = sourceById.get(asset.drive_file_id); const displayName = driveDisplayName(source ?? { name: asset.name, originalFilename: null }, `${asset.mime_type.startsWith("video/") ? "Vídeo" : "Foto"} ${(classifiedPage - 1) * ASSET_PAGE_SIZE + index + 1}`); return <div className="creative-drive-tile" key={asset.id} data-classified-asset-id={asset.id}><button type="button" className="creative-drive-tile-preview" onClick={() => { setSelected(files.find((file) => file.assetId === asset.id) ?? null); main.current?.scrollTo({ top: 0, behavior: "smooth" }); }} aria-label={`Visualizar bruto classificado ${displayName}`}><span className={`creative-drive-tile-art${asset.mime_type.startsWith("video/") ? " video" : ""}`} aria-hidden><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><span className="creative-drive-tile-caption"><b title={displayName}>{displayName}</b><small>{source ? driveShotLabel(source) : "Bruto da captação"}</small></span></button><div className="creative-drive-tile-actions"><a className="creative-drive-download" href={`/api/admin/tasks/${activeTaskId}/drive-assets/${asset.id}/download`}>↓ Baixar</a><details className="creative-drive-options"><summary>Drive ▾</summary><div><a href={asset.web_view_link ?? `https://drive.google.com/file/d/${encodeURIComponent(asset.drive_file_id)}/view`} target="_blank" rel="noreferrer">Abrir no Drive ↗</a><button type="button" disabled={Boolean(busy)} onClick={() => void unlinkRaw(asset.id, asset.drive_file_id)}>Desassociar</button></div></details></div></div>; })}</div>
+          <div className="creative-drive-gallery curated">{classifiedAssets.slice((classifiedPage - 1) * ASSET_PAGE_SIZE, classifiedPage * ASSET_PAGE_SIZE).map((asset, index) => { const source = sourceById.get(asset.drive_file_id); const displayName = driveDisplayName(source ?? { name: asset.name, originalFilename: null }, `${asset.mime_type.startsWith("video/") ? "Vídeo" : "Foto"} ${(classifiedPage - 1) * ASSET_PAGE_SIZE + index + 1}`); const fileLinks = targets.filter((target) => linkedToTarget(target.id, asset.drive_file_id)); return <div className="creative-drive-tile" key={asset.id} data-classified-asset-id={asset.id}><button type="button" className="creative-drive-tile-preview" onClick={() => { setSelected(files.find((file) => file.assetId === asset.id) ?? null); main.current?.scrollTo({ top: 0, behavior: "smooth" }); }} aria-label={`Visualizar bruto classificado ${displayName}`}><span className={`creative-drive-tile-art${asset.mime_type.startsWith("video/") ? " video" : ""}`} aria-hidden><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><span className="creative-drive-tile-caption"><b title={displayName}>{displayName}</b><small>{source ? driveShotLabel(source) : "Bruto da captação"}</small>{fileLinks.length ? <span className="creative-drive-tile-links" aria-label="Criativos vinculados">{fileLinks.map((target) => <span className="creative-drive-tile-eyebrow" key={target.id} title={target.title}>{target.title}</span>)}</span> : null}</span></button><div className="creative-drive-tile-actions"><a className="creative-drive-download" href={`/api/admin/tasks/${activeTaskId}/drive-assets/${asset.id}/download`}>↓ Baixar</a><details className="creative-drive-options"><summary>Drive ▾</summary><div><a href={asset.web_view_link ?? `https://drive.google.com/file/d/${encodeURIComponent(asset.drive_file_id)}/view`} target="_blank" rel="noreferrer">Abrir no Drive ↗</a><button type="button" disabled={Boolean(busy)} onClick={() => void unlinkRaw(asset.id, asset.drive_file_id)}>Desassociar</button></div></details></div></div>; })}</div>
           {classifiedAssets.length ? <Pagination page={classifiedPage} total={Math.ceil(classifiedAssets.length / ASSET_PAGE_SIZE)} onPrevious={() => setClassifiedPage((page) => page - 1)} onNext={() => setClassifiedPage((page) => page + 1)} /> : <p className="admin-sub">Nenhum bruto classificado neste Criativo.</p>}
         </section> : null}
         {activeTab === "preview" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Previews de {currentTarget?.title ?? "este Criativo"}</strong><button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => input.current?.click()}>{busy === "upload" ? "Enviando…" : "Enviar arquivo"}</button><input ref={input} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} /></div>

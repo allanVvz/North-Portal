@@ -20,6 +20,13 @@ export async function GET() {
       .eq("plan_task_id", BAITA_DRIVE_PLAN_ID)]);
     const { data, error } = workspaceResult;
     if (error) throw error;
+    const creativeIds = [...new Set((data ?? []).map((workspace) => workspace.creative_task_id))];
+    const creativeTitles = new Map<string, string>();
+    if (creativeIds.length) {
+      const { data: cards, error: cardsError } = await db.from("tasks").select("id,title").in("id", creativeIds);
+      if (cardsError) throw cardsError;
+      for (const card of cards ?? []) creativeTitles.set(card.id, card.title);
+    }
     const { data: captures, error: captureError } = captureResult;
     if (captureError) throw captureError;
     const counts = new Map<string, { count: number | null; limited: boolean }>(await Promise.all((captures ?? []).map(async (capture) => {
@@ -36,6 +43,7 @@ export async function GET() {
     })));
     return NextResponse.json({ workspaces: (data ?? []).map((workspace) => ({
       ...workspace,
+      creative_title: creativeTitles.get(workspace.creative_task_id) ?? null,
       available_raw_count: counts.get(workspace.capture_task_id)?.count ?? null,
       available_raw_limited: counts.get(workspace.capture_task_id)?.limited ?? false,
     })) }, { headers: { "Cache-Control": "private, no-store" } });
