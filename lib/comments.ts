@@ -24,6 +24,7 @@ export type TaskComment = {
   text: string;
   at: string;
   edited_at?: string;
+  asset_ids?: string[];
 };
 
 export function commentsOf(payload: Record<string, unknown> | null | undefined): TaskComment[] {

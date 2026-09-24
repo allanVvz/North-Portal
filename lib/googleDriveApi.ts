@@ -22,6 +22,7 @@ const SCOPE = "https://www.googleapis.com/auth/drive";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
+const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 
 // Subfolders created under each client's root folder. The keys map 1:1 to the
 // columns already on client_drive_links, so the automation fills exactly the
@@ -111,6 +112,150 @@ async function accessToken(): Promise<string | null> {
 
 function folderUrl(id: string): string {
   return `https://drive.google.com/drive/folders/${id}`;
+}
+
+function driveEscaped(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+export type DriveItemMetadata = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  webViewLink: string | null;
+  parents?: string[];
+};
+
+export async function getDriveItemMetadata(fileId: string): Promise<DriveItemMetadata | null> {
+  const token = await accessToken();
+  if (!token) return null;
+  const params = new URLSearchParams({ fields: "id,name,mimeType,size,webViewLink,parents,trashed", supportsAllDrives: "true" });
+  const res = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const file = await res.json() as { id?: string; name?: string; mimeType?: string; size?: string; webViewLink?: string; parents?: string[]; trashed?: boolean };
+  if (!file.id || file.trashed) return null;
+  return {
+    id: file.id, name: file.name ?? "(sem nome)", mimeType: file.mimeType ?? "application/octet-stream",
+    size: file.size ? Number(file.size) : null, webViewLink: file.webViewLink ?? null, parents: file.parents ?? [],
+  };
+}
+
+/** Cria ou recupera um item pela chave de reconciliacao em appProperties. */
+export async function findDriveItemByAppProperties(
+  parentId: string,
+  properties: Record<string, string>,
+  mimeType?: string,
+): Promise<DriveItemMetadata | null> {
+  const token = await accessToken();
+  if (!token) return null;
+  const clauses = [
+    `'${driveEscaped(parentId)}' in parents`,
+    "trashed = false",
+    ...Object.entries(properties).map(([key, value]) => `appProperties has { key='${driveEscaped(key)}' and value='${driveEscaped(value)}' }`),
+    ...(mimeType ? [`mimeType = '${driveEscaped(mimeType)}'`] : []),
+  ];
+  const params = new URLSearchParams({
+    q: clauses.join(" and "),
+    fields: "files(id,name,mimeType,size,webViewLink)",
+    pageSize: "2",
+    supportsAllDrives: "true",
+    includeItemsFromAllDrives: "true",
+  });
+  const res = await fetch(`${DRIVE_FILES}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const data = await res.json() as { files?: Array<{ id?: string; name?: string; mimeType?: string; size?: string; webViewLink?: string }> };
+  const file = data.files?.[0];
+  return file?.id ? {
+    id: file.id,
+    name: file.name ?? "(sem nome)",
+    mimeType: file.mimeType ?? "application/octet-stream",
+    size: file.size ? Number(file.size) : null,
+    webViewLink: file.webViewLink ?? null,
+  } : null;
+}
+
+export async function ensureDriveFolder(input: {
+  name: string;
+  parentId: string;
+  appProperties: Record<string, string>;
+}): Promise<DriveFolder> {
+  const found = await findDriveItemByAppProperties(input.parentId, input.appProperties, FOLDER_MIME);
+  if (found) return { id: found.id, url: folderUrl(found.id) };
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const res = await fetch(`${DRIVE_FILES}?fields=id&supportsAllDrives=true`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: input.name, mimeType: FOLDER_MIME, parents: [input.parentId], appProperties: input.appProperties }),
+  });
+  if (!res.ok) throw new HttpError(502, `Falha ao criar pasta no Drive: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json() as { id?: string };
+  if (!data.id) throw new HttpError(502, "Google Drive nao retornou o id da pasta.");
+  return { id: data.id, url: folderUrl(data.id) };
+}
+
+export async function createDriveShortcut(input: {
+  name: string;
+  parentId: string;
+  targetId: string;
+  appProperties: Record<string, string>;
+}): Promise<string> {
+  const found = await findDriveItemByAppProperties(input.parentId, input.appProperties, SHORTCUT_MIME);
+  if (found) return found.id;
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const res = await fetch(`${DRIVE_FILES}?fields=id&supportsAllDrives=true`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      mimeType: SHORTCUT_MIME,
+      parents: [input.parentId],
+      shortcutDetails: { targetId: input.targetId },
+      appProperties: input.appProperties,
+    }),
+  });
+  if (!res.ok) throw new HttpError(502, `Falha ao criar atalho no Drive: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json() as { id?: string };
+  if (!data.id) throw new HttpError(502, "Google Drive nao retornou o id do atalho.");
+  return data.id;
+}
+
+export async function setDriveItemTrashed(fileId: string, trashed: boolean): Promise<void> {
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const res = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?supportsAllDrives=true`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed }),
+  });
+  if (!res.ok) throw new HttpError(502, `Falha ao atualizar item no Drive: ${res.status} ${(await res.text()).slice(0, 200)}`);
+}
+
+/** Inicia a sessao; os bytes seguem direto do navegador para a URL retornada. */
+export async function createDriveResumableUpload(input: {
+  name: string;
+  mimeType: string;
+  size: number;
+  parentId: string;
+  appProperties: Record<string, string>;
+}): Promise<{ sessionUrl: string; expiresAt: string }> {
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Type": input.mimeType,
+      "X-Upload-Content-Length": String(input.size),
+    },
+    body: JSON.stringify({ name: input.name, mimeType: input.mimeType, parents: [input.parentId], appProperties: input.appProperties }),
+  });
+  const sessionUrl = res.headers.get("location");
+  if (!res.ok || !sessionUrl) throw new HttpError(502, `Falha ao iniciar upload no Drive: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  return { sessionUrl, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() };
 }
 
 async function createFolder(token: string, name: string, parent: string): Promise<DriveFolder> {

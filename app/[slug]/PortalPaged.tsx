@@ -1438,7 +1438,9 @@ function EntregasPage(props: {
             const yourTurn = canActOn(t);
             const canAct = yourTurn && !busyId;
             const comments = commentsOf(t.payload);
-            const materialLink = extractLatestLink(comments) ?? ctx.links?.uploadsUrl ?? null;
+            const materialLink = t.kind === "criativo"
+              ? t.creative_drive_material_url ?? null
+              : extractLatestLink(comments);
             return (
               <div className={`np-approval ${yourTurn ? "np-approval-turn" : ""}`} key={t.id}>
                 <div className={`np-approval-cover tone-${typeTone(t.kind)}`}>

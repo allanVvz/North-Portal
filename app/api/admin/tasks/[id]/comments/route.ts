@@ -127,7 +127,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID inválido.");
-    const { text, comment_id: commentId, stage_task_id: stageTaskId } = taskCommentCreateSchema.parse(await request.json());
+    const { text, comment_id: commentId, stage_task_id: stageTaskId, asset_ids: assetIds = [] } = taskCommentCreateSchema.parse(await request.json());
     // Comentar no card PAI (a entrega) grava o comentário na ETAPA em que a
     // pessoa estava (`stage_task_id`) — ou, em chamada antiga sem ele, na única
     // etapa atual inequívoca; ambíguo é 409, nunca um palpite. A LEITURA não
@@ -136,10 +136,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // de comentário (o portal do cliente) precisa responder exatamente a mesma
     // coisa; ver o cabeçalho daquele módulo.
     const parent = await getTaskById(id);
-    const targetId = parent
+    const targetId = assetIds.length ? id : parent
       ? (await resolveFlowCommentTarget(createAdminClient(), parent, { commenterId: session.userId, stageTaskId })).targetId
       : id;
-    const { task, inserted } = await appendTaskComment(targetId, session.userId, text, commentId ?? null);
+    const { task, inserted } = await appendTaskComment(targetId, session.userId, text, commentId ?? null, assetIds);
     // Reenvio do mesmo comentário (retry, clique duplo): já foi gravado e já
     // disparou seus efeitos — não notifica, não menciona e não regenera de novo.
     if (!inserted) return NextResponse.json(task);

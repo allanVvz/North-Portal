@@ -52,6 +52,7 @@ import { WINDSOR_SETTINGS_DEFAULT, type MetaPost, type WindsorDatasource, type W
 import { AI_PROVIDER_SETTINGS_DEFAULT, type AiProviderSettings, type AiVendor } from "./aiProviders";
 import { META_ADS_ADSET_DATASOURCE, META_ADS_CREATIVE_DATASOURCE, META_ADS_DATASOURCE } from "./metaInsights";
 import { sanitizePerformanceViewPrefs, type PerformanceViewPrefs } from "./performancePrefs";
+import { selectCreativeMaterialUrl } from "./creativeDriveModel";
 import {
   sanitizePerformanceTemplateConfig,
   type PerformanceTemplate,
@@ -321,7 +322,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const client = await getClient(slug);
   if (!client) throw new HttpError(404, "Cliente nao encontrado.");
 
-  const [briefing, links, results, content, prefs, tasks, documents, northTrilhas, credentials, planoVisibility, flowFlags, taskTypes] = await Promise.all([
+  const [briefing, links, results, content, prefs, tasks, documents, northTrilhas, credentials, planoVisibility, flowFlags, taskTypes, creativeMaterials] = await Promise.all([
     supabase.from("briefing_answers").select("answers,submitted,updated_at").eq("client_id", client.id).limit(1),
     supabase.from("client_drive_links").select("brand_url,products_url,uploads_url").eq("client_id", client.id).limit(1),
     supabase.from("client_results").select("insights,top_metrics,report_url,feedback_url").eq("client_id", client.id).limit(1),
@@ -353,6 +354,9 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     // e não pode chamar /api/admin/task-types (requireAdmin), então resolve
     // isso no servidor, igual ao que listParentCards já faz (labelByKind).
     listTaskTypes(supabase),
+    supabase.from("drive_creative_workspaces")
+      .select("creative_task_id,drive_assets(id,role,state,web_view_link,created_at),drive_final_versions(asset_id,state,version_number)")
+      .eq("client_id", client.id),
   ]);
   if (briefing.error) fail(briefing.error);
   if (links.error) fail(links.error);
@@ -361,13 +365,24 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   if (prefs.error) fail(prefs.error);
   if (tasks.error) fail(tasks.error);
   if (documents.error) fail(documents.error);
+  if (creativeMaterials.error) fail(creativeMaterials.error);
 
   const b = briefing.data?.[0] as BriefingRow | undefined;
   const l = links.data?.[0] as LinksRow | undefined;
   const r = results.data?.[0] as ResultsRow | undefined;
   const c = content.data?.[0] as ContentRow | undefined;
   const p = prefs.data?.[0] as PrefsRow | undefined;
-  const taskRows = ((tasks.data as unknown as (ClientTask & TaskAssigneesJoin)[] | null) ?? []).map(mergeTaskAssigneeRow);
+  type CreativeMaterialRow = {
+    creative_task_id: string;
+    drive_assets: Array<{ id: string; role: string; state: string; web_view_link: string | null; created_at: string }> | null;
+    drive_final_versions: Array<{ asset_id: string; state: string; version_number: number }> | null;
+  };
+  const materialByTask = new Map(((creativeMaterials.data as unknown as CreativeMaterialRow[] | null) ?? []).map((workspace) => {
+    return [workspace.creative_task_id, selectCreativeMaterialUrl(workspace.drive_assets ?? [], workspace.drive_final_versions ?? [])];
+  }));
+  const taskRows = ((tasks.data as unknown as (ClientTask & TaskAssigneesJoin)[] | null) ?? [])
+    .map(mergeTaskAssigneeRow)
+    .map((task) => ({ ...task, creative_drive_material_url: materialByTask.get(task.id) ?? null }));
   const documentRows = (documents.data as DocumentRecord[] | null) ?? [];
   const trilhaRows = (northTrilhas.data as NorthTrilha[] | null) ?? [];
 
@@ -2820,12 +2835,18 @@ export async function appendTaskComment(
   authorId: string,
   text: string,
   commentId: string | null = null,
+  assetIds: string[] = [],
 ): Promise<{ task: TaskRecord; inserted: boolean }> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("append_task_comment_idempotent", {
-    p_task_id: taskId, p_author_id: authorId, p_text: text, p_comment_id: commentId,
-  });
+  const { data, error } = assetIds.length
+    ? await supabase.rpc("append_task_comment_with_assets", {
+        p_task_id: taskId, p_author_id: authorId, p_text: text, p_comment_id: commentId, p_asset_ids: assetIds,
+      })
+    : await supabase.rpc("append_task_comment_idempotent", {
+        p_task_id: taskId, p_author_id: authorId, p_text: text, p_comment_id: commentId,
+      });
   if (isMissingRpc(error)) {
+    if (assetIds.length) throw new HttpError(503, "A associacao de assets ainda nao esta disponivel.");
     // Deploy chegou antes da migration: o campo de comentário não pode quebrar.
     // Perde só a idempotência até a migration ser aplicada.
     const legacy = await supabase.rpc("append_task_comment", { p_task_id: taskId, p_author_id: authorId, p_text: text });

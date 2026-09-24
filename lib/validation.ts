@@ -170,8 +170,11 @@ const taskCommentSchema = z.object({
   // humano devolve o thread inteiro.
   id: z.string().max(128).optional(),
   author: z.string().max(80),
+  author_id: z.string().uuid().optional(),
   text: z.string().max(2000),
   at: z.string(),
+  edited_at: z.string().optional(),
+  asset_ids: z.array(z.string().uuid()).max(20).optional(),
 });
 // F dos "pontos frágeis": `payload` deixou de ser `.passthrough()`. Agora é o
 // CONTRATO — toda chave que o app grava no payload de uma tarefa está listada
@@ -308,6 +311,9 @@ export const taskCommentCreateSchema = z.object({
   /** Etapa (tarefa filha) em que a pessoa comentou. Quando presente, é o
    *  destino do comentário — nunca uma heurística. Ver lib/flows/commentTarget.ts. */
   stage_task_id: z.string().uuid().optional(),
+  /** Assets do workspace individual. Quando presentes, o comentario fica no
+   *  Criativo, mesmo que a etapa de Edicao seja compartilhada. */
+  asset_ids: z.array(z.string().uuid()).max(20).optional(),
 });
 
 // `introducesInvalidPublishedState` morava aqui. Ela existia para impedir que
@@ -1009,7 +1015,11 @@ export const prefsPatchSchema = z.object({
 
 // A task row as seen by the client portal — same TaskRecord plus updated_at,
 // used to sort/label the Feedbacks queue and history.
-export type ClientTask = TaskRecord & { updated_at: string | null };
+export type ClientTask = TaskRecord & {
+  updated_at: string | null;
+  /** Material canonico do workspace individual; nunca a pasta EDICAO inteira. */
+  creative_drive_material_url?: string | null;
+};
 
 export type PortalPayload = {
   client: { slug: string; name: string };

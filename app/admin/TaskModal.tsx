@@ -46,6 +46,7 @@ import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, Task
 import { useTaskAutosave } from "./useTaskAutosave";
 import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
 import BackArrowIcon from "./BackArrowIcon";
+import CreativeDriveWorkspace from "./CreativeDriveWorkspace";
 
 type Draft = {
   title: string;
@@ -343,6 +344,7 @@ export default function TaskModal({
     ? deliveryType.workflowSteps.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
     : -1;
   const [comment, setComment] = useState("");
+  const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
   const [editingComment, setEditingComment] = useState<{ index: number; at: string; text: string } | null>(null);
@@ -1203,10 +1205,16 @@ export default function TaskModal({
     try {
       const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, comment_id: commentIds.idFor(liveTask.id, text), ...(stageTaskId ? { stage_task_id: stageTaskId } : {}) }),
+        body: JSON.stringify({
+          text,
+          comment_id: commentIds.idFor(liveTask.id, text),
+          ...(stageTaskId && commentAssetIds.length === 0 ? { stage_task_id: stageTaskId } : {}),
+          ...(commentAssetIds.length ? { asset_ids: commentAssetIds } : {}),
+        }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
       commentIds.settle(liveTask.id, text);
+      setCommentAssetIds([]);
       const updated = await res.json() as TaskRecord;
       // Comentar no PAI grava na etapa corrente (ver lib/flows/currentStep.ts
       // + a rota) — o servidor pode devolver um card DIFERENTE do que está
@@ -1858,6 +1866,14 @@ export default function TaskModal({
                 onLinkStep={(card, workflowStepId) => void linkStepCard(card, workflowStepId)}
                 onPatchStep={patchRelatedCard}
                 onCommentStep={commentRelatedCard}
+              />
+            ) : null}
+
+            {liveTask && isDelivery && liveTask.kind === "criativo" && !isRecurringParent ? (
+              <CreativeDriveWorkspace
+                taskId={liveTask.id}
+                selectedAssetIds={commentAssetIds}
+                onSelectedAssetIdsChange={setCommentAssetIds}
               />
             ) : null}
 
