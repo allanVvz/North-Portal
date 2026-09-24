@@ -3299,19 +3299,19 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-/* Inline Google Drive/Docs/Sheets/Slides preview — a <span> (not <div>) so it
-   stays valid nested inside the <p class="tm-comment-text"> a comment renders
-   into, but laid out as a block via CSS. Shared by the description view and
-   the comment thread (see CommentText's showLinkPreview). */
-.gdrive-preview { position: relative; display: block; width: 100%; max-width: 420px; height: 200px; margin: 8px 0 2px; border: 1px solid var(--a-border); border-radius: 10px; overflow: hidden; background: var(--a-surface); }
-.gdrive-preview iframe { display: block; width: 100%; height: 100%; border: 0; }
-/* Prévia de PASTA dentro do comentário: a listagem do Drive é feita para uma
-   aba inteira e chega grande demais numa coluna estreita. Mesmo tratamento do
-   navegador de pastas — `zoom` encolhe o conteúdo, a largura fica em 100%
-   (porcentagem já resolve no espaço escalado) e só a altura compensa. */
-.gdrive-preview.is-folder { height: 200px; }
-.gdrive-preview.is-folder iframe { --embed-zoom: .62; zoom: var(--embed-zoom); width: 100%; height: calc(100% / var(--embed-zoom)); }
-.gdrive-preview-loading { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: var(--a-inset, var(--np-surface-2)); color: var(--a-muted); font-size: 12px; }
+/* Comment links remain compact until their full preview is requested. */
+.gdrive-comment-attachment { display: inline-flex; align-items: center; gap: 7px; max-width: 190px; margin: 6px 0 2px; padding: 4px 9px 4px 4px; border: 1px solid var(--a-border); border-radius: 8px; background: var(--a-surface); color: var(--a-ink); text-align: left; font: inherit; cursor: pointer; vertical-align: top; }
+.gdrive-comment-attachment:hover { border-color: var(--a-teal); }
+.gdrive-comment-attachment-thumb { position: relative; display: grid; place-items: center; flex: 0 0 37px; width: 37px; height: 32px; overflow: hidden; border-radius: 5px; background: var(--a-inset); color: var(--a-teal-text); }
+.gdrive-comment-attachment-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.gdrive-comment-attachment-thumb span { position: relative; text-shadow: 0 1px 3px #fff; }
+.gdrive-comment-attachment > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.gdrive-comment-attachment b, .gdrive-comment-attachment small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gdrive-comment-attachment b { font-size: 10px; }
+.gdrive-comment-attachment small { color: var(--a-muted); font-size: 9px; }
+.gdrive-link-modal .tm-layout { overflow: hidden; }
+.gdrive-link-modal-main { min-width: 0; padding: 18px 0 18px 24px; }
+.gdrive-link-modal-main iframe { width: 100%; height: 100%; min-height: 380px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-inset); }
 .tm-comment-input { display: flex; gap: 8px; }
 .tm-comment-input input, .tm-comment-input textarea { flex: 1; background: var(--a-surface); }
 .tm-comment-attach { flex-shrink: 0; }

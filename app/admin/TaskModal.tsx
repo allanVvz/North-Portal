@@ -367,15 +367,18 @@ export default function TaskModal({
   // decks. Lazily fetched once per edit session (small, agency-wide list;
   // same "all documents" endpoint Informações uses).
   const [attachableDocs, setAttachableDocs] = useState<AdminDocument[]>([]);
+  const [docsReady, setDocsReady] = useState(false);
   useEffect(() => {
     if (mode !== "edit") return;
     let cancelled = false;
+    setDocsReady(false);
     fetch("/api/admin/documents")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { documents: AdminDocument[] } | null) => {
         if (!cancelled && data) setAttachableDocs(data.documents.filter((d) => !isHtmlDocument(d)));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setDocsReady(true); });
     return () => { cancelled = true; };
   }, [mode]);
   const { name: currentUserName } = useCurrentAdminUser();
@@ -592,10 +595,14 @@ export default function TaskModal({
   const materialStart = (safeMaterialPage - 1) * 3;
   const commentAssets = useMemo(() => new Map(materialWorkspaces.flatMap((workspace) => workspace.assets.map((asset) => [asset.id, { asset, workspace }] as const))), [materialWorkspaces]);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
+  function knownDocForUrl(url: string): AdminDocument | undefined {
+    const driveId = parseGoogleDriveUrl(url)?.id;
+    return attachableDocs.find((doc) => doc.file_url === url || (driveId && doc.file_url && parseGoogleDriveUrl(doc.file_url)?.id === driveId));
+  }
   // A comment link that matches a known document's file_url opens the same
   // preview modal in place instead of navigating to the raw file in a new tab.
   function openDocForUrl(url: string): boolean {
-    const doc = attachableDocs.find((d) => d.file_url === url);
+    const doc = knownDocForUrl(url);
     if (!doc) return false;
     setPreviewDoc(doc);
     return true;
@@ -2113,7 +2120,7 @@ export default function TaskModal({
                     title="Clique duas vezes para editar"
                   >
                     {draft.description ? (
-                      <CommentText text={draft.description} showLinkPreview />
+                      <CommentText text={draft.description} onLinkClick={openDocForUrl} showLinkPreview={docsReady} hidePreviewForUrl={(url) => Boolean(knownDocForUrl(url))} />
                     ) : (
                       <span className="tm-desc-placeholder">Objetivo, referência e critério de pronto entram aqui antes de enviar para o quadro.</span>
                     )}
@@ -2224,7 +2231,7 @@ export default function TaskModal({
                               </div>
                             </div>
                           ) : (
-                            <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} showLinkPreview /></p>
+                            <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} showLinkPreview={docsReady} hidePreviewForUrl={(url) => Boolean(knownDocForUrl(url))} /></p>
                           )}
                           {c.asset_ids?.length ? <div className="tm-comment-assets">{c.asset_ids.map((id) => {
                             const found = commentAssets.get(id);

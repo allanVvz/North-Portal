@@ -1,67 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { GOOGLE_DRIVE_KIND_LABEL, type GoogleDriveLink } from "@/lib/googleDrive";
+import BackArrowIcon from "@/app/admin/BackArrowIcon";
 
-// Prévia embutida de um link do Drive/Docs/Sheets/Slides citado num comentário
-// ou na descrição (ver showLinkPreview em CommentText). Renderiza o iframe do
-// próprio Google — o mesmo que "Compartilhar > Incorporar" produz —, então
-// basta o link já estar compartilhado como "qualquer pessoa com o link"; não
-// há API nem OAuth envolvido.
-//
-// PASTA vs ARQUIVO. `/open?id=…` é a forma que o Drive para desktop gera e
-// serve para os dois; a URL sozinha não distingue, e parseGoogleDriveUrl chuta
-// arquivo. Com o chute errado uma pasta virava um iframe de arquivo, que o
-// Google responde com erro — era por isso que pasta colada em comentário não
-// abria prévia nenhuma.
-//
-// Agora o componente pergunta ao servidor (/api/admin/drive/kind) quando a URL
-// é ambígua, e troca para a visão de pasta se for o caso. A pergunta só sai
-// para link ambíguo: `/drive/folders/…` e `/file/d/…` já se declaram na URL.
-const FOLDER_EMBED = (id: string) => `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(id)}#grid`;
+const folderEmbed = (id: string) => `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(id)}#grid`;
 
-export default function GoogleDrivePreview({ link, url }: { link: GoogleDriveLink; url?: string }) {
-  const [loading, setLoading] = useState(true);
-  const [isFolder, setIsFolder] = useState(link.kind === "folder");
-
-  // Ambíguo = veio de `?id=`, que não prova nada. Só esse caso pergunta.
+/** A comment stays short; the Google iframe is created only when requested. */
+export default function GoogleDrivePreview({ link, url, onLinkClick }: { link: GoogleDriveLink; url?: string; onLinkClick?: (url: string) => boolean }) {
+  const [open, setOpen] = useState(false);
+  const [resolvedKind, setResolvedKind] = useState<"file" | "folder" | null>(null);
+  const [imageFailed, setImageFailed] = useState(false);
   const ambiguous = link.kind === "file" && Boolean(url) && /[?&]id=/.test(url ?? "");
+  const isFolder = resolvedKind ? resolvedKind === "folder" : link.kind === "folder";
+
+  useEffect(() => { setOpen(false); setResolvedKind(null); setImageFailed(false); }, [link.id]);
 
   useEffect(() => {
-    if (!ambiguous) return;
+    if (!open || !ambiguous || resolvedKind) return;
     let alive = true;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/admin/drive/kind?id=${encodeURIComponent(link.id)}`);
-        if (!res.ok || !alive) return;
-        const data = (await res.json()) as { kind?: string };
-        if (alive && data.kind === "folder") {
-          setIsFolder(true);
-          setLoading(true);
-        }
-      } catch {
-        // Sem resposta, segue como arquivo — que é o comportamento anterior.
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [ambiguous, link.id]);
+    void fetch(`/api/admin/drive/kind?id=${encodeURIComponent(link.id)}`)
+      .then(async (response) => response.ok ? await response.json() as { kind?: string } : null)
+      .then((result) => { if (alive) setResolvedKind(result?.kind === "folder" ? "folder" : "file"); })
+      .catch(() => { if (alive) setResolvedKind("file"); });
+    return () => { alive = false; };
+  }, [open, ambiguous, resolvedKind, link.id]);
 
-  const src = isFolder ? FOLDER_EMBED(link.id) : link.embedUrl;
+  const label = isFolder ? "Pasta do Drive" : GOOGLE_DRIVE_KIND_LABEL[link.kind];
+  const src = isFolder ? folderEmbed(link.id) : link.embedUrl;
+  const pending = ambiguous && !resolvedKind;
 
-  return (
-    <span className={`gdrive-preview${isFolder ? " is-folder" : ""}`} contentEditable={false}>
-      {loading ? <span className="gdrive-preview-loading">Carregando prévia…</span> : null}
-      <iframe
-        // A chave força um iframe novo quando a resposta troca arquivo por
-        // pasta: só mudar o src nem sempre dispara o onLoad de novo.
-        key={src}
-        src={src}
-        title={isFolder ? "Pasta do Drive" : GOOGLE_DRIVE_KIND_LABEL[link.kind]}
-        loading="lazy"
-        onLoad={() => setLoading(false)}
-      />
-    </span>
-  );
+  return <>
+    <button type="button" className="gdrive-comment-attachment" onClick={() => { if (!url || !onLinkClick?.(url)) setOpen(true); }} aria-label={`Visualizar ${label} do comentário`}>
+      <span className="gdrive-comment-attachment-thumb">
+        {link.kind === "file" && !ambiguous && !imageFailed ? <img src={`/api/admin/drive/thumbnail/${encodeURIComponent(link.id)}`} alt="" loading="lazy" onError={() => setImageFailed(true)} /> : null}
+        <span aria-hidden>{isFolder ? "▣" : "▧"}</span>
+      </span>
+      <span><b>{label}</b><small>Toque para ampliar</small></span>
+    </button>
+    {open ? createPortal(<div className="kb-modal-backdrop" onClick={() => setOpen(false)}><div className="tm tm-lg docprev-tm gdrive-link-modal" onClick={(event) => event.stopPropagation()}>
+      <button type="button" className="tm-back tm-back-floating" onClick={() => setOpen(false)} aria-label="Voltar para o card"><BackArrowIcon /></button>
+      <div className="tm-head tm-head-tone-purple"><span className="tm-head-ico" aria-hidden>▧</span><div className="tm-head-text"><strong className="docprev-title">{label}</strong><span className="admin-sub">Link citado no comentário</span></div><button type="button" className="kb-modal-close" onClick={() => setOpen(false)} aria-label="Fechar">✕</button></div>
+      <div className="tm-layout"><div className="tm-main gdrive-link-modal-main">{pending ? <p className="admin-sub">Abrindo prévia…</p> : <iframe key={src} src={src} title={label} />}</div><aside className="tm-side"><div className="tm-box docprev-cellbox"><p className="tm-box-label">Origem</p><a href={url ?? link.embedUrl} target="_blank" rel="noreferrer">Abrir no Drive ↗</a></div></aside></div>
+    </div></div>, document.body) : null}
+  </>;
 }

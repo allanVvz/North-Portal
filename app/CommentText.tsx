@@ -40,12 +40,12 @@ function withMentions(text: string, key: number) {
   );
 }
 
-export default function CommentText({ text, onLinkClick, showLinkPreview = false }: { text: string; onLinkClick?: (url: string) => boolean; showLinkPreview?: boolean }) {
+export default function CommentText({ text, onLinkClick, showLinkPreview = false, hidePreviewForUrl }: { text: string; onLinkClick?: (url: string) => boolean; showLinkPreview?: boolean; hidePreviewForUrl?: (url: string) => boolean }) {
   return (
     <>
       {splitCommentText(text).map((part, i) => {
         if (!("url" in part)) return withMentions(part.text, i);
-        const drive = showLinkPreview ? parseGoogleDriveUrl(part.url) : null;
+        const drive = showLinkPreview && !hidePreviewForUrl?.(part.url) ? parseGoogleDriveUrl(part.url) : null;
         return (
           <Fragment key={i}>
             <a
@@ -56,7 +56,7 @@ export default function CommentText({ text, onLinkClick, showLinkPreview = false
             >
               {part.label ?? part.url}
             </a>
-            {drive ? <GoogleDrivePreview link={drive} url={part.url} /> : null}
+            {drive ? <GoogleDrivePreview link={drive} url={part.url} onLinkClick={onLinkClick} /> : null}
           </Fragment>
         );
       })}
