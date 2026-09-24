@@ -10,6 +10,10 @@ import BackArrowIcon from "./BackArrowIcon";
 type Payload = { context: CreativeDriveContext; workspace: Workspace | null };
 type Target = { id: string; title: string };
 type FileItem = { id: string; name: string; mimeType: string; size: number | null; url: string | null; source: string; assetId?: string };
+type SourceKind = "script" | "capture";
+type SourcePages = Record<SourceKind, string | null>;
+const emptySources = (): Record<SourceKind, DriveFile[]> => ({ script: [], capture: [] });
+const emptyPages = (): SourcePages => ({ script: null, capture: null });
 
 async function json<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({})) as T & { error?: string };
@@ -33,11 +37,19 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<FileItem | null>(null);
+  const [extraSources, setExtraSources] = useState(emptySources);
+  const [nextPages, setNextPages] = useState<SourcePages>(emptyPages);
+  const [loadingMore, setLoadingMore] = useState<SourceKind | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => setPayload(await json<Payload>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-workspace`, { cache: "no-store" }))), [activeTaskId]);
+  const load = useCallback(async () => {
+    const next = await json<Payload>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-workspace`, { cache: "no-store" }));
+    setPayload(next);
+    setExtraSources(emptySources());
+    setNextPages(next.workspace?.source_next_page_token ?? emptyPages());
+  }, [activeTaskId]);
   useEffect(() => {
-    setPayload(null); setSelected(null); setError("");
+    setPayload(null); setSelected(null); setError(""); setExtraSources(emptySources()); setNextPages(emptyPages());
     void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar o Drive."));
   }, [load]);
 
@@ -76,14 +88,29 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   async function provision() {
     await changed(async () => json(await fetch(`/api/admin/tasks/${activeTaskId}/drive-workspace`, { method: "POST" })), "provision");
   }
+  async function loadMore(kind: SourceKind) {
+    const token = nextPages[kind];
+    if (!token) return;
+    setLoadingMore(kind); setError("");
+    try {
+      const params = new URLSearchParams({ kind, pageToken: token });
+      const page = await json<{ files: DriveFile[]; nextPageToken: string | null }>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-sources?${params}`, { cache: "no-store" }));
+      setExtraSources((previous) => {
+        const seen = new Set([...(payload?.workspace?.source_files[kind] ?? []), ...previous[kind]].map((file) => file.id));
+        return { ...previous, [kind]: [...previous[kind], ...page.files.filter((file) => !seen.has(file.id))] };
+      });
+      setNextPages((previous) => ({ ...previous, [kind]: page.nextPageToken }));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao carregar mais brutos."); }
+    finally { setLoadingMore(null); }
+  }
 
   const workspace = payload?.workspace;
   const assetsById = useMemo(() => new Map((workspace?.assets ?? []).map((asset) => [asset.id, asset])), [workspace]);
   const linked = useMemo(() => new Map((workspace?.assets ?? []).filter((asset) => asset.role === "raw" && workspace?.raw_links.some((row) => row.asset_id === asset.id)).map((asset) => [asset.drive_file_id, asset.id])), [workspace]);
   const sources = useMemo(() => [
-    ...(workspace?.source_files.script ?? []).map((file) => ({ file, source: "Roteiro" })),
-    ...(workspace?.source_files.capture ?? []).map((file) => ({ file, source: "Captação" })),
-  ], [workspace]);
+    ...(workspace?.source_files.script ?? []).concat(extraSources.script).map((file) => ({ file, source: "Roteiro" })),
+    ...(workspace?.source_files.capture ?? []).concat(extraSources.capture).map((file) => ({ file, source: "Captação" })),
+  ], [workspace, extraSources]);
   const files: FileItem[] = (workspace?.assets ?? []).filter((asset) => asset.role !== "raw" && asset.state === "active").map((asset) => ({
     id: asset.drive_file_id, assetId: asset.id, name: asset.name, mimeType: asset.mime_type, size: asset.size_bytes,
     url: asset.web_view_link, source: asset.role === "final" ? "Final" : "Preview",
@@ -93,6 +120,10 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const preview = selected ?? files.find((file) => file.assetId === initialAssetId) ?? files.find((file) => file.assetId === current?.asset_id) ?? files[0] ?? (firstSource ? { id: firstSource.file.id, name: firstSource.file.name, mimeType: firstSource.file.mimeType, size: null, url: firstSource.file.webViewLink, source: firstSource.source } : null);
   const currentTarget = targets.find((target) => target.id === activeTaskId);
   const targetSummaries = summaries.filter((summary) => summary.capture_task_id === payload?.context.captureTaskId);
+  const availableRaw = targetSummaries[0];
+  const rawCountLabel = availableRaw?.available_raw_count == null
+    ? `${sources.length} arquivo(s) exibido(s)`
+    : `${sources.length} exibidos de ${availableRaw.available_raw_limited ? "≥" : ""}${Math.max(sources.length, availableRaw.available_raw_count)}`;
 
   return <div className="kb-modal-backdrop" onClick={onClose}><div className="tm tm-lg docprev-tm creative-drive-modal" onClick={(event) => event.stopPropagation()}>
     <button type="button" className="tm-back tm-back-floating" onClick={onBack} aria-label="Voltar para o card"><BackArrowIcon /></button>
@@ -103,8 +134,10 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
       {!payload && !error ? <p className="admin-sub">Carregando materiais…</p> : null}
       {payload && (!workspace || workspace.status !== "ready") ? <button type="button" className="admin-btn primary" disabled={Boolean(busy)} onClick={() => void provision()}>{busy === "provision" ? "Preparando…" : "Preparar pastas do Criativo"}</button> : null}
       {workspace?.status === "ready" ? <>
-        <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos da captação</strong><small>{sources.length} arquivo(s)</small></div><p className="admin-sub">Classifique para criar um atalho neste Criativo. O original permanece na Captação. Selecione outro Criativo para vincular o mesmo bruto a ele.</p>
+        <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos da captação</strong><small>{rawCountLabel}</small></div><p className="admin-sub">Classifique para criar um atalho neste Criativo. O original permanece na Captação. Selecione outro Criativo para vincular o mesmo bruto a ele. {workspace.capture_workspace?.daily_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.capture_workspace.daily_folder_id)}`} target="_blank" rel="noreferrer">Abrir a diária no Drive ↗</a> : null}</p>
           {sources.map(({ file, source }) => <div className="creative-drive-file" key={`${source}-${file.id}`}><input type="checkbox" aria-label={`Classificar ${file.name} em ${currentTarget?.title ?? "Criativo"}`} checked={Boolean(linked.get(file.id))} disabled={Boolean(busy)} onChange={() => void link(file, linked.get(file.id))} /><button type="button" className="creative-drive-file-name" onClick={() => setSelected({ id: file.id, name: file.name, mimeType: file.mimeType, size: null, url: file.webViewLink, source })}><b>{file.name}</b><small>{source}</small></button></div>)}
+          {nextPages.script ? <button type="button" className="admin-btn ghost" disabled={Boolean(loadingMore || busy)} onClick={() => void loadMore("script")}>{loadingMore === "script" ? "Carregando…" : "Carregar mais do Roteiro"}</button> : null}
+          {nextPages.capture ? <button type="button" className="admin-btn ghost" disabled={Boolean(loadingMore || busy)} onClick={() => void loadMore("capture")}>{loadingMore === "capture" ? "Carregando…" : "Carregar mais da Captação"}</button> : null}
           {!sources.length && !workspace.source_error ? <p className="admin-sub">Nenhum bruto encontrado nesta diária.</p> : null}
         </section>
         <section className="creative-drive-section"><div className="creative-drive-row"><strong>Preview</strong><button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => input.current?.click()}>{busy === "upload" ? "Enviando…" : "Enviar arquivo"}</button><input ref={input} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} /></div>

@@ -6,6 +6,7 @@ import {
   ensureDriveFolder,
   getDriveItemMetadata,
   listFolderFiles,
+  listFolderFilesPage,
   setDriveItemTrashed,
   type DriveItemMetadata,
 } from "./googleDriveApi";
@@ -80,6 +81,7 @@ export type CreativeDriveWorkspace = {
     script: Awaited<ReturnType<typeof listFolderFiles>>;
     capture: Awaited<ReturnType<typeof listFolderFiles>>;
   };
+  source_next_page_token: { script: string | null; capture: string | null };
   source_error: string | null;
 };
 
@@ -253,8 +255,8 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string):
   failDb(assetsError); failDb(rawError); failDb(versionsError);
   const captureWorkspace = Array.isArray(row.capture_workspace) ? row.capture_workspace[0] : row.capture_workspace;
   const [scriptResult, captureResult] = await Promise.allSettled([
-    captureWorkspace?.script_folder_id ? listFolderFiles(captureWorkspace.script_folder_id, 100, true) : [],
-    captureWorkspace?.capture_folder_id ? listFolderFiles(captureWorkspace.capture_folder_id, 100, true) : [],
+    captureWorkspace?.script_folder_id ? listFolderFilesPage(captureWorkspace.script_folder_id, 100, null, true) : { files: [], nextPageToken: null },
+    captureWorkspace?.capture_folder_id ? listFolderFilesPage(captureWorkspace.capture_folder_id, 100, null, true) : { files: [], nextPageToken: null },
   ]);
   return {
     ...row,
@@ -263,8 +265,12 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string):
     raw_links: rawLinks ?? [],
     final_versions: versions ?? [],
     source_files: {
-      script: scriptResult.status === "fulfilled" ? scriptResult.value : [],
-      capture: captureResult.status === "fulfilled" ? captureResult.value : [],
+      script: scriptResult.status === "fulfilled" ? scriptResult.value.files : [],
+      capture: captureResult.status === "fulfilled" ? captureResult.value.files : [],
+    },
+    source_next_page_token: {
+      script: scriptResult.status === "fulfilled" ? scriptResult.value.nextPageToken : null,
+      capture: captureResult.status === "fulfilled" ? captureResult.value.nextPageToken : null,
     },
     source_error: scriptResult.status === "rejected" || captureResult.status === "rejected"
       ? "Não foi possível listar os brutos desta Captação no Google Drive." : null,

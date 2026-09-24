@@ -470,46 +470,54 @@ export async function fetchDriveThumbnail(fileId: string, size = 480): Promise<D
  * degrade to [], while workspaces opt into strict errors so a failed Drive
  * request never looks like a genuinely empty capture.
  */
-export async function listFolderFiles(folderId: string, limit = 8, strict = false): Promise<DriveFile[]> {
+export type DriveFilePage = { files: DriveFile[]; nextPageToken: string | null };
+
+export async function listFolderFilesPage(folderId: string, limit = 100, pageToken?: string | null, strict = false): Promise<DriveFilePage> {
   if (!folderId || !isGoogleDriveConfigured()) {
     if (strict) throw new HttpError(503, "A integração com Google Drive não está configurada.");
-    return [];
+    return { files: [], nextPageToken: null };
   }
   try {
     const token = await accessToken();
     if (!token) {
       if (strict) throw new HttpError(503, "O Google Drive não retornou acesso à pasta.");
-      return [];
+      return { files: [], nextPageToken: null };
     }
     const params = new URLSearchParams({
       q: `'${folderId.split("'").join("\\'")}' in parents and trashed = false`,
-      fields: "files(id,name,mimeType,thumbnailLink,webViewLink)",
+      fields: "nextPageToken,files(id,name,mimeType,thumbnailLink,webViewLink)",
       // `folder` é uma chave de ordenação do próprio Drive: põe as subpastas
       // antes dos arquivos. Importa desde que a listagem virou navegável — o
       // que se clica para descer um nível fica no topo, não perdido no meio
       // dos arquivos. Depois disso, mais recente primeiro.
       orderBy: "folder,modifiedTime desc",
-      pageSize: String(Math.min(Math.max(limit, 1), 200)),
+      pageSize: String(Math.min(Math.max(limit, 1), 1000)),
       supportsAllDrives: "true",
       includeItemsFromAllDrives: "true",
     });
+    if (pageToken) params.set("pageToken", pageToken);
     const res = await fetch(`${DRIVE_FILES}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
       if (strict) throw new HttpError(502, `Falha ao listar a pasta no Google Drive (HTTP ${res.status}).`);
-      return [];
+      return { files: [], nextPageToken: null };
     }
     const data = (await res.json()) as {
+      nextPageToken?: string;
       files?: { id?: string; name?: string; mimeType?: string; thumbnailLink?: string; webViewLink?: string }[];
     };
-    return (data.files ?? []).map((f) => ({
+    return { files: (data.files ?? []).map((f) => ({
       id: f.id ?? "",
       name: f.name ?? "(sem nome)",
       mimeType: f.mimeType ?? "application/octet-stream",
       thumbnailUrl: f.thumbnailLink ?? null,
       webViewLink: f.webViewLink ?? null,
-    }));
+    })), nextPageToken: data.nextPageToken ?? null };
   } catch (cause) {
     if (strict) throw cause;
-    return [];
+    return { files: [], nextPageToken: null };
   }
+}
+
+export async function listFolderFiles(folderId: string, limit = 8, strict = false): Promise<DriveFile[]> {
+  return (await listFolderFilesPage(folderId, limit, null, strict)).files;
 }

@@ -69,10 +69,17 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   await expect(folder).toContainText(/brutos/, { timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath("real-raw-card.png") });
   await folder.click();
-  const raw = page.locator(".creative-drive-modal .creative-drive-section").first().locator(".creative-drive-file").first();
+  const rawFiles = page.locator(".creative-drive-modal .creative-drive-section").first().locator(".creative-drive-file");
+  const raw = rawFiles.first();
   await expect(raw).toBeVisible({ timeout: 30_000 });
+  const firstPageCount = await rawFiles.count();
+  expect(firstPageCount).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Carregar mais da Captação" }).click();
+  await expect.poll(() => rawFiles.count(), { timeout: 30_000 }).toBeGreaterThan(firstPageCount);
   await raw.locator(".creative-drive-file-name").click();
-  await expect(page.locator(".creative-drive-modal iframe[title^='Preview de']")).toBeVisible();
+  const iframe = page.locator(".creative-drive-modal iframe[title^='Preview de']");
+  await expect(iframe).toBeVisible();
+  await expect(iframe.contentFrame().locator("body[role='application']")).toHaveCount(1, { timeout: 15_000 });
   await page.screenshot({ path: testInfo.outputPath("real-raw-preview.png") });
 });
 
