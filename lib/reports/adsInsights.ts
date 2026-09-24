@@ -410,7 +410,12 @@ export function stageGap(from: FunnelStage, to: FunnelStage): string {
   switch (to.key) {
     case "cliques": return `${rate} clicaram`;
     case "visitas": return `${rate} visitaram`;
-    case "conversas": return `${rate} conversaram`;
+    // Só depois de alcance ou clique. Visita (ao site ou ao perfil) não vira
+    // conversa: a conversa abre pelo botão do anúncio, então "3,41%
+    // conversaram" entre visitas e conversas afirmava uma causa que não existe
+    // (24/09, CRIS). O comentário de `mediaFunnel` já dizia isso; a taxa saía
+    // mesmo assim.
+    case "conversas": return from.key === "alcance" || from.key === "cliques" ? `${rate} conversaram` : "";
     case "vendas": return `${rate} viraram venda`;
     default: return "";
   }
@@ -586,11 +591,11 @@ export function creativeBadges(rows: CreativeRow[], outcome: MediaOutcome, prevR
   const candidates: Record<BadgeKey, () => void> = {
     mais_conversas: () => {
       const r = best((x) => x.conversations, (x) => x.conversations > 0 && (legacy(x) || x.block === "mensagens"));
-      if (r) give(r, { key: "mais_conversas", label: "Mais conversas", tone: "good", detail: `${plural(r.conversations, "conversa")}${r.resultShare !== null ? ` · ${pctRound(r.resultShare)} do total` : ""}` });
+      if (r) give(r, { key: "mais_conversas", label: "Mais conversas", tone: "good", detail: `${plural(r.conversations, "conversa")}${r.resultShare !== null ? ` · ${pctRound(r.resultShare)} do objetivo` : ""}` });
     },
     mais_visitas_perfil: () => {
       const r = best((x) => x.result, (x) => x.block === "trafego_perfil" && x.result > 0);
-      if (r) give(r, { key: "mais_visitas_perfil", label: "Mais visitas ao perfil", tone: "good", detail: `${plural(r.result, "visita")}${r.resultShare !== null ? ` · ${pctRound(r.resultShare)} do total` : ""}` });
+      if (r) give(r, { key: "mais_visitas_perfil", label: "Mais visitas ao perfil", tone: "good", detail: `${plural(r.result, "visita")}${r.resultShare !== null ? ` · ${pctRound(r.resultShare)} do objetivo` : ""}` });
     },
     mais_cliques: () => {
       const r = best((x) => x.clicks, (x) => x.clicks > 0 && (legacy(x) || x.block === "trafego_site"));
@@ -736,7 +741,11 @@ export function mediaAnalysis(i: AnalysisInput): { headline: string; insights: s
   // Criativos.
   const topCreative = [...i.creatives].sort((a, b) => b.result - a.result)[0];
   if (topCreative?.resultShare !== null && topCreative && topCreative.resultShare! >= 50 && i.creatives.length >= 2) {
-    c.push({ key: "criativo_concentra", score: 80, opensReport: false, text: `${topCreative.name} concentrou ${pctRound(topCreative.resultShare!)} das ${topCreative.resultUnit === "conversa" ? "conversas" : `${topCreative.resultUnit}s`}.` });
+    // "das visitas" sozinho ficou falso quando o funil passou a somar a conta
+    // (24/09): a CRIS tem 662 visitas ao perfil no funil e o criativo
+    // "concentrou 100% das visitas" — eram 100% das 132 da campanha de perfil.
+    // `resultShare` é a fatia DENTRO do objetivo do criativo; a frase diz isso.
+    c.push({ key: "criativo_concentra", score: 80, opensReport: false, text: `${topCreative.name} concentrou ${pctRound(topCreative.resultShare!)} das ${topCreative.resultUnit === "conversa" ? "conversas" : `${topCreative.resultUnit}s`}${topCreative.block ? ` de ${CAMPAIGN_BLOCK_LABEL[topCreative.block]}` : ""}.` });
   }
   for (const r of i.creatives) {
     const b = i.badges.get(r.adId) ?? [];

@@ -72,7 +72,7 @@ export function creativeCardView(row: CreativeRow, badges: Badge[], outcome: Med
     row.result > 0 || outcome === "conversas" ? { label: row.resultUnit === "conversa" ? "conversas" : `${row.resultUnit}s`, value: num(row.result) } : null,
     row.costPerResult !== null ? { label: `por ${row.resultUnit}`, value: money(row.costPerResult) } : null,
     { label: "investidos", value: money(row.spend) },
-    row.resultShare !== null ? { label: "do resultado", value: `${row.resultShare.toFixed(1).replace(".", ",")}%` } : null,
+    row.resultShare !== null ? { label: "do objetivo", value: `${row.resultShare.toFixed(1).replace(".", ",")}%` } : null,
     !hideClicks && row.resultUnit !== "clique" && row.result === 0 ? { label: "cliques", value: num(row.clicks) } : null,
   ].filter((m): m is { label: string; value: string } => m !== null);
   return { name: row.name, badges, metrics, preview: asset?.dataUri ?? null, objectType: asset?.objectType ?? null, permalink: asset?.permalink ?? null };
@@ -81,7 +81,15 @@ export function creativeCardView(row: CreativeRow, badges: Badge[], outcome: Med
 /** Linhas da tabela comparativa por objetivo — compartilhada com o relatório 2. */
 export function objectiveTable(objectives: ObjectiveRow[], outcome: MediaOutcome, hidden: { impressions?: boolean; clicks?: boolean } = {}) {
   const Wd = OUTCOME_WORDS[outcome];
-  const best = objectives.filter((o) => o.costPerResult !== null).sort((a, b) => a.costPerResult! - b.costPerResult!)[0];
+  // Cada linha tem o PRÓPRIO resultado (visita, conversa, clique), então "o
+  // menor custo" só se compara entre linhas da mesma unidade. Comparando
+  // tudo, a CRIS de 15–21/09 saía com "Tráfego para o perfil teve o menor
+  // custo por conversa" — R$ 0,51 era custo por VISITA, e a campanha de perfil
+  // não teve conversa nenhuma (24/09). Sem duas linhas comparáveis, não há
+  // vencedor.
+  const comparaveis = objectives.filter((o) => o.costPerResult !== null && o.resultLabel === Wd.Plural);
+  const best = comparaveis.length >= 2 ? [...comparaveis].sort((a, b) => a.costPerResult! - b.costPerResult!)[0] : undefined;
+  const unidade = (label: string) => label.split(" ")[0].toLocaleLowerCase("pt-BR");
   return {
     columns: [
       { key: "obj", label: "Objetivo", flex: 1.5 },
@@ -91,8 +99,11 @@ export function objectiveTable(objectives: ObjectiveRow[], outcome: MediaOutcome
       ...(!hidden.clicks ? [{ key: "clicks", label: "Cliques", align: "right" as const }] : []),
       ...(!hidden.impressions && !hidden.clicks ? [{ key: "ctr", label: "CTR", align: "right" as const, flex: 0.7 }] : []),
       { key: "visits", label: "Visitas", align: "right" as const },
-      { key: "result", label: Wd.Plural, align: "right" as const },
-      { key: "cost", label: `Custo por ${Wd.unit}`, align: "right" as const, flex: 1.1 },
+      // "Resultado", não o desfecho da conta: a coluna mostra o resultado de
+      // CADA objetivo, e com cabeçalho "Conversas" as visitas do site e do
+      // perfil apareciam como se fossem conversas. A unidade vai na célula.
+      { key: "result", label: "Resultado", align: "right" as const, flex: 1.2 },
+      { key: "cost", label: "Custo por resultado", align: "right" as const, flex: 1.1 },
     ],
     rows: objectives.map((o) => ({
       obj: { text: o.label, strong: true },
@@ -102,7 +113,7 @@ export function objectiveTable(objectives: ObjectiveRow[], outcome: MediaOutcome
       clicks: { text: num(o.clicks) },
       ctr: { text: pct(o.ctr) },
       visits: { text: num(o.visits) },
-      result: { text: num(o.result), delta: o.resultDelta, strong: true },
+      result: { text: o.result === null ? "—" : `${num(o.result)} ${unidade(o.resultLabel)}`, delta: o.resultDelta, strong: true },
       cost: { text: o.costPerResult === null ? "—" : money(o.costPerResult), delta: o.costDelta, strong: o === best },
     })),
     bestIndex: best ? objectives.indexOf(best) : -1,

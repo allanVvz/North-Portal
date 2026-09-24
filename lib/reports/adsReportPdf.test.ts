@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderAdsReportPdf, revisionAdjustments, type AdsReportInput } from "./adsReportPdf";
+import { objectiveTable, renderAdsReportPdf, revisionAdjustments, type AdsReportInput } from "./adsReportPdf";
+import type { ObjectiveRow } from "./adsInsights";
 import { BUILTIN_PERFORMANCE_TEMPLATES, DEFAULT_BUILTIN_TEMPLATE } from "@/lib/performanceTemplates";
 import { generateDemoPosts } from "@/app/admin/performance/demoData";
 import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
@@ -121,5 +122,40 @@ describe("renderAdsReportPdf", { timeout: 30_000 }, () => {
     const buf = await renderAdsReportPdf({ ...base, posts: semDesfecho, prevPosts: [], adPosts: [] });
     expect(isPdf(buf)).toBe(true);
     expect(buf.byteLength).toBeGreaterThan(3000);
+  });
+});
+
+// Cada linha da tabela tem o PRÓPRIO resultado. Achados de 24/09 na CRIS: a
+// coluna se chamava "Conversas" e mostrava visitas, e o título dizia que o
+// perfil "teve o menor custo por conversa" com R$ 0,51 por VISITA.
+describe("objectiveTable — resultado de cada objetivo, sem misturar unidades", () => {
+  const semDelta = { pct: null, tone: "neutral" as const, text: "" };
+  const linha = (label: string, resultLabel: string, result: number, cost: number): ObjectiveRow => ({
+    block: "outro", label, resultLabel, spend: 50, spendShare: 33, reach: 5000, impressions: 8000, clicks: 100,
+    ctr: 1.2, visits: null, conversations: null, result, resultShare: null, costPerResult: cost,
+    resultDelta: semDelta, costDelta: semDelta, technical: null,
+  });
+  const cris = [
+    linha("Mensagens", "Conversas", 17, 4.53),
+    linha("Tráfego para o site", "Visitas ao site", 29, 2.37),
+    linha("Tráfego para o perfil", "Visitas ao perfil", 132, 0.51),
+  ];
+
+  it("não elege vencedor comparando custo por visita com custo por conversa", () => {
+    const t = objectiveTable(cris, "conversas");
+    expect(t.best).toBeUndefined();
+    expect(t.bestIndex).toBe(-1);
+  });
+
+  it("com duas linhas da mesma unidade, elege a mais barata", () => {
+    const t = objectiveTable([linha("A", "Conversas", 10, 6), linha("B", "Conversas", 20, 3), cris[2]], "conversas");
+    expect(t.best?.label).toBe("B");
+  });
+
+  it("cabeçalho neutro e unidade na célula", () => {
+    const t = objectiveTable(cris, "conversas");
+    expect(t.columns.map((c) => c.label)).toContain("Resultado");
+    expect(t.columns.map((c) => c.label)).not.toContain("Conversas");
+    expect(t.rows.map((r) => r.result.text)).toEqual(["17 conversas", "29 visitas", "132 visitas"]);
   });
 });

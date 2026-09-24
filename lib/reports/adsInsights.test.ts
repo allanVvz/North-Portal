@@ -427,3 +427,17 @@ describe("mediaTotals · compras", () => {
     expect(mediaTotals([post({ metrics: { custo: 50 } })]).purchases).toBeNull();
   });
 });
+
+describe("stageGap — conversa não sai de visita", () => {
+  const etapa = (key: string, value: number) => ({ key, label: key, value, source: "midia" as const });
+
+  it("visitas → conversas não tem taxa (era o \"3,41% conversaram\" da CRIS)", () => {
+    expect(stageGap(etapa("entradas", 703), etapa("conversas", 24))).toBe("");
+    expect(stageGap(etapa("visitas_perfil", 150), etapa("conversas", 15))).toBe("");
+  });
+
+  it("alcance ou clique → conversas mantém a taxa", () => {
+    expect(stageGap(etapa("alcance", 1000), etapa("conversas", 10))).toContain("conversaram");
+    expect(stageGap(etapa("cliques", 200), etapa("conversas", 10))).toContain("conversaram");
+  });
+});
