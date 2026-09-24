@@ -72,6 +72,14 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   const rawFiles = page.locator(".creative-drive-modal .creative-drive-gallery .creative-drive-tile");
   const raw = rawFiles.first();
   await expect(raw).toBeVisible({ timeout: 30_000 });
+  const rawId = await raw.getAttribute("data-drive-file-id");
+  expect(rawId).toBeTruthy();
+  const preflightResponse = await page.request.get(`/api/admin/tasks/${source!.creative_task_id}/drive-assets?fileId=${encodeURIComponent(rawId!)}`);
+  expect(preflightResponse.ok()).toBe(true);
+  const preflight = await preflightResponse.json() as { payloadValid: boolean; metadataAccessible: boolean; parentMatches: boolean; metadataIsShortcut: boolean };
+  expect(preflight.payloadValid).toBe(true);
+  expect(preflight.metadataAccessible).toBe(true);
+  expect(preflight.parentMatches).toBe(true);
   const thumbnails = page.locator(".creative-drive-gallery .creative-drive-tile-art img");
   await expect.poll(() => thumbnails.evaluateAll((images) => images.slice(0, 12).filter((image) => (image as HTMLImageElement).naturalWidth > 0).length), { timeout: 30_000 }).toBeGreaterThan(0);
   const firstPageCount = await rawFiles.count();

@@ -18,7 +18,7 @@ import { requireAdmin } from "@/lib/supabase/auth";
 import { HttpError } from "@/lib/validation";
 
 export const runtime = "nodejs";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const bodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start_upload"), name: z.string().trim().min(1).max(240), mimeType: z.string().min(1).max(160), size: z.number().int().min(1).max(5 * 1024 * 1024 * 1024) }),
   z.object({ action: z.literal("complete_upload"), driveFileId: z.string().min(3).max(200) }),
