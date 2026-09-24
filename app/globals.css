@@ -5739,6 +5739,8 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .tm-material-media-image { position: relative; display: grid; place-items: center; width: 100%; height: 94px; overflow: hidden; background: #263641; color: white; }
 .tm-material-media-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tm-material-media-image span { position: relative; text-shadow: 0 1px 5px #000; }
+.tm-material-media-image.audio { background: linear-gradient(135deg, #30494e, #182b36); }
+.tm-material-media-image.audio span { font-size: 30px; line-height: 1; }
 .tm-material-media-caption { display: grid; gap: 2px; min-width: 0; padding: 7px 9px; text-align: left; }
 .tm-material-media-caption b, .tm-material-media-caption small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tm-material-media-caption b { font-size: 10px; }
@@ -5820,6 +5822,7 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .creative-drive-gallery.curated .creative-drive-tile-art { aspect-ratio: 16 / 10; }
 .creative-drive-tile-art > img { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .creative-drive-tile-art.video > span { position: relative; z-index: 2; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #0008; color: white; font-size: 16px; }
+.creative-drive-tile-art.audio { background: linear-gradient(135deg, #30494e, #182b36); color: #fff; }
 .creative-drive-tile-caption { display: grid; gap: 2px; min-width: 0; padding: 7px 8px 8px; }
 .creative-drive-tile-caption b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .creative-drive-tile-caption small { color: var(--a-muted); font-size: 10px; }
