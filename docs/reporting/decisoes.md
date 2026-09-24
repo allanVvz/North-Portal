@@ -112,11 +112,17 @@ Par da semana sem IA ≈ US$ 0,0002 (≈ R$ 0,001). Com a IA lendo o comentário
   números) e os do bloco por objetivo podem repetir o mesmo dado — Luiza pediu
   "rodar uma validação de templates para esses contextos, não duplicar dados".
   Falta desenhar como detectar "1 campanha == 1 bloco" e suprimir a redundância.
-- **Campanha "VENDAS | SITE | 03/06 — CÓPIA" na CRIS (achado 22/09, ainda
-  presente em 23/09)**: continua aparecendo como destaque real no PDF —
-  parece um teste/duplicata de campanha que não deveria concorrer por espaço
-  no relatório. Não confirmado com o cliente se é para excluir do relatório
-  ou corrigir na Meta.
+- **Nome de campanha cru no relatório do cliente (24/09)**: a
+  "VENDAS | SITE | 03/06 — Cópia" da CRIS aparece como título de seção no PDF
+  que vai ao cliente. A suspeita de 22/09 de que era teste/duplicata a
+  excluir estava ERRADA e fica registrada para ninguém repetir: o snapshot
+  mostra uma das três campanhas ativas da semana, objetivo OUTCOME_SALES, os
+  7 dias completos, R$ 68,62 (um terço da verba) e dois criativos — é a única
+  campanha de site da conta. Excluí-la apagaria o bloco inteiro de tráfego
+  para o site. O "— Cópia" é só o sufixo que a Meta cola ao duplicar uma
+  campanha para relançar. Problema é cosmético; as saídas são renomear na
+  Meta ou um apelido por campanha no template (nome real no relatório
+  interno, apelido no do cliente).
 - **Design do card de destaque (feito em 23/09)**: largura deixou de ser
   forçada à folha inteira, mas o valor `320` (`reportBlocks.tsx`, padrão
   "wide") e o fundo `C.surface2` foram uma primeira proposta validada
