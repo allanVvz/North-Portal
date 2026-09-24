@@ -119,6 +119,19 @@ function shiftDays(iso: string, days: number): string {
   return isoDay(d);
 }
 
+/** O dia de execução que reproduz a MESMA janela de um relatório já gerado.
+ *
+ *  Uma revisão é outra versão do mesmo relatório — tem de cobrir a mesma
+ *  semana. Antes, regerar usava "hoje" e a janela andava junto: na CRIS
+ *  (23/09) a revisão 1 cobria 15–21/09 e a 2 saiu em 17–23/09, enquanto o
+ *  relatório de conversão da MESMA entrega continuava em 15–21 — dois PDFs da
+ *  mesma semana discordando do período. Como `reportPeriodFor` termina na
+ *  véspera do dia de execução, o dia que reproduz a janela é o seguinte ao fim
+ *  dela. */
+export function runDayForPeriodEnd(periodTo: string): string {
+  return shiftDays(periodTo, 1);
+}
+
 async function fillReportCard(
   admin: AdminClient,
   actingTask: TaskRecord,
@@ -576,7 +589,18 @@ export async function handleTrafficRevisionComment(
   const instruction = options.instruction?.trim() || [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
   if (!instruction) return;
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
-  const today = occ.due_date ?? agencyToday();
+  // A janela vem do relatório que está sendo revisado, não do dia de hoje —
+  // ver runDayForPeriodEnd. `revision: 1` é a âncora: as revisões seguintes
+  // herdariam qualquer deslocamento já ocorrido.
+  const { data: primeiraRevisao, error: revisaoError } = await admin
+    .from("traffic_reports")
+    .select("period_to")
+    .eq("task_id", trafficTask.id)
+    .order("revision", { ascending: true })
+    .limit(1);
+  if (revisaoError) throw revisaoError;
+  const periodoOriginal = (primeiraRevisao?.[0] as { period_to?: string | null } | undefined)?.period_to ?? null;
+  const today = periodoOriginal ? runDayForPeriodEnd(periodoOriginal) : occ.due_date ?? agencyToday();
   const { fileName, url, report } = await fillReportCard(admin, trafficTask, mold, config, windsor, meta, today, occ.id, instruction);
   // A geração levou segundos: o comentário entra no thread que está no banco
   // AGORA (nunca numa cópia lida antes) e o status é compare-and-set. Uma pessoa
