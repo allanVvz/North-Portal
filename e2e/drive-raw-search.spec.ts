@@ -43,11 +43,13 @@ test("busca encontra um bruto da última página da Captação real", async ({ p
   await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
   await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
   await page.getByRole("button", { name: "Brutos da captação" }).click();
+  await page.getByRole("button", { name: "Todos" }).click();
   await page.getByLabel("Encontrar bruto pelo nome").fill(filename.slice(0, 18));
   await page.getByRole("button", { name: "Buscar" }).click();
   const raw = page.locator(`[data-drive-file-id="${fileId}"]`);
   await expect(raw).toBeVisible({ timeout: 30_000 });
-  await expect(raw.getByRole("checkbox", { name: `Selecionar bruto ${filename}` })).toBeVisible();
+  await expect(raw.getByRole("button", { name: /Selecionar/ })).toBeVisible();
+  await expect(raw).not.toContainText(filename);
   await page.screenshot({ path: testInfo.outputPath("raw-search-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("raw-search-narrow.png") });

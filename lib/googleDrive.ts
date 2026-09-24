@@ -83,6 +83,10 @@ export type DriveFile = {
   mimeType: string;
   thumbnailUrl: string | null;
   webViewLink: string | null;
+  originalFilename?: string | null;
+  createdTime?: string | null;
+  modifiedTime?: string | null;
+  captureTime?: string | null;
 };
 
 export type DriveFileKind = "folder" | "image" | "video" | "doc" | "sheet" | "slide" | "pdf" | "other";

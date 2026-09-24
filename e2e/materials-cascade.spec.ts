@@ -101,7 +101,7 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("real-raw-gallery-narrow.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
-  await raw.getByRole("checkbox").check();
+  await raw.getByRole("button", { name: /Selecionar/ }).click();
   await page.getByRole("button", { name: "Escolher pasta" }).click();
   await expect(page.locator(".creative-drive-targets")).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("real-raw-targets-narrow.png") });
@@ -169,16 +169,16 @@ test("Previews e finais usam páginas separadas na pasta do Criativo", async ({ 
   await page.goto(`/admin/operacao?area=planos-entregas&task=${creativeId}`);
   await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
   await page.locator(".creative-drive-tabs button").filter({ hasText: "Previews" }).click();
-  await expect(page.locator(".creative-drive-file")).toHaveCount(12, { timeout: 30_000 });
+  await expect(page.locator(".creative-drive-gallery.curated .creative-drive-tile")).toHaveCount(12, { timeout: 30_000 });
   await page.locator(".creative-drive-pagination").getByRole("button", { name: "Próxima" }).click();
-  await expect(page.locator(".creative-drive-file")).toHaveCount(1);
+  await expect(page.locator(".creative-drive-gallery.curated .creative-drive-tile")).toHaveCount(1);
   await page.locator(".creative-drive-tabs button").filter({ hasText: "Finais" }).click();
-  await expect(page.locator(".creative-drive-history-row")).toHaveCount(12);
+  await expect(page.locator(".creative-drive-gallery.curated .creative-drive-tile")).toHaveCount(12);
   await page.locator(".creative-drive-pagination").getByRole("button", { name: "Próxima" }).click();
-  await expect(page.locator(".creative-drive-history-row")).toHaveCount(1);
+  await expect(page.locator(".creative-drive-gallery.curated .creative-drive-tile")).toHaveCount(1);
 });
 
-test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o vínculo aparece no Criativo", async ({ page }) => {
+test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o vínculo aparece no Criativo", async ({ page }, testInfo) => {
   test.setTimeout(240_000);
   await login(page);
   const indexResponse = await page.request.get("/api/admin/drive/baita/materials");
@@ -200,8 +200,8 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   })));
   expect([...payloads.values()].every((item) => item.workspace?.status === "ready")).toBe(true);
 
-  const raw = { id: "e2e-material-readonly", name: "Bruto compartilhado.mp4", mimeType: "video/mp4", webViewLink: "https://drive.google.com/file/d/e2e-material-readonly/view" };
-  const raw2 = { id: "e2e-material-readonly-2", name: "Segundo bruto.jpg", mimeType: "image/jpeg", webViewLink: "https://drive.google.com/file/d/e2e-material-readonly-2/view" };
+  const raw = { id: "e2e-material-readonly", name: "72bf991001aa993145cd552411bb33ff22cd00aa.mp4", originalFilename: "IMG_0420.MOV", mimeType: "video/mp4", webViewLink: "https://drive.google.com/file/d/e2e-material-readonly/view", createdTime: "2026-09-20T12:00:00Z" };
+  const raw2 = { id: "e2e-material-readonly-2", name: "Segundo bruto.jpg", mimeType: "image/jpeg", webViewLink: "https://drive.google.com/file/d/e2e-material-readonly-2/view", captureTime: "2026:09:19 10:30:00", createdTime: "2026-09-24T12:00:00Z" };
   const linked = new Set<string>();
   let rejectSecondRaw = false;
   const linkedFiles = (id: string) => [raw, raw2].filter((file) => linked.has(`${id}:${file.id}`));
@@ -215,12 +215,12 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
     });
     await route.fulfill({ json: { workspaces } });
   });
-  await page.route("**/api/admin/tasks/*/drive-workspace", async (route) => {
+  await page.route(/\/api\/admin\/tasks\/[^/]+\/drive-workspace(?:\?.*)?$/, async (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[4];
     const payload = payloads.get(id);
     if (!payload || route.request().method() !== "GET") { await route.continue(); return; }
     const assets = mockedAssets(id);
-    const workspace = { ...payload.workspace, source_files: { ...payload.workspace.source_files, capture: [raw, raw2] }, assets: [...payload.workspace.assets, ...assets], raw_links: [...payload.workspace.raw_links, ...assets.map((asset) => ({ asset_id: asset.id, shortcut_drive_file_id: "mock-shortcut" }))] };
+    const workspace = { ...payload.workspace, source_error: null, source_files: { ...payload.workspace.source_files, capture: [raw, raw2] }, assets: [...payload.workspace.assets, ...assets], raw_links: [...payload.workspace.raw_links, ...assets.map((asset) => ({ asset_id: asset.id, shortcut_drive_file_id: "mock-shortcut" }))] };
     await route.fulfill({ json: { ...payload, workspace } });
   });
   await page.route("**/api/admin/tasks/*/drive-assets", async (route) => {
@@ -235,12 +235,14 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
     await route.fulfill({ json: { ok: true } });
   });
 
-  await page.goto(`/admin/operacao?task=${ids[0]}`);
+  await page.goto(`/admin/operacao?area=planos-entregas&task=${ids[0]}`);
+  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
   const firstFolder = page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first();
   await expect(firstFolder).toBeVisible({ timeout: 30_000 });
   await firstFolder.click();
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   const tile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw.id}"]`);
+  const secondTile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw2.id}"]`);
   await expect(tile).toBeVisible({ timeout: 30_000 });
   const firstTarget = page.locator(".creative-drive-target").filter({ hasText: taskRows[0].title });
   const secondTarget = page.locator(".creative-drive-target").filter({ hasText: taskRows[1].title });
@@ -250,48 +252,84 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
     await target.dispatchEvent("dragover", { dataTransfer });
     await target.dispatchEvent("drop", { dataTransfer });
   };
+  await expect(tile).toContainText("IMG_0420.MOV");
+  await expect(secondTile).toContainText("Gravado 19/09");
+  await secondTile.getByRole("button", { name: `Selecionar ${raw2.name}` }).click();
+  await tile.getByRole("button", { name: "Selecionar IMG_0420.MOV" }).click({ modifiers: ["Control"] });
+  await expect(page.locator(".creative-drive-gallery.raw .creative-drive-tile.selected")).toHaveCount(2);
+  await tile.getByRole("button", { name: "Selecionar IMG_0420.MOV" }).click();
+  await expect(page.locator(".creative-drive-gallery.raw .creative-drive-tile.selected")).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath("raw-improved-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath("raw-improved-narrow.png") });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await drop(tile, firstTarget);
-  await expect(page.locator(".creative-drive-tabs button.on")).toContainText("Classificados");
+  await expect(page.locator(".creative-drive-tabs button.on")).toContainText("Brutos da captação");
+  await expect(page.locator(".creative-drive-toast")).toContainText("vinculado");
+  await expect(tile).toHaveCount(0);
+  const noticeBox = await page.locator(".creative-drive-toast").boundingBox();
+  const paginationBox = await page.locator(".creative-drive-pagination").boundingBox();
+  expect(noticeBox && paginationBox && noticeBox.y + noticeBox.height < paginationBox.y).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("classified-notice-desktop.png") });
+  await firstTarget.getByRole("button", { name: "Abrir" }).click();
   await expect(page.locator(`[data-classified-asset-id="${assetIdFor(ids[0], raw.id)}"]`)).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Brutos da captação" }).click();
+  await expect(page.locator(`[data-classified-asset-id="${assetIdFor(ids[0], raw.id)}"]`).getByRole("link", { name: /Baixar/ })).toBeVisible();
+  await expect(page.locator(`[data-classified-asset-id="${assetIdFor(ids[0], raw.id)}"]`).locator("summary")).toContainText("Drive");
+  await secondTarget.getByRole("button", { name: `Ver brutos pendentes para ${taskRows[1].title}` }).click();
+  await expect(page.locator(".creative-drive-tabs button.on")).toContainText("Brutos da captação");
+  await expect(tile).toBeVisible();
   await drop(tile, secondTarget);
   await expect.poll(() => posts.length).toBe(2);
   expect(posts).toEqual(ids.map((creativeId) => ({ creativeId, driveFileId: raw.id })));
-  await expect(page.locator(`[data-classified-asset-id="${assetIdFor(ids[1], raw.id)}"]`)).toBeVisible();
-  await page.getByRole("button", { name: "Brutos da captação" }).click();
-  const secondTile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw2.id}"]`);
-  await tile.getByRole("checkbox", { name: `Selecionar bruto ${raw.name}` }).check();
-  await secondTile.getByRole("checkbox", { name: `Selecionar bruto ${raw2.name}` }).check();
-  await drop(tile, firstTarget);
+  await page.getByRole("button", { name: "Já classificados" }).click();
+  await expect(tile).toBeVisible();
+  await page.getByRole("button", { name: "Pendentes", exact: true }).click();
+  await expect(tile).toHaveCount(0);
+  await firstTarget.getByRole("button", { name: `Ver brutos pendentes para ${taskRows[0].title}` }).click();
+  await expect(tile).toHaveCount(0);
+  await secondTile.getByRole("button", { name: `Selecionar ${raw2.name}` }).click();
+  await firstTarget.getByRole("button", { name: `Classificar brutos em ${taskRows[0].title}` }).click();
   await expect.poll(() => posts.length).toBe(3);
   expect(posts.at(-1)).toEqual({ creativeId: ids[0], driveFileId: raw2.id });
-  await page.getByRole("button", { name: "Brutos da captação" }).click();
-  await secondTile.getByRole("checkbox", { name: `Selecionar bruto ${raw2.name}` }).check();
+  await secondTarget.getByRole("button", { name: `Ver brutos pendentes para ${taskRows[1].title}` }).click();
+  await secondTile.getByRole("button", { name: `Selecionar ${raw2.name}` }).click();
   rejectSecondRaw = true;
   await secondTarget.getByRole("button", { name: `Classificar brutos em ${taskRows[1].title}` }).click();
   await expect(page.locator(".creative-drive-toast")).toContainText("Bruto inválido para esta pasta.");
   rejectSecondRaw = false;
 
   await page.locator(".creative-drive-modal .tm-back").click();
-  await page.goto(`/admin/operacao?task=${ids[0]}`);
+  await page.goto(`/admin/operacao?area=planos-entregas&task=${ids[0]}`);
   await expect(page.locator(".tm-classified-raw").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(`.tm-classified-raw-actions a[href$="/drive-assets/${assetIdFor(ids[0], raw.id)}/download"]`)).toBeVisible();
+  const cardDownload = page.locator(`.tm-classified-raw-actions a[href$="/drive-assets/${assetIdFor(ids[0], raw.id)}/download"]`);
+  for (let pageNumber = 1; pageNumber < 20 && await cardDownload.count() === 0; pageNumber++) {
+    const next = page.locator(".tm-materials").getByRole("button", { name: "Próxima página" });
+    if (await next.isDisabled()) break;
+    await next.click();
+  }
+  await expect(cardDownload).toBeVisible();
+  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
   await page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first().click();
   const classifiedTile = page.locator(`[data-classified-asset-id="${assetIdFor(ids[0], raw.id)}"]`);
   await expect(classifiedTile).toBeVisible({ timeout: 30_000 });
+  await classifiedTile.locator("summary").click();
   await classifiedTile.getByRole("button", { name: "Desassociar" }).click();
   await expect(classifiedTile).toHaveCount(0);
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   const ownTile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw.id}"]`);
-  await ownTile.getByRole("checkbox", { name: `Selecionar bruto ${raw.name}` }).check();
+  await ownTile.getByRole("button", { name: "Selecionar IMG_0420.MOV" }).click();
   await page.locator(".creative-drive-target").filter({ hasText: taskRows[0].title }).getByRole("button", { name: `Classificar brutos em ${taskRows[0].title}` }).click();
+  await page.locator(".creative-drive-target").filter({ hasText: taskRows[0].title }).getByRole("button", { name: "Abrir" }).click();
   await expect(page.locator(`[data-classified-asset-id="${assetIdFor(ids[0], raw.id)}"]`)).toBeVisible({ timeout: 30_000 });
   expect(posts.at(-1)).toEqual({ creativeId: ids[0], driveFileId: raw.id });
 
-  await page.goto(`/admin/operacao?task=${first!.capture_task_id}`);
+  await page.goto(`/admin/operacao?area=planos-entregas&task=${first!.capture_task_id}`);
+  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
   const captureFolder = page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first();
   await expect(captureFolder).toBeVisible({ timeout: 30_000 });
   await captureFolder.click();
+  await page.getByRole("button", { name: "Todos", exact: true }).click();
   await expect(page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw.id}"]`)).toBeVisible({ timeout: 30_000 });
 });
 

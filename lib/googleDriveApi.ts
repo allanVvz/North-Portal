@@ -485,7 +485,7 @@ export async function listFolderFilesPage(folderId: string, limit = 100, pageTok
     }
     const params = new URLSearchParams({
       q: `'${folderId.split("'").join("\\'")}' in parents and trashed = false${nameQuery ? ` and name contains '${nameQuery.split("\\").join("\\\\").split("'").join("\\'")}'` : ""}`,
-      fields: "nextPageToken,files(id,name,mimeType,thumbnailLink,webViewLink)",
+      fields: "nextPageToken,files(id,name,mimeType,thumbnailLink,webViewLink,originalFilename,createdTime,modifiedTime,imageMediaMetadata(time))",
       // `folder` é uma chave de ordenação do próprio Drive: põe as subpastas
       // antes dos arquivos. Importa desde que a listagem virou navegável — o
       // que se clica para descer um nível fica no topo, não perdido no meio
@@ -503,7 +503,7 @@ export async function listFolderFilesPage(folderId: string, limit = 100, pageTok
     }
     const data = (await res.json()) as {
       nextPageToken?: string;
-      files?: { id?: string; name?: string; mimeType?: string; thumbnailLink?: string; webViewLink?: string }[];
+      files?: { id?: string; name?: string; mimeType?: string; thumbnailLink?: string; webViewLink?: string; originalFilename?: string; createdTime?: string; modifiedTime?: string; imageMediaMetadata?: { time?: string } }[];
     };
     return { files: (data.files ?? []).map((f) => ({
       id: f.id ?? "",
@@ -511,6 +511,10 @@ export async function listFolderFilesPage(folderId: string, limit = 100, pageTok
       mimeType: f.mimeType ?? "application/octet-stream",
       thumbnailUrl: f.thumbnailLink ?? null,
       webViewLink: f.webViewLink ?? null,
+      originalFilename: f.originalFilename ?? null,
+      createdTime: f.createdTime ?? null,
+      modifiedTime: f.modifiedTime ?? null,
+      captureTime: f.imageMediaMetadata?.time ?? null,
     })), nextPageToken: data.nextPageToken ?? null };
   } catch (cause) {
     if (strict) throw cause;

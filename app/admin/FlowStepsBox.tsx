@@ -28,11 +28,19 @@ function ChainPicker({
   candidates,
   busy,
   onPick,
+  action = "link",
+  blockedReason,
+  onRemove,
+  candidateDetail,
 }: {
   step: WorkflowStepDef;
   candidates: TaskRecord[];
   busy: boolean;
   onPick: (task: TaskRecord) => void;
+  action?: "link" | "replace";
+  blockedReason?: string | null;
+  onRemove?: () => void;
+  candidateDetail?: (task: TaskRecord) => string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -42,28 +50,32 @@ function ChainPicker({
   const { anchorRef, popoverRef, style } = useFloatingPopover(open, "start");
   useDismissOnOutside(open, () => setOpen(false), [anchorRef, popoverRef]);
 
-  const shown = q.trim() ? candidates.filter((c) => taskMatchesQuery(c, q)) : candidates;
+  const shown = blockedReason ? [] : q.trim() ? candidates.filter((c) => taskMatchesQuery(c, q)) : candidates;
 
   return (
     <div className="tm-chain" ref={anchorRef}>
       <button
         type="button"
-        className="tm-member-unlink tm-member-chain"
-        title={`Ligar um card existente à etapa ${step.label}`}
-        aria-label={`Ligar um card existente à etapa ${step.label}`}
+        className="tm-member-unlink tm-member-chain tm-chain-replace"
+        title={blockedReason ?? `${action === "replace" ? "Trocar" : "Ligar"} um card existente à etapa ${step.label}`}
+        aria-label={`${action === "replace" ? "Trocar card de" : "Ligar um card existente à etapa"} ${step.label}`}
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
-      >🔗</button>
+      >{action === "replace" ? "Trocar" : "Vincular"}</button>
 
       <FloatingPanel open={open} popoverRef={popoverRef} style={style} className="tm-chain-panel">
-        <p className="tm-chain-title">Ligar um card à etapa {step.label}</p>
+        <p className="tm-chain-title">{action === "replace" ? "Substituir card de" : "Ligar um card à etapa"} {step.label}</p>
+        {action === "replace" ? <p className="admin-sub">O card atual continuará independente; só a ligação com esta Entrega será trocada.</p> : null}
+        {step.key === "captacao" ? <p className="admin-sub">Escolha a Captação que contém os brutos desta gravação. A Diária de Gravação é um card diferente.</p> : null}
+        {blockedReason ? <p className="admin-sub" role="status">{blockedReason}</p> : null}
         <input
           className="tm-chain-search"
           placeholder="Buscar card…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           autoFocus
+          disabled={Boolean(blockedReason)}
         />
         <div className="tm-chain-list">
           {shown.map((candidate) => (
@@ -75,11 +87,11 @@ function ChainPicker({
               disabled={busy}
             >
               <TaskKindIcon kind={candidate.kind} size="sm" />
-              <span className="tm-chain-option-title">{candidate.title}</span>
+              <span className="tm-chain-option-content"><span className="tm-chain-option-title">{candidate.title}</span>{candidateDetail?.(candidate) ? <small>{candidateDetail(candidate)}</small> : null}</span>
               <span className="tm-chain-option-status">{STATUS_LABEL[candidate.status]}</span>
             </button>
           ))}
-          {shown.length === 0 ? (
+          {!blockedReason && shown.length === 0 ? (
             <p className="admin-sub tm-chain-empty">
               {candidates.length === 0
                 ? `Nenhum card de ${step.label} neste cliente. Esta etapa também nasce sozinha quando a anterior é concluída.`
@@ -87,6 +99,7 @@ function ChainPicker({
             </p>
           ) : null}
         </div>
+        {onRemove ? <button type="button" className="tm-chain-remove" onClick={() => { setOpen(false); onRemove(); }} disabled={busy}>Desvincular este card</button> : null}
       </FloatingPanel>
     </div>
   );
@@ -103,6 +116,8 @@ export default function FlowStepsBox({
   onOpenStep,
   onUnlinkStep,
   onLinkStep,
+  onReplaceStep,
+  candidateDetail,
   onPatchStep,
   onCommentStep,
 }: {
@@ -120,6 +135,8 @@ export default function FlowStepsBox({
   onOpenStep: (task: TaskRecord) => void;
   onUnlinkStep: (task: TaskRecord) => void;
   onLinkStep: (task: TaskRecord, workflowStepId: string) => void;
+  onReplaceStep: (current: TaskRecord, replacement: TaskRecord, workflowStepId: string) => void;
+  candidateDetail?: (task: TaskRecord) => string | null;
   onPatchStep: (task: TaskRecord, patch: StepPatch) => Promise<void>;
   onCommentStep: (task: TaskRecord, text: string) => Promise<void>;
 }) {
@@ -141,23 +158,28 @@ export default function FlowStepsBox({
       <p className="tm-box-label">
         Etapas ({steps.length}/{plannedSteps.length})
       </p>
+      <p className="tm-relation-hint">Cada etapa é um card. Use <b>Trocar</b> para reaproveitar um existente; o card atual continua disponível. Ao concluir uma etapa, a próxima é criada automaticamente.</p>
       <div className="tm-member-list">
         {plannedSteps.map((step) => {
           const card = steps.find((task) => task.parents.some((parent) => parent.workflow_step_id === step.workflow_step_id)) ?? null;
+          const previousSteps = plannedSteps.filter((candidate) => candidate.order_index < step.order_index);
+          const previousOpen = previousSteps.find((candidate) => !steps.some((task) => task.completed_at && task.parents.some((parent) => parent.workflow_step_id === candidate.workflow_step_id)));
+          const blockedReason = previousOpen ? `Conclua ${previousOpen.label} antes de vincular ${step.label}.` : null;
+          const laterLinked = steps.some((task) => task.parents.some((parent) => plannedSteps.some((candidate) => candidate.workflow_step_id === parent.workflow_step_id && candidate.order_index > step.order_index)));
           if (card) {
             return (
               <StepRow
                 key={step.key}
                 card={card}
                 label={step.label}
+                showCardTitle
                 isCurrent={current?.id === card.id}
                 isOpenCard={card.id === currentTaskId}
                 team={team}
                 busy={busy}
                 canOpen={canOpen}
                 onOpen={() => onOpenStep(card)}
-                onUnlink={() => onUnlinkStep(card)}
-                unlinkTitle={`Desligar ${card.title} da entrega`}
+                trailingAction={<ChainPicker step={step} candidates={candidatesFor(step.task_type_id)} candidateDetail={candidateDetail} busy={busy} action="replace" blockedReason={blockedReason} onPick={(replacement) => onReplaceStep(card, replacement, step.workflow_step_id)} onRemove={step.workflow_step_id !== plannedSteps[0]?.workflow_step_id && !laterLinked ? () => onUnlinkStep(card) : undefined} />}
                 onPatch={onPatchStep}
                 onComment={onCommentStep}
               />
@@ -171,7 +193,9 @@ export default function FlowStepsBox({
               <ChainPicker
                 step={step}
                 candidates={candidatesFor(step.task_type_id)}
+                candidateDetail={candidateDetail}
                 busy={busy}
+                blockedReason={blockedReason}
                 onPick={(task) => onLinkStep(task, step.workflow_step_id)}
               />
               <span className="tm-member-open tm-member-pending">
@@ -180,13 +204,13 @@ export default function FlowStepsBox({
                 <TaskKindIcon kind="operacional" size="sm" />
                 <span className="tm-member-title">{step.label}</span>
                 <span className="tm-member-status">
-                  {step.creation_trigger === "ads_report_approved"
+                  {blockedReason ?? (step.creation_trigger === "ads_report_approved"
                     ? "Nasce quando o Relatório de anúncios for aprovado"
                     : step.creation_trigger === "feedback_approved"
                       ? "Nasce quando o Feedback for aprovado"
                       : step.creation_trigger === "delivery_created"
                         ? "É criada junto com a Entrega"
-                        : "Nasce quando a etapa anterior for aprovada"}
+                        : "Nasce quando a etapa anterior for aprovada")}
                   {step.lead_days ? ` · prazo de ${step.lead_days} dia${step.lead_days === 1 ? "" : "s"}` : ""}
                 </span>
               </span>

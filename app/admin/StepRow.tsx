@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import TaskKindIcon from "./TaskKindIcon";
 import MentionTextarea from "./MentionTextarea";
 import CommentAvatar from "./CommentAvatar";
@@ -45,6 +45,7 @@ function CommentIcon() {
 export default function StepRow({
   card,
   label,
+  showCardTitle = false,
   isCurrent = false,
   isOpenCard = false,
   team,
@@ -53,12 +54,14 @@ export default function StepRow({
   onOpen,
   onUnlink,
   unlinkTitle,
+  trailingAction,
   onPatch,
   onComment,
   lockDateWhenDone = false,
 }: {
   card: TaskRecord;
   label: string;
+  showCardTitle?: boolean;
   /** A etapa em que a corrente está agora — o pai espelha esta. */
   isCurrent?: boolean;
   /** O card aberto no modal: não se edita pela linha (o formulário está aberto). */
@@ -69,6 +72,7 @@ export default function StepRow({
   onOpen: () => void;
   onUnlink?: () => void;
   unlinkTitle?: string;
+  trailingAction?: ReactNode;
   onPatch: (card: TaskRecord, patch: StepPatch) => Promise<void>;
   onComment: (card: TaskRecord, text: string) => Promise<void>;
   /** Só a caixa "Execuções da recorrência" do MOLDE usa isto: concluída, a
@@ -125,9 +129,9 @@ export default function StepRow({
           aria-label={done ? `Reabrir ${label}` : `Concluir ${label}`}
         />
         {showState ? <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span> : null}
-        <button type="button" className="tm-member-open" onClick={onOpen} disabled={!canOpen || busy || isOpenCard} title={`Abrir ${label}`}>
+        <button type="button" className="tm-member-open" onClick={onOpen} disabled={!canOpen || busy || isOpenCard} title={`Abrir ${card.title}`}>
           <TaskKindIcon kind={card.kind} size="sm" />
-          <span className="tm-member-title">{label}</span>
+          {showCardTitle ? <span className="tm-step-card-name"><strong>{label}</strong><small title={card.title}>{card.title}</small></span> : <span className="tm-member-title">{label}</span>}
           {isCurrent ? <span className="tm-step-current">etapa atual</span> : null}
           {isOpenCard ? <span className="tm-member-status">você está aqui</span> : <span className="tm-member-arrow" aria-hidden>↗</span>}
         </button>
@@ -184,6 +188,7 @@ export default function StepRow({
         {onUnlink ? (
           <button type="button" className="tm-member-unlink" title={unlinkTitle} aria-label={unlinkTitle} onClick={onUnlink} disabled={busy}>✕</button>
         ) : null}
+        {trailingAction}
       </div>
 
       {commentsOpen ? (

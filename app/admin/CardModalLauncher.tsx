@@ -56,12 +56,17 @@ export default function CardModalLauncher({
   // papel nos comentários (TaskModal); independente de cliente.
   const [responsibilityAssignments, setResponsibilityAssignments] = useState<ResponsibilityAssignment[]>([]);
   const rootTaskIdRef = useRef(task.id);
+  // Respostas de GET iniciadas ao abrir o modal podem chegar depois de uma
+  // troca/vínculo. Preserve as mutações desta sessão ao mesclar o carregamento.
+  const patchedTaskIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     setClientTasks((current) => {
       const merged = new Map(current.map((row) => [row.id, row]));
-      merged.set(task.id, task);
-      for (const related of initialRelatedTasks) merged.set(related.id, related);
+      if (!patchedTaskIdsRef.current.has(task.id)) merged.set(task.id, task);
+      for (const related of initialRelatedTasks) {
+        if (!patchedTaskIdsRef.current.has(related.id)) merged.set(related.id, related);
+      }
       return Array.from(merged.values());
     });
     // A router.refresh after activating a future execution recreates the root
@@ -107,7 +112,9 @@ export default function CardModalLauncher({
         if (cancelled || !data?.tasks) return;
         setClientTasks((current) => {
           const merged = new Map(current.map((row) => [row.id, row]));
-          for (const row of data.tasks as TaskRecord[]) merged.set(row.id, row);
+          for (const row of data.tasks as TaskRecord[]) {
+            if (!patchedTaskIdsRef.current.has(row.id)) merged.set(row.id, row);
+          }
           return Array.from(merged.values());
         });
       })
@@ -129,6 +136,7 @@ export default function CardModalLauncher({
   }, []);
 
   const patchLocal = (t: TaskRecord) => {
+    patchedTaskIdsRef.current.add(t.id);
     setClientTasks((rows) => rows.some((r) => r.id === t.id) ? rows.map((r) => (r.id === t.id ? t : r)) : [...rows, t]);
   };
   const patchActiveTask = (t: TaskRecord) => {

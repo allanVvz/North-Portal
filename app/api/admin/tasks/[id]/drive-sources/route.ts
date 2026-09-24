@@ -32,7 +32,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (error) throw error;
     const folderId = kind === "script" ? data?.script_folder_id : data?.capture_folder_id;
     if (!folderId) throw new HttpError(409, "A pasta da Captação ainda não está pronta.");
-    const page = await listFolderFilesPage(folderId, 24, pageToken, true, query);
+    const page = await listFolderFilesPage(folderId, 1000, pageToken, true, query);
     return NextResponse.json(page, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return apiError(error);

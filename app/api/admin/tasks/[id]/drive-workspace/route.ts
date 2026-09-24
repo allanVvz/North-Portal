@@ -8,7 +8,7 @@ import { HttpError } from "@/lib/validation";
 export const runtime = "nodejs";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     await requireAdmin();
     const { id } = await context.params;
@@ -16,7 +16,8 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     const db = createAdminClient();
     // Resolve primeiro: impede consultar por tentativa um workspace fora do piloto.
     const driveContext = await resolveCreativeDriveContext(db, id);
-    return NextResponse.json({ context: driveContext, workspace: await getCreativeDriveWorkspace(db, id) });
+    const includeSources = new URL(request.url).searchParams.get("sources") !== "0";
+    return NextResponse.json({ context: driveContext, workspace: await getCreativeDriveWorkspace(db, id, includeSources) });
   } catch (error) {
     return apiError(error);
   }

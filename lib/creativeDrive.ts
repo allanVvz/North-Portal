@@ -242,7 +242,7 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
   return getCreativeDriveWorkspace(db, creativeTaskId) as Promise<CreativeDriveWorkspace>;
 }
 
-export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string): Promise<CreativeDriveWorkspace | null> {
+export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string, includeSources = true): Promise<CreativeDriveWorkspace | null> {
   const { data: row, error } = await db.from("drive_creative_workspaces")
     .select("*,capture_workspace:drive_capture_workspaces(capture_date,daily_folder_id,script_folder_id,capture_folder_id)")
     .eq("creative_task_id", creativeTaskId).maybeSingle();
@@ -255,10 +255,10 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string):
   ]);
   failDb(assetsError); failDb(rawError); failDb(versionsError);
   const captureWorkspace = Array.isArray(row.capture_workspace) ? row.capture_workspace[0] : row.capture_workspace;
-  const [scriptResult, captureResult] = await Promise.allSettled([
-    captureWorkspace?.script_folder_id ? listFolderFilesPage(captureWorkspace.script_folder_id, 24, null, true) : { files: [], nextPageToken: null },
-    captureWorkspace?.capture_folder_id ? listFolderFilesPage(captureWorkspace.capture_folder_id, 24, null, true) : { files: [], nextPageToken: null },
-  ]);
+  const [scriptResult, captureResult] = includeSources ? await Promise.allSettled([
+    captureWorkspace?.script_folder_id ? listFolderFilesPage(captureWorkspace.script_folder_id, 1000, null, true) : { files: [], nextPageToken: null },
+    captureWorkspace?.capture_folder_id ? listFolderFilesPage(captureWorkspace.capture_folder_id, 1000, null, true) : { files: [], nextPageToken: null },
+  ]) : [{ status: "fulfilled", value: { files: [], nextPageToken: null } }, { status: "fulfilled", value: { files: [], nextPageToken: null } }] as const;
   return {
     ...row,
     capture_workspace: captureWorkspace ?? null,
@@ -279,7 +279,7 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string):
 }
 
 async function readyWorkspace(db: Db, creativeTaskId: string) {
-  const workspace = await getCreativeDriveWorkspace(db, creativeTaskId);
+  const workspace = await getCreativeDriveWorkspace(db, creativeTaskId, false);
   if (!workspace || workspace.status !== "ready" || !workspace.preview_folder_id || !workspace.creative_folder_id) {
     throw new HttpError(409, "O workspace ainda nao esta pronto.");
   }

@@ -348,6 +348,7 @@ export default function TaskModal({
   const [comment, setComment] = useState("");
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
+  const [recentlyCreatedCard, setRecentlyCreatedCard] = useState<TaskRecord | null>(null);
   const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final" } | null>(null);
   const [materialTab, setMaterialTab] = useState<"raw" | "preview" | "final" | "docs" | "links">("links");
   const [materialPage, setMaterialPage] = useState(1);
@@ -503,7 +504,11 @@ export default function TaskModal({
   }
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") void closeAfterSave();
+      if (event.key !== "Escape") return;
+      // O primeiro Escape fecha o seletor aberto. O listener do seletor e este
+      // listener recebem o mesmo evento antes de o React desmontar o painel.
+      if (document.querySelector(".tm-chain-panel, .pac-panel")) return;
+      void closeAfterSave();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
@@ -566,6 +571,7 @@ export default function TaskModal({
     return workspace.assets.filter((asset) => asset.role === "raw" && asset.state === "active" && linked.has(asset.id));
   }, [cardWorkspaces, liveTask?.id]);
   useEffect(() => { setMaterialTab(liveTask?.kind === "criativo" ? "raw" : "links"); setMaterialPage(1); }, [liveTask?.id, liveTask?.kind]);
+  useEffect(() => { setRecentlyCreatedCard(null); }, [liveTask?.id]);
   const creativeCandidates = useMemo(() => {
     const candidates = [...materialCards, ...flowDeliveries];
     return Array.from(new Map(candidates.filter((card) => card.kind === "criativo" && !card.subtype && planParentIdsOf(card).includes(BAITA_DRIVE_PLAN_ID)).map((card) => [card.id, card])).values());
@@ -790,7 +796,7 @@ export default function TaskModal({
   useEffect(() => {
     if (!canCrossClientPlan) { setCrossClientPool([]); return; }
     let cancelled = false;
-    fetch("/api/admin/tasks")
+    fetch(`/api/admin/tasks${slug ? `?slug=${encodeURIComponent(slug)}` : ""}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { tasks: TaskRecord[] } | null) => { if (!cancelled && data?.tasks) setCrossClientPool(data.tasks); })
       .catch(() => {});
@@ -923,13 +929,34 @@ export default function TaskModal({
     Boolean(recorrenciaSlot?.id && !recorrenciaSlot.parent) ||
     (hasPlanKind && planParentIds.length > planParents.length);
 
+  // O quadro pode ter carregado apenas uma área/status. O seletor de etapa
+  // precisa enxergar todos os cards reutilizáveis do cliente, inclusive os que
+  // já servem outros Criativos e os concluídos.
+  const [stepCandidateTasks, setStepCandidateTasks] = useState<TaskRecord[]>([]);
+  useEffect(() => {
+    if (!chainDelivery?.id || !chainDelivery.client_id) { setStepCandidateTasks([]); return; }
+    let cancelled = false;
+    fetch("/api/admin/tasks")
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { tasks?: TaskRecord[] } | null) => {
+        if (!cancelled) setStepCandidateTasks((data?.tasks ?? []).filter((task) => task.client_id === chainDelivery.client_id));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [chainDelivery?.id, chainDelivery?.client_id, slug]);
+  const stepCandidatePool = useMemo(() => {
+    const merged = new Map(stepCandidateTasks.map((card) => [card.id, card]));
+    for (const card of clientTasks) merged.set(card.id, card);
+    return [...merged.values()];
+  }, [clientTasks, stepCandidateTasks]);
+
   /** Cards que podem ocupar uma etapa: mesmo cliente, mesmo task_type_id, e
    * ainda não ligados a esta entrega. Um roteiro já ligado a OUTRA
    * entrega aparece de propósito — compartilhar é o objetivo. E nada de filtrar
    * por status: um card concluído continua associável. */
   function chainCandidates(taskTypeId: string) {
     if (!chainDelivery) return [];
-    return clientTasks.filter(
+    return stepCandidatePool.filter(
       (t) =>
         t.id !== chainDelivery.id &&
         t.client_id === chainDelivery.client_id &&
@@ -941,7 +968,22 @@ export default function TaskModal({
         // não tem `parents` nenhum — sem a guarda isto quebrava a árvore inteira
         // (TypeError: Cannot read properties of undefined) só por comentar um card.
         !(t.parents ?? []).some((parent) => parent.id === chainDelivery.id),
-    );
+    ).sort((a, b) => {
+      const aRaw = materialWorkspaces.find((workspace) => workspace.capture_task_id === a.id)?.available_raw_count ?? 0;
+      const bRaw = materialWorkspaces.find((workspace) => workspace.capture_task_id === b.id)?.available_raw_count ?? 0;
+      if (aRaw !== bRaw) return bRaw - aRaw;
+      if (Boolean(a.completed_at) !== Boolean(b.completed_at)) return a.completed_at ? -1 : 1;
+      return (b.due_date ?? "").localeCompare(a.due_date ?? "") || a.title.localeCompare(b.title, "pt-BR");
+    });
+  }
+  function stepCandidateDetail(card: TaskRecord): string | null {
+    const workspaces = materialWorkspaces.filter((workspace) => workspace.capture_task_id === card.id);
+    if (workspaces.length) {
+      const count = workspaces[0].available_raw_count;
+      return `${count == null ? "Drive vinculado" : workspaces[0].available_raw_limited ? "Brutos no Drive" : `${count} brutos no Drive`} · ${workspaces.length} Criativo(s)`;
+    }
+    const uses = card.parents.filter((parent) => parent.relation_kind === "workflow_step").length;
+    return uses ? `Usado em ${uses} Criativo(s)` : card.completed_at ? "Concluído" : null;
   }
 
   async function linkStepCard(task: TaskRecord, workflowStepId: string) {
@@ -962,6 +1004,26 @@ export default function TaskModal({
       if (body?.id) onTaskPatched?.(body as TaskRecord);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível ligar o card.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function replaceStepCard(current: TaskRecord, replacement: TaskRecord, workflowStepId: string) {
+    if (!chainDelivery) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/tasks/${chainDelivery.id}/relations`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_child_id: current.id, child_id: replacement.id, workflow_step_id: workflowStepId }),
+      });
+      const result = await response.json().catch(() => null) as { previous?: TaskRecord; current?: TaskRecord; error?: string } | null;
+      if (!response.ok || !result?.current || !result.previous) throw new Error(result?.error ?? "Não foi possível trocar o card da etapa.");
+      onTaskPatched?.(result.previous);
+      onTaskPatched?.(result.current);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível trocar o card da etapa.");
     } finally {
       setBusy(false);
     }
@@ -1087,7 +1149,7 @@ export default function TaskModal({
   // etapa nenhuma). A porta é a mesma do NewTaskButton — POST
   // /api/admin/tasks?scope=task — então um tipo `behavior:'entrega'` já
   // cascateia sozinho (createFlowDelivery), sem lógica nova aqui.
-  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string; kind: string; description?: string }) {
+  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string; kind: string; description?: string }, showNextAction = false) {
     if (!liveTask) return;
     setBusy(true);
     setError("");
@@ -1108,7 +1170,8 @@ export default function TaskModal({
         body: JSON.stringify(draft.clientSlug ? { ...body, slug: draft.clientSlug } : body),
       });
       if (!res.ok) throw new Error();
-      onTaskPatched?.(await res.json());
+      const created = await res.json() as TaskRecord;
+      onTaskPatched?.(created);
       // Para um tipo Entrega, a resposta é a PRIMEIRA ETAPA — quem realmente
       // entrou no plano foi a entrega (route.ts liga `flow.delivery.id`, não a
       // etapa), e a resposta do POST não a traz. Sem reler os filhos do plano,
@@ -1119,6 +1182,13 @@ export default function TaskModal({
         .catch(() => null);
       if (Array.isArray(related?.tasks)) {
         for (const relatedTask of related.tasks as TaskRecord[]) onTaskPatched?.(relatedTask);
+      }
+      if (showNextAction) {
+        const deliveryId = created.parents?.find((parent) => parent.relation_kind === "workflow_step")?.id;
+        const target = ((related?.tasks ?? []) as TaskRecord[]).find((card) => card.id === (deliveryId ?? created.id))
+          ?? (deliveryId ? await fetch(`/api/admin/tasks/${deliveryId}`).then((response) => response.ok ? response.json() as Promise<TaskRecord> : null).catch(() => null) : null)
+          ?? created;
+        setRecentlyCreatedCard(target);
       }
     } catch {
       setError("Não foi possível criar a atividade.");
@@ -1710,6 +1780,7 @@ export default function TaskModal({
           </div>
         )}
 
+        {error ? <p className="tm-error-banner" role="alert">{error}</p> : null}
         <div className="tm-layout">
           <div className="tm-main">
             {mode === "new" ? (
@@ -1925,12 +1996,14 @@ export default function TaskModal({
                 steps={chainSteps}
                 currentTaskId={liveTask.id}
                 candidatesFor={chainCandidates}
+                candidateDetail={stepCandidateDetail}
                 busy={busy}
                 canOpen={Boolean(onOpenRelatedTask)}
                 team={adminReviewers}
                 onOpenStep={(card) => void openRelatedTask(card)}
                 onUnlinkStep={(card) => void unlinkMember(card.id, liveTask.id)}
                 onLinkStep={(card, workflowStepId) => void linkStepCard(card, workflowStepId)}
+                onReplaceStep={(current, replacement, workflowStepId) => void replaceStepCard(current, replacement, workflowStepId)}
                 onPatchStep={patchRelatedCard}
                 onCommentStep={commentRelatedCard}
               />
@@ -1958,6 +2031,7 @@ export default function TaskModal({
                     )
                   ) : null}
                 </div>
+                <p className="tm-relation-hint">{isRecurringParent ? "Crie uma execução ou vincule um card existente escolhendo a data." : "Crie um card novo ou vincule um existente. Ele aparecerá aqui e poderá ser aberto para organizar suas etapas."}</p>
                 <div className="tm-member-list">
                   {liveTask ? (
                     planMembers.map((m) => (
@@ -1999,6 +2073,7 @@ export default function TaskModal({
                     </p>
                   ) : null}
                 </div>
+                {recentlyCreatedCard && liveTask && !isRecurringParent && onOpenRelatedTask ? <div className="tm-relation-next"><span>✓ <b>{recentlyCreatedCard.title}</b> criado no plano.</span><button type="button" onClick={() => void openRelatedTask(recentlyCreatedCard)}>Abrir card e organizar etapas ↗</button></div> : null}
                 {isRecurringParent && liveTask ? (
                   // O check de um ciclo não é mais um log à parte
                   // (`payload.cycle_log`), que podia mostrar uma data
@@ -2044,7 +2119,7 @@ export default function TaskModal({
                       }));
                       if (liveTask) {
                         void (async () => {
-                          for (const row of rows) await createLinkedActivity(row);
+                          for (const row of rows) await createLinkedActivity(row, rows.length === 1);
                         })();
                         return;
                       }
@@ -2128,8 +2203,6 @@ export default function TaskModal({
                 )}
               </div>
             ) : null}
-
-            {error ? <p className="admin-error">{error}</p> : null}
 
             {mode === "edit" && materialTabs.length > 0 ? (
               <section className="tm-materials" aria-label="Materiais do card">

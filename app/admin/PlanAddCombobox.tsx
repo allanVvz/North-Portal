@@ -86,6 +86,7 @@ export default function PlanAddCombobox({
   const [open, setOpen] = useState(false);
   const [volume, setVolume] = useState<ContentVolume>(EMPTY_VOLUME);
   const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
+  const [singleType, setSingleType] = useState(defaultType);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -137,6 +138,7 @@ export default function PlanAddCombobox({
     setQuery("");
     setVolume(EMPTY_VOLUME);
     setTypeCounts({});
+    setSingleType(defaultType);
     setOpen(false);
   }
 
@@ -146,17 +148,17 @@ export default function PlanAddCombobox({
       onCreate(items);
       reset();
     } else if (base) {
-      onCreate([{ title: base, kind: defaultType }]);
+      onCreate([{ title: base, kind: singleType }]);
       reset();
     }
   }
 
-  const actionLabel = items.length ? `Criar ${items.length}` : base ? "Criar" : null;
+  const actionLabel = items.length ? `Criar ${items.length}` : base ? `Criar ${types.find((type) => type.key === singleType)?.label ?? "card"}` : null;
   const preview = [
     contentSteps.length ? `${contentSteps.length} etapas de conteúdo (${contentSteps.map((step) => step.title.split(" — ")[0]).join(", ")})` : "",
     ...types.filter((type) => (typeCounts[type.key] ?? 0) > 0).map((type) => `${typeCounts[type.key]} × ${type.label}${type.behavior === "entrega" ? " com fluxo" : ""}`),
   ].filter(Boolean).join(" + ");
-  const defaultTypeLabel = types.find((type) => type.key === defaultType)?.label.toLowerCase() ?? "tarefa";
+  const defaultTypeLabel = types.find((type) => type.key === singleType)?.label.toLowerCase() ?? "tarefa";
 
   return (
     <div className={`pac${open ? " is-open" : ""}`} ref={ref}>
@@ -179,7 +181,7 @@ export default function PlanAddCombobox({
           onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); create(); } }}
-          placeholder={chips.length ? "Título dos cards (opcional)…" : "Adicionar ao plano — buscar, criar ou gerar conteúdos…"}
+          placeholder={chips.length ? "Título dos cards (opcional)…" : "Buscar um card ou escrever o nome do novo…"}
         />
         {actionLabel ? (
           <button type="button" className="admin-btn primary pac-create" disabled={busy} onClick={(event) => { event.stopPropagation(); create(); }}>
@@ -210,6 +212,14 @@ export default function PlanAddCombobox({
           ) : null}
 
           <div className="pac-section">
+            <p className="pac-section-title">Criar novo card<span>Escreva o título acima e escolha o tipo</span></p>
+            <div className="pac-type-choices" role="group" aria-label="Tipo do novo card">
+              {types.map((type) => <button type="button" key={type.key} className={singleType === type.key ? "on" : ""} aria-pressed={singleType === type.key} onClick={() => setSingleType(type.key)}><TaskKindIcon kind={type.key} size="sm" />{type.label}</button>)}
+            </div>
+            {singleType === "criativo" ? <p className="pac-flow-note">O Criativo nasce com Roteiro. Abra o card criado para trocar por um Roteiro existente e escolher a Captação depois de concluir essa etapa.</p> : null}
+          </div>
+
+          <details className="pac-batch"><summary>Planejar vários cards ou conteúdos</summary><div className="pac-section">
             <p className="pac-section-title">Conteúdos<span>viram etapas agrupadas: roteiro, gravação, edição, aprovação e publicação</span></p>
             {CONTENT_ROWS.map((row) => (
               <QtyRow
@@ -236,7 +246,7 @@ export default function PlanAddCombobox({
                 />
               ))}
             </div>
-          ) : null}
+          ) : null}</details>
 
           <div className="pac-foot">
             <span>
