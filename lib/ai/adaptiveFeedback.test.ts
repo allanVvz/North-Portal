@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consolidateAdaptiveFeedback, fingerprintComments, intentOf, precisionOf, type SourcedComment } from "./adaptiveFeedback";
+import { consolidateAdaptiveFeedback, fingerprintComments, intentOf, precisionOf, READING_MAX_CHARS, readingText, type SourcedComment } from "./adaptiveFeedback";
 
 const tags = ["vendas", "agendamentos", "receita", "seguidores"];
 const comment = (text: string, at: string, taskId = "feedback"): SourcedComment => ({ author: "Luiza", text, at, taskId });
@@ -103,5 +103,45 @@ describe("consolidateAdaptiveFeedback", () => {
     expect(fingerprintComments(base)).not.toBe(fingerprintComments(edited));
     expect(intentOf("gere novamente considerando a correção")).toBe("misto");
     expect(precisionOf("entre 4 e 6 vendas")).toBe("faixa");
+  });
+});
+
+// O texto de "Leitura da semana" é o que o CLIENTE lê. Antes ele passava pelo
+// helper de trecho de auditoria, que corta em 280 no meio da palavra.
+describe("readingText — o que a operação escreveu, sem mutilar", () => {
+  // O comentário real da Luiza no Feedback da CRIS (22/09), 291 caracteres.
+  const luiza = "Direcionamos as campanhas de trafego para perfil e para o site para regiões das capitais de SC e PR também, buscando alcançar pessoas mais de longe. Em ambos estamos apresentando a loja. Para engajamento local apenas para região de NH com as promoções com intuito de trazer até a loja física";
+
+  it("REGRESSÃO CRIS — o comentário real sai inteiro, com o ponto da frase", () => {
+    expect(luiza.length).toBeGreaterThan(280);
+    expect(readingText(luiza)).toBe(luiza);
+    expect(readingText(luiza).endsWith("até a loja física")).toBe(true);
+  });
+
+  it("chega ao PDF inteiro pelo fluxo de feedback", async () => {
+    const result = await consolidateAdaptiveFeedback([comment(luiza, "2026-09-22T19:00:00.000Z")], tags);
+    expect(result.interpretation.context.map((c) => c.text)).toContain(luiza);
+  });
+
+  it("acima do teto corta no último fim de frase — nunca no meio de uma", () => {
+    const frase = "A campanha de perfil segurou o custo por visita na semana inteira. ";
+    const longo = frase.repeat(12).trim();
+    const out = readingText(longo);
+    expect(out.length).toBeLessThanOrEqual(READING_MAX_CHARS);
+    expect(out.endsWith("inteira.")).toBe(true);
+    expect(out).not.toContain("…");
+  });
+
+  it("sem frase terminada antes do teto, corta na palavra e marca com reticências", () => {
+    const semPonto = "palavra ".repeat(120).trim();
+    const out = readingText(semPonto);
+    expect(out.endsWith("palavra…")).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(READING_MAX_CHARS + 1);
+  });
+
+  it("não joga fora o texto inteiro por causa de uma frase curtíssima no começo", () => {
+    const texto = `Ok. ${"sem ponto final aqui ".repeat(40)}`;
+    const out = readingText(texto);
+    expect(out.length).toBeGreaterThan(100);
   });
 });

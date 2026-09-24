@@ -100,6 +100,34 @@ function evidence(text: string) {
   return compact.length > 280 ? `${compact.slice(0, 277)}…` : compact;
 }
 
+/** Limite de "Leitura da semana": o mesmo teto que o PDF já aplica à narrativa
+ *  (`narrativePlan.maxChars`, 560). */
+export const READING_MAX_CHARS = 560;
+
+/** O texto que a operação escreveu, pronto para o CLIENTE ler.
+ *
+ *  Não é `evidence()`. Aquele é um trecho de AUDITORIA — fica ao lado de cada
+ *  métrica extraída para mostrar de onde ela veio, e cortar em 280 no meio da
+ *  palavra ali não faz mal a ninguém. Usado para o texto que vai ao cliente, ele
+ *  fez a CRIS receber (24/09) "...com as promoções com intuito de trazer até…"
+ *  — a Luiza tinha escrito 291 caracteres, e os 11 cortados eram "a loja
+ *  física", que era o ponto da frase.
+ *
+ *  Texto que cabe no teto sai inteiro. O que passa é cortado no último fim de
+ *  frase antes do teto — nunca no meio de uma — e só cai para o limite de
+ *  palavra quando não há frase terminada nenhuma antes dele. */
+export function readingText(text: string, max = READING_MAX_CHARS): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  const janela = compact.slice(0, max);
+  const fimDeFrase = Math.max(janela.lastIndexOf(". "), janela.lastIndexOf("! "), janela.lastIndexOf("? "));
+  // Frase inteira só quando sobra texto de verdade: cortar em "Ok. " e jogar fora
+  // 500 caracteres seria pior que o corte por palavra.
+  if (fimDeFrase >= max * 0.4) return compact.slice(0, fimDeFrase + 1);
+  const fimDePalavra = janela.lastIndexOf(" ");
+  return `${compact.slice(0, fimDePalavra > 0 ? fimDePalavra : max).trimEnd()}…`;
+}
+
 /** Extrai somente a leitura editorial que a operação escreveu junto aos números.
  * Métricas continuam no fluxo estruturado; o PDF não deve repetir o resumo todo. */
 function operationalAnalysis(text: string): string | null {
@@ -113,8 +141,7 @@ function operationalAnalysis(text: string): string | null {
     .join(" ");
   const candidate = editorialSentences || (explicit ? source.split(/(?<=[.!?])\s+/).at(0) ?? "" : "");
   if (!candidate) return null;
-  const normalized = candidate.replace(/\s+/g, " ").trim();
-  return normalized.length <= 220 ? normalized : `${normalized.slice(0, 217).trimEnd()}…`;
+  return readingText(candidate);
 }
 
 /**
@@ -185,7 +212,7 @@ export async function consolidateAdaptiveFeedback(comments: readonly SourcedComm
     } else if (analysis) {
       context.push({ sourceCommentAt: comment.at, sourceTaskId: comment.taskId, author: comment.author, text: analysis });
     } else if ((intent === "contexto" || intent === "misto" || (!metricPresent && intent !== "regeneracao")) && comment.text.trim()) {
-      context.push({ sourceCommentAt: comment.at, sourceTaskId: comment.taskId, author: comment.author, text: evidence(comment.text) });
+      context.push({ sourceCommentAt: comment.at, sourceTaskId: comment.taskId, author: comment.author, text: readingText(comment.text) });
     }
   }
 
