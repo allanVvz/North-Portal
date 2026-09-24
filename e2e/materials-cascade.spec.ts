@@ -262,6 +262,9 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   await page.screenshot({ path: testInfo.outputPath("raw-improved-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("raw-improved-narrow.png") });
+  await firstTarget.scrollIntoViewIfNeeded();
+  await expect(firstTarget.getByRole("button", { name: `Classificar brutos em ${taskRows[0].title}` })).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("raw-target-rail-narrow.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
   await page.setViewportSize({ width: 1280, height: 720 });
   await drop(tile, firstTarget);
@@ -300,6 +303,9 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   await firstTarget.getByRole("button", { name: `Ver brutos pendentes para ${taskRows[0].title}` }).click();
   await expect(tile).toHaveCount(0);
   await secondTile.getByRole("button", { name: `Selecionar ${raw2.name}` }).click();
+  await firstTarget.getByRole("button", { name: `Ver brutos pendentes para ${taskRows[0].title}` }).click();
+  expect(posts).toHaveLength(2);
+  await secondTile.getByRole("button", { name: `Selecionar ${raw2.name}` }).click();
   await firstTarget.getByRole("button", { name: `Classificar brutos em ${taskRows[0].title}` }).click();
   await expect.poll(() => posts.length).toBe(3);
   expect(posts.at(-1)).toEqual({ creativeId: ids[0], driveFileId: raw2.id });
@@ -309,6 +315,22 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   await secondTarget.getByRole("button", { name: `Classificar brutos em ${taskRows[1].title}` }).click();
   await expect(page.locator(".creative-drive-toast")).toContainText("Bruto inválido para esta pasta.");
   rejectSecondRaw = false;
+
+  // Soltar em A enquanto B é o filtro em foco não deve mudar para A nem
+  // esconder um bruto que continua pendente em B.
+  await firstTarget.getByRole("button", { name: "Abrir" }).click();
+  const firstRaw2 = page.locator(`[data-classified-asset-id="${assetIdFor(ids[0], raw2.id)}"]`);
+  await firstRaw2.locator("summary").click();
+  await firstRaw2.getByRole("button", { name: "Desassociar" }).click();
+  await page.getByRole("button", { name: "Brutos da captação" }).click();
+  await secondTarget.getByRole("button", { name: `Ver brutos pendentes para ${taskRows[1].title}` }).click();
+  await expect(secondTile).toBeVisible();
+  await drop(secondTile, firstTarget);
+  await expect.poll(() => posts.at(-1)).toEqual({ creativeId: ids[0], driveFileId: raw2.id });
+  await expect(secondTile).toBeVisible();
+  await expect(secondTarget).toHaveClass(/\bon\b/);
+  await expect(page.locator(".creative-drive-raw-target")).toContainText(taskRows[1].title);
+  await page.screenshot({ path: testInfo.outputPath("drop-keeps-filtered-delivery.png") });
 
   await page.locator(".creative-drive-modal .tm-back").click();
   await page.goto(`/admin/operacao?area=planos-entregas&task=${ids[0]}`);
