@@ -46,7 +46,7 @@ export default function CardDriveFolders({ folders }: { folders: TaskDriveFolder
   }, [pendingKey]);
 
   const visible = folders.filter((f) => f.certain || resolved[f.folderId]);
-  const [picked, setPicked] = useState<number | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
 
   // Sem caixa própria: quem monta a moldura é o bloco "Materiais" do modal,
   // que junta a pasta e os anexos numa composição só. Antes isto era uma caixa
@@ -63,11 +63,11 @@ export default function CardDriveFolders({ folders }: { folders: TaskDriveFolder
   //
   // Além de não quebrar, ler melhor: ninguém circula por três pastas ao mesmo
   // tempo.
-  const current = picked === null ? null : visible[picked];
+  const current = picked === null ? null : visible.find((folder) => folder.folderId === picked);
 
   return (
     <div className="tm-folders">
-      {visible.map((folder, index) => <button type="button" key={folder.folderId} className="tm-material-item" onClick={() => setPicked(index)} title={folder.url}><span className="tm-material-icon folder">▣</span><span className="tm-material-name">Pasta do Drive {visible.length > 1 ? index + 1 : ""}</span><small>Link do card</small></button>)}
+      {visible.map((folder, index) => <button type="button" key={folder.folderId} className="tm-material-item" onClick={() => setPicked(folder.folderId)} title={folder.url}><span className="tm-material-icon folder">▣</span><span className="tm-material-name">Pasta do Drive {visible.length > 1 ? index + 1 : ""}</span><small>Link do card</small></button>)}
       {current ? createPortal(<div className="kb-modal-backdrop" onClick={() => setPicked(null)}><div className="tm tm-lg docprev-tm creative-drive-modal" onClick={(event) => event.stopPropagation()}>
         <button type="button" className="tm-back tm-back-floating" onClick={() => setPicked(null)} aria-label="Voltar para o card"><BackArrowIcon /></button>
         <div className="tm-head tm-head-tone-purple"><span className="tm-head-ico" aria-hidden>▣</span><div className="tm-head-text"><strong className="docprev-title">Pasta do Drive</strong><span className="admin-sub">Materiais citados no card</span></div><button type="button" className="kb-modal-close" onClick={() => setPicked(null)} aria-label="Fechar">✕</button></div>

@@ -472,7 +472,7 @@ export async function fetchDriveThumbnail(fileId: string, size = 480): Promise<D
  */
 export type DriveFilePage = { files: DriveFile[]; nextPageToken: string | null };
 
-export async function listFolderFilesPage(folderId: string, limit = 100, pageToken?: string | null, strict = false): Promise<DriveFilePage> {
+export async function listFolderFilesPage(folderId: string, limit = 100, pageToken?: string | null, strict = false, nameQuery?: string): Promise<DriveFilePage> {
   if (!folderId || !isGoogleDriveConfigured()) {
     if (strict) throw new HttpError(503, "A integração com Google Drive não está configurada.");
     return { files: [], nextPageToken: null };
@@ -484,7 +484,7 @@ export async function listFolderFilesPage(folderId: string, limit = 100, pageTok
       return { files: [], nextPageToken: null };
     }
     const params = new URLSearchParams({
-      q: `'${folderId.split("'").join("\\'")}' in parents and trashed = false`,
+      q: `'${folderId.split("'").join("\\'")}' in parents and trashed = false${nameQuery ? ` and name contains '${nameQuery.split("\\").join("\\\\").split("'").join("\\'")}'` : ""}`,
       fields: "nextPageToken,files(id,name,mimeType,thumbnailLink,webViewLink)",
       // `folder` é uma chave de ordenação do próprio Drive: põe as subpastas
       // antes dos arquivos. Importa desde que a listagem virou navegável — o

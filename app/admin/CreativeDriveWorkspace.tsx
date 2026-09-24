@@ -51,6 +51,13 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const [extraSources, setExtraSources] = useState(emptySources);
   const [nextPages, setNextPages] = useState<SourcePages>(emptyPages);
   const [loadingMore, setLoadingMore] = useState<SourceKind | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const [rawQuery, setRawQuery] = useState("");
+  const [searchSources, setSearchSources] = useState(emptySources);
+  const [searchPages, setSearchPages] = useState<SourcePages>(emptyPages);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const searchRequest = useRef(0);
+  const sourceRequest = useRef(0);
   const [activeTab, setActiveTab] = useState<MaterialTab>(initialAssetId ? "classified" : initialTab);
   const [rawPage, setRawPage] = useState(1);
   const [classifiedPage, setClassifiedPage] = useState(1);
@@ -60,9 +67,12 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const main = useRef<HTMLDivElement>(null);
   const targetRail = useRef<HTMLElement>(null);
   const draggedRawIds = useRef<string[]>([]);
+  const workspaceRequest = useRef(0);
 
   const load = useCallback(async (preserveSources = false) => {
+    const requestId = ++workspaceRequest.current;
     const next = await json<Payload>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-workspace`, { cache: "no-store" }));
+    if (requestId !== workspaceRequest.current) return;
     setPayload(next);
     if (initialAssetId && !preserveSources) {
       const asset = next.workspace?.assets.find((item) => item.id === initialAssetId);
@@ -75,8 +85,10 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   }, [activeTaskId, initialAssetId]);
   useEffect(() => {
     setPayload(null); setSelected(null); setError(""); setExtraSources(emptySources()); setNextPages(emptyPages());
+    searchRequest.current += 1; setSearchText(""); setRawQuery(""); setSearchSources(emptySources()); setSearchPages(emptyPages());
     setRawPage(1); setClassifiedPage(1); setPreviewPage(1); setFinalPage(1);
     void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar o Drive."));
+    return () => { workspaceRequest.current += 1; searchRequest.current += 1; sourceRequest.current += 1; };
   }, [load]);
 
   async function action(body: Record<string, unknown>, targetId = activeTaskId) {
@@ -158,17 +170,21 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
     await changed(async () => json(await fetch(`/api/admin/tasks/${activeTaskId}/drive-workspace`, { method: "POST" })), "provision");
   }
   async function loadMore(kind: SourceKind) {
-    const token = nextPages[kind];
+    const requestId = sourceRequest.current;
+    const token = rawQuery ? searchPages[kind] : nextPages[kind];
     if (!token) return false;
     setLoadingMore(kind); setError("");
     try {
       const params = new URLSearchParams({ kind, pageToken: token });
+      if (rawQuery) params.set("query", rawQuery);
       const page = await json<{ files: DriveFile[]; nextPageToken: string | null }>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-sources?${params}`, { cache: "no-store" }));
-      setExtraSources((previous) => {
-        const seen = new Set([...(payload?.workspace?.source_files[kind] ?? []), ...previous[kind]].map((file) => file.id));
+      if (requestId !== sourceRequest.current) return false;
+      const updateSources = rawQuery ? setSearchSources : setExtraSources;
+      updateSources((previous) => {
+        const seen = new Set([...(rawQuery ? [] : payload?.workspace?.source_files[kind] ?? []), ...previous[kind]].map((file) => file.id));
         return { ...previous, [kind]: [...previous[kind], ...page.files.filter((file) => !seen.has(file.id))] };
       });
-      setNextPages((previous) => ({ ...previous, [kind]: page.nextPageToken }));
+      (rawQuery ? setSearchPages : setNextPages)((previous) => ({ ...previous, [kind]: page.nextPageToken }));
       return page.files.length > 0;
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha ao carregar mais brutos."); return false; }
     finally { setLoadingMore(null); }
@@ -176,20 +192,49 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
 
   async function nextRawPage() {
     if (rawPage * RAW_PAGE_SIZE < sources.length) { setRawPage((page) => page + 1); return; }
-    const kind = nextPages.script ? "script" : nextPages.capture ? "capture" : null;
+    const pages = rawQuery ? searchPages : nextPages;
+    const kind = pages.script ? "script" : pages.capture ? "capture" : null;
     if (!kind) return;
     if (await loadMore(kind)) setRawPage((page) => page + 1);
+  }
+
+  async function searchRaws(query: string) {
+    const trimmed = query.trim();
+    const requestId = ++searchRequest.current;
+    sourceRequest.current += 1;
+    setRawPage(1); setSelected(null); setSelectedRawIds([]); setError("");
+    if (!trimmed) { setRawQuery(""); setSearchSources(emptySources()); setSearchPages(emptyPages()); return; }
+    if (trimmed.length < 2) { setError("Digite pelo menos 2 caracteres para buscar."); return; }
+    setSearchBusy(true);
+    try {
+      const workspace = payload?.workspace;
+      const kinds: SourceKind[] = (["script", "capture"] as const).filter((kind) => Boolean(kind === "script" ? workspace?.capture_workspace?.script_folder_id : workspace?.capture_workspace?.capture_folder_id));
+      const results = await Promise.all(kinds.map(async (kind) => {
+        const params = new URLSearchParams({ kind, query: trimmed });
+        return { kind, page: await json<{ files: DriveFile[]; nextPageToken: string | null }>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-sources?${params}`, { cache: "no-store" })) };
+      }));
+      if (requestId !== searchRequest.current) return;
+      const files = emptySources(); const pages = emptyPages();
+      for (const result of results) { files[result.kind] = result.page.files; pages[result.kind] = result.page.nextPageToken; }
+      setRawQuery(trimmed); setSearchSources(files); setSearchPages(pages);
+    } catch (cause) {
+      if (requestId === searchRequest.current) setError(cause instanceof Error ? cause.message : "Falha ao buscar brutos.");
+    } finally { if (requestId === searchRequest.current) setSearchBusy(false); }
   }
 
   const workspace = payload?.workspace;
   const assetsById = useMemo(() => new Map((workspace?.assets ?? []).map((asset) => [asset.id, asset])), [workspace]);
   const linked = useMemo(() => new Map((workspace?.assets ?? []).filter((asset) => asset.role === "raw" && workspace?.raw_links.some((row) => row.asset_id === asset.id)).map((asset) => [asset.drive_file_id, asset.id])), [workspace]);
-  const sources = useMemo(() => [
+  const allSources = useMemo(() => [
     ...(workspace?.source_files.script ?? []).map((file) => ({ file, source: "Roteiro" })),
     ...(workspace?.source_files.capture ?? []).map((file) => ({ file, source: "Captação" })),
     ...extraSources.script.map((file) => ({ file, source: "Roteiro" })),
     ...extraSources.capture.map((file) => ({ file, source: "Captação" })),
   ], [workspace, extraSources]);
+  const sources = useMemo(() => rawQuery ? [
+    ...searchSources.script.map((file) => ({ file, source: "Roteiro" })),
+    ...searchSources.capture.map((file) => ({ file, source: "Captação" })),
+  ] : allSources, [rawQuery, searchSources, allSources]);
   const linkedAssetIds = useMemo(() => new Set((workspace?.raw_links ?? []).map((link) => link.asset_id)), [workspace]);
   const classifiedAssets = (workspace?.assets ?? []).filter((asset) => asset.role === "raw" && asset.state === "active" && linkedAssetIds.has(asset.id));
   const previewAssets = (workspace?.assets ?? []).filter((asset) => asset.role === "preview" && asset.state === "active");
@@ -216,9 +261,9 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
     return Boolean(rawAsset && source.raw_links.some((link) => link.asset_id === rawAsset.id));
   }
   const availableRaw = targetSummaries[0];
-  const rawCountLabel = availableRaw?.available_raw_count == null
+  const rawCountLabel = rawQuery ? `${sources.length} resultado(s) para “${rawQuery}”` : availableRaw?.available_raw_count == null
     ? `${sources.length} arquivo(s) exibido(s)`
-    : `${sources.length} exibidos de ${availableRaw.available_raw_limited ? "≥" : ""}${Math.max(sources.length, availableRaw.available_raw_count)}`;
+    : availableRaw.available_raw_limited ? `${sources.length} exibido(s) · mais páginas` : `${sources.length} de ${Math.max(sources.length, availableRaw.available_raw_count)}`;
 
   return <div className="kb-modal-backdrop" onClick={onClose}><div className="tm tm-lg docprev-tm creative-drive-modal" onClick={(event) => event.stopPropagation()}>
     <button type="button" className="tm-back tm-back-floating" onClick={onBack} aria-label="Voltar para o card"><BackArrowIcon /></button>
@@ -230,7 +275,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
       {payload && (!workspace || workspace.status !== "ready") ? <button type="button" className="admin-btn primary" disabled={Boolean(busy)} onClick={() => void provision()}>{busy === "provision" ? "Preparando…" : "Preparar pastas do Criativo"}</button> : null}
       {workspace?.status === "ready" ? <>
         <nav className="creative-drive-tabs" aria-label="Tipos de materiais">{([ ["raw", "Brutos da captação", null], ["classified", "Classificados", classifiedAssets.length], ["preview", "Previews", previewAssets.length], ["final", "Finais", finalVersions.length] ] as const).map(([tab, label, count]) => <button type="button" key={tab} className={activeTab === tab ? "on" : ""} aria-current={activeTab === tab ? "page" : undefined} onClick={() => { setActiveTab(tab); setSelected(null); }}>{label}{count !== null ? <small>{count}</small> : null}</button>)}</nav>
-        {activeTab === "raw" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos da captação</strong><small>{rawCountLabel}</small></div><p className="admin-sub">Selecione miniaturas e toque em uma pasta à direita, ou arraste uma ou várias miniaturas para a pasta do Criativo. Clique na imagem para ampliar. O bruto original fica na Captação. {workspace.capture_workspace?.daily_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.capture_workspace.daily_folder_id)}`} target="_blank" rel="noreferrer">Abrir a diária no Drive ↗</a> : null}</p>
+        {activeTab === "raw" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos da captação</strong><small>{rawCountLabel}</small></div><form className="creative-drive-search" onSubmit={(event) => { event.preventDefault(); void searchRaws(searchText); }}><label htmlFor="creative-drive-raw-search">Encontrar bruto pelo nome</label><div><input id="creative-drive-raw-search" type="search" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Nome ou código do arquivo" /><button type="submit" className="admin-btn ghost" disabled={searchBusy}>{searchBusy ? "Buscando…" : "Buscar"}</button>{rawQuery ? <button type="button" className="admin-btn ghost" onClick={() => { setSearchText(""); void searchRaws(""); }}>Limpar</button> : null}</div></form><p className="admin-sub">Selecione miniaturas e toque em uma pasta à direita, ou arraste uma ou várias miniaturas para a pasta do Criativo. Clique na imagem para ampliar. O bruto original fica na Captação. {workspace.capture_workspace?.daily_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.capture_workspace.daily_folder_id)}`} target="_blank" rel="noreferrer">Abrir a diária no Drive ↗</a> : null}</p>
           {selectedRawIds.length ? <p className="creative-drive-selected" role="status">{selectedRawIds.length} bruto(s) selecionado(s). Toque em uma pasta de Criativo para classificar.</p> : null}
           <div className="creative-drive-gallery">{sources.slice((rawPage - 1) * RAW_PAGE_SIZE, rawPage * RAW_PAGE_SIZE).map(({ file, source }, index) => {
             const isMedia = file.mimeType.startsWith("image/") || file.mimeType.startsWith("video/");
@@ -251,7 +296,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
               {linked.get(file.id) ? <button type="button" className="creative-drive-tile-unlink" disabled={Boolean(busy)} onClick={() => void unlinkRaw(linked.get(file.id)!, file.id)}>Remover vínculo</button> : null}
             </div>;
           })}</div>
-          {sources.length ? <Pagination page={rawPage} total={Math.ceil(sources.length / RAW_PAGE_SIZE)} hasMore={Boolean(nextPages.script || nextPages.capture)} busy={Boolean(loadingMore || busy)} onPrevious={() => setRawPage((page) => page - 1)} onNext={() => void nextRawPage()} /> : null}
+          {sources.length ? <Pagination page={rawPage} total={Math.ceil(sources.length / RAW_PAGE_SIZE)} hasMore={Boolean((rawQuery ? searchPages : nextPages).script || (rawQuery ? searchPages : nextPages).capture)} busy={Boolean(loadingMore || busy)} onPrevious={() => setRawPage((page) => page - 1)} onNext={() => void nextRawPage()} /> : rawQuery && !searchBusy ? <p className="creative-drive-empty">Nenhum bruto encontrado nesta Captação.</p> : null}
           {!sources.length && !workspace.source_error ? <p className="admin-sub">Nenhum bruto encontrado nesta diária.</p> : null}
         </section> : null}
         {activeTab === "classified" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos classificados em {currentTarget?.title ?? "este Criativo"}</strong><small>{classifiedAssets.length} vínculo(s)</small></div><p className="admin-sub">Cada arquivo abaixo é um atalho. Desassociar remove apenas o vínculo deste Criativo; o original permanece na Captação.</p>

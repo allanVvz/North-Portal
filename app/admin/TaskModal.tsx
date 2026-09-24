@@ -24,6 +24,7 @@ import {
 import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
 import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
+import { parseGoogleDriveUrl } from "@/lib/googleDrive";
 import { BAITA_DRIVE_PLAN_ID, creativeWorkspacesForCard, currentFinalAsset, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
 import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
@@ -348,14 +349,17 @@ export default function TaskModal({
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
   const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final" } | null>(null);
-  const [cardRawPage, setCardRawPage] = useState(1);
+  const [materialTab, setMaterialTab] = useState<"raw" | "preview" | "final" | "docs" | "links">("links");
+  const [materialPage, setMaterialPage] = useState(1);
+  const materialRequest = useRef(0);
   const reloadMaterials = useCallback(() => {
+    const requestId = ++materialRequest.current;
     fetch("/api/admin/drive/baita/materials", { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
-      .then((data: { workspaces?: CreativeMaterialWorkspace[] } | null) => { if (data?.workspaces) setMaterialWorkspaces(data.workspaces); })
+      .then((data: { workspaces?: CreativeMaterialWorkspace[] } | null) => { if (requestId === materialRequest.current && data?.workspaces) setMaterialWorkspaces(data.workspaces); })
       .catch(() => {});
   }, []);
-  useEffect(() => { if (mode === "edit") reloadMaterials(); }, [mode, reloadMaterials]);
+  useEffect(() => { if (mode === "edit") reloadMaterials(); return () => { materialRequest.current += 1; }; }, [mode, reloadMaterials]);
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
   const [editingComment, setEditingComment] = useState<{ index: number; at: string; text: string } | null>(null);
@@ -546,6 +550,11 @@ export default function TaskModal({
     }
     return { card, docs: Array.from(byId.values()) };
   }).filter((group) => group.docs.length), [materialCards, attachableDocs]);
+  const driveFolders = useMemo(
+    () => taskDriveFolders({ description: draft.description, payload: task?.payload }).filter((folder) =>
+      !attachableDocs.some((doc) => doc.file_url === folder.url || (doc.file_url && parseGoogleDriveUrl(doc.file_url)?.id === folder.folderId))),
+    [draft.description, task?.payload, attachableDocs],
+  );
   const cardWorkspaces = useMemo(() => liveTask ? creativeWorkspacesForCard(liveTask, clientTasks, materialWorkspaces) : [], [liveTask, clientTasks, materialWorkspaces]);
   const ownClassifiedRaws = useMemo(() => {
     const workspace = cardWorkspaces.find((item) => item.creative_task_id === liveTask?.id);
@@ -553,8 +562,7 @@ export default function TaskModal({
     const linked = new Set(workspace.raw_links.map((item) => item.asset_id));
     return workspace.assets.filter((asset) => asset.role === "raw" && asset.state === "active" && linked.has(asset.id));
   }, [cardWorkspaces, liveTask?.id]);
-  useEffect(() => { setCardRawPage(1); }, [liveTask?.id]);
-  useEffect(() => { setCardRawPage((page) => Math.min(page, Math.max(1, Math.ceil(ownClassifiedRaws.length / 3)))); }, [ownClassifiedRaws.length]);
+  useEffect(() => { setMaterialTab(liveTask?.kind === "criativo" ? "raw" : "links"); setMaterialPage(1); }, [liveTask?.id, liveTask?.kind]);
   const creativeCandidates = useMemo(() => {
     const candidates = [...materialCards, ...flowDeliveries];
     return Array.from(new Map(candidates.filter((card) => card.kind === "criativo" && !card.subtype && planParentIdsOf(card).includes(BAITA_DRIVE_PLAN_ID)).map((card) => [card.id, card])).values());
@@ -563,6 +571,25 @@ export default function TaskModal({
     liveTask?.kind === "criativo" || liveTask?.subtype === "captacao" ||
     cardWorkspaces.some((workspace) => workspace.creative_task_id === card.id && currentFinalAsset(workspace)),
   );
+  const materialPreviews = cardWorkspaces.flatMap((workspace) => workspace.assets.filter((asset) => asset.role === "preview" && asset.state === "active").map((asset) => ({ asset, workspace })));
+  const materialFinals = cardWorkspaces.flatMap((workspace) => workspace.final_versions.filter((version) => version.state === "current" || workspace.creative_task_id === liveTask?.id).flatMap((version) => {
+    const asset = workspace.assets.find((item) => item.id === version.asset_id && item.state === "active");
+    return asset ? [{ asset, workspace, version }] : [];
+  }));
+  const materialDocs = materialGroups.flatMap(({ card, docs }) => docs.map((doc) => ({ card, doc })));
+  const materialLinks = driveFolders.length + visibleCreativeCandidates.length;
+  const materialTabs = ([
+    { id: "raw", label: "Brutos", count: ownClassifiedRaws.length },
+    { id: "preview", label: "Previews", count: materialPreviews.length },
+    { id: "final", label: "Finais", count: materialFinals.length },
+    { id: "docs", label: "Documentos", count: materialDocs.length },
+    { id: "links", label: "Pastas e links", count: materialLinks },
+  ] as const).filter((tab) => tab.count > 0);
+  const activeMaterialTab = materialTabs.some((tab) => tab.id === materialTab) ? materialTab : materialTabs[0]?.id;
+  const activeMaterialCount = materialTabs.find((tab) => tab.id === activeMaterialTab)?.count ?? 0;
+  const materialPageCount = Math.max(1, Math.ceil(activeMaterialCount / 3));
+  const safeMaterialPage = Math.min(materialPage, materialPageCount);
+  const materialStart = (safeMaterialPage - 1) * 3;
   const commentAssets = useMemo(() => new Map(materialWorkspaces.flatMap((workspace) => workspace.assets.map((asset) => [asset.id, { asset, workspace }] as const))), [materialWorkspaces]);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
   // A comment link that matches a known document's file_url opens the same
@@ -1453,14 +1480,6 @@ export default function TaskModal({
     [cardWorkspaces, draft.description, liveTask, task?.payload],
   );
 
-  // Pastas do Drive citadas no card. Mesma origem da capa (descrição +
-  // comentários), pergunta diferente: onde fica o material, não qual imagem
-  // representa. Ver taskDriveFolders.
-  const driveFolders = useMemo(
-    () => taskDriveFolders({ description: draft.description, payload: task?.payload }),
-    [draft.description, task?.payload],
-  );
-
   // -1 quando o card está parado: nenhuma etapa aparece cumprida, que é a
   // leitura certa para um card que travou em vez de avançar.
   // O status que o CABEÇALHO mostra. Para um card comum é o do rascunho; para
@@ -2105,33 +2124,29 @@ export default function TaskModal({
 
             {error ? <p className="admin-error">{error}</p> : null}
 
-            {/* Materiais do card: a pasta do Drive e os arquivos anexados no
-                mesmo bloco, porque respondem à mesma pergunta — "onde está o
-                material disto?". Compõem um retângulo só quando há apenas um
-                dos dois, e duas colunas quando há os dois. */}
-            {mode === "edit" && (driveFolders.length > 0 || materialGroups.length > 0 || visibleCreativeCandidates.length > 0 || ownClassifiedRaws.length > 0) ? (
+            {mode === "edit" && materialTabs.length > 0 ? (
               <section className="tm-materials" aria-label="Materiais do card">
-                <p className="tm-box-label">Materiais</p>
-                <div className="tm-material-list">
-                  {driveFolders.length > 0 ? <CardDriveFolders folders={driveFolders} /> : null}
-                  {materialGroups.map(({ card, docs }) => <div className="tm-material-group" key={card.id}>
-                    {card.id !== liveTask?.id ? <small className="tm-material-origin">{card.title}</small> : null}
-                    {docs.map((doc) => <button type="button" key={doc.id} className="tm-material-item" title={doc.name} onClick={() => setPreviewDoc(doc)}><span className="tm-material-icon pdf">{fileTypeLabel(doc)}</span><span className="tm-material-name">{doc.name}</span><small>{card.id === liveTask?.id ? "Neste card" : card.title}</small></button>)}
-                  </div>)}
-                  {visibleCreativeCandidates.map((creative) => {
+                <div className="tm-materials-heading"><div><p className="tm-box-label">Materiais</p><strong>Arquivos desta execução</strong></div><small>{materialTabs.reduce((sum, tab) => sum + tab.count, 0)} itens</small></div>
+                <nav className="tm-material-tabs" aria-label="Tipos de materiais do card">{materialTabs.map((tab) => <button type="button" key={tab.id} className={activeMaterialTab === tab.id ? "on" : ""} aria-current={activeMaterialTab === tab.id ? "page" : undefined} onClick={() => { setMaterialTab(tab.id); setMaterialPage(1); }}>{tab.label}<span>{tab.count}</span></button>)}</nav>
+                {activeMaterialTab === "raw" && liveTask ? <div className="tm-classified-raws-grid">{ownClassifiedRaws.slice(materialStart, materialStart + 3).map((asset, index) => <div className="tm-classified-raw" key={asset.id}><button type="button" className="tm-classified-raw-preview" onClick={() => setDriveOpen({ taskId: liveTask.id, assetId: asset.id })} aria-label={`Visualizar bruto ${asset.name}`}><span className="tm-classified-raw-thumb"><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><b>{asset.mime_type.startsWith("video/") ? "Vídeo" : "Foto"} {materialStart + index + 1}</b></button><div className="tm-classified-raw-actions"><a href={asset.web_view_link ?? `https://drive.google.com/file/d/${encodeURIComponent(asset.drive_file_id)}/view`} target="_blank" rel="noreferrer">Abrir</a><a href={`/api/admin/tasks/${liveTask.id}/drive-assets/${asset.id}/download`}>Baixar</a></div></div>)}</div> : null}
+                {activeMaterialTab === "preview" || activeMaterialTab === "final" ? <div className="tm-material-media-grid">{(activeMaterialTab === "preview" ? materialPreviews : materialFinals).slice(materialStart, materialStart + 3).map(({ asset, workspace }, index) => <button type="button" key={`${workspace.id}-${asset.id}`} className="tm-material-media" onClick={() => setDriveOpen({ taskId: workspace.creative_task_id, assetId: asset.id })}><span className="tm-material-media-image"><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><span className="tm-material-media-caption"><b>{activeMaterialTab === "preview" ? "Preview" : "Final"} {materialStart + index + 1}</b><small>{clientTasks.find((card) => card.id === workspace.creative_task_id)?.title ?? "Criativo"}</small></span></button>)}</div> : null}
+                {activeMaterialTab === "docs" ? <div className="tm-material-list">{materialDocs.slice(materialStart, materialStart + 3).map(({ card, doc }) => <button type="button" key={`${card.id}-${doc.id}`} className="tm-material-item" title={doc.name} onClick={() => setPreviewDoc(doc)}><span className="tm-material-icon pdf">{fileTypeLabel(doc)}</span><span className="tm-material-name">{doc.name}</span><small>{card.id === liveTask?.id ? "Neste card" : card.title}</small></button>)}</div> : null}
+                {activeMaterialTab === "links" ? <div className="tm-material-list">
+                  {driveFolders.slice(materialStart, materialStart + 3).length ? <CardDriveFolders folders={driveFolders.slice(materialStart, materialStart + 3)} /> : null}
+                  {visibleCreativeCandidates.slice(Math.max(0, materialStart - driveFolders.length), Math.max(0, materialStart - driveFolders.length) + Math.max(0, 3 - Math.max(0, driveFolders.length - materialStart))).map((creative) => {
                     const workspace = cardWorkspaces.find((item) => item.creative_task_id === creative.id);
                     const final = workspace?.final_versions.find((version) => version.state === "current");
                     const finalAsset = workspace?.assets.find((asset) => asset.id === final?.asset_id);
                     const count = (workspace?.raw_links.length ?? 0) + (workspace?.assets.filter((asset) => asset.state === "active" && asset.role !== "raw").length ?? 0);
                     const showRawCount = liveTask?.subtype === "captacao";
-                    const rawLabel = workspace?.available_raw_count == null ? "Drive indisponível" : `${workspace.available_raw_limited ? "≥" : ""}${workspace.available_raw_count} brutos`;
+                    const rawLabel = workspace?.available_raw_count == null ? "Drive indisponível" : workspace.available_raw_limited ? "Brutos no Drive" : `${workspace.available_raw_count} brutos`;
                     const materialCount = `${count} ${count === 1 ? "material" : "materiais"}`;
                     const classifiedCount = workspace?.raw_links.length ?? 0;
                     const detail = finalAsset ? `Final v${final?.version_number} · ${classifiedCount} classificado(s)` : showRawCount && workspace ? `${rawLabel} · ${classifiedCount} classificado(s)` : liveTask?.id === creative.id ? `${classifiedCount} bruto(s) classificado(s) · ${materialCount}` : materialCount;
                     return <button type="button" key={creative.id} className="tm-material-item" onClick={() => setDriveOpen({ taskId: creative.id, tab: liveTask?.subtype === "captacao" ? "raw" : finalAsset && liveTask?.id !== creative.id ? "final" : "classified" })}><span className="tm-material-icon folder">▣</span><span className="tm-material-name">{creative.title}</span><small>{detail}</small></button>;
                   })}
-                </div>
-                {liveTask?.kind === "criativo" && ownClassifiedRaws.length ? <div className="tm-classified-raws"><div className="tm-classified-raws-head"><strong>Brutos classificados neste Criativo</strong><small>{ownClassifiedRaws.length} arquivo(s)</small></div><div className="tm-classified-raws-grid">{ownClassifiedRaws.slice((cardRawPage - 1) * 3, cardRawPage * 3).map((asset, index) => <div className="tm-classified-raw" key={asset.id}><button type="button" className="tm-classified-raw-preview" onClick={() => setDriveOpen({ taskId: liveTask.id, assetId: asset.id })} aria-label={`Visualizar bruto ${asset.name}`}><span className="tm-classified-raw-thumb"><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><b>{asset.mime_type.startsWith("video/") ? "Vídeo" : "Foto"} {(cardRawPage - 1) * 3 + index + 1}</b></button><div className="tm-classified-raw-actions"><a href={asset.web_view_link ?? `https://drive.google.com/file/d/${encodeURIComponent(asset.drive_file_id)}/view`} target="_blank" rel="noreferrer">Abrir</a><a href={`/api/admin/tasks/${liveTask.id}/drive-assets/${asset.id}/download`}>Baixar</a></div></div>)}</div>{ownClassifiedRaws.length > 3 ? <nav className="tm-classified-raws-pages" aria-label="Páginas de brutos classificados"><button type="button" disabled={cardRawPage === 1} onClick={() => setCardRawPage((page) => page - 1)}>Anterior</button><span>{cardRawPage} / {Math.ceil(ownClassifiedRaws.length / 3)}</span><button type="button" disabled={cardRawPage * 3 >= ownClassifiedRaws.length} onClick={() => setCardRawPage((page) => page + 1)}>Próxima</button></nav> : null}</div> : null}
+                </div> : null}
+                {activeMaterialCount > 3 ? <nav className="tm-material-pagination" aria-label={`Páginas de ${materialTabs.find((tab) => tab.id === activeMaterialTab)?.label ?? "materiais"}`}><button type="button" disabled={safeMaterialPage === 1} onClick={() => setMaterialPage((page) => page - 1)} aria-label="Página anterior">‹</button><span>{safeMaterialPage} / {materialPageCount}</span><button type="button" disabled={safeMaterialPage === materialPageCount} onClick={() => setMaterialPage((page) => page + 1)} aria-label="Próxima página">›</button></nav> : null}
               </section>
             ) : null}
           </div>

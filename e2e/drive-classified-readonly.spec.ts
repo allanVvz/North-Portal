@@ -10,14 +10,17 @@ test("brutos classificados existentes aparecem no card e na pasta do Criativo", 
   await page.waitForURL(/\/admin/, { timeout: 30_000 });
   const indexResponse = await page.request.get("/api/admin/drive/baita/materials");
   expect(indexResponse.ok()).toBe(true);
-  const index = await indexResponse.json() as { workspaces: Array<{ creative_task_id: string; assets: Array<{ id: string; role: string }>; raw_links: Array<{ asset_id: string }> }> };
-  const target = index.workspaces.find((workspace) => workspace.raw_links.some((link) => workspace.assets.some((asset) => asset.id === link.asset_id && asset.role === "raw")));
+  const index = await indexResponse.json() as { workspaces: Array<{ creative_task_id: string; assets: Array<{ id: string; role: string; state: string }>; raw_links: Array<{ asset_id: string }> }> };
+  const target = index.workspaces.find((workspace) => workspace.raw_links.some((link) => workspace.assets.some((asset) => asset.id === link.asset_id && asset.role === "raw" && asset.state === "active")));
   test.skip(!target, "Nenhum bruto classificado no momento");
-  const assetId = target!.raw_links[0].asset_id;
 
   await page.goto(`/admin/operacao?area=planos-entregas&task=${target!.creative_task_id}`);
   const cardRaw = page.locator(".tm-classified-raw").first();
   await expect(cardRaw).toBeVisible({ timeout: 30_000 });
+  const downloadHref = await cardRaw.getByRole("link", { name: "Baixar" }).getAttribute("href");
+  const assetId = downloadHref?.match(/\/drive-assets\/([0-9a-f-]+)\/download$/)?.[1];
+  expect(assetId).toBeTruthy();
+  expect(target!.raw_links.some((link) => link.asset_id === assetId)).toBe(true);
   await expect(cardRaw.getByRole("link", { name: "Abrir" })).toHaveAttribute("target", "_blank");
   await expect(cardRaw.getByRole("link", { name: "Baixar" })).toHaveAttribute("href", new RegExp(`/drive-assets/${assetId}/download$`));
   const driveStatus = await page.request.get("/api/admin/drive/files");
@@ -35,6 +38,7 @@ test("brutos classificados existentes aparecem no card e na pasta do Criativo", 
   await expect(page.locator(".creative-drive-tabs button.on")).toContainText("Classificados", { timeout: 30_000 });
   await expect(page.locator(`[data-classified-asset-id="${assetId}"]`)).toBeVisible();
   await page.locator(".creative-drive-modal .tm-back").click();
+  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
   await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
   await expect(page.locator(".creative-drive-tabs button.on")).toContainText("Classificados");
   await expect(page.locator(`[data-classified-asset-id="${assetId}"]`)).toBeVisible();

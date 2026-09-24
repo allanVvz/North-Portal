@@ -29,6 +29,7 @@ test("Plano BAITA mostra materiais compactos e retorna do Drive ao card", async 
   } : workspace) } }));
   await page.goto(`/admin/operacao?task=${BAITA_PLAN_ID}`);
   await expect(page.locator(".tm:not(.creative-drive-modal)")).toBeVisible({ timeout: 30_000 });
+  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
   const folder = page.locator(".tm-material-list > .tm-material-item").first();
   await expect(folder).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".tm-material-list > .tm-material-item")).toHaveCount(1);
@@ -65,6 +66,7 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   const source = workspaces.find((workspace) => (workspace.available_raw_count ?? 0) > 0);
   expect(source, "Nenhuma Captação BAITA com brutos acessíveis no Drive").toBeTruthy();
   await page.goto(`/admin/operacao?task=${source!.creative_task_id}`);
+  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
   const folder = page.locator(".tm-material-list > .tm-material-item").first();
   await expect(folder).toContainText(/classificado/, { timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath("real-raw-card.png") });
@@ -103,6 +105,39 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   await page.getByRole("button", { name: "Escolher pasta" }).click();
   await expect(page.locator(".creative-drive-targets")).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("real-raw-targets-narrow.png") });
+});
+
+test("box do card pagina brutos, previews e finais sem misturar os tipos", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  const response = await page.request.get("/api/admin/drive/baita/materials");
+  expect(response.ok()).toBe(true);
+  const { workspaces } = await response.json() as { workspaces: CreativeMaterialWorkspace[] };
+  const target = workspaces.find((workspace) => workspace.raw_links.some((link) => workspace.assets.some((asset) => asset.id === link.asset_id && asset.role === "raw" && asset.state === "active")));
+  expect(target).toBeTruthy();
+  const sourceFile = target!.assets.find((asset) => asset.role === "raw" && asset.state === "active")!;
+  const now = new Date().toISOString();
+  const fakeAssets = (["raw", "preview", "final"] as const).flatMap((role, typeIndex) => Array.from({ length: 4 }, (_, index) => ({
+    ...sourceFile, id: `aaa${typeIndex}${index}0000-0000-4000-8000-000000000000`, role, name: `${role} ${index + 1}.mp4`, created_at: now,
+  })));
+  const fakeVersions = fakeAssets.filter((asset) => asset.role === "final").map((asset, index) => ({ id: `bbb${index}00000-0000-4000-8000-000000000000`, asset_id: asset.id, version_number: index + 100, state: "superseded" as const, promoted_at: now }));
+  await page.route("**/api/admin/drive/baita/materials", (route) => route.fulfill({ json: { workspaces: workspaces.map((workspace) => workspace.id === target!.id ? {
+    ...workspace, assets: [...workspace.assets, ...fakeAssets], raw_links: [...workspace.raw_links, ...fakeAssets.filter((asset) => asset.role === "raw").map((asset) => ({ asset_id: asset.id }))], final_versions: [...workspace.final_versions, ...fakeVersions],
+  } : workspace) } }));
+  await page.goto(`/admin/operacao?task=${target!.creative_task_id}`);
+  const box = page.locator(".tm-materials");
+  await expect(box.locator(".tm-material-tabs")).toContainText("Previews", { timeout: 30_000 });
+  await expect(box.locator(".tm-classified-raw")).toHaveCount(3);
+  await box.getByRole("button", { name: "Próxima página" }).click();
+  await expect(box.locator(".tm-material-pagination")).toContainText("2 /");
+  await box.locator(".tm-material-tabs").getByRole("button", { name: /Previews/ }).click();
+  await expect(box.locator(".tm-material-media")).toHaveCount(3);
+  await expect(box.locator(".tm-classified-raw")).toHaveCount(0);
+  await box.getByRole("button", { name: "Próxima página" }).click();
+  await expect(box.locator(".tm-material-pagination")).toContainText("2 /");
+  await box.locator(".tm-material-tabs").getByRole("button", { name: /Finais/ }).click();
+  await expect(box.locator(".tm-material-media")).toHaveCount(3);
+  await expect(box.locator(".tm-material-pagination")).toContainText("1 /");
 });
 
 test("Previews e finais usam páginas separadas na pasta do Criativo", async ({ page }) => {

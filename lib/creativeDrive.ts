@@ -256,8 +256,8 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string):
   failDb(assetsError); failDb(rawError); failDb(versionsError);
   const captureWorkspace = Array.isArray(row.capture_workspace) ? row.capture_workspace[0] : row.capture_workspace;
   const [scriptResult, captureResult] = await Promise.allSettled([
-    captureWorkspace?.script_folder_id ? listFolderFilesPage(captureWorkspace.script_folder_id, 100, null, true) : { files: [], nextPageToken: null },
-    captureWorkspace?.capture_folder_id ? listFolderFilesPage(captureWorkspace.capture_folder_id, 100, null, true) : { files: [], nextPageToken: null },
+    captureWorkspace?.script_folder_id ? listFolderFilesPage(captureWorkspace.script_folder_id, 24, null, true) : { files: [], nextPageToken: null },
+    captureWorkspace?.capture_folder_id ? listFolderFilesPage(captureWorkspace.capture_folder_id, 24, null, true) : { files: [], nextPageToken: null },
   ]);
   return {
     ...row,
