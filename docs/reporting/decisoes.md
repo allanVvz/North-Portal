@@ -45,6 +45,7 @@ Cada linha diz o que foi decidido e por quê. O detalhe de implementação mora 
 | 23/09 | Bloco por objetivo (KPIs + destaque + criativos) volta a ser atômico na paginação (`wrap={false}` incondicional) | Só ficava protegido contra quebra de página quando não tinha detalhe — o relatório de conversão é o único que sempre tem |
 | 23/09 | Página ganha mais respiro (`paddingVertical` 16→28, rodapé 10→14) | Pedido de mais offset no topo/rodapé de cada página |
 | 23/09 | `adaptiveFeedback.ts` não duplica mais em "Leitura da semana" um comentário que já virou narrativa tratada (prefixo "Ajuste o comentário:") | Achado real na CRIS (22/09): a mesma frase aparecia duas vezes, uma limpa e outra crua |
+| 24/09 | **Regeração de manutenção nunca inventa instrução de revisão.** `handleTrafficRevisionComment` exige uma instrução e a IMPRIME no PDF, na seção "Revisão solicitada" — ela existe para registrar o que uma pessoa pediu. Usar esse caminho para regerar layout fez a frase de manutenção ("Regerar o relatório com o layout atual…") sair no relatório que o time lê. Quem precisar regerar sem pedido humano abre uma porta própria, sem instrução; não passa texto sintético por esta | O script pontual que fazia isso (`regenerateConversion.manual.test.ts`) foi removido do repo junto com esta regra — era a única coisa que fabricava instrução |
 
 ## Criativos
 
