@@ -15,7 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyFromAutomation, notifyResponsibilityHolders } from "./notify";
 import { DOCUMENT_BUCKET, documentStoragePath } from "@/lib/documentFiles";
 import { RECURRENCE_CADENCE_LABEL } from "@/lib/automationCatalog";
-import { inPeriod, previousPeriod } from "@/app/admin/performance/insights";
+import { inPeriod, previousPeriod, type Period } from "@/app/admin/performance/insights";
 import type { WindsorSettings } from "@/lib/windsor";
 import { renderAdsReportPdf, trafficFinalViewOf } from "@/lib/reports/adsReportPdf";
 import { creativeRows, mediaOutcome, mediaTotals } from "@/lib/reports/adsInsights";
@@ -132,6 +132,31 @@ export function runDayForPeriodEnd(periodTo: string): string {
   return shiftDays(periodTo, 1);
 }
 
+/** Vendas que a equipe informou no Feedback DESTA semana, se já informou.
+ *
+ *  Lê `task_metrics` pelo período fechado (não por `created_at`), a mesma fonte
+ *  e o mesmo eixo que `previousPeriodTotals` em conversionFlow.ts. Na primeira
+ *  execução da cascata a linha ainda não existe e isto devolve null: o fecho do
+ *  funil mostra só o pixel, e a soma aparece quando o tráfego é regerado depois
+ *  do feedback. Não é o relatório de tráfego espiando a etapa seguinte — é um
+ *  fato já gravado sobre o período, que a etapa seguinte gravou quando rodou.
+ *
+ *  Falha de leitura não derruba o relatório: sem o número, o funil só perde o
+ *  fecho somado. */
+async function informedSalesFor(admin: AdminClient, clientId: string, period: Period): Promise<number | null> {
+  const { data, error } = await admin
+    .from("task_metrics")
+    .select("metrics")
+    .eq("client_id", clientId)
+    .eq("period_to", period.to)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) return null;
+  const raw = ((data ?? [])[0] as { metrics?: Record<string, unknown> } | undefined)?.metrics?.vendas;
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 async function fillReportCard(
   admin: AdminClient,
   actingTask: TaskRecord,
@@ -186,6 +211,7 @@ async function fillReportCard(
     prevAdPosts,
     trendPosts: campaignPosts,
     previews: assets,
+    informedSales: await informedSalesFor(admin, clientId, period),
     revisionInstruction,
     generatedAt: new Date(),
   });

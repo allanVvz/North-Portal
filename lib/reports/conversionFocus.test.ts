@@ -5,7 +5,7 @@ import type { MediaTotals } from "./adsInsights";
 const nada = { vendas: null, agendamentos: null, receita: null, seguidores: null };
 const media: MediaTotals = {
   spend: 184.78, reach: 16424, impressions: 25000, clicks: 474, linkClicks: 323, ctr: 1.9, landingViews: null,
-  profileVisits: 609, conversations: 23, engagement: 3712, costPerConversation: 8.03,
+  profileVisits: 609, conversations: 23, engagement: 3712, costPerConversation: 8.03, purchases: null,
 };
 const baitaMedia: MediaTotals = { ...media, spend: 96.01, reach: 12569, clicks: 404, profileVisits: 562, conversations: 0, costPerConversation: null };
 const baitaPrev: MediaTotals = { ...baitaMedia, spend: 88.37, reach: 15118, profileVisits: 591 };

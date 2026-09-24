@@ -23,7 +23,7 @@ import { registerReportFonts } from "./reportFonts";
 import { blockResolver, CampaignBlocksSection } from "./campaignBlockKpis";
 import {
   OUTCOME_WORDS, creativeBadges, creativeHighlights, creativeRows, deltaOf, dominantBlock, mediaAlert, mediaAnalysis,
-  dailySeries, mediaFunnel, mediaOutcome, mediaTotals, objectiveScopedMediaTotals, money, num, objectiveRows, outcomeCost, outcomeValue, platformSplit, stageGap, weeklyTrend,
+  dailySeries, mediaFunnel, mediaOutcome, mediaTotals, objectiveScopedMediaTotals, money, num, objectiveRows, outcomeCost, outcomeValue, platformSplit, purchasesNote, stageGap, weeklyTrend,
   type Badge, type CreativeRow, type MediaOutcome, type ObjectiveRow,
 } from "./adsInsights";
 import type { PreviewAsset } from "./creativePreviews";
@@ -50,6 +50,13 @@ export type AdsReportInput = {
   trendPosts?: MetaPost[];
   /** Por adId: miniatura já embutível e link do post. */
   previews?: Record<string, PreviewAsset>;
+  /** Vendas que a equipe informou no Feedback DESTA semana, quando já
+   *  existem. Na primeira geração da cascata o feedback ainda não aconteceu e
+   *  isto é null — o fecho do funil mostra só o pixel. Não é uma leitura da
+   *  etapa seguinte: vem de `task_metrics`, um fato já gravado sobre o
+   *  período, então regerar o tráfego depois do feedback soma sem inverter a
+   *  ordem da cascata. */
+  informedSales?: number | null;
   /** Instrução humana aplicada pela North Ai nesta revisão. */
   revisionInstruction?: string | null;
   generatedAt: Date;
@@ -148,7 +155,7 @@ function campaignsOf(posts: MetaPost[], blockOf: (id: string | undefined, name: 
   return out.sort((a, b) => (b.metrics.custo ?? 0) - (a.metrics.custo ?? 0));
 }
 
-function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPosts, prevAdPosts, trendPosts, previews, revisionInstruction, generatedAt }: AdsReportInput) {
+function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPosts, prevAdPosts, trendPosts, previews, informedSales, revisionInstruction, generatedAt }: AdsReportInput) {
   const { blockOf, postBlock } = blockResolver(config, adPosts);
   // Mesma regra do relatório de conversão: visitas ao site, ao perfil e
   // conversas contam só das campanhas daquele objetivo (a Meta atribui clique
@@ -180,6 +187,7 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
   const analysis = mediaAnalysis(analysisInput);
   const alert = mediaAlert(analysisInput);
   const funnel = mediaFunnel(cur, outcome);
+  const purchases = purchasesNote(cur.purchases, informedSales ?? null);
   const trend = weeklyTrend(trendPosts ?? [], period.to, outcome, 6);
   // Detalhe que os dados sempre tiveram e o relatório nunca mostrou: a Meta é
   // consultada com time_increment=1 e breakdowns=publisher_platform, então dia e
@@ -253,6 +261,12 @@ function AdsReportDocument({ clientName, period, config, posts, prevPosts, adPos
               </View>
             ) : null}
           </View>
+          {purchases ? (
+            <View style={T.outcomeStrip}>
+              <Text style={T.outcomeStripValue}>{purchases.label}</Text>
+              <Text style={T.outcomeStripText}>{purchases.detail}</Text>
+            </View>
+          ) : null}
         </Section>
 
         {objectives.length >= 2 ? (

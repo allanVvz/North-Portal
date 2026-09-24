@@ -111,6 +111,11 @@ export const T = StyleSheet.create({
   cardLink: { fontSize: 6.5, color: C.tealText, textDecoration: "none" },
 
   note: { fontSize: 7.5, color: MUTED, marginTop: 6, lineHeight: 1.35 },
+  // Fecho do funil: o desfecho da semana tem mais peso que uma nota de rodapé,
+  // mas não é uma etapa — faixa discreta abaixo do trapézio, nunca dentro dele.
+  outcomeStrip: { flexDirection: "row", alignItems: "baseline", gap: 5, marginTop: 8, borderLeftWidth: 2, borderLeftColor: C.tealText, paddingLeft: 6 },
+  outcomeStripValue: { fontSize: 10.5, fontWeight: 700, color: C.tealText },
+  outcomeStripText: { fontSize: 7.5, color: SEC, lineHeight: 1.3 },
   legendRow: { flexDirection: "row", gap: 12, marginTop: 6 },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendSwatch: { width: 8, height: 8, borderRadius: 2 },

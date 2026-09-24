@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   creativeBadges, creativeHighlights, creativeRows, deltaOf, funnelWidths, mediaAlert, mediaAnalysis, mediaFunnel,
-  mediaTotals, objectiveRows, objectiveScopedMediaTotals, stageGap, weeklyTrend,
+  mediaTotals, objectiveRows, objectiveScopedMediaTotals, purchasesNote, stageGap, weeklyTrend,
   type MediaTotals,
 } from "./adsInsights";
 import type { MetaPost } from "@/lib/windsor";
@@ -341,5 +341,50 @@ describe("weeklyTrend", () => {
     ], "2026-09-15", "conversas", 5);
     expect(t.map((p) => p.weekTo)).toEqual(["2026-09-01", "2026-09-08", "2026-09-15"]);
     expect(t[2]).toMatchObject({ spend: 100, result: 10, cost: 10 });
+  });
+});
+
+describe("purchasesNote", () => {
+  // A decisão de 24/09: a compra soma no funil do relatório INTERNO, como nota
+  // de fechamento, e a composição fica sempre visível — o pixel atribui à
+  // campanha, a venda que a equipe informa é da conta inteira, e um número
+  // solto apagaria essa diferença.
+  it("só pixel: diz que veio do pixel", () => {
+    expect(purchasesNote(3, null)).toMatchObject({ total: 3, label: "3 compras", detail: "registradas pelo pixel no período" });
+  });
+
+  it("pixel e informada: soma e mostra as duas parcelas", () => {
+    expect(purchasesNote(3, 1)).toMatchObject({ total: 4, label: "4 compras", detail: "no período · 3 pelo pixel + 1 informada pela equipe" });
+  });
+
+  it("só informada: não atribui ao pixel o que a equipe contou", () => {
+    expect(purchasesNote(null, 2)).toMatchObject({ total: 2, label: "2 compras", detail: "informadas pela equipe no período" });
+  });
+
+  it("singular tem concordância própria", () => {
+    expect(purchasesNote(1, null)).toMatchObject({ label: "1 compra", detail: "registrada pelo pixel no período" });
+  });
+
+  it("conta sem pixel e sem venda informada não ganha fecho", () => {
+    expect(purchasesNote(null, null)).toBeNull();
+  });
+
+  it("zero não vira fecho do funil — o KPI do bloco já mostra o zero do pixel", () => {
+    expect(purchasesNote(0, null)).toBeNull();
+    expect(purchasesNote(0, 0)).toBeNull();
+  });
+});
+
+describe("mediaTotals · compras", () => {
+  it("soma a conta inteira, não só a campanha de site", () => {
+    const totals = mediaTotals([
+      post({ metrics: { custo: 50, compras: 3 } }),
+      post({ metrics: { custo: 30, compras: 3 } }),
+    ]);
+    expect(totals.purchases).toBe(6);
+  });
+
+  it("conta sem pixel devolve null, nunca 0", () => {
+    expect(mediaTotals([post({ metrics: { custo: 50 } })]).purchases).toBeNull();
   });
 });

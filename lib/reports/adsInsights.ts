@@ -66,6 +66,11 @@ export type MediaTotals = {
   conversations: number | null;
   engagement: number | null;
   costPerConversation: number | null;
+  /** Compras atribuídas pelo pixel, da conta inteira — como alcance e
+   *  investimento, não é escopada por objetivo em `objectiveScopedMediaTotals`:
+   *  o fecho da semana é da conta, e o recorte por campanha já vive no KPI do
+   *  bloco (`blockKpis.trafego_site`). */
+  purchases: number | null;
 };
 
 function sumKey(posts: MetaPost[], key: MetaPostMetricKey): number | null {
@@ -101,6 +106,7 @@ export function mediaTotals(posts: MetaPost[]): MediaTotals {
     conversations,
     engagement: sumKey(paid, "engajamento"),
     costPerConversation: spend !== null && conversations ? spend / conversations : null,
+    purchases: sumKey(paid, "compras"),
   };
 }
 
@@ -344,6 +350,36 @@ export function mediaFunnel(t: MediaTotals, outcome: MediaOutcome): FunnelStage[
  *  para o valor/rótulo, sem duplicar a lógica de `mediaFunnel`. */
 export function conversasStage(t: MediaTotals): FunnelStage | null {
   return t.conversations !== null ? { key: "conversas", label: "Conversas", value: t.conversations, source: "midia" } : null;
+}
+
+/** O fecho da semana em compras, como NOTA do funil e não como etapa (24/09).
+ *  A decisão é do usuário e tem duas razões:
+ *
+ *  1. Uma etapa "Compras" depois de "Conversas" afirmaria uma cadeia que não
+ *     existe — a compra não sai da conversa, e `stageGap` calcularia uma taxa
+ *     falsa entre as duas. Como nota, o número soma ao funil sem inventar o
+ *     caminho até ele.
+ *  2. As duas fontes têm naturezas diferentes e precisam permanecer visíveis:
+ *     o pixel atribui a compra à campanha; a venda que a equipe informa no
+ *     Feedback é da conta inteira, sem campanha. Somar é legítimo no nível da
+ *     conta, que é onde o funil vive — desde que a composição apareça. Por isso
+ *     o texto NUNCA é um número solto: ou diz de onde veio, ou diz as duas
+ *     parcelas.
+ *
+ *  Na primeira geração da semana o feedback ainda não aconteceu e só existe o
+ *  pixel; a soma aparece quando o relatório é regerado depois dele.
+ *
+ *  Total zero devolve null: o KPI do bloco já mostra "0 compras" quando o pixel
+ *  diz isso (ausência de dado é outra coisa, e lá também se distingue), e
+ *  repetir o zero como fecho do funil não acrescenta leitura. */
+export function purchasesNote(pixel: number | null, informed: number | null): { total: number; label: string; detail: string } | null {
+  const total = (pixel ?? 0) + (informed ?? 0);
+  if ((pixel === null && informed === null) || total <= 0) return null;
+  const label = `${num(total)} ${total === 1 ? "compra" : "compras"}`;
+  const informadas = (n: number) => `${num(n)} ${n === 1 ? "informada" : "informadas"} pela equipe`;
+  if (pixel && informed) return { total, label, detail: `no período · ${num(pixel)} pelo pixel + ${informadas(informed)}` };
+  if (informed) return { total, label, detail: `${informed === 1 ? "informada" : "informadas"} pela equipe no período` };
+  return { total, label, detail: `${total === 1 ? "registrada" : "registradas"} pelo pixel no período` };
 }
 
 /** Taxa entre etapas: só na mesma fonte e só quando a etapa seguinte é menor.
