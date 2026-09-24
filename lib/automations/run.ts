@@ -565,26 +565,23 @@ export type TrafficRevisionCommentOptions = {
   authorId?: string;
 };
 
-export async function handleTrafficRevisionComment(
-  admin: AdminClient,
-  taskId: string,
-  options: TrafficRevisionCommentOptions = {},
-): Promise<void> {
+/** Entrega + molde + configuração de uma etapa de anúncios. Extraído de
+ *  `handleTrafficRevisionComment` sem mudança de comportamento (24/09) para que
+ *  a regeração de manutenção (`regenerateTrafficReport`) use exatamente a mesma
+ *  resolução, em vez de uma cópia que envelhece à parte. */
+type TrafficStepContext = { trafficTask: TaskRecord; occ: TaskRecord; mold: TaskRecord; config: AutomationConfigRow };
+
+async function resolveTrafficStepContext(admin: AdminClient, taskId: string): Promise<TrafficStepContext | null> {
   const trafficTask = await getAdminTask(admin, taskId);
-  if (!trafficTask || trafficTask.subtype !== ADS_REPORT_STEP_KEY) return;
-  if (options.authorId && trafficTask.reviewer_id && trafficTask.reviewer_id !== options.authorId) return;
-  // Etapa já concluída: uma pessoa a aprovou. Comentário depois disso é conversa;
-  // regenerar substituiria o relatório em que o Feedback e a Conversão já se
-  // apoiam, e o status `revisao` que a geração grava reabriria a etapa.
-  if (trafficTask.completed_at) return;
+  if (!trafficTask || trafficTask.subtype !== ADS_REPORT_STEP_KEY) return null;
   const { data: links } = await admin.from("task_links").select("parent_id").eq("child_id", taskId).eq("relation_kind", "workflow_step").limit(1);
   const occurrenceId = (links?.[0] as { parent_id?: string } | undefined)?.parent_id;
-  if (!occurrenceId) return;
+  if (!occurrenceId) return null;
   const occ = await getAdminTask(admin, occurrenceId);
   const moldId = typeof occ?.payload?.recurrence_parent_id === "string" ? occ.payload.recurrence_parent_id : null;
-  if (!occ || !moldId) return;
+  if (!occ || !moldId) return null;
   const mold = await getAdminTask(admin, moldId);
-  if (!mold) return;
+  if (!mold) return null;
   // A etapa de anúncios pertence à Entrega, mas sua configuração pertence ao
   // molde de anúncios. Os dois são ligados por `depends_on_config_id`; procurar
   // a configuração diretamente no molde da Entrega só funciona em cadastros
@@ -611,22 +608,76 @@ export async function handleTrafficRevisionComment(
       config = trafficRows?.[0] as AutomationConfigRow | undefined;
     }
   }
-  if (!config) return;
+  if (!config) return null;
+  return { trafficTask, occ, mold, config };
+}
+
+/** O dia de execução que reproduz a MESMA janela do relatório original desta
+ *  etapa — nunca o dia de hoje. `revision: 1` é a âncora: as revisões seguintes
+ *  herdariam qualquer deslocamento já ocorrido. */
+async function runDayOfFirstRevision(admin: AdminClient, ctx: TrafficStepContext): Promise<string> {
+  const { data, error } = await admin
+    .from("traffic_reports")
+    .select("period_to")
+    .eq("task_id", ctx.trafficTask.id)
+    .order("revision", { ascending: true })
+    .limit(1);
+  if (error) throw error;
+  const periodoOriginal = (data?.[0] as { period_to?: string | null } | undefined)?.period_to ?? null;
+  return periodoOriginal ? runDayForPeriodEnd(periodoOriginal) : ctx.occ.due_date ?? agencyToday();
+}
+
+/** Regeração de MANUTENÇÃO: redesenha o PDF da etapa de anúncios com o código
+ *  atual, sem pedido humano nenhum.
+ *
+ *  Existe porque `handleTrafficRevisionComment` é o caminho errado para isto e a
+ *  regra de 24/09 proíbe usá-lo assim: ele EXIGE uma instrução de revisão, a
+ *  grava no card e a IMPRIME no PDF, na seção "Revisão solicitada". Regerar
+ *  layout por ali obrigava a inventar uma frase — e a frase sintética
+ *  ("Regerar o relatório com o layout atual…") vazou para o relatório que o
+ *  time lê. Aqui não há instrução para inventar: `fillReportCard` recebe null e
+ *  a seção simplesmente não existe.
+ *
+ *  Diferenças deliberadas do caminho de revisão, todas pelo mesmo motivo — uma
+ *  mudança de layout não é um pedido de correção e não pode mover a cascata:
+ *  - NÃO empurra a etapa para `revisao` nem troca o responsável;
+ *  - NÃO limpa `feedback_source_at` / `conversion_report_generated_at`, então o
+ *    feedback já colhido continua valendo;
+ *  - NÃO devolve Feedback e Conversão para Entrada.
+ *
+ *  Etapa concluída continua sendo regerável aqui (diferente da revisão, que
+ *  recusa): aprovar é sobre o conteúdo, e o conteúdo não muda. O PDF novo entra
+ *  como revisão seguinte no storage, com o mesmo período do original. */
+export async function regenerateTrafficReport(admin: AdminClient, taskId: string): Promise<{ fileName: string; url: string; revision: number } | null> {
+  const ctx = await resolveTrafficStepContext(admin, taskId);
+  if (!ctx) return null;
+  const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
+  const today = await runDayOfFirstRevision(admin, ctx);
+  const { fileName, url, report } = await fillReportCard(admin, ctx.trafficTask, ctx.mold, ctx.config, windsor, meta, today, ctx.occ.id, null);
+  await updateTaskPayload(admin, ctx.trafficTask.id, {
+    text: `North Ai regerou o relatório com o layout atual — mesmo período, mesmos números: [${fileName}](${url})`,
+    commentId: automationCommentId("ads-rerender", ctx.trafficTask.id, report.revision),
+  });
+  return { fileName, url, revision: report.revision };
+}
+
+export async function handleTrafficRevisionComment(
+  admin: AdminClient,
+  taskId: string,
+  options: TrafficRevisionCommentOptions = {},
+): Promise<void> {
+  const ctx = await resolveTrafficStepContext(admin, taskId);
+  if (!ctx) return;
+  const { trafficTask, occ, mold, config } = ctx;
+  if (options.authorId && trafficTask.reviewer_id && trafficTask.reviewer_id !== options.authorId) return;
+  // Etapa já concluída: uma pessoa a aprovou. Comentário depois disso é conversa;
+  // regenerar substituiria o relatório em que o Feedback e a Conversão já se
+  // apoiam, e o status `revisao` que a geração grava reabriria a etapa.
+  if (trafficTask.completed_at) return;
   const instruction = options.instruction?.trim() || [...commentsOf(trafficTask.payload)].reverse().find((comment) => comment.author !== "Automação" && comment.author !== AUTOMATION_ASSIGNEE)?.text;
   if (!instruction) return;
   const [windsor, meta] = await Promise.all([getWindsorSettingsService(), getMetaSettingsService()]);
-  // A janela vem do relatório que está sendo revisado, não do dia de hoje —
-  // ver runDayForPeriodEnd. `revision: 1` é a âncora: as revisões seguintes
-  // herdariam qualquer deslocamento já ocorrido.
-  const { data: primeiraRevisao, error: revisaoError } = await admin
-    .from("traffic_reports")
-    .select("period_to")
-    .eq("task_id", trafficTask.id)
-    .order("revision", { ascending: true })
-    .limit(1);
-  if (revisaoError) throw revisaoError;
-  const periodoOriginal = (primeiraRevisao?.[0] as { period_to?: string | null } | undefined)?.period_to ?? null;
-  const today = periodoOriginal ? runDayForPeriodEnd(periodoOriginal) : occ.due_date ?? agencyToday();
+  const today = await runDayOfFirstRevision(admin, ctx);
   const { fileName, url, report } = await fillReportCard(admin, trafficTask, mold, config, windsor, meta, today, occ.id, instruction);
   // A geração levou segundos: o comentário entra no thread que está no banco
   // AGORA (nunca numa cópia lida antes) e o status é compare-and-set. Uma pessoa

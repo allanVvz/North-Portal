@@ -38,6 +38,12 @@ export const BLOCK_KPIS_DEFAULT: Record<CampaignBlock, BlockKpi[]> = {
     { label: "Visitas ao perfil", metric: "profileVisits" },
     { label: "Mensagens", metric: "contatos" },
     { label: "Custo por clique", ratio: ["custo", "cliquesLink"] },
+    // Esta lista é a do relatório INTERNO (`kpiSource="all"`), separada da
+    // `siteKpis` dos templates — as duas precisam do desfecho do objetivo, ou o
+    // time vê a compra no relatório do cliente e não no seu (24/09). `optional`:
+    // só renderiza com dado no período.
+    { label: "Compras", metric: "compras", optional: true },
+    { label: "Custo por compra", ratio: ["custo", "compras"], optional: true },
   ],
   trafego_perfil: [
     { label: "Investimento", metric: "custo" },

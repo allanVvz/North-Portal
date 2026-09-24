@@ -94,7 +94,7 @@ const AUTOMATION_AUTHORS = new Set(["Automação", AUTOMATION_ASSIGNEE]);
 // que apagava KPI e funil de seguidores da CRIS); capa editorial com título
 // "Relatório de tráfego pago", período em evidência e texto de apresentação;
 // seções com régua, título Fraunces e mais respiro; funil com mais destaque.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v17";
+const CONVERSION_RENDERER_REVISION = "segment-summary-v18";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
@@ -663,6 +663,9 @@ async function processOccurrence(
   occ: TaskRecord,
   today: string,
   visualRequest?: VisualRequest | null,
+  /** Regeração de manutenção: o PDF é redesenhado com o código atual, sem
+   *  pedido humano nenhum. Ver `regenerateConversionReport`. */
+  maintenance = false,
 ): Promise<boolean> {
   const startedAt = Date.now();
   const tags = tagsOf(config);
@@ -693,7 +696,12 @@ async function processOccurrence(
   // Uma aprovação sem comentário humano no próprio relatório é terminal. Um
   // revisor que efetivamente escreva uma correção continua podendo abrir uma
   // nova versão, cujo fingerprint não colide com a anterior.
-  if (card3.completed_at && !humanComments([card3]).length) return false;
+  //
+  // A manutenção atravessa esse gate porque ele protege o CONTEÚDO aprovado, e
+  // a manutenção não mexe em conteúdo: mesmos números, mesma leitura, só o
+  // desenho muda. Sem isso, todo cliente cujo relatório foi aprovado sem
+  // comentário (a maioria) ficaria congelado no layout do dia da aprovação.
+  if (card3.completed_at && !maintenance && !humanComments([card3]).length) return false;
   const ext = await consolidateAdaptiveFeedback(humanComments([card2, card3]), tags);
   const reportFingerprint = `${ext.interpretation.sourceFingerprint}:${CONVERSION_RENDERER_REVISION}`;
   if (occPayload.adaptive_source_fingerprint === reportFingerprint) return false;
@@ -928,7 +936,7 @@ export async function runConversionFlow(
 }
 
 /** Executa a conversão depois da aprovação manual do Feedback. */
-export async function processConversionFeedback(admin: AdminClient, occId: string, visualRequest?: VisualRequest | null): Promise<void> {
+export async function processConversionFeedback(admin: AdminClient, occId: string, visualRequest?: VisualRequest | null, maintenance = false): Promise<void> {
   const occ = await getAdminTask(admin, occId);
   if (!occ) return;
   const moldId = (occ.payload as Record<string, unknown>)?.recurrence_parent_id;
@@ -947,10 +955,38 @@ export async function processConversionFeedback(admin: AdminClient, occId: strin
 
   const today = new Date().toISOString().slice(0, 10);
   try {
-    await processOccurrence(admin, config, mold, occ, today, visualRequest);
+    await processOccurrence(admin, config, mold, occ, today, visualRequest, maintenance);
   } catch (error) {
     await markTaskParada(admin, occId, `Falha ao processar o feedback da semana: ${errorMessage(error)}`);
   }
+}
+
+/** Regeração de MANUTENÇÃO do relatório de conversão — o par de
+ *  `regenerateTrafficReport` (run.ts), pelo mesmo motivo e com a mesma regra:
+ *  redesenhar o PDF com o código atual não é um pedido humano e não pode fingir
+ *  que é um.
+ *
+ *  Contra `handleConversionRevisionComment`, que é o caminho de quem pediu algo,
+ *  a diferença é uma só: aqui não se lê comentário nenhum em busca de
+ *  instrução, então `report_instructions` da ocorrência fica como está — o que
+ *  a Luiza pediu na semana continua valendo e continua aplicado. O gate de
+ *  "aprovado sem comentário é terminal" cede, porque protege conteúdo e o
+ *  conteúdo não muda.
+ *
+ *  Continua valendo a idempotência por fingerprint: sem bump de
+ *  `CONVERSION_RENDERER_REVISION`, chamar isto duas vezes não gera dois PDFs. */
+export async function regenerateConversionReport(admin: AdminClient, taskId: string): Promise<void> {
+  const card = await getAdminTask(admin, taskId);
+  if (!card || card.subtype !== CONVERSION_REPORT_STEP_KEY) return;
+  const { data, error } = await admin.from("task_links")
+    .select("parent_id")
+    .eq("child_id", taskId)
+    .eq("relation_kind", "workflow_step")
+    .limit(1);
+  if (error) throw error;
+  const occurrenceId = (data?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (!occurrenceId) return;
+  await processConversionFeedback(admin, occurrenceId, null, true);
 }
 
 /** Comentário direto na etapa de conversão pede uma nova versão do PDF.
