@@ -44,7 +44,7 @@ describe("mediaTotals", () => {
   });
 });
 
-describe("objectiveScopedMediaTotals — site/perfil/conversas só do próprio objetivo (23/09)", () => {
+describe("objectiveScopedMediaTotals — a porta de cada etapa do funil", () => {
   it("clique/landing view incidental numa campanha de perfil não vira 'visitas ao site' fantasma", () => {
     // Caso real: Baita não tem campanha de site, mas a Meta reportou 2
     // cliques de link incidentais (bio/CTA) na campanha de perfil.
@@ -68,6 +68,28 @@ describe("objectiveScopedMediaTotals — site/perfil/conversas só do próprio o
     const { postBlock } = blockResolver(config, posts);
     const t = objectiveScopedMediaTotals(posts, postBlock);
     expect(t.linkClicks).toBe(41);
+  });
+
+  it("CRIS 15–21/09 — com campanha de site, o funil soma as visitas ao site da CONTA (41, não 29)", () => {
+    // Decisão de 24/09: o funil conta a jornada da conta. As 12 visitas das
+    // campanhas de perfil e engajamento são reais; o recorte (29) fica em
+    // "Mídia por objetivo".
+    const config = {
+      ...DEFAULT_BUILTIN_TEMPLATE.config,
+      campaignBlocks: { Vendas: "trafego_site" as const, Trafego: "trafego_perfil" as const, Eng: "mensagens" as const },
+    };
+    const posts = [
+      post({ campaignName: "Vendas", metrics: { custo: 68.62, landingPageViews: 29, cliquesLink: 41, profileVisits: 231, contatos: 7 } }),
+      post({ campaignName: "Trafego", metrics: { custo: 67.36, landingPageViews: 9, cliquesLink: 221, profileVisits: 132 } }),
+      post({ campaignName: "Eng", metrics: { custo: 76.96, landingPageViews: 3, cliquesLink: 87, profileVisits: 299, contatos: 17 } }),
+    ];
+    const { postBlock } = blockResolver(config, posts);
+    const t = objectiveScopedMediaTotals(posts, postBlock);
+    expect(t.landingViews).toBe(41);
+    expect(t.linkClicks).toBe(349);
+    // Perfil e conversas seguem recortados pelo próprio bloco.
+    expect(t.profileVisits).toBe(132);
+    expect(t.conversations).toBe(17);
   });
 
   it("conversas ficam restritas ao bloco de mensagens", () => {

@@ -110,23 +110,34 @@ export function mediaTotals(posts: MetaPost[]): MediaTotals {
   };
 }
 
-/** Como `mediaTotals`, mas site/perfil/conversas restritos aos posts que de
- *  fato resolvem para aquele bloco de objetivo — a Meta atribui link
- *  click/landing view a qualquer anúncio com link (bio, CTA), mesmo numa
- *  campanha de perfil, então somar sem filtrar vazava "Visitas ao site"
- *  fantasma no funil de um cliente sem essa campanha (Baita, 23/09). Alcance,
- *  investimento e impressões continuam de conta inteira — são métricas de
- *  conta, não de objetivo. */
+/** Totais da conta para o FUNIL, com cada etapa de objetivo sob uma porta.
+ *
+ *  Site (24/09, pedido do usuário): se a conta tem campanha de site, o funil
+ *  soma as visitas ao site da CONTA INTEIRA — na CRIS de 15–21/09, 41 e não
+ *  29. As 12 a mais são reais: gente que chegou ao site por anúncio de outra
+ *  campanha (botão, link na bio), e o funil conta a jornada da conta, não de
+ *  uma campanha. Sem campanha de site a etapa não existe: era o "Visitas ao
+ *  site: 2" fantasma da Baita (23/09), que não tem campanha de site e teve 2
+ *  cliques incidentais na de perfil. A porta é ter o objetivo, não ter o
+ *  número.
+ *
+ *  Perfil e conversas continuam recortados pelo próprio bloco (regra de 23/09).
+ *
+ *  O recorte por objetivo de verdade — 29 visitas no bloco de site — mora em
+ *  "Mídia por objetivo" (`CampaignBlocksSection`), que filtra os posts de cada
+ *  bloco por conta própria e não passa por aqui. Alcance, investimento e
+ *  impressões sempre foram de conta inteira. */
 export function objectiveScopedMediaTotals(posts: MetaPost[], postBlock: (post: MetaPost) => CampaignBlock): MediaTotals {
   const totals = mediaTotals(posts);
-  const site = mediaTotals(posts.filter((p) => postBlock(p) === "trafego_site"));
+  const temObjetivo = (block: CampaignBlock) => posts.some((p) => p.source === "paid" && postBlock(p) === block);
   const perfil = mediaTotals(posts.filter((p) => postBlock(p) === "trafego_perfil"));
   const mensagens = mediaTotals(posts.filter((p) => postBlock(p) === "mensagens"));
+  const site = temObjetivo("trafego_site");
   return {
     ...totals,
-    landingViews: site.landingViews,
-    linkClicks: site.linkClicks,
-    clicks: site.clicks,
+    landingViews: site ? totals.landingViews : null,
+    linkClicks: site ? totals.linkClicks : null,
+    clicks: site ? totals.clicks : null,
     profileVisits: perfil.profileVisits,
     conversations: mensagens.conversations,
   };
