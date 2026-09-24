@@ -6,6 +6,7 @@ import { recurrenceWeekdays } from "@/lib/recurrence";
 import { isFlowDelivery, recurrenceParentIdOf } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
 import { createClient } from "@/lib/supabase/server";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { flowDemotionProblem } from "@/lib/flows/demotion";
@@ -237,8 +238,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // estado local, uma resposta incompleta apagava os elos que a tela acabara
     // de aprender: a caixa de etapas voltava a mostrar o slot vazio.
     const saved = (await getTaskById(task.id)) ?? task;
+    let driveSyncWarning: string | undefined;
+    if (current.subtype === "edicao" && current.status === "revisao" && saved.status === "em_producao") {
+      try {
+        const result = await returnEditFinalsToPreview(createAdminClient(), saved.id);
+        if (result.errors.length) driveSyncWarning = `Card salvo, mas ${result.errors.length} pasta(s) do Drive ainda precisam sincronizar. Abra os materiais para tentar novamente.`;
+      } catch {
+        driveSyncWarning = "Card salvo, mas nao foi possivel sincronizar os finais do Drive agora.";
+      }
+    }
     await notifyTaskChange(current, saved);
-    return NextResponse.json(await withFlowNextTask(current, saved));
+    return NextResponse.json({ ...await withFlowNextTask(current, saved), ...(driveSyncWarning ? { drive_sync_warning: driveSyncWarning } : {}) });
   } catch (error) {
     return apiError(error);
   }

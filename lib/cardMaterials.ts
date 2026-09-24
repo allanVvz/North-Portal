@@ -59,7 +59,7 @@ export function creativeWorkspacesForCard(
 
 export function currentFinalAsset(workspace: CreativeMaterialWorkspace): CreativeMaterialAsset | null {
   const current = workspace.final_versions.find((version) => version.state === "current");
-  return workspace.assets.find((asset) => asset.id === current?.asset_id && asset.state === "active") ?? null;
+  return workspace.assets.find((asset) => asset.id === current?.asset_id && asset.role === "final" && asset.state === "active") ?? null;
 }
 
 export function materialCoverCandidates(workspaces: readonly CreativeMaterialWorkspace[]): TaskCover[] {

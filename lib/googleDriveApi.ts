@@ -233,6 +233,29 @@ export async function setDriveItemTrashed(fileId: string, trashed: boolean): Pro
   if (!res.ok) throw new HttpError(502, `Falha ao atualizar item no Drive: ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
 
+/** Move only a direct child of the expected folder; retries are harmless. */
+export async function moveDriveItemBetweenFolders(fileId: string, fromFolderId: string, toFolderId: string): Promise<void> {
+  const file = await getDriveItemMetadata(fileId);
+  if (!file) throw new HttpError(404, "Arquivo nao encontrado no Google Drive.");
+  if (file.parents?.includes(toFolderId)) return;
+  if (!file.parents?.includes(fromFolderId)) throw new HttpError(409, "O arquivo mudou de pasta antes da movimentacao.");
+  if (file.mimeType === FOLDER_MIME || file.mimeType === SHORTCUT_MIME) {
+    throw new HttpError(400, "Pastas e atalhos nao podem ser movidos como finais.");
+  }
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const params = new URLSearchParams({
+    addParents: toFolderId, removeParents: fromFolderId,
+    fields: "id,parents", supportsAllDrives: "true",
+  });
+  const response = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${params}`, {
+    method: "PATCH", headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new HttpError(502, `Falha ao mover arquivo no Drive (HTTP ${response.status}).`);
+  const moved = await response.json() as { parents?: string[] };
+  if (!moved.parents?.includes(toFolderId)) throw new HttpError(502, "O Drive nao confirmou a nova pasta do arquivo.");
+}
+
 /** Inicia a sessao; os bytes seguem direto do navegador para a URL retornada. */
 export async function createDriveResumableUpload(input: {
   name: string;

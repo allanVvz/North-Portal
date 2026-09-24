@@ -193,8 +193,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     setLoading(false);
   }, []);
 
-  const loadMaterials = useCallback(() => {
-    fetch("/api/admin/drive/baita/materials", { cache: "no-store" })
+  const loadMaterials = useCallback((sync = false) => {
+    fetch("/api/admin/drive/baita/materials", sync
+      ? { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", cache: "no-store" }
+      : { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((data: { workspaces?: CreativeMaterialWorkspace[] } | null) => {
         if (data?.workspaces) setMaterialWorkspaces(data.workspaces);
@@ -222,7 +224,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     } catch { setFlowFlags(null); }
   }, []);
 
-  useEffect(() => { void load(); loadMaterials(); }, [load, loadMaterials]);
+  useEffect(() => { void load(); loadMaterials(true); }, [load, loadMaterials]);
 
   // Keeps the board in sync when a client approves/requests adjustments from
   // the portal (or another admin tab moves a card), without a manual refresh.

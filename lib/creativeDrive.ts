@@ -7,6 +7,7 @@ import {
   getDriveItemMetadata,
   listFolderFiles,
   listFolderFilesPage,
+  moveDriveItemBetweenFolders,
   setDriveItemTrashed,
   type DriveItemMetadata,
 } from "./googleDriveApi";
@@ -355,19 +356,22 @@ export async function promoteCreativeAsset(db: Db, userId: string, creativeTaskI
   const { data: existingVersion, error: existingVersionError } = await db.from("drive_final_versions").select("*")
     .eq("workspace_id", workspace.id).eq("asset_id", assetId).maybeSingle();
   failDb(existingVersionError);
-  if (existingVersion) return existingVersion;
-  const { data: versions, error: versionError } = await db.from("drive_final_versions").select("version_number")
-    .eq("workspace_id", workspace.id).order("version_number", { ascending: false }).limit(1);
-  failDb(versionError);
-  const nextVersion = ((versions?.[0]?.version_number as number | undefined) ?? 0) + 1;
-  const { error: supersedeError } = await db.from("drive_final_versions").update({ state: "superseded" })
-    .eq("workspace_id", workspace.id).eq("state", "current");
-  failDb(supersedeError);
-  const { error: assetRoleError } = await db.from("drive_assets").update({ role: "final" }).eq("id", assetId);
-  failDb(assetRoleError);
-  const { data, error } = await db.from("drive_final_versions").upsert({
-    workspace_id: workspace.id, asset_id: assetId, version_number: nextVersion, state: "current", promoted_by: userId,
-  }, { onConflict: "workspace_id,asset_id", ignoreDuplicates: false }).select("*").single();
+  if (existingVersion && asset.role === "final") return existingVersion;
+  const file = await getDriveItemMetadata(asset.drive_file_id);
+  if (!file?.parents?.some((parent) => parent === workspace.preview_folder_id || parent === workspace.creative_folder_id)) {
+    throw new HttpError(409, "O arquivo ja nao esta no Preview deste Criativo.");
+  }
+  if (file.parents.includes(workspace.preview_folder_id!)) {
+    await moveDriveItemBetweenFolders(file.id, workspace.preview_folder_id!, workspace.creative_folder_id!);
+  }
+  const { error: registerError } = await db.rpc("register_drive_folder_asset", {
+    p_workspace_id: workspace.id, p_drive_file_id: file.id, p_name: file.name,
+    p_mime_type: file.mimeType, p_size_bytes: file.size, p_web_view_link: file.webViewLink,
+    p_role: "final", p_source_created_at: new Date().toISOString(), p_promoted_by: userId,
+  });
+  failDb(registerError);
+  const { data, error } = await db.from("drive_final_versions").select("*")
+    .eq("workspace_id", workspace.id).eq("asset_id", assetId).single();
   failDb(error);
   return data;
 }
@@ -378,10 +382,11 @@ export async function setFinalVersionTrashed(db: Db, creativeTaskId: string, ver
     .eq("workspace_id", workspace.id).eq("id", versionId).maybeSingle();
   failDb(error);
   if (!version) throw new HttpError(404, "Versao final nao encontrada.");
-  const { data: asset, error: assetError } = await db.from("drive_assets").select("drive_file_id")
+  const { data: asset, error: assetError } = await db.from("drive_assets").select("drive_file_id,role")
     .eq("id", version.asset_id).maybeSingle();
   failDb(assetError);
   if (!asset) throw new HttpError(404, "Arquivo da versao nao encontrado.");
+  if (asset.role === "preview") throw new HttpError(409, "Este arquivo voltou ao Preview; gerencie-o na aba Previews.");
   await setDriveItemTrashed(asset.drive_file_id, trashed);
   const now = new Date().toISOString();
   if (!trashed) {

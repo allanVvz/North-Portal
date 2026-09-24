@@ -348,6 +348,7 @@ export default function TaskModal({
   const [comment, setComment] = useState("");
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
+  const [materialSyncWarning, setMaterialSyncWarning] = useState("");
   const [recentlyCreatedCard, setRecentlyCreatedCard] = useState<TaskRecord | null>(null);
   const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final" } | null>(null);
   const [materialTab, setMaterialTab] = useState<"raw" | "preview" | "final" | "docs" | "links">("links");
@@ -355,12 +356,26 @@ export default function TaskModal({
   const materialRequest = useRef(0);
   const reloadMaterials = useCallback(() => {
     const requestId = ++materialRequest.current;
-    fetch("/api/admin/drive/baita/materials", { cache: "no-store" })
+    fetch("/api/admin/drive/baita/materials", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: liveTask?.id ?? task?.id }), cache: "no-store",
+    })
       .then((response) => response.ok ? response.json() : null)
-      .then((data: { workspaces?: CreativeMaterialWorkspace[] } | null) => { if (requestId === materialRequest.current && data?.workspaces) setMaterialWorkspaces(data.workspaces); })
+      .then((data: { workspaces?: CreativeMaterialWorkspace[]; syncWarnings?: string[] } | null) => {
+        if (requestId !== materialRequest.current || !data?.workspaces) return;
+        setMaterialWorkspaces(data.workspaces);
+        setMaterialSyncWarning(data.syncWarnings?.length ? "O Drive nao concluiu a sincronizacao dos materiais. Abra a pasta para tentar novamente." : "");
+      })
       .catch(() => {});
-  }, []);
-  useEffect(() => { if (mode === "edit") reloadMaterials(); return () => { materialRequest.current += 1; }; }, [mode, reloadMaterials]);
+  }, [liveTask?.id, task?.id]);
+  useEffect(() => {
+    if (mode !== "edit") return () => { materialRequest.current += 1; };
+    reloadMaterials();
+    const onFocus = () => reloadMaterials();
+    window.addEventListener("focus", onFocus);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") reloadMaterials(); }, 60_000);
+    return () => { window.removeEventListener("focus", onFocus); window.clearInterval(timer); materialRequest.current += 1; };
+  }, [mode, reloadMaterials]);
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
   const [editingComment, setEditingComment] = useState<{ index: number; at: string; text: string } | null>(null);
@@ -599,7 +614,7 @@ export default function TaskModal({
   );
   const materialPreviews = cardWorkspaces.flatMap((workspace) => workspace.assets.filter((asset) => asset.role === "preview" && asset.state === "active").map((asset) => ({ asset, workspace })));
   const materialFinals = cardWorkspaces.flatMap((workspace) => workspace.final_versions.filter((version) => version.state === "current" || workspace.creative_task_id === liveTask?.id).flatMap((version) => {
-    const asset = workspace.assets.find((item) => item.id === version.asset_id && item.state === "active");
+    const asset = workspace.assets.find((item) => item.id === version.asset_id && item.role === "final" && item.state === "active");
     return asset ? [{ asset, workspace, version }] : [];
   }));
   const materialDocs = materialGroups.flatMap(({ card, docs }) => docs.map((doc) => ({ card, doc })));
@@ -2224,6 +2239,7 @@ export default function TaskModal({
             {mode === "edit" && materialTabs.length > 0 ? (
               <section className="tm-materials" aria-label="Materiais do card">
                 <div className="tm-materials-heading"><div><p className="tm-box-label">Materiais</p><strong>Arquivos desta execução</strong></div><small>{materialTabs.reduce((sum, tab) => sum + tab.count, 0)} itens</small></div>
+                {materialSyncWarning ? <p className="admin-warn" role="status">{materialSyncWarning}</p> : null}
                 <nav className="tm-material-tabs" aria-label="Tipos de materiais do card">{materialTabs.map((tab) => <button type="button" key={tab.id} className={activeMaterialTab === tab.id ? "on" : ""} aria-current={activeMaterialTab === tab.id ? "page" : undefined} onClick={() => { setMaterialTab(tab.id); setMaterialPage(1); }}>{tab.label}<span>{tab.count}</span></button>)}</nav>
                 {activeMaterialTab === "raw" && liveTask ? <div className="tm-classified-raws-grid">{ownClassifiedRaws.slice(materialStart, materialStart + 3).map((asset, index) => <div className="tm-classified-raw" key={asset.id}><button type="button" className="tm-classified-raw-preview" onClick={() => setDriveOpen({ taskId: liveTask.id, assetId: asset.id })} aria-label={`Visualizar bruto ${asset.name}`}><span className="tm-classified-raw-thumb"><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><b>{asset.mime_type.startsWith("video/") ? "Vídeo" : "Foto"} {materialStart + index + 1}</b><span className="tm-classified-raw-links" aria-label="Criativos vinculados">{(ownRawCreativeLinks.get(asset.drive_file_id) ?? []).map((target) => <span className="tm-classified-raw-eyebrow" key={target.id} title={target.title}>{target.title}</span>)}</span></button><div className="tm-classified-raw-actions"><a href={asset.web_view_link ?? `https://drive.google.com/file/d/${encodeURIComponent(asset.drive_file_id)}/view`} target="_blank" rel="noreferrer">Abrir</a><a href={`/api/admin/tasks/${liveTask.id}/drive-assets/${asset.id}/download`}>Baixar</a></div></div>)}</div> : null}
                 {activeMaterialTab === "preview" || activeMaterialTab === "final" ? <div className="tm-material-media-grid">{(activeMaterialTab === "preview" ? materialPreviews : materialFinals).slice(materialStart, materialStart + 3).map(({ asset, workspace }, index) => <button type="button" key={`${workspace.id}-${asset.id}`} className="tm-material-media" onClick={() => setDriveOpen({ taskId: workspace.creative_task_id, assetId: asset.id })}><span className="tm-material-media-image"><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><span className="tm-material-media-caption"><b>{activeMaterialTab === "preview" ? "Preview" : "Final"} {materialStart + index + 1}</b><small>{clientTasks.find((card) => card.id === workspace.creative_task_id)?.title ?? "Criativo"}</small></span></button>)}</div> : null}
