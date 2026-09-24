@@ -10,8 +10,9 @@ import {
   type DriveItemMetadata,
 } from "./googleDriveApi";
 import { creativeDriveAppProperties } from "./creativeDriveModel";
+import { BAITA_DRIVE_PLAN_ID } from "./cardMaterials";
 
-export const BAITA_DRIVE_PLAN_ID = "7e1a162d-ff0f-414e-ad50-bea8b472fbcd";
+export { BAITA_DRIVE_PLAN_ID };
 
 type Db = ReturnType<typeof createAdminClient>;
 type TaskRow = {
@@ -79,6 +80,7 @@ export type CreativeDriveWorkspace = {
     script: Awaited<ReturnType<typeof listFolderFiles>>;
     capture: Awaited<ReturnType<typeof listFolderFiles>>;
   };
+  source_error: string | null;
 };
 
 function failDb(error: { message: string } | null): void {
@@ -186,13 +188,24 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
   failDb(creativeSeedError);
 
   try {
-    const daily = await ensureDriveFolder({
+    // The capture is shared by several creatives. Reuse its recorded folders
+    // before searching by tags; legacy runs created duplicate same-name folders.
+    async function recordedFolder(id: string | null, parentId: string): Promise<{ id: string } | null> {
+      if (!id) return null;
+      const file = await getDriveItemMetadata(id);
+      if (!file) throw new HttpError(502, "Uma pasta de Captação já registrada está inacessível no Google Drive.");
+      if (file.mimeType !== "application/vnd.google-apps.folder" || !file.parents?.includes(parentId)) {
+        throw new HttpError(409, "Uma pasta de Captação já registrada não pertence à pasta esperada.");
+      }
+      return { id: file.id };
+    }
+    const daily = await recordedFolder(captureWorkspace.daily_folder_id, links.raw_folder_id) ?? await ensureDriveFolder({
       name: dailyLabel(context.captureDate), parentId: links.raw_folder_id,
       appProperties: creativeDriveAppProperties(context, "daily_root"),
     });
     const [script, capture] = await Promise.all([
-      ensureDriveFolder({ name: "Roteiro", parentId: daily.id, appProperties: creativeDriveAppProperties(context, "script") }),
-      ensureDriveFolder({ name: "Captacao", parentId: daily.id, appProperties: creativeDriveAppProperties(context, "capture") }),
+      recordedFolder(captureWorkspace.script_folder_id, daily.id).then((found) => found ?? ensureDriveFolder({ name: "Roteiro", parentId: daily.id, appProperties: creativeDriveAppProperties(context, "script") })),
+      recordedFolder(captureWorkspace.capture_folder_id, daily.id).then((found) => found ?? ensureDriveFolder({ name: "Captacao", parentId: daily.id, appProperties: creativeDriveAppProperties(context, "capture") })),
     ]);
     const creative = await ensureDriveFolder({
       name: context.creativeTitle, parentId: links.uploads_folder_id,
@@ -239,9 +252,9 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string):
   ]);
   failDb(assetsError); failDb(rawError); failDb(versionsError);
   const captureWorkspace = Array.isArray(row.capture_workspace) ? row.capture_workspace[0] : row.capture_workspace;
-  const [scriptFiles, captureFiles] = await Promise.all([
-    captureWorkspace?.script_folder_id ? listFolderFiles(captureWorkspace.script_folder_id, 100) : [],
-    captureWorkspace?.capture_folder_id ? listFolderFiles(captureWorkspace.capture_folder_id, 100) : [],
+  const [scriptResult, captureResult] = await Promise.allSettled([
+    captureWorkspace?.script_folder_id ? listFolderFiles(captureWorkspace.script_folder_id, 100, true) : [],
+    captureWorkspace?.capture_folder_id ? listFolderFiles(captureWorkspace.capture_folder_id, 100, true) : [],
   ]);
   return {
     ...row,
@@ -249,7 +262,12 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string):
     assets: assets ?? [],
     raw_links: rawLinks ?? [],
     final_versions: versions ?? [],
-    source_files: { script: scriptFiles, capture: captureFiles },
+    source_files: {
+      script: scriptResult.status === "fulfilled" ? scriptResult.value : [],
+      capture: captureResult.status === "fulfilled" ? captureResult.value : [],
+    },
+    source_error: scriptResult.status === "rejected" || captureResult.status === "rejected"
+      ? "Não foi possível listar os brutos desta Captação no Google Drive." : null,
   } as CreativeDriveWorkspace;
 }
 

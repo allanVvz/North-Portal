@@ -24,6 +24,7 @@ import {
 import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
 import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
+import { BAITA_DRIVE_PLAN_ID, creativeWorkspacesForCard, currentFinalAsset, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
 import CardDriveFolders from "./CardDriveFolders";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
@@ -345,6 +346,15 @@ export default function TaskModal({
     : -1;
   const [comment, setComment] = useState("");
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
+  const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
+  const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string } | null>(null);
+  const reloadMaterials = useCallback(() => {
+    fetch("/api/admin/drive/baita/materials", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { workspaces?: CreativeMaterialWorkspace[] } | null) => { if (data?.workspaces) setMaterialWorkspaces(data.workspaces); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { if (mode === "edit") reloadMaterials(); }, [mode, reloadMaterials]);
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
   const [editingComment, setEditingComment] = useState<{ index: number; at: string; text: string } | null>(null);
@@ -517,24 +527,28 @@ export default function TaskModal({
   const commentDocs = draft.clientSlug
     ? [...attachableDocs.filter((d) => d.clientSlug === draft.clientSlug), ...attachableDocs.filter((d) => d.clientSlug !== draft.clientSlug)]
     : attachableDocs;
-  // Anexos = documents attached directly to THIS card (documents.task_id, e.g.
-  // a report an automation generated) UNION any document a comment happens to
-  // link to (file link pasted/posted in the thread) — every file link in a
-  // comment becomes an icon here too, not just direct task_id attachments.
-  const taskDocs = useMemo(() => {
-    if (!liveTask) return [];
-    // Anexos ficam por card, não por família — o thread de comentários é
-    // compartilhado, os arquivos não. Por isso varre `ownComments`, não o merge.
-    const byId = new Map(attachableDocs.filter((d) => d.task_id === liveTask.id).map((d) => [d.id, d]));
-    for (const c of ownComments) {
-      for (const part of splitCommentText(c.text)) {
-        if (!("url" in part)) continue;
-        const doc = attachableDocs.find((d) => d.file_url === part.url);
-        if (doc) byId.set(doc.id, doc);
-      }
+  // Each source card keeps its own documents. A parent only mirrors their
+  // references, so shared stages appear once and routine cycles stay separate.
+  const materialCards = useMemo(() => liveTask ? materialCardsOf(liveTask, clientTasks) : [], [liveTask, clientTasks]);
+  const materialGroups = useMemo(() => materialCards.map((card) => {
+    const byId = new Map(attachableDocs.filter((doc) => doc.task_id === card.id).map((doc) => [doc.id, doc]));
+    for (const item of commentsOf(card)) for (const part of splitCommentText(item.text)) {
+      if (!("url" in part)) continue;
+      const doc = attachableDocs.find((candidate) => candidate.file_url === part.url);
+      if (doc) byId.set(doc.id, doc);
     }
-    return Array.from(byId.values());
-  }, [liveTask, attachableDocs, ownComments]);
+    return { card, docs: Array.from(byId.values()) };
+  }).filter((group) => group.docs.length), [materialCards, attachableDocs]);
+  const cardWorkspaces = useMemo(() => liveTask ? creativeWorkspacesForCard(liveTask, clientTasks, materialWorkspaces) : [], [liveTask, clientTasks, materialWorkspaces]);
+  const creativeCandidates = useMemo(() => {
+    const candidates = [...materialCards, ...flowDeliveries];
+    return Array.from(new Map(candidates.filter((card) => card.kind === "criativo" && !card.subtype && planParentIdsOf(card).includes(BAITA_DRIVE_PLAN_ID)).map((card) => [card.id, card])).values());
+  }, [materialCards, flowDeliveries]);
+  const visibleCreativeCandidates = creativeCandidates.filter((card) =>
+    liveTask?.kind === "criativo" || liveTask?.subtype === "captacao" ||
+    cardWorkspaces.some((workspace) => workspace.creative_task_id === card.id && currentFinalAsset(workspace)),
+  );
+  const commentAssets = useMemo(() => new Map(materialWorkspaces.flatMap((workspace) => workspace.assets.map((asset) => [asset.id, { asset, workspace }] as const))), [materialWorkspaces]);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
   // A comment link that matches a known document's file_url opens the same
   // preview modal in place instead of navigating to the raw file in a new tab.
@@ -1414,8 +1428,14 @@ export default function TaskModal({
   // Memoizado porque isto varre descrição + thread inteira, e rodaria a cada
   // tecla digitada no título.
   const coverCandidates = useMemo(
-    () => taskCoverCandidates({ description: draft.description, payload: task?.payload }),
-    [draft.description, task?.payload],
+    () => {
+      const promoted = liveTask && (liveTask.kind === "criativo" || kindDef(liveTask.kind).isPlan)
+        ? materialCoverCandidates(cardWorkspaces) : [];
+      const previous = taskCoverCandidates({ description: draft.description, payload: task?.payload });
+      const seen = new Set(promoted.map((candidate) => candidate.fileId));
+      return [...promoted, ...previous.filter((candidate) => !seen.has(candidate.fileId))];
+    },
+    [cardWorkspaces, draft.description, liveTask, task?.payload],
   );
 
   // Pastas do Drive citadas no card. Mesma origem da capa (descrição +
@@ -1468,12 +1488,18 @@ export default function TaskModal({
     );
     return (id: string) => (holders.has(id) ? roleTone(relevantResponsibility) : undefined);
   }, [responsibilityAssignments, relevantResponsibility]);
+  const openWorkspace = driveOpen ? materialWorkspaces.find((workspace) => workspace.creative_task_id === driveOpen.taskId) : null;
+  const driveTargets = openWorkspace ? Array.from(new Map([
+    ...materialWorkspaces.filter((workspace) => workspace.capture_task_id === openWorkspace.capture_task_id).map((workspace) => [workspace.creative_task_id, clientTasks.find((card) => card.id === workspace.creative_task_id)?.title ?? "Criativo"] as const),
+    ...creativeCandidates.filter((card) => flowStepsOf(card.id, clientTasks).some((step) => step.id === openWorkspace.capture_task_id)).map((card) => [card.id, card.title] as const),
+  ])).map(([id, title]) => ({ id, title }))
+    : creativeCandidates.filter((card) => liveTask?.id === card.id || !isDelivery).map((card) => ({ id: card.id, title: card.title }));
 
   return (
     <>
     <div className="kb-modal-backdrop" onClick={() => { if (!busy) void closeAfterSave(); }}>
       <div className={`tm tm-tone-${tone} tm-lg${mode === "new" ? " tm-new" : ""}`} onClick={(e) => e.stopPropagation()}>
-        {coverCandidates.length ? <CardCover candidates={coverCandidates} title={draft.title || "card"} className="tm-cover" /> : null}
+        {coverCandidates.length ? <CardCover key={coverCandidates[0].fileId} candidates={coverCandidates} title={draft.title || "card"} className="tm-cover" /> : null}
         {mode === "edit" ? (
           <div className={`tm-head tm-head-tone-${tone}`}>
             <div className="tm-head-identity">
@@ -1869,14 +1895,6 @@ export default function TaskModal({
               />
             ) : null}
 
-            {liveTask && isDelivery && liveTask.kind === "criativo" && !isRecurringParent ? (
-              <CreativeDriveWorkspace
-                taskId={liveTask.id}
-                selectedAssetIds={commentAssetIds}
-                onSelectedAssetIdsChange={setCommentAssetIds}
-              />
-            ) : null}
-
             {((kd.isPlan || isRecurringParent) && liveTask) || isNewPlan ? (
               <div className={`tm-box tm-planmembers${isRecurringParent ? " tm-cycles" : ""}`}>
                 <div className="tm-box-head">
@@ -2076,19 +2094,28 @@ export default function TaskModal({
                 mesmo bloco, porque respondem à mesma pergunta — "onde está o
                 material disto?". Compõem um retângulo só quando há apenas um
                 dos dois, e duas colunas quando há os dois. */}
-            {mode === "edit" && (driveFolders.length > 0 || taskDocs.length > 0) ? (
-              <div className="tm-materials">
-                {driveFolders.length > 0 ? <CardDriveFolders folders={driveFolders} /> : null}
-                {taskDocs.length > 0 ? (
-                  <div className="tm-docs">
-                    {taskDocs.map((d) => (
-                      <button type="button" key={d.id} className="tm-doc-thumb" title={d.name} aria-label={d.name} onClick={() => setPreviewDoc(d)}>
-                        <span className="tm-doc-badge">{fileTypeLabel(d)}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
+            {mode === "edit" && (driveFolders.length > 0 || materialGroups.length > 0 || visibleCreativeCandidates.length > 0) ? (
+              <section className="tm-materials" aria-label="Materiais do card">
+                <p className="tm-box-label">Materiais</p>
+                <div className="tm-material-list">
+                  {driveFolders.length > 0 ? <CardDriveFolders folders={driveFolders} /> : null}
+                  {materialGroups.map(({ card, docs }) => <div className="tm-material-group" key={card.id}>
+                    {card.id !== liveTask?.id ? <small className="tm-material-origin">{card.title}</small> : null}
+                    {docs.map((doc) => <button type="button" key={doc.id} className="tm-material-item" title={doc.name} onClick={() => setPreviewDoc(doc)}><span className="tm-material-icon pdf">{fileTypeLabel(doc)}</span><span className="tm-material-name">{doc.name}</span><small>{card.id === liveTask?.id ? "Neste card" : card.title}</small></button>)}
+                  </div>)}
+                  {visibleCreativeCandidates.map((creative) => {
+                    const workspace = cardWorkspaces.find((item) => item.creative_task_id === creative.id);
+                    const final = workspace?.final_versions.find((version) => version.state === "current");
+                    const finalAsset = workspace?.assets.find((asset) => asset.id === final?.asset_id);
+                    const count = (workspace?.raw_links.length ?? 0) + (workspace?.assets.filter((asset) => asset.state === "active" && asset.role !== "raw").length ?? 0);
+                    const showRawCount = liveTask?.kind === "criativo" || liveTask?.subtype === "captacao";
+                    const rawLabel = workspace?.available_raw_count == null ? "Drive indisponível" : `${workspace.available_raw_limited ? "≥" : ""}${workspace.available_raw_count} brutos`;
+                    const materialCount = `${count} ${count === 1 ? "material" : "materiais"}`;
+                    const detail = finalAsset ? `Final v${final?.version_number} · ${materialCount}` : showRawCount && workspace ? `${rawLabel} · ${materialCount}` : materialCount;
+                    return <button type="button" key={creative.id} className="tm-material-item" onClick={() => setDriveOpen({ taskId: creative.id })}><span className="tm-material-icon folder">▣</span><span className="tm-material-name">{creative.title}</span><small>{detail}</small></button>;
+                  })}
+                </div>
+              </section>
             ) : null}
           </div>
 
@@ -2167,6 +2194,14 @@ export default function TaskModal({
                           ) : (
                             <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} showLinkPreview /></p>
                           )}
+                          {c.asset_ids?.length ? <div className="tm-comment-assets">{c.asset_ids.map((id) => {
+                            const found = commentAssets.get(id);
+                            if (!found || found.asset.state === "trashed") return null;
+                            return <button type="button" key={id} className="tm-comment-asset" title={found.asset.name} onClick={() => setDriveOpen({ taskId: found.workspace.creative_task_id, assetId: id })}>
+                              <span className="tm-comment-asset-image">{found.asset.mime_type.startsWith("image/") ? <img src={`/api/admin/drive/thumbnail/${found.asset.drive_file_id}`} alt="" loading="lazy" /> : "▣"}</span>
+                              <span>{found.asset.name}</span>
+                            </button>;
+                          })}</div> : null}
                         </div>
                       </div>
                     );
@@ -2229,6 +2264,18 @@ export default function TaskModal({
         }}
       />
     ) : null}
+    {driveOpen ? <CreativeDriveWorkspace
+      key={driveOpen.taskId}
+      taskId={driveOpen.taskId}
+      targets={driveTargets}
+      summaries={materialWorkspaces}
+      initialAssetId={driveOpen.assetId}
+      selectedAssetIds={commentAssetIds}
+      onSelectedAssetIdsChange={setCommentAssetIds}
+      onChanged={reloadMaterials}
+      onBack={() => setDriveOpen(null)}
+      onClose={() => { setDriveOpen(null); void closeAfterSave(); }}
+    /> : null}
     </>
   );
 }

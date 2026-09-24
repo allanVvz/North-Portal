@@ -13,13 +13,14 @@ export function captureWorkspaceKey(identity: Pick<CreativeDriveIdentity, "planT
 }
 
 export function creativeDriveAppProperties(identity: CreativeDriveIdentity, role: string): Record<string, string> {
+  const captureLevel = role === "daily_root" || role === "script" || role === "capture";
   return Object.fromEntries(Object.entries({
     client_id: identity.clientId,
     routine_task_id: identity.routineTaskId,
     plan_task_id: identity.planTaskId,
     capture_task_id: identity.captureTaskId,
-    creative_task_id: identity.creativeTaskId,
-    stage_task_id: identity.stageTaskId,
+    creative_task_id: captureLevel ? null : identity.creativeTaskId,
+    stage_task_id: captureLevel ? null : identity.stageTaskId,
     north_role: role,
   }).filter((entry): entry is [string, string] => Boolean(entry[1])));
 }

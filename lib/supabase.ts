@@ -355,7 +355,7 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     // isso no servidor, igual ao que listParentCards já faz (labelByKind).
     listTaskTypes(supabase),
     supabase.from("drive_creative_workspaces")
-      .select("creative_task_id,drive_assets(id,role,state,web_view_link,created_at),drive_final_versions(asset_id,state,version_number)")
+      .select("creative_task_id,drive_assets!drive_assets_workspace_id_fkey(id,role,state,web_view_link,created_at),drive_final_versions!drive_final_versions_workspace_id_fkey(asset_id,state,version_number)")
       .eq("client_id", client.id),
   ]);
   if (briefing.error) fail(briefing.error);

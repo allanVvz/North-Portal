@@ -22,6 +22,15 @@ describe("creative Drive identity", () => {
       capture_task_id: "capture-a", creative_task_id: "creative", stage_task_id: "shared-edit", north_role: "preview",
     });
   });
+
+  it("identifica a pasta da Captação compartilhada sem o Criativo", () => {
+    expect(creativeDriveAppProperties(identity, "daily_root")).toEqual({
+      client_id: "client", routine_task_id: "routine", plan_task_id: "plan",
+      capture_task_id: "capture-a", north_role: "daily_root",
+    });
+    expect(creativeDriveAppProperties({ ...identity, creativeTaskId: "another" }, "daily_root"))
+      .toEqual(creativeDriveAppProperties(identity, "daily_root"));
+  });
 });
 
 describe("client creative material", () => {

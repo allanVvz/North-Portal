@@ -12,6 +12,7 @@ import NewTaskButton from "./NewTaskButton";
 import TaskKindIcon from "./TaskKindIcon";
 import CardCover from "./CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
+import { creativeWorkspacesForCard, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
 import { useAttrVisibility } from "./kanbanAttrs";
 import { useSidebarEnabledPref } from "./kanbanPrefs";
 import SortMenu from "./SortMenu";
@@ -115,6 +116,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const pathname = usePathname();
   const deepLinkHandledRef = useRef(false);
   const [tasks, setTasks] = useState<BoardRow[]>([]);
+  const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
   // Demandas recorrentes (moldes) — não entram no quadro, mas são guia no
   // calendário: cada data futura da regra aparece no dia (ATA 14/09).
   const [routines, setRoutines] = useState<RecurringTask[]>([]);
@@ -127,6 +129,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalState, setModalState] = useState<ModalState>(null);
+  const [modalHistory, setModalHistory] = useState<string[]>([]);
   const [attrCfgOpen, setAttrCfgOpen] = useState(false);
   const [q, setQ] = useState("");
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
@@ -190,6 +193,15 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     setLoading(false);
   }, []);
 
+  const loadMaterials = useCallback(() => {
+    fetch("/api/admin/drive/baita/materials", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { workspaces?: CreativeMaterialWorkspace[] } | null) => {
+        if (data?.workspaces) setMaterialWorkspaces(data.workspaces);
+      })
+      .catch(() => {});
+  }, []);
+
   const loadReviewers = useCallback(async (s: string) => {
     if (!s) { setAdminReviewers([]); setClientReviewers([]); return; }
     try {
@@ -210,7 +222,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     } catch { setFlowFlags(null); }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); loadMaterials(); }, [load, loadMaterials]);
 
   // Keeps the board in sync when a client approves/requests adjustments from
   // the portal (or another admin tab moves a card), without a manual refresh.
@@ -225,6 +237,16 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const { sort, setSort } = useSortPref(sortScope);
 
   const taskScreenTasks = useMemo(() => tasks.filter(belongsToTaskScreen), [tasks]);
+  const materialCovers = useMemo(() => {
+    const covers = new Map<string, ReturnType<typeof materialCoverCandidates>>();
+    if (!materialWorkspaces.length) return covers;
+    for (const task of tasks) {
+      if (task.kind !== "criativo" && !kindDef(task.kind).isPlan && !isFlowDelivery(task)) continue;
+      const workspaces = creativeWorkspacesForCard(task, tasks, materialWorkspaces);
+      if (workspaces.length) covers.set(task.id, materialCoverCandidates(workspaces));
+    }
+    return covers;
+  }, [tasks, materialWorkspaces]);
   const filtered = useMemo(() => {
     const matching = taskScreenTasks.filter((t) => {
       if (!taskMatchesFilters(t, activeFilters, todayIso)) return false;
@@ -583,7 +605,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   // step before the full modal.
   function openTask(id: string) {
     if (sidebarEnabled) setSelectedId(id);
-    else { setSelectedId(null); setModalState({ mode: "edit", taskId: id }); }
+    else { setSelectedId(null); setModalHistory([]); setModalState({ mode: "edit", taskId: id }); }
   }
 
   // "Copiar link" on a card points here with ?task=<id> — resolve it once
@@ -629,11 +651,13 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   function applySaved(updated: TaskRecord, isNew: boolean) {
     setTasks((rows) => (isNew ? [...rows, updated] : rows.map((r) => (r.id === updated.id ? updated : r))));
     setModalState(null);
+    setModalHistory([]);
     if (sidebarEnabled) setSelectedId(updated.id);
   }
   function applyDeleted(id: string) {
     setTasks((rows) => rows.filter((r) => r.id !== id));
     setModalState(null);
+    setModalHistory([]);
     if (selectedId === id) setSelectedId(null);
   }
 
@@ -650,7 +674,10 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
     const state = deadlineStateOf(t, todayIso);
     const dueRelative = state === "concluida" ? null : relativeDue(t.due_date, todayIso);
     const period = formatPeriod(t.start_date, t.end_date);
-    const coverCandidates = taskCoverCandidates(t);
+    const promoted = materialCovers.get(t.id) ?? [];
+    const previous = taskCoverCandidates(t);
+    const seen = new Set(promoted.map((candidate) => candidate.fileId));
+    const coverCandidates = [...promoted, ...previous.filter((candidate) => !seen.has(candidate.fileId))];
     const flowBadge = visible("flow_step") ? flowBadges.get(t.id) ?? null : null;
     return (
       <article
@@ -663,7 +690,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDropBefore(); }}
         onClick={() => openTask(t.id)}
       >
-        {coverCandidates.length ? <CardCover candidates={coverCandidates} title={t.title} className="kb-card-cover" /> : null}
+        {coverCandidates.length ? <CardCover key={coverCandidates[0].fileId} candidates={coverCandidates} title={t.title} className="kb-card-cover" /> : null}
         <div className="kb-card-statusline">
           <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span>
           {/* No Kanban a coluna já diz a etapa; agrupado por pessoa, não. */}
@@ -1075,7 +1102,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
             planoVisibilityOn={planoVisibilityOn}
             flowFlags={flowFlags}
             onClose={() => setSelectedId(null)}
-            onExpand={() => setModalState({ mode: "edit", taskId: selectedTask.id })}
+            onExpand={() => { setModalHistory([]); setModalState({ mode: "edit", taskId: selectedTask.id }); }}
             onChanged={applyChanged}
           />
         ) : null}
@@ -1098,8 +1125,9 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
           flowFlags={flowFlags}
           responsibilityAssignments={responsibilityAssignments}
           onTaskPatched={applyChanged}
-          onOpenRelatedTask={(related) => { applyChanged(related); setModalState({ mode: "edit", taskId: related.id }); }}
-          onClose={() => setModalState(null)}
+          onOpenRelatedTask={(related) => { applyChanged(related); if (modalState.taskId !== related.id) { setModalHistory((items) => [...items, modalState.taskId]); setModalState({ mode: "edit", taskId: related.id }); } }}
+          onBack={modalHistory.length ? () => { const previous = modalHistory[modalHistory.length - 1]; setModalHistory((items) => items.slice(0, -1)); setModalState({ mode: "edit", taskId: previous }); } : undefined}
+          onClose={() => { setModalState(null); setModalHistory([]); loadMaterials(); }}
           onSaved={applySaved}
           onDeleted={applyDeleted}
         />

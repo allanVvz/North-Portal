@@ -163,7 +163,7 @@ export async function findDriveItemByAppProperties(
     includeItemsFromAllDrives: "true",
   });
   const res = await fetch(`${DRIVE_FILES}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) return null;
+  if (!res.ok) throw new HttpError(502, `Falha ao procurar item no Google Drive (HTTP ${res.status}).`);
   const data = await res.json() as { files?: Array<{ id?: string; name?: string; mimeType?: string; size?: string; webViewLink?: string }> };
   const file = data.files?.[0];
   return file?.id ? {
@@ -466,15 +466,21 @@ export async function fetchDriveThumbnail(fileId: string, size = 480): Promise<D
 }
 
 /**
- * Lists files inside a folder for the admin preview. Returns [] when Drive is
- * not configured or the folder is unreachable, so the preview degrades to an
- * empty state instead of breaking the page around it.
+ * Lists files inside a folder for the admin preview. Browser callers may
+ * degrade to [], while workspaces opt into strict errors so a failed Drive
+ * request never looks like a genuinely empty capture.
  */
-export async function listFolderFiles(folderId: string, limit = 8): Promise<DriveFile[]> {
-  if (!folderId || !isGoogleDriveConfigured()) return [];
+export async function listFolderFiles(folderId: string, limit = 8, strict = false): Promise<DriveFile[]> {
+  if (!folderId || !isGoogleDriveConfigured()) {
+    if (strict) throw new HttpError(503, "A integração com Google Drive não está configurada.");
+    return [];
+  }
   try {
     const token = await accessToken();
-    if (!token) return [];
+    if (!token) {
+      if (strict) throw new HttpError(503, "O Google Drive não retornou acesso à pasta.");
+      return [];
+    }
     const params = new URLSearchParams({
       q: `'${folderId.split("'").join("\\'")}' in parents and trashed = false`,
       fields: "files(id,name,mimeType,thumbnailLink,webViewLink)",
@@ -488,7 +494,10 @@ export async function listFolderFiles(folderId: string, limit = 8): Promise<Driv
       includeItemsFromAllDrives: "true",
     });
     const res = await fetch(`${DRIVE_FILES}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      if (strict) throw new HttpError(502, `Falha ao listar a pasta no Google Drive (HTTP ${res.status}).`);
+      return [];
+    }
     const data = (await res.json()) as {
       files?: { id?: string; name?: string; mimeType?: string; thumbnailLink?: string; webViewLink?: string }[];
     };
@@ -499,7 +508,8 @@ export async function listFolderFiles(folderId: string, limit = 8): Promise<Driv
       thumbnailUrl: f.thumbnailLink ?? null,
       webViewLink: f.webViewLink ?? null,
     }));
-  } catch {
+  } catch (cause) {
+    if (strict) throw cause;
     return [];
   }
 }

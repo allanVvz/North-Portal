@@ -1,0 +1,232 @@
+import { expect, test, type Page } from "@playwright/test";
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
+import type { CreativeMaterialWorkspace } from "../lib/cardMaterials";
+
+const BAITA_PLAN_ID = "7e1a162d-ff0f-414e-ad50-bea8b472fbcd";
+
+async function login(page: Page) {
+  await page.goto("/login");
+  await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);
+  await page.getByPlaceholder("Sua senha").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: /Entrar/ }).click();
+  await page.waitForURL(/\/admin/, { timeout: 30_000 });
+}
+
+test("Plano BAITA mostra materiais compactos e retorna do Drive ao card", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await login(page);
+  const response = await page.request.get("/api/admin/drive/baita/materials");
+  expect(response.ok()).toBe(true);
+  const { workspaces } = await response.json() as { workspaces: CreativeMaterialWorkspace[] };
+  const target = workspaces.find((workspace) => !workspace.final_versions.some((version) => version.state === "current")) ?? workspaces[0];
+  expect(target).toBeTruthy();
+  // A read-only fixture makes the parent material icon visible even when the
+  // live BAITA cycle has no promoted final yet.
+  await page.route("**/api/admin/drive/baita/materials", async (route) => route.fulfill({ json: { workspaces: workspaces.map((workspace) => workspace.id === target.id ? {
+    ...workspace,
+    assets: [...workspace.assets, { id: "33333333-3333-4333-8333-333333333333", drive_file_id: "e2e-final-preview", name: "Final aprovado.mp4", mime_type: "video/mp4", size_bytes: 100, role: "final", state: "active", web_view_link: null, created_at: new Date().toISOString() }],
+    final_versions: [...workspace.final_versions, { id: "44444444-4444-4444-8444-444444444444", asset_id: "33333333-3333-4333-8333-333333333333", version_number: 99, state: "current", promoted_at: new Date().toISOString() }],
+  } : workspace) } }));
+  await page.goto(`/admin/operacao?task=${BAITA_PLAN_ID}`);
+  await expect(page.locator(".tm:not(.creative-drive-modal)")).toBeVisible({ timeout: 30_000 });
+  const folder = page.locator(".tm-material-list > .tm-material-item").first();
+  await expect(folder).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".tm-material-list > .tm-material-item")).toHaveCount(1);
+  await expect(folder.locator(".tm-material-name")).not.toBeEmpty();
+  await folder.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("materials-desktop.png") });
+  await folder.click();
+  await expect(page.locator(".creative-drive-modal")).toBeVisible();
+  await expect(page.locator(".creative-drive-modal")).not.toContainText("Carregando materiais…", { timeout: 30_000 });
+  await page.screenshot({ path: testInfo.outputPath("drive-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath("drive-narrow.png") });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
+  await page.locator(".creative-drive-modal .tm-back").click();
+  await expect(page.locator(".creative-drive-modal")).toHaveCount(0);
+  await expect(page.locator(".tm-materials")).toBeVisible();
+  await page.locator(".tm-materials").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("materials-narrow.png") });
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  expect(horizontalOverflow).toBe(false);
+});
+
+test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await login(page);
+  const response = await page.request.get("/api/admin/drive/baita/materials");
+  expect(response.ok()).toBe(true);
+  const { workspaces } = await response.json() as { workspaces: CreativeMaterialWorkspace[] };
+  const driveStatus = await page.request.get("/api/admin/drive/files");
+  expect(driveStatus.ok()).toBe(true);
+  const { configured } = await driveStatus.json() as { configured: boolean };
+  test.skip(!configured && process.env.E2E_REQUIRE_DRIVE !== "1", "Credenciais do Google Drive indisponíveis neste servidor");
+  expect(configured, "O servidor local está sem configuração do Google Drive").toBe(true);
+  const source = workspaces.find((workspace) => (workspace.available_raw_count ?? 0) > 0);
+  expect(source, "Nenhuma Captação BAITA com brutos acessíveis no Drive").toBeTruthy();
+  await page.goto(`/admin/operacao?task=${source!.creative_task_id}`);
+  const folder = page.locator(".tm-material-list > .tm-material-item").first();
+  await expect(folder).toContainText(/brutos/, { timeout: 30_000 });
+  await page.screenshot({ path: testInfo.outputPath("real-raw-card.png") });
+  await folder.click();
+  const raw = page.locator(".creative-drive-modal .creative-drive-section").first().locator(".creative-drive-file").first();
+  await expect(raw).toBeVisible({ timeout: 30_000 });
+  await raw.locator(".creative-drive-file-name").click();
+  await expect(page.locator(".creative-drive-modal iframe[title^='Preview de']")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("real-raw-preview.png") });
+});
+
+test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o vínculo aparece no Criativo", async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page);
+  const indexResponse = await page.request.get("/api/admin/drive/baita/materials");
+  expect(indexResponse.ok()).toBe(true);
+  const index = await indexResponse.json() as { workspaces: Array<Record<string, unknown> & { creative_task_id: string; capture_task_id: string; id: string; assets: unknown[]; raw_links: unknown[] }> };
+  const first = index.workspaces.find((item) => index.workspaces.some((other) => other.id !== item.id && other.capture_task_id === item.capture_task_id));
+  expect(first).toBeTruthy();
+  const second = index.workspaces.find((item) => item.id !== first!.id && item.capture_task_id === first!.capture_task_id)!;
+  const ids = [first!.creative_task_id, second.creative_task_id];
+  const taskRows = await Promise.all(ids.map(async (id) => {
+    const response = await page.request.get(`/api/admin/tasks/${id}`);
+    expect(response.ok()).toBe(true);
+    return response.json() as Promise<{ id: string; title: string }>;
+  }));
+  const payloads = new Map(await Promise.all(ids.map(async (id) => {
+    const response = await page.request.get(`/api/admin/tasks/${id}/drive-workspace`);
+    expect(response.ok()).toBe(true);
+    return [id, await response.json()] as const;
+  })));
+  expect([...payloads.values()].every((item) => item.workspace?.status === "ready")).toBe(true);
+
+  const raw = { id: "e2e-material-readonly", name: "Bruto compartilhado.mp4", mimeType: "video/mp4", webViewLink: "https://drive.google.com/file/d/e2e-material-readonly/view" };
+  const linked = new Set<string>();
+  const posts: Array<{ creativeId: string; driveFileId: string }> = [];
+  await page.route("**/api/admin/drive/baita/materials", async (route) => {
+    const workspaces = index.workspaces.map((item) => {
+      if (!linked.has(item.creative_task_id)) return item;
+      const assetId = item.creative_task_id === ids[0] ? "11111111-1111-4111-8111-111111111111" : "22222222-2222-4222-8222-222222222222";
+      return { ...item, assets: [...item.assets, { id: assetId, drive_file_id: raw.id, name: raw.name, mime_type: raw.mimeType, size_bytes: null, role: "raw", state: "active", web_view_link: raw.webViewLink, created_at: new Date().toISOString() }], raw_links: [...item.raw_links, { asset_id: assetId }] };
+    });
+    await route.fulfill({ json: { workspaces } });
+  });
+  await page.route("**/api/admin/tasks/*/drive-workspace", async (route) => {
+    const id = new URL(route.request().url()).pathname.split("/")[4];
+    const payload = payloads.get(id);
+    if (!payload || route.request().method() !== "GET") { await route.continue(); return; }
+    const assetId = id === ids[0] ? "11111111-1111-4111-8111-111111111111" : "22222222-2222-4222-8222-222222222222";
+    const workspace = { ...payload.workspace, source_files: { ...payload.workspace.source_files, capture: [raw] }, assets: [...payload.workspace.assets, ...(linked.has(id) ? [{ id: assetId, drive_file_id: raw.id, name: raw.name, mime_type: raw.mimeType, size_bytes: null, role: "raw", state: "active", web_view_link: raw.webViewLink, created_at: new Date().toISOString() }] : [])], raw_links: [...payload.workspace.raw_links, ...(linked.has(id) ? [{ asset_id: assetId, shortcut_drive_file_id: "mock-shortcut" }] : [])] };
+    await route.fulfill({ json: { ...payload, workspace } });
+  });
+  await page.route("**/api/admin/tasks/*/drive-assets", async (route) => {
+    const id = new URL(route.request().url()).pathname.split("/")[4];
+    const body = route.request().postDataJSON() as { action: string; driveFileId?: string };
+    if (!ids.includes(id)) { await route.abort(); return; }
+    if (body.action === "unlink_raw") { linked.delete(id); await route.fulfill({ json: { ok: true } }); return; }
+    if (body.action !== "link_raw") { await route.abort(); return; }
+    posts.push({ creativeId: id, driveFileId: body.driveFileId! });
+    linked.add(id);
+    await route.fulfill({ json: { ok: true } });
+  });
+
+  await page.goto(`/admin/operacao?task=${first!.capture_task_id}`);
+  const firstFolder = page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first();
+  await expect(firstFolder).toBeVisible({ timeout: 30_000 });
+  await firstFolder.click();
+  await expect(page.locator(".creative-drive-modal .creative-drive-file")).toContainText(raw.name, { timeout: 30_000 });
+  await page.getByRole("checkbox", { name: `Classificar ${raw.name} em ${taskRows[0].title}` }).click();
+  await expect(page.getByRole("checkbox", { name: `Classificar ${raw.name} em ${taskRows[0].title}` })).toBeChecked();
+  await page.locator(".creative-drive-target").filter({ hasText: taskRows[1].title }).click();
+  await page.getByRole("checkbox", { name: `Classificar ${raw.name} em ${taskRows[1].title}` }).click();
+  await expect(page.getByRole("checkbox", { name: `Classificar ${raw.name} em ${taskRows[1].title}` })).toBeChecked();
+  expect(posts).toEqual(ids.map((creativeId) => ({ creativeId, driveFileId: raw.id })));
+
+  await page.locator(".creative-drive-modal .tm-back").click();
+  await page.goto(`/admin/operacao?task=${ids[0]}`);
+  await page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first().click();
+  const ownCheckbox = page.getByRole("checkbox", { name: `Classificar ${raw.name} em ${taskRows[0].title}` });
+  await expect(ownCheckbox).toBeChecked();
+  await ownCheckbox.click();
+  await expect(ownCheckbox).not.toBeChecked();
+  await ownCheckbox.click();
+  await expect(ownCheckbox).toBeChecked();
+  expect(posts.at(-1)).toEqual({ creativeId: ids[0], driveFileId: raw.id });
+});
+
+test("Kanban volta ao Plano anterior depois de abrir um Criativo", async ({ page }) => {
+  test.setTimeout(180_000);
+  await login(page);
+  await page.goto(`/admin/kanban?task=${BAITA_PLAN_ID}`);
+  await expect(page.locator(".tm-planmembers .tm-member-open").first()).toBeVisible({ timeout: 90_000 });
+  const planTitle = await page.locator(".tm-title-input").inputValue();
+  await page.locator(".tm-planmembers .tm-member-open").first().click();
+  await expect(page.locator(".tm-title-input")).not.toHaveValue(planTitle);
+  await page.getByRole("button", { name: "Voltar para o card anterior" }).click();
+  await expect(page.locator(".tm-title-input")).toHaveValue(planTitle);
+});
+
+test("PDF do Criativo aparece no Plano por referência e abre o modal de documentos", async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page);
+  const indexResponse = await page.request.get("/api/admin/drive/baita/materials");
+  const index = await indexResponse.json() as { workspaces: Array<{ creative_task_id: string }> };
+  const creativeId = index.workspaces[0].creative_task_id;
+  const creative = await (await page.request.get(`/api/admin/tasks/${creativeId}`)).json() as { client_id: string; title: string };
+  const documentResponse = await page.request.get("/api/admin/documents");
+  expect(documentResponse.ok()).toBe(true);
+  const existing = await documentResponse.json() as { documents: Record<string, unknown>[] };
+  const inheritedPdf = {
+    id: "33333333-3333-4333-8333-333333333333", client_id: creative.client_id, task_id: creativeId,
+    name: "PDF herdado do Criativo", doc_type: "material", status: "enviada", file_url: null,
+    storage_path: null, original_file_name: "material.pdf", mime_type: "application/pdf", size_bytes: 1024,
+    doc_date: "2026-09-24", read_at: null, clientName: "ADM NORTH", clientSlug: "north",
+  };
+  await page.route("**/api/admin/documents", async (route) => {
+    if (route.request().method() !== "GET") { await route.abort(); return; }
+    await route.fulfill({ json: { documents: [...existing.documents, inheritedPdf] } });
+  });
+  await page.goto(`/admin/operacao?task=${BAITA_PLAN_ID}`);
+  const pdf = page.locator(".tm-material-item").filter({ hasText: inheritedPdf.name });
+  await expect(pdf).toBeVisible({ timeout: 45_000 });
+  await expect(pdf).toContainText(creative.title);
+  await pdf.click();
+  await expect(page.locator(".docprev-tm")).toContainText(inheritedPdf.name);
+  await page.locator(".docprev-tm .tm-back").click();
+  await expect(page.locator(".tm-materials")).toBeVisible();
+});
+
+test("anexo no comentário vira miniatura que abre o preview amplo", async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page);
+  const index = await (await page.request.get("/api/admin/drive/baita/materials")).json() as { workspaces: Array<Record<string, unknown> & { creative_task_id: string; assets: unknown[] }> };
+  const owner = index.workspaces[0];
+  const creative = await (await page.request.get(`/api/admin/tasks/${owner.creative_task_id}`)).json() as Record<string, unknown> & { payload: Record<string, unknown>; id: string };
+  const assetId = "44444444-4444-4444-8444-444444444444";
+  const asset = { id: assetId, drive_file_id: "e2e-comment-image", name: "Imagem do comentário.png", mime_type: "image/png", size_bytes: 128, role: "preview", state: "active", web_view_link: "https://drive.google.com/file/d/e2e-comment-image/view", created_at: new Date().toISOString() };
+  const comment = { author: "Teste visual", text: "Veja o anexo", at: new Date().toISOString(), asset_ids: [assetId] };
+  const updated = { ...creative, payload: { ...creative.payload, comments: [...((creative.payload.comments as unknown[]) ?? []), comment] } };
+  const workspacePayload = await (await page.request.get(`/api/admin/tasks/${creative.id}/drive-workspace`)).json() as { context: unknown; workspace: Record<string, unknown> & { assets: unknown[] } };
+  await page.route(`**/api/admin/tasks/${creative.id}/comments`, async (route) => {
+    if (route.request().method() !== "POST") { await route.abort(); return; }
+    await route.fulfill({ json: updated });
+  });
+  await page.route("**/api/admin/drive/baita/materials", async (route) => {
+    await route.fulfill({ json: { workspaces: index.workspaces.map((workspace) => workspace.creative_task_id === creative.id ? { ...workspace, assets: [...workspace.assets, asset] } : workspace) } });
+  });
+  await page.route(`**/api/admin/tasks/${creative.id}/drive-workspace`, async (route) => {
+    if (route.request().method() !== "GET") { await route.abort(); return; }
+    await route.fulfill({ json: { ...workspacePayload, workspace: { ...workspacePayload.workspace, assets: [...workspacePayload.workspace.assets, asset] } } });
+  });
+  await page.route("**/api/admin/drive/thumbnail/e2e-comment-image", async (route) => {
+    await route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==", "base64") });
+  });
+  await page.goto(`/admin/operacao?task=${creative.id}`);
+  await expect(page.locator(".tm-comment-input textarea")).toBeVisible({ timeout: 45_000 });
+  await page.locator(".tm-comment-input textarea").fill("Teste de preview");
+  await page.locator(".tm-comment-input button").last().click();
+  const thumbnail = page.locator(".tm-comment-asset").filter({ hasText: asset.name });
+  await expect(thumbnail).toBeVisible({ timeout: 45_000 });
+  await thumbnail.click();
+  await expect(page.locator(".creative-drive-modal")).toContainText(asset.name, { timeout: 30_000 });
+  await page.locator(".creative-drive-modal .tm-back").click();
+  await expect(thumbnail).toBeVisible();
+});
