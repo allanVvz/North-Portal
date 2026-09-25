@@ -40,7 +40,12 @@ export default function DocumentFilePreview({ file, compact = false }: { file: P
   useEffect(() => {
     setFailed(false);
     setLoading(Boolean(file.file_url));
-  }, [file.file_url]);
+    // Chromium's built-in PDF viewer can render without firing iframe onLoad.
+    // Keep the preview usable even when that event never arrives.
+    if (!file.file_url || (kind !== "pdf" && kind !== "text")) return;
+    const timeout = window.setTimeout(() => setLoading(false), 8000);
+    return () => window.clearTimeout(timeout);
+  }, [file.file_url, kind]);
 
   if (!file.file_url) return <div className={`file-preview ${compact ? "compact" : ""}`}><div className="file-preview-fallback"><span>ARQ</span><strong>Sem arquivo anexado</strong><p>Este registro é apenas informativo.</p></div></div>;
 

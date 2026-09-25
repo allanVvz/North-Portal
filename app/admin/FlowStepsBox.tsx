@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import TaskKindIcon from "./TaskKindIcon";
+import WorkflowStepIcon from "./WorkflowStepIcon";
 import StepRow, { type StepPatch } from "./StepRow";
 import { STATUS_LABEL } from "./kanbanShared";
 import { FloatingPanel, useDismissOnOutside, useFloatingPopover } from "./FloatingPopover";
@@ -62,7 +63,7 @@ function ChainPicker({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
-      >{action === "replace" ? "Trocar" : "Vincular"}</button>
+      ><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l2.1-2.1a5 5 0 0 0-7.1-7.1L10.9 5" /><path d="M14 11a5 5 0 0 0-7.1 0l-2.1 2.1a5 5 0 0 0 7.1 7.1L13.1 19" /></svg></button>
 
       <FloatingPanel open={open} popoverRef={popoverRef} style={style} className="tm-chain-panel">
         <p className="tm-chain-title">{action === "replace" ? "Substituir card de" : "Ligar um card à etapa"} {step.label}</p>
@@ -158,7 +159,7 @@ export default function FlowStepsBox({
       <p className="tm-box-label">
         Etapas ({steps.length}/{plannedSteps.length})
       </p>
-      <p className="tm-relation-hint">Cada etapa é um card. Use <b>Trocar</b> para reaproveitar um existente; o card atual continua disponível. Ao concluir uma etapa, a próxima é criada automaticamente.</p>
+      <p className="tm-relation-hint">Ao concluir uma etapa, a próxima é criada automaticamente. Use a corrente para vincular outro card.</p>
       <div className="tm-member-list">
         {plannedSteps.map((step) => {
           const card = steps.find((task) => task.parents.some((parent) => parent.workflow_step_id === step.workflow_step_id)) ?? null;
@@ -173,6 +174,7 @@ export default function FlowStepsBox({
                 card={card}
                 label={step.label}
                 showCardTitle
+                leadingIcon={<WorkflowStepIcon stepKey={step.key} label={step.label} />}
                 isCurrent={current?.id === card.id}
                 isOpenCard={card.id === currentTaskId}
                 team={team}
@@ -201,7 +203,7 @@ export default function FlowStepsBox({
               <span className="tm-member-open tm-member-pending">
                 {/* Etapas de relatório nascem sempre `operacional` (ver
                     ensureFlowStep) — nunca do kind da entrega ("criativo"). */}
-                <TaskKindIcon kind="operacional" size="sm" />
+                <WorkflowStepIcon stepKey={step.key} label={step.label} />
                 <span className="tm-member-title">{step.label}</span>
                 <span className="tm-member-status">
                   {blockedReason ?? (step.creation_trigger === "ads_report_approved"

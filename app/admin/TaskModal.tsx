@@ -48,6 +48,7 @@ import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, Task
 import { useTaskAutosave } from "./useTaskAutosave";
 import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
 import BackArrowIcon from "./BackArrowIcon";
+import CommentActionsMenu from "./CommentActionsMenu";
 import CreativeDriveWorkspace from "./CreativeDriveWorkspace";
 
 type Draft = {
@@ -453,7 +454,11 @@ export default function TaskModal({
   // a mesma função usada pelo servidor (fonte de verdade). Zera aqui o
   // reviewer_id já considerando a etapa desligada, para as duas chamadas do
   // save (autosave e save() manual) nunca divergirem entre si.
-  const effectiveReviewerId = revisaoOff ? null : draft.reviewer_id || null;
+  // Preserve the loaded card while client flow flags are still in flight.
+  // Treating "not loaded" as "disabled" caused a PATCH on simply opening a
+  // card with a reviewer once the flags arrived.
+  const effectiveReviewerId = flowFlags === null ? draft.reviewer_id || null : revisaoOff ? null : draft.reviewer_id || null;
+  const effectiveApproverId = flowFlags === null ? draft.approver_id || null : aprovacaoOff ? null : draft.approver_id || null;
   // Revisão e Aprovação são as únicas etapas que somem, e por CLIENTE, não por
   // tipo: são contrato de cliente, não modelo de card. O recorte por tipo que
   // existia aqui era o "Publicado", que deixou de ser etapa.
@@ -470,13 +475,13 @@ export default function TaskModal({
       status: draft.status, priority: draft.priority, assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
       reviewer_id: effectiveReviewerId,
-      approver_id: aprovacaoOff ? null : draft.approver_id || null,
+      approver_id: effectiveApproverId,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
       // O elo que ESTE campo representa, pra setTaskPlanLink trocar só ele —
       // ver planIdBaselineRef acima.
       plan_id_previous: kd.isPlan ? null : planIdBaselineRef.current || null,
       requires_review: deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids),
-      requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
+      requires_approval: Boolean(effectiveApproverId),
       due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
       start_date: draft.start_date.trim() || draft.due_date.trim() || null,
       end_date: draft.end_date.trim() || null,
@@ -489,7 +494,7 @@ export default function TaskModal({
       slug: draft.clientSlug || null,
       payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, formato: draft.formato.trim() || null, plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
     };
-  }, [aprovacaoOff, draft, kd.isPlan, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn, revisaoOff]);
+  }, [draft, effectiveApproverId, effectiveReviewerId, kd.isPlan, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
   const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
     // Concluir uma etapa cria a próxima no mesmo request. O servidor devolve
     // esse card junto para a pessoa não ficar olhando uma etapa concluída sem
@@ -2309,14 +2314,10 @@ export default function TaskModal({
                             <small>{formatCommentTime(c.at)}</small>
                             {c.edited_at ? <small className="tm-comment-edited">editado</small> : null}
                             {own && storedIndex >= 0 ? (
-                              <HeadDropdown className="tm-comment-menu" trigger={<span className="sr-only">Ações do comentário</span>}>
-                                <button type="button" className="tm-headpick-option" onClick={() => setEditingComment({ index: storedIndex, at: c.at, text: c.text })}>
-                                  <span aria-hidden>✎</span> Editar
-                                </button>
-                                <button type="button" className="tm-headpick-option danger" onClick={() => void removeComment(storedIndex, c.at)}>
-                                  <span aria-hidden>🗑</span> Excluir
-                                </button>
-                              </HeadDropdown>
+                              <CommentActionsMenu
+                                onEdit={() => setEditingComment({ index: storedIndex, at: c.at, text: c.text })}
+                                onDelete={() => void removeComment(storedIndex, c.at)}
+                              />
                             ) : null}
                           </p>
                           {editing ? (

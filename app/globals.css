@@ -3248,7 +3248,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-comment { display: flex; gap: 9px; }
 .tm-comment > div { flex: 1; min-width: 0; }
 .tm-comment-av { width: 26px; height: 26px; border-radius: 50%; background: var(--a-teal); color: #fff; font-size: 10.5px; font-weight: 700; display: inline-grid; place-items: center; flex-shrink: 0; overflow: hidden; }
-.tm-comment-meta { margin: 0; font-size: 12.5px; display: flex; gap: 7px; align-items: baseline; }
+.tm-comment-meta { margin: 0; padding-right: 34px; font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 3px 7px; align-items: baseline; min-width: 0; }
 .tm-comment-meta small { color: var(--a-muted); font-weight: 400; }
 .tm-comment-text { max-width: 100%; margin: 2px 0 0; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 13px; color: var(--a-sec); line-height: 1.4; }
 .tm-comment-text a { overflow-wrap: anywhere; word-break: break-all; }
@@ -3274,14 +3274,16 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    — só aparece quando o comentário NÃO é do card aberto agora. */
 .tm-comment-origin { font-weight: 500; }
 
-/* Menu do comentário: só o caret, encostado à direita da linha do autor.
-   Aparece no hover/foco para não poluir a leitura da thread — mas continua
-   sempre acessível pelo teclado (:focus-within). */
-.tm-comment-menu { margin-left: auto; opacity: 0; transition: opacity .14s; }
-.tm-comment:hover .tm-comment-menu,
-.tm-comment-menu:focus-within { opacity: 1; }
-.tm-comment-menu .tm-headpick-trigger { padding: 2px 4px; gap: 0; }
-.tm-comment-menu .tm-headpick-panel { right: 0; left: auto; min-width: 148px; }
+/* Menu do comentário: botão sempre acessível e painel em portal, fora do
+   recorte da coluna com rolagem. */
+.tm-comment-actions { position: absolute; top: -3px; right: 0; }
+.tm-comment-actions-trigger { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--a-muted); cursor: pointer; }
+.tm-comment-actions-trigger:hover, .tm-comment-actions-trigger:focus-visible, .tm-comment-actions-trigger[aria-expanded="true"] { border-color: var(--a-border); background: var(--a-surface); color: var(--a-ink); outline: none; }
+.tm-comment-actions-panel { position: fixed; z-index: 340; width: 160px; padding: 5px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface); box-shadow: 0 16px 40px rgba(0,0,0,.18); }
+.tm-comment-actions-panel button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--a-ink); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.tm-comment-actions-panel button:hover, .tm-comment-actions-panel button:focus-visible { background: var(--a-hover); outline: none; }
+.tm-comment-actions-panel button.danger { color: var(--a-danger); }
+.tm-comment-actions-panel button span { width: 16px; text-align: center; font-size: 15px; }
 .tm-headpick-option.danger { color: var(--a-danger); }
 
 .tm-comment.editing { background: var(--a-hover); border-radius: 10px; padding: 6px; margin: -6px; }
@@ -3462,7 +3464,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 /* ---- Document preview modal (reuses the TaskModal .tm/.tm-lg/.tm-head/
    .tm-layout/.tm-side/.tm-cell shell — see app/admin/TaskModal.tsx — so the
    two modals read as the same family, same size, instead of two different
-   designs). .tm-lg sets the base 1680×880 sizing; the only override here is a
+   designs). .tm-lg sets the shared modal sizing; the only override here is a
    narrower side column than TaskModal's (this sidebar is just a short facts
    list, not a comment thread) so the PDF preview reads as the dominant ~80%
    of the layout instead of an even split. ---- */
@@ -3482,6 +3484,16 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .docprev-tm .tm-cell-ico { width: 19px; height: 19px; font-size: 9.5px; border-radius: 6px; }
 .docprev-tm .tm-cell-label { font-size: 9px; margin-bottom: 1px; }
 .docprev-tm .tm-cell-static { font-size: 11.5px; }
+.docprev-overview { display: grid; gap: 7px; padding: 11px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface); }
+.docprev-overview-row { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--a-sec); font-size: 12px; }
+.docprev-overview-row > span:first-child { display: inline-grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 6px; background: var(--a-inset); color: var(--a-teal-text); }
+.docprev-overview-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--a-ink); font-size: 12px; }
+.docprev-file-facts { display: grid; gap: 0; margin-top: 12px; border-top: 1px solid var(--a-border); }
+.docprev-file-facts > div { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px 3px; border-bottom: 1px solid var(--a-border); color: var(--a-sec); font-size: 11.5px; }
+.docprev-file-facts > div > span:first-child { flex: 0 0 20px; text-align: center; color: var(--a-teal-text); font-size: 14px; }
+.docprev-fact-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docprev-action { display: inline-flex; align-items: center; gap: 6px; }
+.docprev-action > span { font-size: 17px; line-height: 1; }
 .tm-main:has(.file-preview) { padding: 20px 0 20px 30px; height: 100%; }
 .file-preview { position: relative; min-width: 0; min-height: 510px; height: 100%; flex: 1; overflow: hidden; display: grid; place-items: center; background: var(--a-inset, var(--np-surface-2)); border: 1px solid var(--a-border, var(--np-border)); border-radius: 14px; }
 .file-preview iframe, .file-preview img, .file-preview video { display: block; width: 100%; height: 100%; min-height: 510px; border: 0; object-fit: contain; background: #fff; }
@@ -3941,8 +3953,15 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    Só seletores de classe aqui: um `div.tm-chain-panel` perderia para regras de
    classe declaradas depois neste cascade — ver CLAUDE.md. */
 .tm-chain { display: inline-flex; }
-.tm-chain-replace { width: auto; min-width: 56px; padding: 0 7px; border: 1px solid var(--a-border); background: var(--a-surface); color: var(--a-teal-text); font-size: 11px; font-weight: 700; }
-.tm-chain-replace:hover, .tm-chain-replace:focus-visible { color: var(--a-teal-text); background: var(--a-teal-soft); font-size: 11px; transform: none; }
+.tm-chain-replace { width: 32px; height: 32px; flex-basis: 32px; border: 1px solid var(--a-border); background: var(--a-surface); color: var(--a-teal-text); }
+.tm-chain-replace:hover, .tm-chain-replace:focus-visible { color: var(--a-teal-text); border-color: var(--a-teal); background: var(--a-teal-soft); transform: none; outline: 2px solid transparent; }
+.tm-chain-replace[aria-expanded="true"] { border-color: var(--a-teal); background: var(--a-teal-soft); }
+.tm-workflow-icon { display: inline-grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border: 1px solid var(--a-border); border-radius: 9px; color: var(--a-sec); background: var(--a-surface); }
+.tm-workflow-icon-roteiro { color: var(--a-purple-text); background: var(--a-purple-soft); }
+.tm-workflow-icon-captacao { color: var(--a-blue-text); background: var(--a-blue-soft); }
+.tm-workflow-icon-edicao { color: var(--a-teal-text); background: var(--a-teal-soft); }
+.tm-workflow-icon-publicacao { color: var(--a-warn); background: color-mix(in srgb, var(--a-warn) 14%, var(--a-surface)); }
+.tm-workflow-icon-revisao, .tm-workflow-icon-aprovacao { color: var(--a-teal-text); background: var(--a-teal-soft); }
 .tm-chain-panel {
   position: fixed; z-index: 340; width: 320px;
   max-width: calc((100vw / var(--ui-scale)) - 24px);
@@ -4044,17 +4063,13 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 
 /* ---- Task modal v2: larger, two-column edit layout ---- */
 .tm-lg {
-  /* O app inteiro roda a --ui-scale (0.80) por `html { zoom }`. No card aberto
-     isso deixava rótulo, data e comentário pequenos demais para a tela onde se
-     passa mais tempo. Este zoom extra devolve ~10% só ao modal, sem mexer no
-     resto do admin.
-     As medidas são divididas pelo mesmo fator porque `zoom` multiplica o
-     tamanho renderizado: sem dividir, o modal passaria da viewport em telas
-     menores (a 1280px chegaria a 1387px de largura). */
-  --tm-scale: 1.1;
+  /* O app inteiro roda a --ui-scale (0.80) por `html { zoom }`. O modal usa
+     uma escala própria discreta e divide as medidas por ela para caber na
+     viewport sem reduzir a área útil dos comentários. */
+  --tm-scale: 1.04;
   --tm-cover-h: 88px;
   zoom: var(--tm-scale);
-  width: min(1760px, calc(((100vw / var(--ui-scale)) - 24px) / var(--tm-scale)));
+  width: min(1880px, calc(((100vw / var(--ui-scale)) - 12px) / var(--tm-scale)));
   height: min(880px, calc(((100dvh / var(--ui-scale)) - 64px) / var(--tm-scale)));
   max-height: calc(((100dvh / var(--ui-scale)) - 64px) / var(--tm-scale));
   overflow-x: hidden;
@@ -4065,26 +4080,22 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-lg .tm-head { min-height: var(--tm-cover-h); gap: 18px; padding: 24px 32px 19px; }
 .tm-lg .tm-head:not(.tm-head-plain) { display: grid; grid-template-columns: minmax(260px, 460px) minmax(280px, 1fr) auto; }
 .tm-head-identity { display: flex; align-items: center; gap: 14px; min-width: 0; overflow: visible; }
-/* O título nunca quebra em duas linhas, nem fica truncado — cresce pelo que
-   precisar e, se for mais largo que a coluna, sobrepõe o stepper/progresso
-   ao lado (pedido explícito: melhor sobrepor do que quebrar ou cortar). */
+/* O título fica dentro da coluna e não invade o stepper ou as ações. */
 .tm-lg .tm-head-text { min-width: 0; max-width: none; overflow: visible; }
 .tm-lg .tm-title-input {
   font-size: clamp(19px, 1.6vw, 24px); line-height: 1.2; letter-spacing: -.01em;
-  field-sizing: content; width: auto; min-width: 100%; max-width: none;
-  white-space: nowrap; overflow: visible; position: relative; z-index: 2;
+  width: 100%; min-width: 0; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tm-lg .tm-title-input { margin-bottom: 1px; }
 .tm-lg .tm-head-client { gap: 5px; padding-top: 3px; line-height: 1.35; }
 .tm-layout { display: grid; grid-template-columns: 1fr; min-width: 0; flex: 1; min-height: 0; overflow-y: auto; }
-/* Coluna de comentários mais larga (375/462 -> 410/520): o dropdown de editar
-   um comentário (menu "···") ficava sob o corte da coluna, meio invisível.
-   O que a coluna ganha sai da principal, então descrição e atributos encolhem
-   um pouco junto (ver .tm-desc-input / .tm-cell abaixo). */
-.tm-layout:has(.tm-side) { grid-template-columns: minmax(0,1fr) minmax(410px, 520px); align-items: stretch; }
+/* Coluna de comentários com largura suficiente para autor, data e ações;
+   o modal ampliado preserva a área principal. */
+.tm-layout:has(.tm-side) { grid-template-columns: minmax(0,1fr) minmax(440px, 540px); align-items: stretch; }
 .tm-main { display: flex; flex-direction: column; min-width: 0; min-height: 100%; }
 /* Internal, elegant panel (inset card) instead of a bordered "external" column */
-.tm-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 20px 24px 24px 8px; padding: 20px 20px 18px; background: linear-gradient(180deg, var(--a-inset), color-mix(in srgb, var(--a-inset) 76%, var(--a-surface))); border: 1px solid var(--a-border); border-radius: 18px; }
+.tm-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 16px 18px 18px 4px; padding: 18px 18px 16px; background: linear-gradient(180deg, var(--a-inset), color-mix(in srgb, var(--a-inset) 76%, var(--a-surface))); border: 1px solid var(--a-border); border-radius: 18px; }
 .tm-side .tm-commentsbox { flex: 1; display: flex; flex-direction: column; min-height: 0; margin: 0; background: none; padding: 0; }
 .tm-side .tm-box-label { margin: 0 0 12px; }
 .tm-side .tm-comments { flex: 1; max-height: none; min-height: 220px; }
@@ -4250,6 +4261,22 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   .tm-side { margin-left: 16px; margin-right: 16px; }
   .tm-stepper { padding-left: 16px; padding-right: 16px; flex-wrap: wrap; row-gap: 10px; }
   .kb-modal-actions { padding-left: 16px; padding-right: 16px; }
+}
+
+@media (max-width: 900px) {
+  .docprev-tm .tm-layout:has(.tm-side) { grid-template-columns: minmax(0, 1fr); }
+  .docprev-tm .tm-main:has(.file-preview) { grid-column: 1; grid-row: 1; width: 100%; height: auto; padding: 16px; }
+  .docprev-tm .tm-side { grid-column: 1; grid-row: 2; margin: 0 16px 20px; }
+}
+
+.docprev-tm .tm-head:not(.tm-head-plain) { position: relative; display: flex; align-items: center; gap: 12px; padding-right: 52px; }
+.docprev-tm .tm-head-ico { flex: 0 0 42px; width: 42px; height: 42px; }
+.docprev-tm .tm-head-text { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.docprev-tm .docprev-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.docprev-tm .kb-modal-close { position: absolute; top: 18px; right: 20px; }
+@media (max-width: 640px) {
+  .docprev-tm .tm-head:not(.tm-head-plain) { padding: 14px 46px 14px 16px; }
+  .docprev-tm .kb-modal-close { top: 15px; right: 15px; }
 }
 
 /* ---- Performance dashboard (Meta via Windsor) ---- */
@@ -5264,15 +5291,12 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .plan-card-titleline .kb-situacao { margin-right: 4px; }
 
 /* Etapa/atividade editável na linha (StepRow) — referência do Monday. */
-.tm-step-row { flex-direction: column; align-items: stretch; gap: 6px; padding: 5px 6px 5px 10px; border: 1px solid var(--a-border); }
+.tm-step-row { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 10px; border: 1px solid var(--a-border); }
 .tm-step-row:hover { background: inherit; }
 .tm-step-row.is-current { border-color: var(--a-teal); box-shadow: 0 0 0 1px var(--a-teal) inset; }
 /* Uma linha só: check · situação · título · status · data · responsável · comentários. */
 .tm-steprow-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
-.tm-steprow-head .tm-member-open { flex: 1 1 160px; padding: 2px 4px; }
-.tm-step-card-name { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
-.tm-step-card-name strong { font-size: 12px; font-weight: 650; color: var(--a-muted); }
-.tm-step-card-name small { overflow: hidden; color: var(--a-ink); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.tm-steprow-head .tm-member-open { flex: 1 1 190px; padding: 2px 4px; }
 .tm-step-check { width: 18px; height: 18px; accent-color: var(--a-teal-strong); cursor: pointer; flex: 0 0 auto; }
 .tm-step-current { padding: 2px 7px; border-radius: 999px; background: var(--a-teal); color: var(--a-inverse); font-size: 10px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
 .tm-step-comments { flex: 0 0 auto; padding: 4px 8px; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface); color: var(--a-muted); font: inherit; font-size: 11.5px; cursor: pointer; }
@@ -5300,6 +5324,7 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .tm-step-pending { opacity: .9; }
 @media (max-width: 900px) { .tm-step-fields { flex: 1 1 100%; margin-left: 26px; } .tm-step-fields > * { flex: 1 1 0; width: auto; } }
 @media (max-width: 720px) { .tm-step-fields { margin-left: 0; flex-wrap: wrap; } .tm-step-thread { margin-left: 0; } }
+@media (max-width: 640px) { .tm-step-row .tm-member-title { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; } }
 
 /* Cadastro de cliente — rotinas padrão obrigatórias. */
 .client-routines-list { display: grid; gap: 10px; }

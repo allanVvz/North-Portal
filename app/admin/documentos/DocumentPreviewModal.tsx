@@ -27,6 +27,14 @@ function fmtDate(iso: string | null): string {
   return `${m[3]} ${MES[Number(m[2]) - 1]} ${m[1]}`;
 }
 
+function compactFileType(doc: AdminDocument): string {
+  const fileName = doc.original_file_name ?? "";
+  const extension = /\.([a-z0-9]{2,5})$/i.exec(fileName)?.[1]?.toUpperCase();
+  if (extension) return extension;
+  const label = fileTypeLabel(doc);
+  return label.length <= 6 ? label : "ARQ";
+}
+
 export default function DocumentPreviewModal({
   doc,
   onBack,
@@ -73,7 +81,7 @@ export default function DocumentPreviewModal({
           </button>
         ) : null}
         <div className={`tm-head tm-head-tone-${STATUS_TONE[doc.status]}`}>
-          <span className="tm-head-ico" aria-hidden>{fileTypeLabel(doc)}</span>
+          <span className="tm-head-ico" aria-hidden>{compactFileType(doc)}</span>
           <div className="tm-head-text">
             <strong className="docprev-title">{doc.name}</strong>
             <span className="admin-sub">{TYPE_LABEL[doc.doc_type]} · {fmtDate(doc.doc_date)}</span>
@@ -88,17 +96,15 @@ export default function DocumentPreviewModal({
 
           <div className="tm-side">
             <div className="tm-box tm-commentsbox docprev-cellbox">
-              <p className="tm-box-label">Detalhes</p>
-              <div className="docprev-cells">
-                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◆</span><div className="tm-cell-body"><span className="tm-cell-label">Tipo</span><span className="tm-cell-static">{TYPE_LABEL[doc.doc_type]}</span></div></div>
-                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◔</span><div className="tm-cell-body"><span className="tm-cell-label">Cliente</span><span className="tm-cell-static">{doc.clientName}</span></div></div>
-                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>⚑</span><div className="tm-cell-body"><span className="tm-cell-label">Status</span><span className={`doc-status tone-${STATUS_TONE[doc.status]}`}>{STATUS_LABEL[doc.status]}</span></div></div>
-                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>▦</span><div className="tm-cell-body"><span className="tm-cell-label">Data</span><span className="tm-cell-static">{fmtDate(doc.doc_date)}</span></div></div>
-                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>▤</span><div className="tm-cell-body"><span className="tm-cell-label">Arquivo</span><span className="tm-cell-static docprev-cell-wrap">{doc.original_file_name || "Link externo"}</span></div></div>
-                <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◧</span><div className="tm-cell-body"><span className="tm-cell-label">Formato</span><span className="tm-cell-static">{doc.mime_type || fileTypeLabel(doc)}</span></div></div>
-                {doc.size_bytes !== null ? (
-                  <div className="tm-cell"><span className="tm-cell-ico" aria-hidden>◈</span><div className="tm-cell-body"><span className="tm-cell-label">Tamanho</span><span className="tm-cell-static">{formatFileSize(doc.size_bytes)}</span></div></div>
-                ) : null}
+              <p className="tm-box-label">Sobre o arquivo</p>
+              <div className="docprev-overview">
+                <div className="docprev-overview-row"><span aria-hidden="true">◔</span><strong title={doc.clientName}>{doc.clientName}</strong></div>
+                <div className="docprev-overview-row"><span aria-hidden="true">●</span><span className={`doc-status tone-${STATUS_TONE[doc.status]}`}>{STATUS_LABEL[doc.status]}</span></div>
+              </div>
+              <div className="docprev-file-facts">
+                <div title={doc.original_file_name || "Link externo"}><span aria-hidden="true">▤</span><span className="docprev-fact-value">{doc.original_file_name || "Link externo"}</span></div>
+                <div title={doc.mime_type || fileTypeLabel(doc)}><span aria-hidden="true">◧</span><span className="docprev-fact-value">{doc.mime_type || fileTypeLabel(doc)}</span></div>
+                {doc.size_bytes !== null ? <div><span aria-hidden="true">◈</span><span className="docprev-fact-value">{formatFileSize(doc.size_bytes)}</span></div> : null}
               </div>
             </div>
           </div>
@@ -108,10 +114,10 @@ export default function DocumentPreviewModal({
           <span />
           <span />
           <div className="kb-modal-actions-right">
-            {doc.file_url ? <a className="admin-btn ghost" href={doc.file_url} target="_blank" rel="noopener noreferrer">↓ Baixar</a> : null}
-            <button className="admin-btn ghost" onClick={share} disabled={!doc.file_url}>{copied ? "Link copiado ✓" : "Compartilhar"}</button>
+            {doc.file_url ? <a className="admin-btn ghost docprev-action" href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Baixar arquivo"><span aria-hidden="true">↓</span> Baixar</a> : null}
+            <button className="admin-btn ghost docprev-action" onClick={share} disabled={!doc.file_url} title="Copiar link do arquivo"><span aria-hidden="true">↗</span> {copied ? "Copiado" : "Compartilhar"}</button>
             <button className="admin-btn primary" onClick={approve} disabled={busy || doc.status === "publicado"}>
-              {doc.status === "publicado" ? "Publicado ✓" : busy ? "Aprovando…" : "Aprovar documento"}
+              <span aria-hidden="true">✓</span> {doc.status === "publicado" ? "Publicado" : busy ? "Aprovando…" : "Aprovar"}
             </button>
           </div>
         </footer>
