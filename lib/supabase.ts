@@ -383,6 +383,18 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
   const taskRows = ((tasks.data as unknown as (ClientTask & TaskAssigneesJoin)[] | null) ?? [])
     .map(mergeTaskAssigneeRow)
     .map((task) => ({ ...task, creative_drive_material_url: materialByTask.get(task.id) ?? null }));
+  // Uma etapa vinculada pode aparecer em Aprovação junto com sua Entrega.
+  // O cliente decide pela Entrega (contexto do elo), não pelo card compartilhado.
+  const approvalCardIds = taskRows
+    .filter((task) => (task.status === "aprovacao" || task.status === "aprovado") && !isFlowDelivery(task))
+    .map((task) => task.id);
+  const workflowChildren = new Set<string>();
+  if (approvalCardIds.length) {
+    const { data: workflowLinks, error: workflowError } = await createAdminClient().from("task_links")
+      .select("child_id").eq("relation_kind", "workflow_step").in("child_id", approvalCardIds);
+    if (workflowError) fail(workflowError);
+    for (const link of workflowLinks ?? []) workflowChildren.add(link.child_id);
+  }
   const documentRows = (documents.data as DocumentRecord[] | null) ?? [];
   const trilhaRows = (northTrilhas.data as NorthTrilha[] | null) ?? [];
 
@@ -435,10 +447,10 @@ export async function getPortalPayload(slug: string): Promise<PortalPayload> {
     northTrilhas: trilhaRows,
     credentials,
     pendingApprovals: taskRows
-      .filter((t) => t.status === "aprovacao")
+      .filter((t) => t.status === "aprovacao" && !workflowChildren.has(t.id))
       .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
     resolvedApprovals: taskRows
-      .filter((t) => t.status === "aprovado")
+      .filter((t) => t.status === "aprovado" && !workflowChildren.has(t.id))
       .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")),
     checkpoints: checkpointRows,
     flowFlags: { revisaoCliente: flowFlags.revisaoCliente, aprovacaoCliente: flowFlags.aprovacaoCliente },
