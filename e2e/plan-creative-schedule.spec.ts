@@ -86,9 +86,9 @@ test("plano Setembro/Outubro: prazo e responsável editam o Criativo, sem altera
   const otherCreative = modal.locator(".tm-step-row", { hasText: "Não é Todo Mundo" });
   await expect(otherCreative.getByLabel("Prazo da Entrega de Não é Todo Mundo")).toHaveValue(otherOriginal.due_date);
 
-  const alternate = await assignee.locator("option").evaluateAll((options) => options
+  const alternate = await assignee.locator("option").evaluateAll((options, currentAssignee) => options
     .map((option) => ({ value: (option as HTMLOptionElement).value, text: option.textContent ?? "" }))
-    .find((option) => option.value && option.text !== original.assignee));
+    .find((option) => option.value && option.text !== currentAssignee), original.assignee);
   expect(alternate).toBeTruthy();
   await assignee.selectOption(alternate!.value);
   await expect.poll(() => patches.length).toBe(2);
