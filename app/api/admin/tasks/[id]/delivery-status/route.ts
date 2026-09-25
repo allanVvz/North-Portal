@@ -12,6 +12,7 @@ import { feedbackMetricApprovalProblem } from "@/lib/automations/conversionFlow"
 import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
 import { creativesFollowingStage } from "@/lib/flows/homeArrival";
 import { eventCommentId, recordStatusComment, statusChangeText, stepLabelOf } from "@/lib/flows/statusComments";
+import { recordStepDelivery } from "@/lib/flows/stepDelivery";
 import { notifyTaskParticipants, statusChangedMessage } from "@/lib/notifications";
 import { HttpError, TASK_STATUSES, type TaskRecord } from "@/lib/validation";
 
@@ -98,6 +99,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           text: statusChangeText(stepLabelOf(storedStage), stage.status, input.status, contextual),
           commentId: eventCommentId("status"),
         });
+        // Roteiro/Captação concluídos: o responsável entrega o que produziu.
+        if (input.status === "aprovado") await recordStepDelivery(createAdminClient(), stage.id);
       }
     }
     return NextResponse.json({

@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
 import { creativesFollowingStage } from "@/lib/flows/homeArrival";
 import { eventCommentId, isCreativeStatusScope, recordStatusComment, statusChangeText, stepLabelOf } from "@/lib/flows/statusComments";
+import { recordStepDelivery } from "@/lib/flows/stepDelivery";
 import { BAITA_DRIVE_PLAN_ID, provisionCreativeDriveWorkspace } from "@/lib/creativeDrive";
 import { createClient } from "@/lib/supabase/server";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
@@ -279,6 +280,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         text: statusChangeText(stepLabelOf(saved), current.status, saved.status, false),
         commentId: eventCommentId("status"),
       });
+      // Roteiro/Captação concluídos: o responsável entrega o que produziu.
+      if (saved.status === "aprovado") await recordStepDelivery(createAdminClient(), saved.id);
     }
     return NextResponse.json({ ...await withFlowNextTask(current, saved), ...(driveSyncWarning ? { drive_sync_warning: driveSyncWarning } : {}) });
   } catch (error) {
