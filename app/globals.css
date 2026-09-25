@@ -5742,6 +5742,12 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .tm-materials-heading .tm-box-label { margin: 0; }
 .tm-materials-heading strong { font-size: 13px; line-height: 1.2; }
 .tm-materials-heading > small { color: var(--a-muted); font-size: 10px; white-space: nowrap; }
+/* Caixa de arquivos simplificada (25/09): a navegação mora no modal de arquivos. */
+.tm-materials-open { flex: 0 0 auto; padding: 2px 0; border: 0; background: none; color: var(--a-teal-text); font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.tm-materials-open:hover { text-decoration: underline; }
+.tm-materials-more { justify-self: start; padding: 0; border: 0; background: none; color: var(--a-muted); font: inherit; font-size: 10px; cursor: pointer; }
+.tm-materials-more:hover { color: var(--a-ink); text-decoration: underline; }
+.tm-materials-empty { margin: 0; color: var(--a-muted); font-size: 11px; }
 .tm-material-tabs { display: flex; gap: 5px; min-width: 0; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
 .tm-material-tabs button { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; min-height: 28px; padding: 4px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--a-muted); font: inherit; font-size: 10px; cursor: pointer; }
 .tm-material-tabs button.on { border-color: var(--a-border); background: var(--a-inset); color: var(--a-ink); font-weight: 700; }

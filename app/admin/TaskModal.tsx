@@ -23,10 +23,9 @@ import {
 } from "./kanbanShared";
 import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
-import { taskCoverCandidates, taskDriveFolders } from "@/lib/taskCover";
+import { taskCoverCandidates } from "@/lib/taskCover";
 import { parseGoogleDriveUrl } from "@/lib/googleDrive";
-import { BAITA_DRIVE_PLAN_ID, creativeWorkspacesForCard, currentFinalAsset, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
-import CardDriveFolders from "./CardDriveFolders";
+import { BAITA_DRIVE_PLAN_ID, creativeWorkspacesForCard, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
@@ -352,8 +351,7 @@ export default function TaskModal({
   const [materialSyncWarning, setMaterialSyncWarning] = useState("");
   const [recentlyCreatedCard, setRecentlyCreatedCard] = useState<TaskRecord | null>(null);
   const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final" } | null>(null);
-  const [materialTab, setMaterialTab] = useState<"raw" | "preview" | "final" | "docs" | "links">("links");
-  const [materialPage, setMaterialPage] = useState(1);
+  const [materialTab, setMaterialTab] = useState<"final" | "preview" | "docs">("final");
   const materialRequest = useRef(0);
   const reloadMaterials = useCallback(() => {
     const requestId = ++materialRequest.current;
@@ -578,64 +576,39 @@ export default function TaskModal({
     }
     return { card, docs: Array.from(byId.values()) };
   }).filter((group) => group.docs.length), [materialCards, attachableDocs]);
-  const driveFolders = useMemo(
-    () => taskDriveFolders({ description: draft.description, payload: task?.payload }).filter((folder) =>
-      !attachableDocs.some((doc) => doc.file_url === folder.url || (doc.file_url && parseGoogleDriveUrl(doc.file_url)?.id === folder.folderId))),
-    [draft.description, task?.payload, attachableDocs],
-  );
   const cardWorkspaces = useMemo(() => liveTask ? creativeWorkspacesForCard(liveTask, clientTasks, materialWorkspaces) : [], [liveTask, clientTasks, materialWorkspaces]);
-  const ownClassifiedRaws = useMemo(() => {
-    const workspace = cardWorkspaces.find((item) => item.creative_task_id === liveTask?.id);
-    if (!workspace) return [];
-    const linked = new Set(workspace.raw_links.map((item) => item.asset_id));
-    return workspace.assets.filter((asset) => asset.role === "raw" && asset.state === "active" && linked.has(asset.id));
-  }, [cardWorkspaces, liveTask?.id]);
-  const ownRawCreativeLinks = useMemo(() => {
-    const currentWorkspace = cardWorkspaces.find((item) => item.creative_task_id === liveTask?.id);
-    const links = new Map<string, Array<{ id: string; title: string }>>();
-    if (!currentWorkspace) return links;
-    for (const workspace of materialWorkspaces) {
-      if (workspace.capture_task_id !== currentWorkspace.capture_task_id) continue;
-      const linked = new Set(workspace.raw_links.map((item) => item.asset_id));
-      const title = workspace.creative_title ?? clientTasks.find((card) => card.id === workspace.creative_task_id)?.title ?? (workspace.creative_task_id === liveTask?.id ? liveTask.title : "Criativo");
-      for (const asset of workspace.assets) {
-        if (asset.role !== "raw" || asset.state !== "active" || !linked.has(asset.id)) continue;
-        const fileLinks = links.get(asset.drive_file_id) ?? [];
-        if (!fileLinks.some((target) => target.id === workspace.creative_task_id)) fileLinks.push({ id: workspace.creative_task_id, title });
-        links.set(asset.drive_file_id, fileLinks);
-      }
-    }
-    return links;
-  }, [cardWorkspaces, clientTasks, liveTask?.id, liveTask?.title, materialWorkspaces]);
-  useEffect(() => { setMaterialTab(liveTask?.kind === "criativo" ? "raw" : "links"); setMaterialPage(1); }, [liveTask?.id, liveTask?.kind]);
+  useEffect(() => { setMaterialTab("final"); }, [liveTask?.id]);
   useEffect(() => { setRecentlyCreatedCard(null); }, [liveTask?.id]);
   const creativeCandidates = useMemo(() => {
     const candidates = [...materialCards, ...flowDeliveries];
     return Array.from(new Map(candidates.filter((card) => card.kind === "criativo" && !card.subtype && planParentIdsOf(card).includes(BAITA_DRIVE_PLAN_ID)).map((card) => [card.id, card])).values());
   }, [materialCards, flowDeliveries]);
-  const visibleCreativeCandidates = creativeCandidates.filter((card) =>
-    liveTask?.kind === "criativo" || liveTask?.subtype === "captacao" ||
-    cardWorkspaces.some((workspace) => workspace.creative_task_id === card.id && currentFinalAsset(workspace)),
-  );
   const materialPreviews = cardWorkspaces.flatMap((workspace) => workspace.assets.filter((asset) => asset.role === "preview" && asset.state === "active").map((asset) => ({ asset, workspace })));
   const materialFinals = cardWorkspaces.flatMap((workspace) => workspace.final_versions.filter((version) => version.state === "current" || workspace.creative_task_id === liveTask?.id).flatMap((version) => {
     const asset = workspace.assets.find((item) => item.id === version.asset_id && item.role === "final" && item.state === "active");
     return asset ? [{ asset, workspace, version }] : [];
   })).sort((a, b) => b.version.promoted_at.localeCompare(a.version.promoted_at));
   const materialDocs = materialGroups.flatMap(({ card, docs }) => docs.map((doc) => ({ card, doc })));
-  const materialLinks = driveFolders.length + visibleCreativeCandidates.length;
+  // Caixa de arquivos (25/09): só as categorias que alguém abre para VER —
+  // Finais e Previews, e Documentos quando o card tem (é onde fica o PDF dos
+  // relatórios, que não vive no Drive). Brutos e "Pastas e links" saíram: a
+  // navegação por criativo, pasta e bruto mora no modal de arquivos, que já tem
+  // a própria troca de criativo (`targets`). Aqui é vitrine + um link para lá.
   const materialTabs = ([
-    { id: "raw", label: "Brutos", count: ownClassifiedRaws.length },
-    { id: "preview", label: "Previews", count: materialPreviews.length },
     { id: "final", label: "Finais", count: materialFinals.length },
+    { id: "preview", label: "Previews", count: materialPreviews.length },
     { id: "docs", label: "Documentos", count: materialDocs.length },
-    { id: "links", label: "Pastas e links", count: materialLinks },
   ] as const).filter((tab) => tab.count > 0);
   const activeMaterialTab = materialTabs.some((tab) => tab.id === materialTab) ? materialTab : materialTabs[0]?.id;
-  const activeMaterialCount = materialTabs.find((tab) => tab.id === activeMaterialTab)?.count ?? 0;
-  const materialPageCount = Math.max(1, Math.ceil(activeMaterialCount / 3));
-  const safeMaterialPage = Math.min(materialPage, materialPageCount);
-  const materialStart = (safeMaterialPage - 1) * 3;
+  // Onde "Abrir arquivos" leva: o próprio card quando ele é um criativo com
+  // arquivos; num card-pai ou numa captação, o primeiro criativo — dentro do
+  // modal a pessoa troca de criativo sem voltar aqui.
+  const filesTaskId = cardWorkspaces.some((workspace) => workspace.creative_task_id === liveTask?.id)
+    ? liveTask?.id ?? null
+    : cardWorkspaces[0]?.creative_task_id ?? creativeCandidates[0]?.id ?? null;
+  const filesTab = liveTask?.subtype === "captacao" ? "raw" as const : filesTaskId === liveTask?.id ? "classified" as const : materialFinals.length ? "final" as const : "classified" as const;
+  const openFiles = () => { if (filesTaskId) setDriveOpen({ taskId: filesTaskId, tab: filesTab }); };
+  const activeMedia = activeMaterialTab === "preview" ? materialPreviews : activeMaterialTab === "final" ? materialFinals : [];
   const commentAssets = useMemo(() => new Map(materialWorkspaces.flatMap((workspace) => workspace.assets.map((asset) => [asset.id, { asset, workspace }] as const))), [materialWorkspaces]);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
   function knownDocForUrl(url: string): AdminDocument | undefined {
@@ -2241,30 +2214,19 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {mode === "edit" && materialTabs.length > 0 ? (
-              <section className="tm-materials" aria-label="Materiais do card">
-                <div className="tm-materials-heading"><div><p className="tm-box-label">Materiais</p><strong>Arquivos desta execução</strong></div><small>{materialTabs.reduce((sum, tab) => sum + tab.count, 0)} itens</small></div>
+            {mode === "edit" && (materialTabs.length > 0 || filesTaskId) ? (
+              <section className="tm-materials" aria-label="Arquivos do card">
+                <div className="tm-materials-heading">
+                  <div><p className="tm-box-label">Arquivos</p><strong>Desta execução</strong></div>
+                  {filesTaskId ? <button type="button" className="tm-materials-open" onClick={openFiles}>Abrir arquivos ↗</button> : null}
+                </div>
                 {materialSyncWarning ? <p className="admin-warn" role="status">{materialSyncWarning}</p> : null}
-                <nav className="tm-material-tabs" aria-label="Tipos de materiais do card">{materialTabs.map((tab) => <button type="button" key={tab.id} className={activeMaterialTab === tab.id ? "on" : ""} aria-current={activeMaterialTab === tab.id ? "page" : undefined} onClick={() => { setMaterialTab(tab.id); setMaterialPage(1); }}>{tab.label}<span>{tab.count}</span></button>)}</nav>
-                {activeMaterialTab === "raw" && liveTask ? <div className="tm-classified-raws-grid">{ownClassifiedRaws.slice(materialStart, materialStart + 3).map((asset, index) => <div className="tm-classified-raw" key={asset.id}><button type="button" className="tm-classified-raw-preview" onClick={() => setDriveOpen({ taskId: liveTask.id, assetId: asset.id })} aria-label={`Visualizar bruto ${asset.name}`}><span className="tm-classified-raw-thumb"><img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" /><span>{asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><b>{asset.mime_type.startsWith("video/") ? "Vídeo" : "Foto"} {materialStart + index + 1}</b><span className="tm-classified-raw-links" aria-label="Criativos vinculados">{(ownRawCreativeLinks.get(asset.drive_file_id) ?? []).map((target) => <span className="tm-classified-raw-eyebrow" key={target.id} title={target.title}>{target.title}</span>)}</span></button><div className="tm-classified-raw-actions"><a href={asset.web_view_link ?? `https://drive.google.com/file/d/${encodeURIComponent(asset.drive_file_id)}/view`} target="_blank" rel="noreferrer">Abrir</a><a href={`/api/admin/tasks/${liveTask.id}/drive-assets/${asset.id}/download`}>Baixar</a></div></div>)}</div> : null}
-                {activeMaterialTab === "preview" || activeMaterialTab === "final" ? <div className="tm-material-media-grid">{(activeMaterialTab === "preview" ? materialPreviews : materialFinals).slice(materialStart, materialStart + 3).map(({ asset, workspace }, index) => <button type="button" key={`${workspace.id}-${asset.id}`} className="tm-material-media" title={asset.name} onClick={() => setDriveOpen({ taskId: workspace.creative_task_id, assetId: asset.id })}><span className={`tm-material-media-image${asset.mime_type.startsWith("audio/") ? " audio" : ""}`}>{asset.mime_type.startsWith("audio/") ? null : <img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" />}<span>{asset.mime_type.startsWith("audio/") ? "♫" : asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><span className="tm-material-media-caption"><b>{activeMaterialTab === "preview" ? "Preview" : "Final"} {materialStart + index + 1} · {asset.mime_type.startsWith("audio/") ? "Áudio" : asset.mime_type.startsWith("video/") ? "Vídeo" : "Arquivo"}</b><small>{clientTasks.find((card) => card.id === workspace.creative_task_id)?.title ?? "Criativo"}</small></span></button>)}</div> : null}
-                {activeMaterialTab === "docs" ? <div className="tm-material-list">{materialDocs.slice(materialStart, materialStart + 3).map(({ card, doc }) => <button type="button" key={`${card.id}-${doc.id}`} className="tm-material-item" title={doc.name} onClick={() => setPreviewDoc(doc)}><span className="tm-material-icon pdf">{fileTypeLabel(doc)}</span><span className="tm-material-name">{doc.name}</span><small>{card.id === liveTask?.id ? "Neste card" : card.title}</small></button>)}</div> : null}
-                {activeMaterialTab === "links" ? <div className="tm-material-list">
-                  {driveFolders.slice(materialStart, materialStart + 3).length ? <CardDriveFolders folders={driveFolders.slice(materialStart, materialStart + 3)} /> : null}
-                  {visibleCreativeCandidates.slice(Math.max(0, materialStart - driveFolders.length), Math.max(0, materialStart - driveFolders.length) + Math.max(0, 3 - Math.max(0, driveFolders.length - materialStart))).map((creative) => {
-                    const workspace = cardWorkspaces.find((item) => item.creative_task_id === creative.id);
-                    const final = workspace?.final_versions.find((version) => version.state === "current");
-                    const finalAsset = workspace?.assets.find((asset) => asset.id === final?.asset_id);
-                    const count = (workspace?.raw_links.length ?? 0) + (workspace?.assets.filter((asset) => asset.state === "active" && asset.role !== "raw").length ?? 0);
-                    const showRawCount = liveTask?.subtype === "captacao";
-                    const rawLabel = workspace?.available_raw_count == null ? "Drive indisponível" : workspace.available_raw_limited ? "Brutos no Drive" : `${workspace.available_raw_count} brutos`;
-                    const materialCount = `${count} ${count === 1 ? "material" : "materiais"}`;
-                    const classifiedCount = workspace?.raw_links.length ?? 0;
-                    const detail = finalAsset ? `Final v${final?.version_number} · ${classifiedCount} classificado(s)` : showRawCount && workspace ? `${rawLabel} · ${classifiedCount} classificado(s)` : liveTask?.id === creative.id ? `${classifiedCount} bruto(s) classificado(s) · ${materialCount}` : materialCount;
-                    return <button type="button" key={creative.id} className="tm-material-item" onClick={() => setDriveOpen({ taskId: creative.id, tab: liveTask?.subtype === "captacao" ? "raw" : finalAsset && liveTask?.id !== creative.id ? "final" : "classified" })}><span className="tm-material-icon folder">▣</span><span className="tm-material-name">{creative.title}</span><small>{detail}</small></button>;
-                  })}
-                </div> : null}
-                {activeMaterialCount > 3 ? <nav className="tm-material-pagination" aria-label={`Páginas de ${materialTabs.find((tab) => tab.id === activeMaterialTab)?.label ?? "materiais"}`}><button type="button" disabled={safeMaterialPage === 1} onClick={() => setMaterialPage((page) => page - 1)} aria-label="Página anterior">‹</button><span>{safeMaterialPage} / {materialPageCount}</span><button type="button" disabled={safeMaterialPage === materialPageCount} onClick={() => setMaterialPage((page) => page + 1)} aria-label="Próxima página">›</button></nav> : null}
+                {materialTabs.length ? (
+                  <nav className="tm-material-tabs" aria-label="Categorias de arquivos">{materialTabs.map((tab) => <button type="button" key={tab.id} className={activeMaterialTab === tab.id ? "on" : ""} aria-current={activeMaterialTab === tab.id ? "page" : undefined} onClick={() => setMaterialTab(tab.id)}>{tab.label}<span>{tab.count}</span></button>)}</nav>
+                ) : <p className="tm-materials-empty">Nenhum final ou preview ainda.</p>}
+                {activeMedia.length ? <div className="tm-material-media-grid">{activeMedia.slice(0, 3).map(({ asset, workspace }, index) => <button type="button" key={`${workspace.id}-${asset.id}`} className="tm-material-media" title={asset.name} onClick={() => setDriveOpen({ taskId: workspace.creative_task_id, assetId: asset.id })}><span className={`tm-material-media-image${asset.mime_type.startsWith("audio/") ? " audio" : ""}`}>{asset.mime_type.startsWith("audio/") ? null : <img src={`/api/admin/drive/thumbnail/${encodeURIComponent(asset.drive_file_id)}`} alt="" loading="lazy" />}<span>{asset.mime_type.startsWith("audio/") ? "♫" : asset.mime_type.startsWith("video/") ? "▶" : "▧"}</span></span><span className="tm-material-media-caption"><b>{activeMaterialTab === "preview" ? "Preview" : "Final"} {index + 1} · {asset.mime_type.startsWith("audio/") ? "Áudio" : asset.mime_type.startsWith("video/") ? "Vídeo" : "Arquivo"}</b><small>{clientTasks.find((card) => card.id === workspace.creative_task_id)?.title ?? "Criativo"}</small></span></button>)}</div> : null}
+                {activeMedia.length > 3 && filesTaskId ? <button type="button" className="tm-materials-more" onClick={openFiles}>+{activeMedia.length - 3} no modal de arquivos</button> : null}
+                {activeMaterialTab === "docs" ? <div className="tm-material-list">{materialDocs.map(({ card, doc }) => <button type="button" key={`${card.id}-${doc.id}`} className="tm-material-item" title={doc.name} onClick={() => setPreviewDoc(doc)}><span className="tm-material-icon pdf">{fileTypeLabel(doc)}</span><span className="tm-material-name">{doc.name}</span><small>{card.id === liveTask?.id ? "Neste card" : card.title}</small></button>)}</div> : null}
               </section>
             ) : null}
           </div>
