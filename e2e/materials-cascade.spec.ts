@@ -13,7 +13,7 @@ async function login(page: Page) {
 }
 
 test("Plano BAITA mostra materiais compactos e retorna do Drive ao card", async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await login(page);
   const response = await page.request.get("/api/admin/drive/baita/materials");
   expect(response.ok()).toBe(true);
@@ -29,16 +29,20 @@ test("Plano BAITA mostra materiais compactos e retorna do Drive ao card", async 
   } : workspace) } }));
   await page.goto(`/admin/operacao?task=${BAITA_PLAN_ID}`);
   await expect(page.locator(".tm:not(.creative-drive-modal)")).toBeVisible({ timeout: 30_000 });
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  const folder = page.locator(".tm-material-list > .tm-material-item").first();
-  await expect(folder).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(".tm-material-list > .tm-material-item")).toHaveCount(1);
-  await expect(folder.locator(".tm-material-name")).not.toBeEmpty();
-  await folder.scrollIntoViewIfNeeded();
+  // Caixa simplificada (25/09): só Finais/Previews/Documentos e um link que
+  // abre direto o modal de arquivos — a navegação por pasta saiu do card.
+  const openFiles = page.locator(".tm-materials-open");
+  await expect(openFiles).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".tm-material-tabs")).not.toContainText(/Pastas e links|Brutos/);
+  await openFiles.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("materials-desktop.png") });
-  await folder.click();
+  await openFiles.click();
   await expect(page.locator(".creative-drive-modal")).toBeVisible();
-  await expect(page.locator(".creative-drive-modal")).not.toContainText("Carregando materiais…", { timeout: 30_000 });
+  // 90s, não 30: a caixa abre nos Finais com miniatura, e no `next dev`
+  // (HTTP/1.1, 6 conexões por host) as miniaturas lentas do Drive seguram a
+  // busca do workspace na fila do navegador. Medido em 25/09: ~36s. Na Vercel
+  // (HTTP/2) não há essa fila.
+  await expect(page.locator(".creative-drive-modal")).not.toContainText("Carregando materiais…", { timeout: 90_000 });
   await page.screenshot({ path: testInfo.outputPath("drive-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("drive-narrow.png") });
@@ -66,11 +70,9 @@ test("Criativo BAITA mostra brutos reais da Captação compartilhada", async ({ 
   const source = workspaces.find((workspace) => (workspace.available_raw_count ?? 0) > 0);
   expect(source, "Nenhuma Captação BAITA com brutos acessíveis no Drive").toBeTruthy();
   await page.goto(`/admin/operacao?task=${source!.creative_task_id}`);
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  const folder = page.locator(".tm-material-list > .tm-material-item").first();
-  await expect(folder).toContainText(/classificado/, { timeout: 30_000 });
+  await expect(page.locator(".tm-materials-open")).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath("real-raw-card.png") });
-  await folder.click();
+  await page.locator(".tm-materials-open").click();
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   const rawFiles = page.locator(".creative-drive-modal .creative-drive-gallery .creative-drive-tile");
   const raw = rawFiles.first();
@@ -117,11 +119,10 @@ test("selecionar bruto classificado real mostra o Criativo vinculado no preview"
   expect(target, "Nenhum bruto classificado encontrado na BAITA").toBeTruthy();
   await page.goto(`/admin/operacao?task=${target!.creative_task_id}`);
   const title = await page.locator(".tm-title-input").inputValue();
-  await expect(page.locator(".tm-classified-raw-eyebrow").first()).toContainText(title);
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  const folder = page.locator(".tm-material-list > .tm-material-item").filter({ hasText: title }).first();
-  await expect(folder).toBeVisible({ timeout: 30_000 });
-  await folder.click();
+  // O vínculo bruto → criativo é conferido dentro do modal, logo abaixo: o
+  // card não lista mais brutos (25/09).
+  await expect(page.locator(".tm-materials-open")).toBeVisible({ timeout: 30_000 });
+  await page.locator(".tm-materials-open").click();
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   await page.getByRole("button", { name: "Já classificados" }).click();
   const tile = page.locator(".creative-drive-gallery.raw .creative-drive-tile").first();
@@ -133,7 +134,7 @@ test("selecionar bruto classificado real mostra o Criativo vinculado no preview"
   await page.screenshot({ path: testInfo.outputPath("real-selected-raw-eyebrow.png") });
 });
 
-test("box do card pagina brutos, previews e finais sem misturar os tipos", async ({ page }) => {
+test("box do card mostra só finais e previews e abre o modal de arquivos", async ({ page }) => {
   test.setTimeout(120_000);
   await login(page);
   const response = await page.request.get("/api/admin/drive/baita/materials");
@@ -152,18 +153,25 @@ test("box do card pagina brutos, previews e finais sem misturar os tipos", async
   } : workspace) } }));
   await page.goto(`/admin/operacao?task=${target!.creative_task_id}`);
   const box = page.locator(".tm-materials");
-  await expect(box.locator(".tm-material-tabs")).toContainText("Previews", { timeout: 30_000 });
-  await expect(box.locator(".tm-classified-raw")).toHaveCount(3);
-  await box.getByRole("button", { name: "Próxima página" }).click();
-  await expect(box.locator(".tm-material-pagination")).toContainText("2 /");
-  await box.locator(".tm-material-tabs").getByRole("button", { name: /Previews/ }).click();
-  await expect(box.locator(".tm-material-media")).toHaveCount(3);
+  const tabs = box.locator(".tm-material-tabs");
+  // Caixa simplificada (25/09): só categorias para VER, sem paginação.
+  await expect(tabs).toContainText("Finais", { timeout: 30_000 });
+  await expect(tabs).toContainText("Previews");
+  await expect(tabs).not.toContainText(/Brutos|Pastas e links/);
   await expect(box.locator(".tm-classified-raw")).toHaveCount(0);
-  await box.getByRole("button", { name: "Próxima página" }).click();
-  await expect(box.locator(".tm-material-pagination")).toContainText("2 /");
-  await box.locator(".tm-material-tabs").getByRole("button", { name: /Finais/ }).click();
+  await expect(box.locator(".tm-material-pagination")).toHaveCount(0);
+  // Finais primeiro, três miniaturas e o resto no modal.
+  await expect(tabs.locator("button.on")).toContainText("Finais");
   await expect(box.locator(".tm-material-media")).toHaveCount(3);
-  await expect(box.locator(".tm-material-pagination")).toContainText("1 /");
+  await expect(box.locator(".tm-material-media").first()).toContainText("Final");
+  await expect(box.locator(".tm-materials-more")).toContainText("no modal de arquivos");
+  // Previews não se misturam com finais.
+  await tabs.getByRole("button", { name: /Previews/ }).click();
+  await expect(box.locator(".tm-material-media")).toHaveCount(3);
+  await expect(box.locator(".tm-material-media").first()).toContainText("Preview");
+  // "+N no modal de arquivos" abre o modal direto.
+  await box.locator(".tm-materials-more").click();
+  await expect(page.locator(".creative-drive-modal")).toBeVisible({ timeout: 30_000 });
 });
 
 test("Previews e finais usam páginas separadas na pasta do Criativo", async ({ page }) => {
@@ -193,7 +201,7 @@ test("Previews e finais usam páginas separadas na pasta do Criativo", async ({ 
     await route.fulfill({ json: { ...payload, workspace: { ...payload.workspace, assets: [...payload.workspace.assets, ...previews, ...finalAssets], final_versions: [...payload.workspace.final_versions, ...versions] } } });
   });
   await page.goto(`/admin/operacao?area=planos-entregas&task=${creativeId}`);
-  await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
+  await page.locator(".tm-materials-open").click();
   await page.locator(".creative-drive-tabs button").filter({ hasText: "Previews" }).click();
   await expect(page.locator(".creative-drive-gallery.curated .creative-drive-tile")).toHaveCount(12, { timeout: 30_000 });
   await page.locator(".creative-drive-pagination").getByRole("button", { name: "Próxima" }).click();
@@ -262,10 +270,8 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   });
 
   await page.goto(`/admin/operacao?area=planos-entregas&task=${ids[0]}`);
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  const firstFolder = page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first();
-  await expect(firstFolder).toBeVisible({ timeout: 30_000 });
-  await firstFolder.click();
+  await expect(page.locator(".tm-materials-open")).toBeVisible({ timeout: 30_000 });
+  await page.locator(".tm-materials-open").click();
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   const tile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw.id}"]`);
   const secondTile = page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw2.id}"]`);
@@ -371,20 +377,10 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
 
   await page.locator(".creative-drive-modal .tm-back").click();
   await page.goto(`/admin/operacao?area=planos-entregas&task=${ids[0]}`);
-  await expect(page.locator(".tm-classified-raw").first()).toBeVisible({ timeout: 30_000 });
-  const cardDownload = page.locator(`.tm-classified-raw-actions a[href$="/drive-assets/${assetIdFor(ids[0], raw.id)}/download"]`);
-  for (let pageNumber = 1; pageNumber < 20 && await cardDownload.count() === 0; pageNumber++) {
-    const next = page.locator(".tm-materials").getByRole("button", { name: "Próxima página" });
-    if (await next.isDisabled()) break;
-    await next.click();
-  }
-  await expect(cardDownload).toBeVisible();
-  const cardEyebrows = cardDownload.locator("xpath=../..").locator(".tm-classified-raw-eyebrow");
-  await expect(cardEyebrows).toHaveCount(2);
-  await expect(cardEyebrows.filter({ hasText: taskRows[0].title })).toHaveCount(1);
-  await expect(cardEyebrows.filter({ hasText: taskRows[1].title })).toHaveCount(1);
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  await page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first().click();
+  // Os brutos classificados não aparecem mais no card (25/09): o vínculo com
+  // os dois criativos é conferido dentro do modal, nos tiles classificados.
+  await expect(page.locator(".tm-materials-open")).toBeVisible({ timeout: 30_000 });
+  await page.locator(".tm-materials-open").click();
   const classifiedTile = page.locator(`[data-classified-asset-id="${assetIdFor(ids[0], raw.id)}"]`);
   await expect(classifiedTile).toBeVisible({ timeout: 30_000 });
   await classifiedTile.locator("summary").click();
@@ -402,10 +398,8 @@ test("Captação compartilhada classifica o mesmo bruto em dois Criativos e o v�
   expect(posts.at(-1)).toEqual({ creativeId: ids[0], driveFileId: raw.id });
 
   await page.goto(`/admin/operacao?area=planos-entregas&task=${first!.capture_task_id}`);
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  const captureFolder = page.locator(".tm-material-list > .tm-material-item").filter({ hasText: taskRows[0].title }).first();
-  await expect(captureFolder).toBeVisible({ timeout: 30_000 });
-  await captureFolder.click();
+  await expect(page.locator(".tm-materials-open")).toBeVisible({ timeout: 30_000 });
+  await page.locator(".tm-materials-open").click();
   await page.getByRole("button", { name: "Todos", exact: true }).click();
   await expect(page.locator(`.creative-drive-gallery .creative-drive-tile[data-drive-file-id="${raw.id}"]`)).toBeVisible({ timeout: 30_000 });
 });

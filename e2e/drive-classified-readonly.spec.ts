@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
-test("brutos classificados existentes aparecem no card e na pasta do Criativo", async ({ page }, testInfo) => {
+test("brutos classificados existentes aparecem na pasta do Criativo aberta pelo card", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await page.goto("/login");
   await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);
@@ -15,31 +15,12 @@ test("brutos classificados existentes aparecem no card e na pasta do Criativo", 
   test.skip(!target, "Nenhum bruto classificado no momento");
 
   await page.goto(`/admin/operacao?area=planos-entregas&task=${target!.creative_task_id}`);
-  const cardRaw = page.locator(".tm-classified-raw").first();
-  await expect(cardRaw).toBeVisible({ timeout: 30_000 });
-  const downloadHref = await cardRaw.getByRole("link", { name: "Baixar" }).getAttribute("href");
-  const assetId = downloadHref?.match(/\/drive-assets\/([0-9a-f-]+)\/download$/)?.[1];
-  expect(assetId).toBeTruthy();
-  expect(target!.raw_links.some((link) => link.asset_id === assetId)).toBe(true);
-  await expect(cardRaw.getByRole("link", { name: "Abrir" })).toHaveAttribute("target", "_blank");
-  await expect(cardRaw.getByRole("link", { name: "Baixar" })).toHaveAttribute("href", new RegExp(`/drive-assets/${assetId}/download$`));
-  const driveStatus = await page.request.get("/api/admin/drive/files");
-  const { configured } = await driveStatus.json() as { configured: boolean };
-  if (configured) {
-    page.on("download", (download) => { void download.cancel(); });
-    const downloadResponse = page.waitForResponse((response) => response.url().includes(`/drive-assets/${assetId}/download`), { timeout: 45_000 });
-    await cardRaw.getByRole("link", { name: "Baixar" }).click();
-    const response = await downloadResponse;
-    expect(response.ok(), response.ok() ? undefined : (await response.text()).slice(0, 200)).toBe(true);
-    expect(response.headers()["content-disposition"]).toContain("attachment");
-  }
+  // O card não lista mais brutos (25/09): "Abrir arquivos" leva direto aos
+  // classificados do próprio criativo, dentro do modal.
+  const assetId = target!.raw_links.find((link) => target!.assets.some((asset) => asset.id === link.asset_id && asset.role === "raw" && asset.state === "active"))!.asset_id;
+  await expect(page.locator(".tm-materials-open")).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath("classified-card-desktop.png") });
-  await cardRaw.getByRole("button", { name: /Visualizar bruto/ }).click();
-  await expect(page.locator(".creative-drive-tabs button.on")).toContainText("Classificados", { timeout: 30_000 });
-  await expect(page.locator(`[data-classified-asset-id="${assetId}"]`)).toBeVisible();
-  await page.locator(".creative-drive-modal .tm-back").click();
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
+  await page.locator(".tm-materials-open").click();
   await expect(page.locator(".creative-drive-tabs button.on")).toContainText("Classificados");
   await expect(page.locator(`[data-classified-asset-id="${assetId}"]`)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("classified-folder-desktop.png") });

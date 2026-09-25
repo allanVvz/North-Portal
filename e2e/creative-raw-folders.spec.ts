@@ -30,8 +30,7 @@ test("Raw, Preview e Home do Criativo mantem os materiais nas categorias certas"
   expect(workspace.final_versions).toEqual([expect.objectContaining({ asset_id: video?.id, version_number: 1, state: "current" })]);
 
   await page.goto(`/admin/operacao?task=${CARD_ID}`);
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
+  await page.locator(".tm-materials-open").click();
   await expect(page.locator(".creative-drive-folder-links a")).toHaveCount(3);
   await expect(page.locator(".creative-drive-folder-links")).toContainText("Home · finais");
   await expect(page.locator(".creative-drive-folder-links")).toContainText("Raw");

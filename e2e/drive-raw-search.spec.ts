@@ -40,8 +40,7 @@ test("busca encontra um bruto da última página da Captação real", async ({ p
   expect(allIds.has(fileId)).toBe(true);
 
   await page.goto(`/admin/operacao?task=${creativeTaskId}`);
-  await page.locator(".tm-material-tabs").getByRole("button", { name: /Pastas e links/ }).click();
-  await page.locator(".tm-material-list > .tm-material-item").filter({ has: page.locator(".tm-material-icon.folder") }).first().click();
+  await page.locator(".tm-materials-open").click();
   await page.getByRole("button", { name: "Brutos da captação" }).click();
   await page.getByRole("button", { name: "Todos" }).click();
   await page.getByLabel("Encontrar bruto pelo nome").fill(filename.slice(0, 18));
