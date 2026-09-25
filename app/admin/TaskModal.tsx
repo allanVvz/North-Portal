@@ -2327,7 +2327,11 @@ export default function TaskModal({
                       <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.taskId}-${c.at}-${i}`}>
                         <CommentAvatar comment={c} className="tm-comment-av" />
                         <div className="tm-comment-body">
-                          <p className="tm-comment-meta">
+                          {/* <div>, não <p>: o menu "…" (CommentActionsMenu) é um <div>, e <div>
+                              dentro de <p> é HTML inválido — no card aberto por link o navegador
+                              fechava o <p> antes do menu e o React descartava o HTML do servidor
+                              (erro de hidratação, 25/09). O CSS usa só a classe. */}
+                          <div className="tm-comment-meta">
                             <b>{c.author}</b>
                             {roleLabel ? <span className={`kb-type ${roleClass}`}>{roleLabel}</span> : null}
                             {destinationLabel ? <small className="tm-comment-origin" title="Onde este comentário foi gravado">→ {destinationLabel}</small> : null}
@@ -2339,7 +2343,7 @@ export default function TaskModal({
                                 onDelete={() => void removeComment(storedIndex, c.at)}
                               />
                             ) : null}
-                          </p>
+                          </div>
                           {editing ? (
                             <div className="tm-comment-edit">
                               <AutoGrowTextarea

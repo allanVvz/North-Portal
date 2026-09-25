@@ -93,66 +93,6 @@ export function taskCoverCandidates(task: {
   return candidates;
 }
 
-/** Uma pasta do Drive citada num card. */
-export type TaskDriveFolder = {
-  folderId: string;
-  url: string;
-  /**
-   * A URL provou que isto é uma pasta?
-   *
-   * `true` para `/drive/folders/…`, que só existe para pasta. `false` para
-   * `/open?id=…`, que serve para arquivo E para pasta — nesse caso quem
-   * renderiza pergunta ao servidor (`/api/admin/drive/kind`) antes de abrir
-   * qualquer coisa.
-   */
-  certain: boolean;
-};
-
-/**
- * As pastas do Drive citadas no card, sem repetição, na ordem em que aparecem.
- *
- * Separado dos candidatos a capa porque a pergunta é outra: capa é "qual imagem
- * representa este card", pasta é "onde fica o material deste card". Uma pasta
- * nunca vira capa (ver driveFilesIn) e um arquivo nunca vira pasta.
- *
- * É o que alimenta o navegador de pastas dentro do card
- * (app/admin/DriveBrowser.tsx): colar o link da pasta num comentário passa a
- * bastar para poder circular por ela sem sair do card.
- *
- * A lista inclui os links `/open?id=…`, marcados com `certain: false`. Eles são
- * a MAIORIA dos links reais e boa parte deles é pasta — recusá-los aqui, como
- * uma primeira versão fazia, deixava de fora quase tudo que a equipe cola. Como
- * a URL não diz se é pasta ou arquivo, quem renderiza pergunta ao servidor
- * antes de abrir (ver /api/admin/drive/kind).
- *
- * No cadastro do cliente a pergunta nem se coloca: lá o campo em que o link foi
- * colado já responde — ver driveFolderIdFromUrl em lib/googleDrive.
- */
-export function taskDriveFolders(task: {
-  description?: string | null;
-  payload?: Record<string, unknown> | null;
-}): TaskDriveFolder[] {
-  const folders: TaskDriveFolder[] = [];
-  const seen = new Set<string>();
-
-  const collect = (text: string) => {
-    for (const url of linksIn(text)) {
-      const link = parseGoogleDriveUrl(url);
-      // `folder` veio de /drive/folders/ (prova); `file` pode ter vindo de
-      // /file/d/ (prova de que NÃO é pasta) ou de /open?id= (não prova nada).
-      if (!link || seen.has(link.id)) continue;
-      const ambiguous = link.kind === "file" && /[?&]id=/.test(url);
-      if (link.kind !== "folder" && !ambiguous) continue;
-      seen.add(link.id);
-      folders.push({ folderId: link.id, url, certain: link.kind === "folder" });
-    }
-  };
-
-  collect(task.description ?? "");
-  for (const comment of commentsOf(task.payload) as TaskComment[]) collect(comment.text);
-  return folders;
-}
-
 /** O primeiro candidato, ou null. Conveniência para quem só quer saber se há capa. */
 export function taskCover(task: {
   description?: string | null;

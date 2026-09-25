@@ -110,9 +110,8 @@ export function isDriveFolder(file: { mimeType: string }): boolean {
  * "um item do Drive com este id". Quando o link foi colado no campo "Pasta de
  * Edição", quem colou já respondeu essa pergunta.
  *
- * Por isso o card NÃO usa esta função (ver taskDriveFolders em lib/taskCover):
- * lá o link aparece solto no meio de um comentário, sem campo que o qualifique,
- * e só a forma inequívoca `/drive/folders/…` conta.
+ * Link solto no meio de um comentário ou descrição não passa por aqui: sem o
+ * campo para qualificá-lo, a URL `/open?id=…` não diz se é pasta.
  */
 export function driveFolderIdFromUrl(url: string | null | undefined): string | null {
   if (!url) return null;
