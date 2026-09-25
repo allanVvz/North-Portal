@@ -39,7 +39,14 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     if (!idPattern.test(id)) throw new HttpError(400, "ID invalido.");
     const task = await getTaskById(id);
     if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
-    return NextResponse.json(task);
+    // O link direto pode chegar antes do feed do quadro. Sem estes dois campos,
+    // o modal abre o card como "Outros", não carrega a equipe do cliente e o
+    // seletor de responsável fica sem opções (Plano Baita Setembro/Outubro).
+    if (!task.client_id) return NextResponse.json({ ...task, clientName: "Outros", clientSlug: "" });
+    const db = await createClient();
+    const { data: client, error } = await db.from("clients").select("name,slug").eq("id", task.client_id).single();
+    if (error || !client) throw new HttpError(503, "Não foi possível carregar o cliente deste card.");
+    return NextResponse.json({ ...task, clientName: client.name, clientSlug: client.slug });
   } catch (error) {
     return apiError(error);
   }

@@ -34,7 +34,7 @@ import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindI
 import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, currentRecurringExecutionOf, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf, stageInDelivery } from "@/lib/taskRelations";
 import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
-import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus, projectParentStatus } from "@/lib/flows/parentStatus";
+import { mirroredParentStatus, projectParentStatus } from "@/lib/flows/parentStatus";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { createCommentIdRegistry } from "./commentIds";
 import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
@@ -1263,8 +1263,8 @@ export default function TaskModal({
     }
   }
 
-  // Demais campos da linha continuam no card executável; status de Entrega ou
-  // etapa contextual passa pela rota acima para não atingir outros Criativos.
+  // Prazo e responsável da linha pertencem ao card indicado (a Entrega quando
+  // vista no Plano); status de Entrega ou etapa contextual passa pela rota acima.
   async function patchRelatedCard(card: TaskRecord, patch: StepPatch) {
     setError("");
     try {
@@ -1625,13 +1625,11 @@ export default function TaskModal({
   // Espelhado, e não persistido, pelo mesmo motivo do progresso — ver o
   // comentário de `mirroredParentStatus`.
   //
-  // A entrega também não tem DATA nem RESPONSÁVEL próprios — resolve a etapa
-  // corrente UMA VEZ aqui e lê os três espelhos dela, em vez de cada campo
-  // varrer `chainSteps` de novo por conta própria.
+  // O andamento da Entrega vem da etapa corrente. Prazo e responsável são
+  // próprios do Criativo: a etapa pode servir vários Criativos com prazos e
+  // responsáveis diferentes (caso real: Plano de Conteúdo Setembro/Outubro).
   const currentChainStep = isDelivery ? currentFlowStepOf(chainSteps) : null;
   const mirroredStatus = mirroredParentStatus(currentChainStep);
-  const mirroredDate = mirroredParentDate(currentChainStep);
-  const mirroredAssignee = mirroredParentAssignee(currentChainStep);
   const displayStatus = projectedParentStatus ?? mirroredStatus ?? contextualStage?.status ?? draft.status;
   // Só um card que tem status PRÓPRIO pode ter o status trocado pelo stepper.
   // Numa entrega espelhada, clicar ali escreveria na coluna do pai um valor
@@ -1899,16 +1897,7 @@ export default function TaskModal({
 
               {/* Um único campo inteligente concentra início, fim opcional,
                   horário e recorrência. Dia do mês vive dentro do calendário. */}
-              <Cell icon="▦" label="Data">
-                {isDelivery ? (
-                  // A entrega não tem data própria — espelha a etapa
-                  // corrente, mesmo princípio de mirroredStatus acima.
-                  <span className="tm-cell-static">
-                    {mirroredDate?.start_date || mirroredDate?.due_date
-                      ? [mirroredDate.start_date ?? mirroredDate.due_date, mirroredDate.end_date].filter(Boolean).join(" – ")
-                      : "Sem etapa"}
-                  </span>
-                ) : (
+              <Cell icon="▦" label={isDelivery ? "Prazo da Entrega" : "Data"}>
                   <CalendarPicker
                     value={draft.start_date || draft.due_date}
                     onChange={(value) => setDraft((current) => {
@@ -1932,7 +1921,6 @@ export default function TaskModal({
                     recurrenceRequired={mode === "new" && effectiveScope === "routine"}
                     nextExecutionValue={isRecurringParent ? liveTask?.due_date ?? undefined : undefined}
                   />
-                )}
               </Cell>
 
               {/* Atributos por kind */}
@@ -1972,21 +1960,16 @@ export default function TaskModal({
 
               {/* Multiple people stay backwards-compatible in one DB field,
                   but behave as a reusable list in the editor. */}
-              <Cell icon="◔" label="Responsável" hidden={!visible("assignee")}>
-                {/* A entrega não tem responsável próprio — espelha o(s) da
-                    etapa corrente, somente leitura (mesmo princípio do
-                    Status/Data acima). accountTone colore por papel de
-                    Equipe & papéis nos dois modos. */}
+              <Cell icon="◔" label={isDelivery ? "Responsável pela Entrega" : "Responsável"} hidden={!visible("assignee")}>
                 <AssigneePicker
-                  assignee={isDelivery ? mirroredAssignee?.assignee ?? null : draft.assignee}
-                  assigneeProfileIds={isDelivery ? mirroredAssignee?.assigneeProfileIds ?? [] : draft.assignee_profile_ids}
+                  assignee={draft.assignee}
+                  assigneeProfileIds={draft.assignee_profile_ids}
                   accountOptions={adminReviewers}
                   freeTextOptions={assignees}
                   onChange={({ assignee, assigneeProfileIds }) =>
                     setDraft((current) => ({ ...current, assignee: assignee ?? "", assignee_profile_ids: assigneeProfileIds }))
                   }
                   disabled={busy}
-                  readOnly={isDelivery}
                   accountTone={accountTone}
                 />
               </Cell>
@@ -2112,7 +2095,7 @@ export default function TaskModal({
                         onUnlink={() => void unlinkMember(m.id, liveTask.id)}
                         unlinkTitle={isRecurringParent ? `Remover ligação com ${m.title}` : `Desvincular ${m.title} do plano`}
                         lockDateWhenDone={isRecurringParent}
-                        editableFields={isFlowDelivery(m) ? "status" : kindDef(m.kind).isPlan || Boolean(m.recurrence_cadence) ? "none" : "all"}
+                        editableFields={isFlowDelivery(m) ? "status_details" : kindDef(m.kind).isPlan || Boolean(m.recurrence_cadence) ? "none" : "all"}
                         statusTitle={isFlowDelivery(m) ? "Muda a primeira etapa pendente apenas nesta Entrega" : undefined}
                         onPatch={patchRelatedCard}
                         onComment={commentRelatedCard}

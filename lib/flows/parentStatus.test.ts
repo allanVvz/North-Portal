@@ -118,7 +118,7 @@ describe("mirroredParentStatus — o pai mostra a etapa em que a corrente está"
   });
 });
 
-describe("mirroredParentDate — o pai não tem data própria", () => {
+describe("mirroredParentDate — mostra a data da etapa consultada", () => {
   it("nenhuma etapa: não há o que espelhar", () => {
     expect(mirroredParentDate(null)).toBeNull();
   });
@@ -129,7 +129,7 @@ describe("mirroredParentDate — o pai não tem data própria", () => {
   });
 });
 
-describe("mirroredParentAssignee — o pai não tem responsável próprio", () => {
+describe("mirroredParentAssignee — mostra o responsável da etapa consultada", () => {
   it("nenhuma etapa: não há o que espelhar", () => {
     expect(mirroredParentAssignee(null)).toBeNull();
   });

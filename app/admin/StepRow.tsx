@@ -22,8 +22,9 @@ import type { ReviewerCandidate, TaskRecord, TaskStatus } from "@/lib/validation
 // (atrasada/parada) — "No prazo" em toda linha era ruído, e concluída já está
 // no check e no fundo da linha.
 //
-// Cada mudança é um PATCH no card da ETAPA — o mesmo que abrir e editar —, então
-// a cascata, as notificações e o autosave do servidor valem igual.
+// Cada mudança de data ou responsável é um PATCH no card desta linha. A linha
+// de uma Entrega no Plano grava esses metadados no Criativo, sem tocar na etapa
+// compartilhada. O status contextual usa a rota da Entrega no TaskModal.
 
 export type StepPatch = {
   status?: TaskStatus;
@@ -85,8 +86,8 @@ export default function StepRow({
    * porque esta trava é só do jeito que o MOLDE mostra a linha, não um
    * estado do card. */
   lockDateWhenDone?: boolean;
-  /** Pais exibem andamento contextual, mas data e responsável pertencem à etapa. */
-  editableFields?: "all" | "status" | "none";
+  /** Entregas editam prazo e responsável próprios; andamento vem da etapa atual. */
+  editableFields?: "all" | "status" | "status_details" | "none";
   statusTitle?: string;
 }) {
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -95,10 +96,13 @@ export default function StepRow({
   const state = deadlineStateOf(card, agencyToday());
   const comments = commentsOf(card.payload);
   const done = card.status === "aprovado";
-  const assigneeId = card.assignee_profile_ids?.[0] ?? team.find((member) => member.label === card.assignee)?.id ?? "";
+  const assigneeId = card.assignee_profile_ids?.find((id) => team.some((member) => member.id === id))
+    ?? team.find((member) => member.label === card.assignee)?.id ?? "";
   const disabled = busy || saving || isOpenCard;
   const dateLocked = lockDateWhenDone && done;
   const showState = state === "atrasada" || state === "parada";
+  const detailsEditable = editableFields === "all" || editableFields === "status_details";
+  const isDeliveryDetails = editableFields === "status_details";
 
   async function run(patch: StepPatch) {
     setSaving(true);
@@ -154,13 +158,13 @@ export default function StepRow({
           >
             {COLUMNS.map((column) => <option key={column.status} value={column.status}>{column.label}</option>)}
           </select>
-          {editableFields === "all" ? <><input
+          {detailsEditable ? <><input
             type="date"
             className="tm-step-date"
-            aria-label={`Data prevista de ${label}`}
-            title={dateLocked ? "Data travada — ciclo concluído. Abra a execução para alterar." : "Data prevista"}
+            aria-label={`${isDeliveryDetails ? "Prazo da Entrega" : "Data prevista"} de ${label}`}
+            title={dateLocked ? "Data travada — ciclo concluído. Abra a execução para alterar." : isDeliveryDetails ? "Prazo desta Entrega" : "Data prevista"}
             value={card.due_date ?? ""}
-            disabled={disabled || dateLocked || editableFields !== "all"}
+            disabled={disabled || dateLocked}
             onChange={(event) => {
               const value = event.target.value || null;
               void run({ due_date: value, start_date: value, end_date: value });
@@ -168,10 +172,10 @@ export default function StepRow({
           />
           <select
             className="tm-step-assignee"
-            aria-label={`Responsável por ${label}`}
-            title="Responsável"
+            aria-label={`${isDeliveryDetails ? "Responsável pela Entrega" : "Responsável por"} ${label}`}
+            title={isDeliveryDetails ? "Responsável por esta Entrega" : "Responsável"}
             value={assigneeId}
-            disabled={disabled || editableFields !== "all"}
+            disabled={disabled}
             onChange={(event) => {
               const member = team.find((candidate) => candidate.id === event.target.value);
               void run(member ? { assignee: member.label, assignee_profile_ids: [member.id] } : { assignee: null, assignee_profile_ids: [] });

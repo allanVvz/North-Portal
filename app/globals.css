@@ -5310,7 +5310,7 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 /* A data nativa precisa de ~140px para "dd/mm/aaaa" + ícone; com 126px o
    valor aparecia cortado ("05/") nos prints de produção. */
 .tm-step-status { width: 116px; }
-.tm-step-fields .tm-step-date { width: 148px; padding: 0 6px; }
+.tm-step-fields .tm-step-date { width: 148px; min-width: 140px; flex-shrink: 0; padding: 0 6px; }
 .tm-step-assignee { width: 136px; }
 .tm-step-row.is-atrasada .tm-step-date { border-color: var(--a-danger); color: var(--a-danger); font-weight: 650; }
 /* Ciclo concluído na caixa "Execuções da recorrência" do MOLDE: a data
@@ -5323,7 +5323,7 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .tm-step-comment-input { display: flex; gap: 8px; align-items: flex-end; }
 .tm-step-comment-input textarea { min-height: 34px; padding: 7px 9px; border: 1px solid var(--a-border); border-radius: 8px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 13px; }
 .tm-step-pending { opacity: .9; }
-@media (max-width: 900px) { .tm-step-fields { flex: 1 1 100%; margin-left: 26px; } .tm-step-fields > * { flex: 1 1 0; width: auto; } }
+@media (max-width: 900px) { .tm-step-fields { flex: 1 1 100%; margin-left: 26px; } .tm-step-fields > * { flex: 1 1 0; width: auto; min-width: 0; } .tm-step-fields .tm-step-date { width: auto; min-width: 0; flex: 1 1 0; } }
 @media (max-width: 720px) { .tm-step-fields { margin-left: 0; flex-wrap: wrap; } .tm-step-thread { margin-left: 0; } }
 @media (max-width: 640px) { .tm-step-row .tm-member-title { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; } }
 

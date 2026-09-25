@@ -42,8 +42,10 @@ export function deliveryIsFinished(
  * — não re-varre a lista. Antes esta função reimplementava a mesma busca
  * (".find(!completed_at) ?? última") só que localmente, e as duas cópias já
  * quase divergiram uma vez; agora há um resolvedor só, chamado uma vez por
- * quem for mostrar o pai, e `mirroredParentStatus`/`mirroredParentDate`/
- * `mirroredParentAssignee` só leem campos do resultado. `null` quando a
+ * quem for mostrar o pai, e `mirroredParentStatus` lê o andamento do resultado.
+ * Prazo e responsável da Entrega ficam no próprio card; os helpers de data e
+ * responsável abaixo servem apenas para mostrar metadados da etapa atual.
+ * `null` quando a
  * entrega ainda não tem etapa nenhuma (vazia, esperando
  * `materializeFirstStep`) — não há o que espelhar.
  */
@@ -149,8 +151,8 @@ function currentStep<T extends ParentStatusTask>(steps: readonly T[]): T | null 
   return steps.find((step) => !step.completed_at) ?? null;
 }
 
-/** Mesma ideia de `mirroredParentStatus`, para as datas — o pai não tem data
- * própria, só mostra a da etapa corrente. */
+/** Datas da etapa atual para interfaces que mostram a etapa. A Entrega guarda
+ * seu próprio prazo em `tasks`, independente dos prazos das etapas. */
 export function mirroredParentDate<T extends Pick<TaskRecord, "start_date" | "due_date" | "end_date">>(
   currentStep: T | null,
 ): { start_date: string | null; due_date: string | null; end_date: string | null } | null {
@@ -158,8 +160,8 @@ export function mirroredParentDate<T extends Pick<TaskRecord, "start_date" | "du
   return { start_date: currentStep.start_date, due_date: currentStep.due_date, end_date: currentStep.end_date };
 }
 
-/** Mesma ideia, para o responsável — o pai não tem responsável próprio, só
- * mostra o da etapa corrente. */
+/** Responsável da etapa atual para interfaces que mostram a etapa. A Entrega
+ * guarda seu próprio responsável em `tasks`, independente da equipe da etapa. */
 export function mirroredParentAssignee<T extends Pick<TaskRecord, "assignee" | "assignee_profile_ids">>(
   currentStep: T | null,
 ): { assignee: string | null; assigneeProfileIds: string[] } | null {
