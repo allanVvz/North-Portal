@@ -14,6 +14,11 @@
 // abrir o card ou os materiais. Um arquivo posto direto no Google Drive só é
 // percebido na próxima abertura.
 //
+// Todo arquivo novo é comentado (25/09), mesmo sem mudar status: o thread
+// conta a história do criativo, e cada arquivo entra como link logo abaixo da
+// frase — o thread o mostra como cartão com miniatura. O status só muda se a
+// etapa estiver em Entrada ou Em produção.
+//
 // Sem loop: voltar a Edição para produção devolve os finais para Preview e a
 // Home esvazia; em Roteiro/Captação, o que já foi visto fica registrado em
 // `drive_capture_workspaces.*_seen_file_ids`.
@@ -41,7 +46,20 @@ async function readStage(admin: AdminClient, stageId: string): Promise<Stage | n
   return (data as Stage | null) ?? null;
 }
 
-const names = (files: readonly ArrivedFile[]) => files.map((file) => file.name).join(", ");
+const fileLink = (file: ArrivedFile) => `[${file.name}](https://drive.google.com/file/d/${file.id}/view)`;
+const fileLinks = (files: readonly ArrivedFile[]) => files.map(fileLink).join("\n");
+
+/** "🎞️ Arquivo final — Edição: Em produção → Revisão (só nesta entrega) (automático).\n[arquivo](link)" */
+export function editArrivalText(files: readonly ArrivedFile[], change: string | null): string {
+  const head = files.length === 1 ? "Arquivo final" : `${files.length} arquivos finais`;
+  return `🎞️ ${head}${change ? ` — ${change} (automático)` : ""}.\n${fileLinks(files)}`;
+}
+
+export function folderArrivalText(label: string, files: readonly ArrivedFile[], change: string | null): string {
+  const icon = label === "Roteiro" ? "📝" : "🎬";
+  const head = files.length === 1 ? `Arquivo novo na pasta ${label}` : `${files.length} arquivos novos na pasta ${label}`;
+  return `${icon} ${head}${change ? ` — ${change} (automático)` : ""}.\n${fileLinks(files)}`;
+}
 
 /** Criativos cuja Edição anda junto com a etapa (sem andamento próprio). Uma
  *  mudança da etapa inteira só alcança esses. */
@@ -53,7 +71,8 @@ export async function creativesFollowingStage(admin: AdminClient, stageTaskId: s
     .filter((link) => link.status_override === null).map((link) => link.parent_id);
 }
 
-/** Edição: arquivo novo na Home do criativo. Devolve se a etapa mudou. */
+/** Edição: arquivo novo na Home do criativo. Sempre comenta a chegada; devolve
+ *  se a etapa mudou para Revisão. */
 export async function applyEditHomeArrival(
   admin: AdminClient,
   sessionDb: SessionDb,
@@ -69,30 +88,51 @@ export async function applyEditHomeArrival(
   const link = rows.find((row) => row.parent_id === input.creativeTaskId);
   if (!link) return false;
   const effective = link.status_override ?? stage.status;
-  if (!OPEN.has(effective)) return false;
 
   // Mesma decisão da rota delivery-status: etapa compartilhada ou já com
   // andamento próprio muda SÓ nesta Entrega.
   const perDelivery = rows.length > 1 || link.status_override !== null;
-  if (perDelivery) {
-    const { error: rpcError } = await sessionDb.rpc("set_delivery_stage_status", {
-      p_delivery_id: input.creativeTaskId, p_child_id: stage.id, p_expected_status: effective, p_status: "revisao",
-    });
-    // Outra pessoa mudou o andamento no meio: não sobrescreve, não comenta.
-    if (rpcError) return false;
-  } else if (!await transitionTaskStatus(admin, stage.id, { to: "revisao", from: [effective] })) {
-    return false;
+  let changed = false;
+  if (OPEN.has(effective)) {
+    if (perDelivery) {
+      const { error: rpcError } = await sessionDb.rpc("set_delivery_stage_status", {
+        p_delivery_id: input.creativeTaskId, p_child_id: stage.id, p_expected_status: effective, p_status: "revisao",
+      });
+      // Outra pessoa mudou o andamento no meio: não sobrescreve.
+      changed = !rpcError;
+    } else {
+      changed = Boolean(await transitionTaskStatus(admin, stage.id, { to: "revisao", from: [effective] }));
+    }
   }
 
-  const label = stepLabelOf(stage);
-  const target = perDelivery ? input.creativeTaskId : stage.id;
+  // O arquivo é deste criativo: o comentário fica no card dele, salvo quando a
+  // etapa inteira (só dele) mudou — aí fica na etapa, que o thread já mostra.
+  const target = changed && !perDelivery ? stage.id : input.creativeTaskId;
   await recordStatusComment(admin, {
     targetId: target,
     authorId: await resolveStepResponsible(admin, stage),
-    text: `Arquivo novo na Home: ${names(input.files)} — ${statusChangeText(label, effective, "revisao", perDelivery)} (automático).`,
+    text: editArrivalText(input.files, changed ? statusChangeText(stepLabelOf(stage), effective, "revisao", perDelivery) : null),
     commentId: stableCommentId("home-arrival", target, ...input.files.map((file) => file.id).sort()),
   });
-  return true;
+  return changed;
+}
+
+/** Áudio posto na Home ou no Preview vai para os brutos (é material da
+ *  edição, não entrega) — comentado no card do criativo pelo responsável da
+ *  Edição. */
+export async function recordAudioToRaw(
+  admin: AdminClient,
+  input: { creativeTaskId: string; stageTaskId: string | null; files: readonly ArrivedFile[] },
+): Promise<void> {
+  if (!input.files.length) return;
+  const stage = input.stageTaskId ? await readStage(admin, input.stageTaskId) : null;
+  const head = input.files.length === 1 ? "Áudio guardado nos brutos" : `${input.files.length} áudios guardados nos brutos`;
+  await recordStatusComment(admin, {
+    targetId: input.creativeTaskId,
+    authorId: stage ? await resolveStepResponsible(admin, stage) : null,
+    text: `🎧 ${head} — áudio é material da edição, não final.\n${fileLinks(input.files)}`,
+    commentId: stableCommentId("audio-to-raw", input.creativeTaskId, ...input.files.map((file) => file.id).sort()),
+  });
 }
 
 /** Mesma regra quando o arquivo chega pela promoção no modal de arquivos: a
@@ -169,14 +209,14 @@ export async function applyCaptureHomeArrivals(admin: AdminClient, captureWorksp
     if (!fresh.length) continue;
 
     const stage = await readStage(admin, pasta.stepId);
-    if (!stage || !OPEN.has(stage.status)) continue;
+    if (!stage) continue;
     // Compare-and-set: outra leitura simultânea que já moveu não duplica.
-    if (!await transitionTaskStatus(admin, stage.id, { to: "revisao", from: [stage.status] })) continue;
+    const changed = OPEN.has(stage.status) && Boolean(await transitionTaskStatus(admin, stage.id, { to: "revisao", from: [stage.status] }));
     const label = stepLabelOf(stage);
     await recordStatusComment(admin, {
       targetId: stage.id,
       authorId: await resolveStepResponsible(admin, stage),
-      text: `Arquivo novo na pasta ${label}: ${names(fresh)} — ${statusChangeText(label, stage.status, "revisao", false)} (automático).`,
+      text: folderArrivalText(label, fresh, changed ? statusChangeText(label, stage.status, "revisao", false) : null),
       commentId: stableCommentId("home-arrival", stage.id, ...fresh.map((file) => file.id).sort()),
     });
   }

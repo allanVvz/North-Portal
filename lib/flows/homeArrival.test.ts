@@ -117,20 +117,22 @@ describe("Edição: arquivo novo na Home → Revisão", () => {
     expect(comment.author).toBe("Allan");
     expect(comment.author_id).toBe(ALLAN);
     expect(String(comment.text)).toContain("Divulgação.mp4");
-    expect(String(comment.text)).toContain("Edição: Em produção → Revisão (só nesta entrega)");
+    expect(comment.text).toBe("🎞️ Arquivo final — Edição: Em produção → Revisão (só nesta entrega) (automático).\n[Divulgação.mp4](https://drive.google.com/file/d/final-1/view)");
     // Nada no card da etapa compartilhada, nada no outro criativo.
     expect(db.comments("edicao")).toEqual([]);
     expect(db.comments("criativo-b")).toEqual([]);
   });
 
-  it("com a Edição deste criativo já em Revisão (ou além), não muda nem comenta", async () => {
+  it("com a Edição deste criativo já em Revisão (ou além), não muda — mas a chegada é comentada", async () => {
     const db = world();
     const s = session();
     // criativo-b acompanha a etapa, que está em Revisão.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await applyEditHomeArrival(db as any, s as any, { creativeTaskId: "criativo-b", stageTaskId: "edicao", files: [file("f")] })).toBe(false);
     expect(s.rpc).not.toHaveBeenCalled();
-    expect(db.comments("criativo-b")).toEqual([]);
+    const [comment] = db.comments("criativo-b");
+    expect(comment.author).toBe("Allan");
+    expect(comment.text).toBe("🎞️ Arquivo final.\n[f.mp4](https://drive.google.com/file/d/f/view)");
   });
 
   it("etapa só deste criativo: muda a etapa e comenta nela", async () => {
@@ -148,12 +150,12 @@ describe("Edição: arquivo novo na Home → Revisão", () => {
     expect(db.comments("edicao-solo")[0].author).toBe("Allan");
   });
 
-  it("outra pessoa mudou o andamento no meio: não sobrescreve e não comenta", async () => {
+  it("outra pessoa mudou o andamento no meio: não sobrescreve, só comenta a chegada", async () => {
     const db = world();
     const s = { rpc: vi.fn(async () => ({ data: null, error: { message: "Stage status changed" } })) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await applyEditHomeArrival(db as any, s as any, { creativeTaskId: "criativo-a", stageTaskId: "edicao", files: [file("f")] })).toBe(false);
-    expect(db.comments("criativo-a")).toEqual([]);
+    expect(String(db.comments("criativo-a")[0].text)).not.toContain("→");
   });
 });
 

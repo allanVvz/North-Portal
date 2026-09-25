@@ -22,6 +22,16 @@ type WorkspaceFolders = {
 const FOLDER = "application/vnd.google-apps.folder";
 const SHORTCUT = "application/vnd.google-apps.shortcut";
 const MOVE_PENDING = "final_move_pending:";
+/** Correção pontual (25/09): os arquivos em Preview deste criativo eram finais
+ *  rebaixados por erro. Marcado no banco; a próxima sincronização — que é
+ *  quem tem credencial do Drive — devolve cada um para a Home, e o áudio para
+ *  Raw. Sem gerar comentário de chegada: não é um arquivo novo. */
+export const RESTORE_FINALS_PENDING = "restore_finals_pending";
+
+/** Áudio é material de edição, não entrega: vai sempre para Raw (25/09). */
+function isAudio(file: DriveFile): boolean {
+  return (file.mimeType ?? "").startsWith("audio/");
+}
 
 function isMaterial(file: DriveFile): boolean {
   return Boolean(file.id) && file.mimeType !== FOLDER && file.mimeType !== SHORTCUT;
@@ -58,6 +68,31 @@ async function registerFile(db: Db, workspace: WorkspaceFolders, file: DriveFile
   });
   if (error) throw new HttpError(500, error.message);
   return true;
+}
+
+/** Tira um áudio da Home ou do Preview e guarda nos brutos do criativo. */
+async function moveAudioToRaw(db: Db, workspace: WorkspaceFolders, file: DriveFile, fromFolderId: string): Promise<boolean> {
+  if (!workspace.raw_folder_id) return false;
+  await moveDriveItemBetweenFolders(file.id, fromFolderId, workspace.raw_folder_id);
+  return registerFile(db, workspace, file, "raw");
+}
+
+/** A correção de RESTORE_FINALS_PENDING: tudo que está em Preview volta para a
+ *  Home como final (as versões já existem e mantêm a data de promoção), e o
+ *  áudio vai para Raw. */
+async function restorePreviewToHome(db: Db, workspace: WorkspaceFolders): Promise<DriveFile[]> {
+  const audio: DriveFile[] = [];
+  for (const file of await directFiles(workspace.preview_folder_id!)) {
+    if (isAudio(file)) {
+      if (await moveAudioToRaw(db, workspace, file, workspace.preview_folder_id!)) audio.push(file);
+      continue;
+    }
+    await moveDriveItemBetweenFolders(file.id, workspace.preview_folder_id!, workspace.creative_folder_id!);
+    await registerFile(db, workspace, file, "final");
+  }
+  const { error } = await db.from("drive_creative_workspaces").update({ last_error: null }).eq("id", workspace.id);
+  if (error) throw new HttpError(500, error.message);
+  return audio;
 }
 
 /** Move os finais da Home do criativo para Preview e deixa um comentário
@@ -101,9 +136,13 @@ async function effectiveStageStatus(db: Db, workspace: WorkspaceFolders): Promis
  *  não eram finais ativos antes. É o gatilho de "arquivo novo na Home →
  *  Revisão" (lib/flows/homeArrival.ts). Um final que tinha voltado para Preview
  *  e foi posto na Home de novo conta como chegada: é uma entrega nova. */
-export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolders): Promise<{ newHomeFiles: DriveFile[] }> {
+export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolders): Promise<{ newHomeFiles: DriveFile[]; audioToRaw: DriveFile[] }> {
   if (workspace.plan_task_id !== BAITA_DRIVE_PLAN_ID || workspace.status !== "ready"
-    || !workspace.creative_folder_id || !workspace.preview_folder_id || !isGoogleDriveConfigured()) return { newHomeFiles: [] };
+    || !workspace.creative_folder_id || !workspace.preview_folder_id || !isGoogleDriveConfigured()) return { newHomeFiles: [], audioToRaw: [] };
+  // Correção pontual primeiro: os restaurados entram como finais já conhecidos
+  // (a lista `known` abaixo é lida depois) e não viram "arquivo novo".
+  const audioToRaw: DriveFile[] = [];
+  if (workspace.last_error === RESTORE_FINALS_PENDING) audioToRaw.push(...await restorePreviewToHome(db, workspace));
   if (workspace.last_error?.startsWith(MOVE_PENDING)) {
     if (await effectiveStageStatus(db, workspace) === "em_producao") {
       const pendingRoot = await directFiles(workspace.creative_folder_id);
@@ -121,13 +160,23 @@ export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolde
   root.sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? "") || a.id.localeCompare(b.id));
   const newHomeFiles: DriveFile[] = [];
   for (const file of root) {
+    if (isAudio(file) && workspace.raw_folder_id) {
+      if (await moveAudioToRaw(db, workspace, file, workspace.creative_folder_id)) audioToRaw.push(file);
+      continue;
+    }
     if (await registerFile(db, workspace, file, "final") && !known.has(file.id)) newHomeFiles.push(file);
   }
-  for (const file of previews) await registerFile(db, workspace, file, "preview");
+  for (const file of previews) {
+    if (isAudio(file) && workspace.raw_folder_id) {
+      if (await moveAudioToRaw(db, workspace, file, workspace.preview_folder_id)) audioToRaw.push(file);
+      continue;
+    }
+    await registerFile(db, workspace, file, "preview");
+  }
   if (workspace.raw_folder_id) {
     for (const file of await directFiles(workspace.raw_folder_id)) await registerFile(db, workspace, file, "raw");
   }
-  return { newHomeFiles };
+  return { newHomeFiles, audioToRaw };
 }
 
 /** Os arquivos que JÁ eram finais ativos deste criativo, antes da leitura. */

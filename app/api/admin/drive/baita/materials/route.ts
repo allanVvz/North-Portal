@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { BAITA_DRIVE_PLAN_ID } from "@/lib/creativeDrive";
 import { syncCreativeDriveFolders } from "@/lib/creativeDriveSync";
-import { applyCaptureHomeArrivals, applyEditHomeArrival } from "@/lib/flows/homeArrival";
+import { applyCaptureHomeArrivals, applyEditHomeArrival, recordAudioToRaw } from "@/lib/flows/homeArrival";
 import { createClient } from "@/lib/supabase/server";
 import { listFolderFilesPage } from "@/lib/googleDriveApi";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -86,6 +86,9 @@ export async function POST(request: Request) {
       ...results.map((result, index) => result.status === "fulfilled"
         ? applyEditHomeArrival(db, session, { creativeTaskId: relevant[index].creative_task_id, stageTaskId: relevant[index].stage_task_id, files: result.value.newHomeFiles })
         : Promise.resolve(false)),
+      ...results.map((result, index) => result.status === "fulfilled"
+        ? recordAudioToRaw(db, { creativeTaskId: relevant[index].creative_task_id, stageTaskId: relevant[index].stage_task_id, files: result.value.audioToRaw })
+        : Promise.resolve()),
       ...[...new Set(relevant.map((folder) => folder.capture_workspace_id).filter(Boolean))].map((captureId) => applyCaptureHomeArrivals(db, captureId)),
     ]);
     for (const arrival of arrivals) {

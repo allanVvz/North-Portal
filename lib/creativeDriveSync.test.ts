@@ -194,3 +194,65 @@ describe("pendência de mover finais usa o status da Edição PARA ESTE criativo
     expect(drive.move).not.toHaveBeenCalled();
   });
 });
+
+describe("áudio vai para os brutos, e a correção de 25/09 devolve os finais", () => {
+  // Onde cada arquivo está: a listagem e a verificação leem daqui, e mover
+  // atualiza — como o Drive faria.
+  let where: Record<string, string>;
+  const files: Record<string, { name: string; mimeType: string; createdTime: string }> = {
+    v1: { name: "Promoções v1.mp4", mimeType: "video/mp4", createdTime: "2026-09-25T02:03:00Z" },
+    v2: { name: "Promoções v2.mp4", mimeType: "video/mp4", createdTime: "2026-09-25T02:19:00Z" },
+    mp3: { name: "Trilha.mp3", mimeType: "audio/mpeg", createdTime: "2026-09-24T20:42:00Z" },
+  };
+  const withRaw = { ...workspace, raw_folder_id: "raw-root" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    drive.list.mockImplementation(async (folder: string) => ({
+      files: Object.entries(where).filter(([, at]) => at === folder).map(([id]) => ({ id, ...files[id] })), nextPageToken: null,
+    }));
+    drive.metadata.mockImplementation(async (id: string) => ({ id, ...files[id], size: 1, webViewLink: null, parents: [where[id]] }));
+    drive.move.mockImplementation(async (id: string, _from: string, to: string) => { where[id] = to; });
+  });
+
+  it("áudio na Home vai para Raw, registrado como bruto e fora das chegadas", async () => {
+    where = { v1: "creative-root", mp3: "creative-root" };
+    const { db, registers } = fakeDb();
+    const result = await syncCreativeDriveFolders(db as never, withRaw);
+    expect(drive.move).toHaveBeenCalledWith("mp3", "creative-root", "raw-root");
+    expect(result.audioToRaw.map((file) => file.id)).toEqual(["mp3"]);
+    expect(result.newHomeFiles.map((file) => file.id)).toEqual(["v1"]);
+    expect(new Set(registers().filter(([name]) => name === "register_drive_raw_folder_asset").map((call) => call[1].p_drive_file_id))).toEqual(new Set(["mp3"]));
+    expect(registers().some(([name, params]) => name !== "register_drive_raw_folder_asset" && params.p_drive_file_id === "mp3")).toBe(false);
+  });
+
+  it("áudio no Preview também vai para Raw", async () => {
+    where = { mp3: "preview-root" };
+    const { db } = fakeDb();
+    const result = await syncCreativeDriveFolders(db as never, withRaw);
+    expect(drive.move).toHaveBeenCalledWith("mp3", "preview-root", "raw-root");
+    expect(result.audioToRaw.map((file) => file.id)).toEqual(["mp3"]);
+  });
+
+  it("marcador de restauração: Preview volta para a Home como final, sem virar 'arquivo novo'", async () => {
+    where = { v1: "preview-root", v2: "preview-root", mp3: "preview-root" };
+    const { db, registers } = fakeDb({ finals: [] });
+    // O banco passa a saber dos finais conforme são registrados.
+    const finals: string[] = [];
+    const rpc = db.rpc;
+    db.rpc = vi.fn(async (name: string, params: Record<string, unknown>) => {
+      if (name === "register_drive_folder_asset" && params.p_role === "final") finals.push(params.p_drive_file_id as string);
+      return rpc(name, params);
+    }) as typeof db.rpc;
+    const from = db.from;
+    db.from = ((table: string) => table === "drive_assets"
+      ? fakeDb({ finals }).db.from(table) : from(table)) as typeof db.from;
+
+    const result = await syncCreativeDriveFolders(db as never, { ...withRaw, last_error: "restore_finals_pending" });
+    expect(where).toEqual({ v1: "creative-root", v2: "creative-root", mp3: "raw-root" });
+    expect(result.newHomeFiles).toEqual([]);
+    expect(result.audioToRaw.map((file) => file.id)).toEqual(["mp3"]);
+    expect(finals).toEqual(expect.arrayContaining(["v1", "v2"]));
+    expect(registers().some(([, params]) => params.p_role === "preview")).toBe(false);
+  });
+});
