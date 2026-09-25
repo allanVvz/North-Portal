@@ -195,6 +195,25 @@ export async function ensureDriveFolder(input: {
   return { id: data.id, url: folderUrl(data.id) };
 }
 
+/** Rename only the folder already recorded for this parent. Its ID and contents stay intact. */
+export async function renameDriveFolder(folderId: string, parentId: string, name: string): Promise<void> {
+  const file = await getDriveItemMetadata(folderId);
+  if (!file || file.mimeType !== FOLDER_MIME || !file.parents?.includes(parentId)) {
+    throw new HttpError(409, "A pasta registrada nao pertence ao local esperado no Drive.");
+  }
+  if (file.name === name) return;
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const response = await fetch(`${DRIVE_FILES}/${encodeURIComponent(folderId)}?supportsAllDrives=true&fields=id,name`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new HttpError(502, `Falha ao renomear pasta no Drive (HTTP ${response.status}).`);
+  const updated = await response.json() as { id?: string; name?: string };
+  if (updated.id !== folderId || updated.name !== name) throw new HttpError(502, "O Drive nao confirmou o novo nome da pasta.");
+}
+
 export async function createDriveShortcut(input: {
   name: string;
   parentId: string;
@@ -234,12 +253,12 @@ export async function setDriveItemTrashed(fileId: string, trashed: boolean): Pro
 }
 
 /** Move only a direct child of the expected folder; retries are harmless. */
-export async function moveDriveItemBetweenFolders(fileId: string, fromFolderId: string, toFolderId: string): Promise<void> {
+export async function moveDriveItemBetweenFolders(fileId: string, fromFolderId: string, toFolderId: string, allowShortcut = false): Promise<void> {
   const file = await getDriveItemMetadata(fileId);
   if (!file) throw new HttpError(404, "Arquivo nao encontrado no Google Drive.");
   if (file.parents?.includes(toFolderId)) return;
   if (!file.parents?.includes(fromFolderId)) throw new HttpError(409, "O arquivo mudou de pasta antes da movimentacao.");
-  if (file.mimeType === FOLDER_MIME || file.mimeType === SHORTCUT_MIME) {
+  if (file.mimeType === FOLDER_MIME || (file.mimeType === SHORTCUT_MIME && !allowShortcut)) {
     throw new HttpError(400, "Pastas e atalhos nao podem ser movidos como finais.");
   }
   const token = await accessToken();

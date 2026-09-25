@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as { taskId?: unknown };
     const taskId = typeof body.taskId === "string" && /^[0-9a-f-]{36}$/i.test(body.taskId) ? body.taskId : null;
     const { data: folders, error } = await db.from("drive_creative_workspaces")
-      .select("id,plan_task_id,routine_task_id,capture_task_id,creative_task_id,stage_task_id,creative_folder_id,preview_folder_id,status,last_error")
+      .select("id,plan_task_id,routine_task_id,capture_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
       .eq("plan_task_id", BAITA_DRIVE_PLAN_ID).eq("status", "ready");
     if (error) throw error;
     const relevant = (folders ?? []).filter((folder) => !taskId || [

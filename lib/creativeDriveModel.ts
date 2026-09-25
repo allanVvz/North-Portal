@@ -2,7 +2,7 @@ export type CreativeDriveIdentity = {
   clientId: string;
   routineTaskId: string | null;
   planTaskId: string;
-  captureTaskId: string;
+  captureTaskId: string | null;
   creativeTaskId: string;
   stageTaskId: string | null;
 };

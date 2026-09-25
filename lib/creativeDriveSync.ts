@@ -10,6 +10,7 @@ type WorkspaceFolders = {
   plan_task_id: string;
   stage_task_id: string | null;
   creative_folder_id: string | null;
+  raw_folder_id: string | null;
   preview_folder_id: string | null;
   status: string;
   last_error: string | null;
@@ -35,20 +36,20 @@ async function directFiles(folderId: string): Promise<DriveFile[]> {
   throw new HttpError(409, "Pasta do Criativo excede o limite de sincronizacao; nenhum arquivo foi registrado parcialmente.");
 }
 
-async function registerFile(db: Db, workspace: WorkspaceFolders, file: DriveFile, role: "preview" | "final") {
-  const parentId = role === "final" ? workspace.creative_folder_id : workspace.preview_folder_id;
+async function registerFile(db: Db, workspace: WorkspaceFolders, file: DriveFile, role: "raw" | "preview" | "final") {
+  const parentId = role === "final" ? workspace.creative_folder_id : role === "raw" ? workspace.raw_folder_id : workspace.preview_folder_id;
   if (!parentId) throw new HttpError(409, "Pasta do Criativo incompleta.");
   const verified = await getDriveItemMetadata(file.id);
   // A pessoa pode mover o arquivo no Drive entre a listagem e a leitura.
   if (!verified?.parents?.includes(parentId) || !isMaterial({ ...file, mimeType: verified.mimeType })) return;
-  const { error } = await db.rpc("register_drive_folder_asset", {
+  const { error } = await db.rpc(role === "raw" ? "register_drive_raw_folder_asset" : "register_drive_folder_asset", {
     p_workspace_id: workspace.id,
     p_drive_file_id: verified.id,
     p_name: verified.name,
     p_mime_type: verified.mimeType,
     p_size_bytes: verified.size,
     p_web_view_link: verified.webViewLink,
-    p_role: role,
+    ...(role === "raw" ? {} : { p_role: role }),
     p_source_created_at: file.createdTime ?? null,
   });
   if (error) throw new HttpError(500, error.message);
@@ -89,12 +90,15 @@ export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolde
   root.sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? "") || a.id.localeCompare(b.id));
   for (const file of root) await registerFile(db, workspace, file, "final");
   for (const file of previews) await registerFile(db, workspace, file, "preview");
+  if (workspace.raw_folder_id) {
+    for (const file of await directFiles(workspace.raw_folder_id)) await registerFile(db, workspace, file, "raw");
+  }
 }
 
 /** A shared Edit card may control several independent Creative folders. */
 export async function returnEditFinalsToPreview(db: Db, editTaskId: string): Promise<{ moved: number; errors: string[] }> {
   const { data, error } = await db.from("drive_creative_workspaces")
-    .select("id,plan_task_id,stage_task_id,creative_folder_id,preview_folder_id,status,last_error")
+    .select("id,plan_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
     .eq("plan_task_id", BAITA_DRIVE_PLAN_ID).eq("stage_task_id", editTaskId).eq("status", "ready");
   if (error) throw new HttpError(500, error.message);
   let moved = 0;

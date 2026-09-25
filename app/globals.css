@@ -5841,6 +5841,9 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .creative-drive-tile-unlink:hover { color: #b42318; }
 .creative-drive-side { overflow-y: auto; gap: 12px; }
 .creative-drive-side .tm-box { margin: 0; }
+.creative-drive-folder-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.creative-drive-folder-links a { display: inline-flex; align-items: center; min-height: 32px; padding: 5px 12px; border: 1px solid var(--a-border); border-radius: 7px; background: var(--a-inset); color: var(--a-ink); font-size: 12px; font-weight: 650; text-decoration: none; }
+.creative-drive-folder-links a:hover { border-color: var(--a-primary); }
 .creative-drive-targets, .creative-drive-history { display: grid; gap: 6px; }
 .creative-drive-target { display: flex; align-items: stretch; gap: 3px; min-width: 0; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-surface); color: var(--a-ink); }
 .creative-drive-target.on { border-color: var(--a-teal); background: var(--a-teal-soft); }

@@ -18,7 +18,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     // Resolve primeiro: impede consultar por tentativa um workspace fora do piloto.
     const driveContext = await resolveCreativeDriveContext(db, id);
     const { data: folders, error: foldersError } = await db.from("drive_creative_workspaces")
-      .select("id,plan_task_id,stage_task_id,creative_folder_id,preview_folder_id,status,last_error")
+      .select("id,plan_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
       .eq("creative_task_id", id).maybeSingle();
     if (foldersError) throw foldersError;
     if (folders) await syncCreativeDriveFolders(db, folders);

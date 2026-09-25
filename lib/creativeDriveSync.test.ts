@@ -15,7 +15,7 @@ import { BAITA_DRIVE_PLAN_ID } from "./cardMaterials";
 
 const workspace = {
   id: "workspace", plan_task_id: BAITA_DRIVE_PLAN_ID, stage_task_id: "edit",
-  creative_folder_id: "creative-root", preview_folder_id: "preview-root",
+  creative_folder_id: "creative-root", raw_folder_id: null, preview_folder_id: "preview-root",
   status: "ready", last_error: null,
 };
 
@@ -44,6 +44,17 @@ describe("Creative Drive folder reconciliation", () => {
     const rpc = vi.fn(async (_name: string, _params: Record<string, unknown>) => ({ error: null }));
     await syncCreativeDriveFolders({ rpc } as never, workspace);
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("registers a file placed in Raw as raw and never as a final", async () => {
+    drive.list.mockImplementation(async (folder: string) => ({ files: folder === "raw-root" ? [
+      { id: "audio", name: "Trilha.mp3", mimeType: "audio/mpeg", createdTime: "2026-09-24T22:31:00Z" },
+    ] : [], nextPageToken: null }));
+    drive.metadata.mockResolvedValue({ id: "audio", name: "Trilha.mp3", mimeType: "audio/mpeg", size: 100, parents: ["raw-root"] });
+    const rpc = vi.fn(async () => ({ error: null }));
+    await syncCreativeDriveFolders({ rpc } as never, { ...workspace, raw_folder_id: "raw-root" });
+    expect(rpc).toHaveBeenCalledWith("register_drive_raw_folder_asset", expect.objectContaining({ p_drive_file_id: "audio" }));
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 
   it("moves each final of a shared Edit card into its own Preview, never raw shortcuts", async () => {

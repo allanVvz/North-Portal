@@ -7,6 +7,7 @@ import { isFlowDelivery, recurrenceParentIdOf } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
+import { BAITA_DRIVE_PLAN_ID, provisionCreativeDriveWorkspace } from "@/lib/creativeDrive";
 import { createClient } from "@/lib/supabase/server";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { flowDemotionProblem } from "@/lib/flows/demotion";
@@ -239,6 +240,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // de aprender: a caixa de etapas voltava a mostrar o slot vazio.
     const saved = (await getTaskById(task.id)) ?? task;
     let driveSyncWarning: string | undefined;
+    if (saved.kind === "criativo" && !saved.subtype
+      && saved.parents.some((parent) => parent.id === BAITA_DRIVE_PLAN_ID && parent.relation_kind === "structural_member")
+      && (saved.title !== current.title || Boolean(payload_patch && Object.hasOwn(payload_patch, "formato")) || planLink === BAITA_DRIVE_PLAN_ID)) {
+      try { await provisionCreativeDriveWorkspace(createAdminClient(), saved.id); }
+      catch { driveSyncWarning = "Card salvo, mas as pastas do Drive precisam ser atualizadas. Abra Materiais para tentar novamente."; }
+    }
     if (current.subtype === "edicao" && current.status === "revisao" && saved.status === "em_producao") {
       try {
         const result = await returnEditFinalsToPreview(createAdminClient(), saved.id);

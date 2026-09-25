@@ -8,6 +8,7 @@ import {
   listFolderFiles,
   listFolderFilesPage,
   moveDriveItemBetweenFolders,
+  renameDriveFolder,
   setDriveItemTrashed,
   type DriveItemMetadata,
 } from "./googleDriveApi";
@@ -24,6 +25,7 @@ type TaskRow = {
   title: string;
   kind: string;
   subtype: string | null;
+  payload: Record<string, unknown> | null;
   due_date: string | null;
   start_date: string | null;
   scheduled_start_at: string | null;
@@ -35,11 +37,13 @@ export type CreativeDriveContext = {
   clientId: string;
   routineTaskId: string | null;
   planTaskId: string;
-  captureTaskId: string;
+  captureTaskId: string | null;
   creativeTaskId: string;
   stageTaskId: string | null;
   captureDate: string | null;
   creativeTitle: string;
+  clientName: string;
+  formatName: string | null;
 };
 
 export type CreativeDriveWorkspace = {
@@ -48,10 +52,11 @@ export type CreativeDriveWorkspace = {
   last_error: string | null;
   routine_task_id: string | null;
   plan_task_id: string;
-  capture_task_id: string;
+  capture_task_id: string | null;
   creative_task_id: string;
   stage_task_id: string | null;
   creative_folder_id: string | null;
+  raw_folder_id: string | null;
   preview_folder_id: string | null;
   capture_workspace: {
     capture_date: string | null;
@@ -98,7 +103,7 @@ function dailyLabel(date: string | null): string {
 
 async function taskById(db: Db, id: string): Promise<TaskRow> {
   const { data, error } = await db.from("tasks")
-    .select("id,client_id,plan_id,title,kind,subtype,due_date,start_date,scheduled_start_at")
+    .select("id,client_id,plan_id,title,kind,subtype,payload,due_date,start_date,scheduled_start_at")
     .eq("id", id).maybeSingle();
   failDb(error);
   if (!data) throw new HttpError(404, "Card nao encontrado.");
@@ -119,6 +124,9 @@ export async function resolveCreativeDriveContext(db: Db, creativeTaskId: string
   const plan = await taskById(db, BAITA_DRIVE_PLAN_ID);
   if (plan.kind !== "plano_acao") throw new HttpError(409, "O escopo autorizado deixou de ser um Plano de Acao.");
   if (!creative.client_id || creative.client_id !== plan.client_id) throw new HttpError(409, "Plano e Criativo precisam pertencer ao mesmo cliente.");
+  const { data: client, error: clientError } = await db.from("clients").select("name").eq("id", creative.client_id).single();
+  failDb(clientError);
+  if (!client) throw new HttpError(409, "Cliente do Criativo nao encontrado.");
 
   const { data: stepLinks, error: stepError } = await db.from("task_links")
     .select("parent_id,child_id,slot,relation_kind").eq("parent_id", creativeTaskId).eq("relation_kind", "workflow_step");
@@ -126,19 +134,27 @@ export async function resolveCreativeDriveContext(db: Db, creativeTaskId: string
   const links = (stepLinks as LinkRow[] | null) ?? [];
   const captureLink = links.find((link) => link.slot === "captacao");
   const editLink = links.find((link) => link.slot === "edicao");
-  if (!captureLink) throw new HttpError(409, "O Criativo nao possui uma etapa de Captacao vinculada.");
-  const capture = await taskById(db, captureLink.child_id);
+  const capture = captureLink ? await taskById(db, captureLink.child_id) : null;
 
   return {
     clientId: creative.client_id,
     routineTaskId: plan.plan_id,
     planTaskId: plan.id,
-    captureTaskId: capture.id,
+    captureTaskId: capture?.id ?? null,
     creativeTaskId: creative.id,
     stageTaskId: editLink?.child_id ?? null,
-    captureDate: (capture.scheduled_start_at ?? capture.start_date ?? capture.due_date)?.slice(0, 10) ?? null,
+    captureDate: (capture?.scheduled_start_at ?? capture?.start_date ?? capture?.due_date)?.slice(0, 10) ?? null,
     creativeTitle: creative.title,
+    clientName: client.name,
+    formatName: typeof creative.payload?.formato === "string" && creative.payload.formato.trim() ? creative.payload.formato.trim() : null,
   };
+}
+
+export function creativeFolderNames(context: Pick<CreativeDriveContext, "clientName" | "formatName" | "creativeTitle">) {
+  const base = [context.clientName, context.formatName, context.creativeTitle]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .map((part) => part.trim().replace(/\s+/g, " ")).join(" · ");
+  return { root: base, raw: `${base} · Raw`, preview: `${base} · Preview` };
 }
 
 export async function canManageCreativeAssets(db: Db, userId: string, level: string | null, context: CreativeDriveContext): Promise<boolean> {
@@ -164,22 +180,22 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
     throw new HttpError(409, "Cadastre as pastas canonicas Baita Bruto e EDICAO antes de provisionar.");
   }
 
-  const captureSeed = {
-    client_id: context.clientId,
-    routine_task_id: context.routineTaskId,
-    plan_task_id: context.planTaskId,
-    capture_task_id: context.captureTaskId,
-    capture_date: context.captureDate,
-    status: "pending",
-  };
-  const { data: captureWorkspace, error: captureSeedError } = await db.from("drive_capture_workspaces")
-    .upsert(captureSeed, { onConflict: "plan_task_id,capture_task_id", ignoreDuplicates: false })
-    .select("*").single();
-  failDb(captureSeedError);
+  let captureWorkspace: { id: string; daily_folder_id: string | null; script_folder_id: string | null; capture_folder_id: string | null; provision_attempts: number } | null = null;
+  if (context.captureTaskId) {
+    const { data, error } = await db.from("drive_capture_workspaces")
+      .upsert({
+        client_id: context.clientId, routine_task_id: context.routineTaskId,
+        plan_task_id: context.planTaskId, capture_task_id: context.captureTaskId,
+        capture_date: context.captureDate, status: "pending",
+      }, { onConflict: "plan_task_id,capture_task_id", ignoreDuplicates: false })
+      .select("*").single();
+    failDb(error);
+    captureWorkspace = data;
+  }
 
   const { data: creativeWorkspace, error: creativeSeedError } = await db.from("drive_creative_workspaces")
     .upsert({
-      capture_workspace_id: captureWorkspace.id,
+      capture_workspace_id: captureWorkspace?.id ?? null,
       client_id: context.clientId,
       routine_task_id: context.routineTaskId,
       plan_task_id: context.planTaskId,
@@ -192,42 +208,71 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
   failDb(creativeSeedError);
 
   try {
+    const names = creativeFolderNames(context);
     // The capture is shared by several creatives. Reuse its recorded folders
     // before searching by tags; legacy runs created duplicate same-name folders.
     async function recordedFolder(id: string | null, parentId: string): Promise<{ id: string } | null> {
       if (!id) return null;
       const file = await getDriveItemMetadata(id);
-      if (!file) throw new HttpError(502, "Uma pasta de Captação já registrada está inacessível no Google Drive.");
+      if (!file) throw new HttpError(502, "Uma pasta registrada esta inacessivel no Google Drive.");
       if (file.mimeType !== "application/vnd.google-apps.folder" || !file.parents?.includes(parentId)) {
-        throw new HttpError(409, "Uma pasta de Captação já registrada não pertence à pasta esperada.");
+        throw new HttpError(409, "Uma pasta registrada nao pertence a pasta esperada.");
       }
       return { id: file.id };
     }
-    const daily = await recordedFolder(captureWorkspace.daily_folder_id, links.raw_folder_id) ?? await ensureDriveFolder({
-      name: dailyLabel(context.captureDate), parentId: links.raw_folder_id,
-      appProperties: creativeDriveAppProperties(context, "daily_root"),
-    });
-    const [script, capture] = await Promise.all([
-      recordedFolder(captureWorkspace.script_folder_id, daily.id).then((found) => found ?? ensureDriveFolder({ name: "Roteiro", parentId: daily.id, appProperties: creativeDriveAppProperties(context, "script") })),
-      recordedFolder(captureWorkspace.capture_folder_id, daily.id).then((found) => found ?? ensureDriveFolder({ name: "Captacao", parentId: daily.id, appProperties: creativeDriveAppProperties(context, "capture") })),
-    ]);
-    const creative = await ensureDriveFolder({
-      name: context.creativeTitle, parentId: links.uploads_folder_id,
+    let daily: { id: string } | null = null;
+    let script: { id: string } | null = null;
+    let capture: { id: string } | null = null;
+    if (captureWorkspace) {
+      daily = await recordedFolder(captureWorkspace.daily_folder_id, links.raw_folder_id) ?? await ensureDriveFolder({
+        name: dailyLabel(context.captureDate), parentId: links.raw_folder_id,
+        appProperties: creativeDriveAppProperties(context, "daily_root"),
+      });
+      [script, capture] = await Promise.all([
+        recordedFolder(captureWorkspace.script_folder_id, daily.id).then((found) => found ?? ensureDriveFolder({ name: "Roteiro", parentId: daily!.id, appProperties: creativeDriveAppProperties(context, "script") })),
+        recordedFolder(captureWorkspace.capture_folder_id, daily.id).then((found) => found ?? ensureDriveFolder({ name: "Captacao", parentId: daily!.id, appProperties: creativeDriveAppProperties(context, "capture") })),
+      ]);
+    }
+    const creative = await recordedFolder(creativeWorkspace.creative_folder_id, links.uploads_folder_id) ?? await ensureDriveFolder({
+      name: names.root, parentId: links.uploads_folder_id,
       appProperties: creativeDriveAppProperties(context, "creative_root"),
     });
-    const preview = await ensureDriveFolder({
-      name: "Preview", parentId: creative.id,
+    const preview = await recordedFolder(creativeWorkspace.preview_folder_id, creative.id) ?? await ensureDriveFolder({
+      name: names.preview, parentId: creative.id,
       appProperties: creativeDriveAppProperties(context, "preview"),
     });
+    const raw = await recordedFolder(creativeWorkspace.raw_folder_id, creative.id) ?? await ensureDriveFolder({
+      name: names.raw, parentId: creative.id,
+      appProperties: creativeDriveAppProperties(context, "raw_folder"),
+    });
+    await Promise.all([
+      renameDriveFolder(creative.id, links.uploads_folder_id, names.root),
+      renameDriveFolder(preview.id, creative.id, names.preview),
+      renameDriveFolder(raw.id, creative.id, names.raw),
+    ]);
+    const { data: oldLinks, error: oldLinksError } = await db.from("drive_raw_asset_links")
+      .select("shortcut_drive_file_id").eq("workspace_id", creativeWorkspace.id).not("shortcut_drive_file_id", "is", null);
+    failDb(oldLinksError);
+    for (let offset = 0; offset < (oldLinks?.length ?? 0); offset += 8) {
+      await Promise.all((oldLinks ?? []).slice(offset, offset + 8).map(async (link) => {
+        if (!link.shortcut_drive_file_id) return;
+        const shortcut = await getDriveItemMetadata(link.shortcut_drive_file_id);
+        if (!shortcut) return;
+        if (shortcut.mimeType !== "application/vnd.google-apps.shortcut") throw new HttpError(409, "O atalho classificado mudou de tipo no Drive.");
+        await moveDriveItemBetweenFolders(shortcut.id, creative.id, raw.id, true);
+      }));
+    }
     const now = new Date().toISOString();
-    const { error: captureUpdateError } = await db.from("drive_capture_workspaces").update({
-      daily_folder_id: daily.id, script_folder_id: script.id, capture_folder_id: capture.id,
-      status: "ready", last_error: null, provisioned_at: now,
-      provision_attempts: (captureWorkspace.provision_attempts ?? 0) + 1,
-    }).eq("id", captureWorkspace.id);
-    failDb(captureUpdateError);
+    if (captureWorkspace && daily && script && capture) {
+      const { error: captureUpdateError } = await db.from("drive_capture_workspaces").update({
+        daily_folder_id: daily.id, script_folder_id: script.id, capture_folder_id: capture.id,
+        status: "ready", last_error: null, provisioned_at: now,
+        provision_attempts: (captureWorkspace.provision_attempts ?? 0) + 1,
+      }).eq("id", captureWorkspace.id);
+      failDb(captureUpdateError);
+    }
     const { error: creativeUpdateError } = await db.from("drive_creative_workspaces").update({
-      creative_folder_id: creative.id, preview_folder_id: preview.id,
+      creative_folder_id: creative.id, raw_folder_id: raw.id, preview_folder_id: preview.id,
       status: "ready", last_error: null, provisioned_at: now,
       provision_attempts: (creativeWorkspace.provision_attempts ?? 0) + 1,
     }).eq("id", creativeWorkspace.id);
@@ -235,7 +280,7 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
   } catch (cause) {
     const message = cause instanceof Error ? cause.message.slice(0, 1000) : "Falha desconhecida no Google Drive.";
     await Promise.all([
-      db.from("drive_capture_workspaces").update({ status: "error", last_error: message, provision_attempts: (captureWorkspace.provision_attempts ?? 0) + 1 }).eq("id", captureWorkspace.id),
+      ...(captureWorkspace ? [db.from("drive_capture_workspaces").update({ status: "error", last_error: message, provision_attempts: (captureWorkspace.provision_attempts ?? 0) + 1 }).eq("id", captureWorkspace.id)] : []),
       db.from("drive_creative_workspaces").update({ status: "error", last_error: message, provision_attempts: (creativeWorkspace.provision_attempts ?? 0) + 1 }).eq("id", creativeWorkspace.id),
     ]);
     throw cause;
@@ -281,7 +326,7 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string, 
 
 async function readyWorkspace(db: Db, creativeTaskId: string) {
   const workspace = await getCreativeDriveWorkspace(db, creativeTaskId, false);
-  if (!workspace || workspace.status !== "ready" || !workspace.preview_folder_id || !workspace.creative_folder_id) {
+  if (!workspace || workspace.status !== "ready" || !workspace.preview_folder_id || !workspace.creative_folder_id || !workspace.raw_folder_id) {
     throw new HttpError(409, "O workspace ainda nao esta pronto.");
   }
   return workspace;
@@ -325,9 +370,19 @@ export async function linkRawAsset(db: Db, userId: string, creativeTaskId: strin
     size_bytes: file.size, role: "raw", state: "active", web_view_link: file.webViewLink, uploaded_by: userId,
   }, { onConflict: "workspace_id,drive_file_id", ignoreDuplicates: false }).select("*").single();
   failDb(assetError);
+  const { data: existingLink, error: existingLinkError } = await db.from("drive_raw_asset_links")
+    .select("shortcut_drive_file_id").eq("workspace_id", workspace.id).eq("asset_id", asset.id).maybeSingle();
+  failDb(existingLinkError);
+  if (existingLink?.shortcut_drive_file_id) {
+    const shortcut = await getDriveItemMetadata(existingLink.shortcut_drive_file_id);
+    if (shortcut) {
+      await moveDriveItemBetweenFolders(shortcut.id, workspace.creative_folder_id!, workspace.raw_folder_id!, true);
+      return asset;
+    }
+  }
   const shortcutId = await createDriveShortcut({
-    name: `${context.creativeTitle.slice(0, 180)} — Bruto ${file.id.slice(-8)}${file.name.match(/\.[a-zA-Z0-9]{1,8}$/)?.[0] ?? ""}`,
-    parentId: workspace.creative_folder_id!, targetId: file.id,
+    name: file.name,
+    parentId: workspace.raw_folder_id!, targetId: file.id,
     appProperties: { ...creativeDriveAppProperties(context, "raw_shortcut"), asset_id: asset.id },
   });
   const { error } = await db.from("drive_raw_asset_links").upsert({
@@ -342,9 +397,33 @@ export async function unlinkRawAsset(db: Db, creativeTaskId: string, assetId: st
   const { data: link, error } = await db.from("drive_raw_asset_links")
     .select("shortcut_drive_file_id").eq("workspace_id", workspace.id).eq("asset_id", assetId).maybeSingle();
   failDb(error);
+  if (link && !link.shortcut_drive_file_id) throw new HttpError(409, "Este arquivo esta fisicamente na pasta Raw. Mova-o no Drive para desassociar.");
   if (link?.shortcut_drive_file_id) await setDriveItemTrashed(link.shortcut_drive_file_id, true);
   const { error: deleteError } = await db.from("drive_raw_asset_links").delete().eq("workspace_id", workspace.id).eq("asset_id", assetId);
   failDb(deleteError);
+}
+
+/** Correct a file placed in the Creative root/Preview: move it into Raw. */
+export async function moveCreativeAssetToRaw(db: Db, creativeTaskId: string, assetId: string) {
+  const workspace = await readyWorkspace(db, creativeTaskId);
+  const { data: asset, error } = await db.from("drive_assets").select("*")
+    .eq("workspace_id", workspace.id).eq("id", assetId).eq("state", "active").maybeSingle();
+  failDb(error);
+  if (!asset) throw new HttpError(404, "Arquivo do Criativo nao encontrado.");
+  const file = await getDriveItemMetadata(asset.drive_file_id);
+  if (!file) throw new HttpError(404, "Arquivo nao encontrado no Drive.");
+  const from = [workspace.creative_folder_id, workspace.preview_folder_id]
+    .find((folderId) => file.parents?.includes(folderId!));
+  if (!from && !file.parents?.includes(workspace.raw_folder_id!)) {
+    throw new HttpError(409, "O arquivo nao esta na raiz ou no Preview deste Criativo.");
+  }
+  if (from) await moveDriveItemBetweenFolders(file.id, from, workspace.raw_folder_id!);
+  const { error: registerError } = await db.rpc("register_drive_raw_folder_asset", {
+    p_workspace_id: workspace.id, p_drive_file_id: file.id, p_name: file.name,
+    p_mime_type: file.mimeType, p_size_bytes: file.size, p_web_view_link: file.webViewLink,
+  });
+  failDb(registerError);
+  return { ...asset, role: "raw" };
 }
 
 export async function promoteCreativeAsset(db: Db, userId: string, creativeTaskId: string, assetId: string) {
