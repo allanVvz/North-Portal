@@ -113,15 +113,31 @@ async function taskById(db: Db, id: string): Promise<TaskRow> {
 /** Resolve a diaria pelo card compartilhado de Captacao, nunca pela data. */
 export async function resolveCreativeDriveContext(db: Db, creativeTaskId: string): Promise<CreativeDriveContext> {
   const creative = await taskById(db, creativeTaskId);
-  if (creative.kind !== "criativo" || creative.subtype) throw new HttpError(400, "O workspace pertence ao card-pai de um Criativo.");
+  if (creative.kind !== "criativo") throw new HttpError(400, "O workspace pertence a uma Entrega.");
 
   const { data: parentLinks, error: parentError } = await db.from("task_links")
     .select("parent_id,child_id,slot,relation_kind").eq("child_id", creativeTaskId).eq("relation_kind", "structural_member");
   failDb(parentError);
   const planIds = (parentLinks as LinkRow[] | null ?? []).map((link) => link.parent_id);
-  if (!planIds.includes(BAITA_DRIVE_PLAN_ID)) throw new HttpError(403, "Este Criativo nao pertence ao Plano BAITA autorizado para o piloto.");
-
-  const plan = await taskById(db, BAITA_DRIVE_PLAN_ID);
+  let plan: TaskRow | null = null;
+  for (const candidateId of planIds) {
+    const candidate = await taskById(db, candidateId);
+    if (candidate.kind !== "plano_acao" || !candidate.client_id || candidate.client_id !== creative.client_id) continue;
+    const moldId = typeof candidate.payload?.recurrence_parent_id === "string" ? candidate.payload.recurrence_parent_id : candidate.id;
+    const [{ data: allowed, error: allowedError }, { data: daily, error: dailyError }] = await Promise.all([
+      db.from("drive_workspace_plan_allowlist").select("enabled").eq("plan_task_id", candidate.id).maybeSingle(),
+      db.from("automation_configs").select("id,daily_config").eq("target_task_id", moldId)
+        .eq("automation_key", "diaria_recorrente").order("created_at").limit(1).maybeSingle(),
+    ]);
+    failDb(allowedError); failDb(dailyError);
+    const snapshot = candidate.payload?.daily_effective as { clientId?: string } | undefined;
+    const snapshotMatches = typeof candidate.payload?.daily_config_id === "string" &&
+      snapshot?.clientId === candidate.client_id && moldId !== candidate.id;
+    if (allowed?.enabled || snapshotMatches || (daily?.daily_config as { clientId?: string } | null)?.clientId === candidate.client_id) {
+      plan = candidate; break;
+    }
+  }
+  if (!plan) throw new HttpError(403, "Este Criativo não pertence a uma diária configurada para o cliente.");
   if (plan.kind !== "plano_acao") throw new HttpError(409, "O escopo autorizado deixou de ser um Plano de Acao.");
   if (!creative.client_id || creative.client_id !== plan.client_id) throw new HttpError(409, "Plano e Criativo precisam pertencer ao mesmo cliente.");
   const { data: client, error: clientError } = await db.from("clients").select("name").eq("id", creative.client_id).single();
@@ -134,7 +150,10 @@ export async function resolveCreativeDriveContext(db: Db, creativeTaskId: string
   const links = (stepLinks as LinkRow[] | null) ?? [];
   const captureLink = links.find((link) => link.slot === "captacao");
   const editLink = links.find((link) => link.slot === "edicao");
-  const capture = captureLink ? await taskById(db, captureLink.child_id) : null;
+  const sharedCaptureId = typeof plan.payload?.daily_capture_task_id === "string" ? plan.payload.daily_capture_task_id : null;
+  const capture = captureLink ? await taskById(db, captureLink.child_id)
+    : sharedCaptureId ? await taskById(db, sharedCaptureId) : null;
+  if (capture && capture.client_id !== plan.client_id) throw new HttpError(409, "Captação e Plano precisam pertencer ao mesmo cliente.");
 
   return {
     clientId: creative.client_id,
@@ -168,16 +187,14 @@ export async function canManageCreativeAssets(db: Db, userId: string, level: str
 
 export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: string): Promise<CreativeDriveWorkspace> {
   const context = await resolveCreativeDriveContext(db, creativeTaskId);
-  const { data: allowed, error: allowedError } = await db.from("drive_workspace_plan_allowlist")
-    .select("enabled").eq("plan_task_id", context.planTaskId).maybeSingle();
-  failDb(allowedError);
-  if (!allowed?.enabled) throw new HttpError(403, "A automacao do Drive esta desativada para este Plano de Acao.");
+  // resolveCreativeDriveContext has already checked the configured client and
+  // exact structural Plan. Workspaces are still keyed by that execution Plan.
 
   const { data: links, error: linksError } = await db.from("client_drive_links")
     .select("raw_folder_id,uploads_folder_id").eq("client_id", context.clientId).maybeSingle();
   failDb(linksError);
   if (!links?.raw_folder_id || !links?.uploads_folder_id) {
-    throw new HttpError(409, "Cadastre as pastas canonicas Baita Bruto e EDICAO antes de provisionar.");
+    throw new HttpError(409, "Cadastre as pastas Raw e Edição do cliente antes de provisionar.");
   }
 
   let captureWorkspace: { id: string; daily_folder_id: string | null; script_folder_id: string | null; capture_folder_id: string | null; provision_attempts: number } | null = null;

@@ -8,12 +8,14 @@ export type AutomationKey =
   | "relatorio_trafego_semanal"
   | "provisionar_card_metricas"
   | "coleta_metrica_cliente"
-  | "relatorio_conversao";
+  | "relatorio_conversao"
+  | "diaria_recorrente";
 export const AUTOMATION_KEYS: AutomationKey[] = [
   "relatorio_trafego_semanal",
   "provisionar_card_metricas",
   "coleta_metrica_cliente",
   "relatorio_conversao",
+  "diaria_recorrente",
 ];
 
 // "ads_account": eligible if the client has a mapped Windsor or Meta ad
@@ -43,6 +45,14 @@ export type AutomationDef = {
 };
 
 export const AUTOMATION_DEFINITIONS: Record<AutomationKey, AutomationDef> = {
+  diaria_recorrente: {
+    label: "Diária recorrente",
+    description: "Cria um Plano por gravação, com Roteiro e Captação compartilhados e uma Entrega por peça.",
+    eligibility: "any_client",
+    requiresPerformanceTemplate: false,
+    requiresTemplateTask: true,
+    source: "Calendário do Plano recorrente",
+  },
   relatorio_trafego_semanal: {
     label: "Relatório de anúncios",
     description: "Lê o dashboard de Performance e exporta um PDF semanal por cliente.",

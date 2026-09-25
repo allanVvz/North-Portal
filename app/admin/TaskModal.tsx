@@ -25,7 +25,7 @@ import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
 import { parseGoogleDriveUrl } from "@/lib/googleDrive";
-import { BAITA_DRIVE_PLAN_ID, creativeWorkspacesForCard, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
+import { creativeWorkspacesForCard, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
@@ -352,7 +352,7 @@ export default function TaskModal({
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
   const [materialSyncWarning, setMaterialSyncWarning] = useState("");
   const [recentlyCreatedCard, setRecentlyCreatedCard] = useState<TaskRecord | null>(null);
-  const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final" } | null>(null);
+  const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final"; source?: { kind: "script" | "capture"; file: { id: string; name: string; mimeType: string; size: number | null; webViewLink: string | null } } } | null>(null);
   const [materialTab, setMaterialTab] = useState<"final" | "preview" | "docs">("final");
   const materialRequest = useRef(0);
   const reloadMaterials = useCallback(() => {
@@ -588,8 +588,10 @@ export default function TaskModal({
   useEffect(() => { setRecentlyCreatedCard(null); }, [liveTask?.id]);
   const creativeCandidates = useMemo(() => {
     const candidates = [...materialCards, ...flowDeliveries];
-    return Array.from(new Map(candidates.filter((card) => card.kind === "criativo" && !card.subtype && planParentIdsOf(card).includes(BAITA_DRIVE_PLAN_ID)).map((card) => [card.id, card])).values());
-  }, [materialCards, flowDeliveries]);
+    return Array.from(new Map(candidates.filter((card) => card.kind === "criativo" &&
+      (typeof card.payload?.daily_execution_id === "string" || materialWorkspaces.some((workspace) => workspace.creative_task_id === card.id)))
+      .map((card) => [card.id, card])).values());
+  }, [materialCards, flowDeliveries, materialWorkspaces]);
   const materialPreviews = cardWorkspaces.flatMap((workspace) => workspace.assets.filter((asset) => asset.role === "preview" && asset.state === "active").map((asset) => ({ asset, workspace })));
   const materialFinals = cardWorkspaces.flatMap((workspace) => workspace.final_versions.filter((version) => version.state === "current" || workspace.creative_task_id === liveTask?.id).flatMap((version) => {
     const asset = workspace.assets.find((item) => item.id === version.asset_id && item.role === "final" && item.state === "active");
@@ -626,8 +628,20 @@ export default function TaskModal({
   // preview modal in place instead of navigating to the raw file in a new tab.
   function openDocForUrl(url: string): boolean {
     const doc = knownDocForUrl(url);
-    if (!doc) return false;
-    setPreviewDoc(doc);
+    if (doc) { setPreviewDoc(doc); return true; }
+    if (!liveTask || !parseGoogleDriveUrl(url)) return false;
+    void fetch(`/api/admin/drive/resolve-link?taskId=${encodeURIComponent(liveTask.id)}&url=${encodeURIComponent(url)}`)
+      .then(async (response) => response.ok ? await response.json() as {
+        resolved?: boolean; taskId?: string; assetId?: string; tab?: "classified" | "preview" | "final";
+        source?: "script" | "capture";
+        file?: { id: string; name: string; mimeType: string; size: number | null; webViewLink: string | null };
+      } : null)
+      .then((result) => {
+        if (result?.resolved && result.taskId) setDriveOpen({ taskId: result.taskId,
+          assetId: result.assetId, tab: result.tab ?? "raw",
+          source: result.source && result.file ? { kind: result.source, file: result.file } : undefined });
+        else window.location.assign(url);
+      }).catch(() => window.location.assign(url));
     return true;
   }
   function attachDocToComment(doc: AdminDocument) {
@@ -2423,6 +2437,7 @@ export default function TaskModal({
       targets={driveTargets}
       summaries={materialWorkspaces}
       initialAssetId={driveOpen.assetId}
+      initialSource={driveOpen.source}
       initialTab={driveOpen.tab}
       selectedAssetIds={commentAssetIds}
       onSelectedAssetIdsChange={setCommentAssetIds}

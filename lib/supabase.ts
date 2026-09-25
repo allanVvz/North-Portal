@@ -1,6 +1,7 @@
 import { createClient } from "./supabase/server";
 import { TASK_COLUMNS } from "./taskColumns";
 import { AUTOMATION_DEFINITIONS, isAutomationKey } from "./automationCatalog";
+import { dailyConfigSchema, type DailyConfig } from "./validation";
 import {
   currentRecurringExecutionFields,
   explicitDateExecutionFields,
@@ -4100,6 +4101,7 @@ export async function listApproverCandidates(clientId: string): Promise<Reviewer
 // lib/automationCatalog.ts; this is only the instance CRUD.
 export type AutomationTargetTaskSummary = {
   id: string;
+  clientId: string | null;
   title: string;
   kind: string;
   clientName: string | null;
@@ -4115,6 +4117,7 @@ export type AutomationConfig = {
   active: boolean;
   /** Métricas (tags) que a automação pede/lê — `coleta_metrica_cliente` e `relatorio_conversao`. */
   collectMetricKeys: string[] | null;
+  dailyConfig: DailyConfig | null;
   /** A automação da qual esta depende (`relatorio_conversao` → a de anúncios do
    *  mesmo cliente). Resolvida no servidor ao salvar, nunca escolhida na tela. */
   dependsOnConfigId: string | null;
@@ -4127,7 +4130,7 @@ export type AutomationConfig = {
 };
 
 type AutomationConfigJoinRow = Record<string, unknown> & {
-  tasks?: { title: string; kind: string; due_date: string | null; recurrence_cadence: string | null; clients: { name: string } | { name: string }[] | null } | null;
+  tasks?: { client_id: string | null; title: string; kind: string; due_date: string | null; recurrence_cadence: string | null; clients: { name: string } | { name: string }[] | null } | null;
 };
 
 function mapAutomationConfigRow(row: AutomationConfigJoinRow): AutomationConfig {
@@ -4140,9 +4143,11 @@ function mapAutomationConfigRow(row: AutomationConfigJoinRow): AutomationConfig 
     performanceTemplateId: (row.performance_template_id as string | null) ?? null,
     active: Boolean(row.active),
     collectMetricKeys: (row.collect_metric_keys as string[] | null) ?? null,
+    dailyConfig: row.daily_config ? dailyConfigSchema.parse(row.daily_config) : null,
     dependsOnConfigId: (row.depends_on_config_id as string | null) ?? null,
     targetTask: task ? {
       id: row.target_task_id as string,
+      clientId: task.client_id,
       title: task.title,
       kind: task.kind,
       clientName: client?.name ?? null,
@@ -4156,7 +4161,7 @@ export async function listAutomationConfigs(): Promise<AutomationConfig[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("automation_configs")
-    .select("*,tasks!automation_configs_target_task_id_fkey(title,kind,due_date,recurrence_cadence,clients(name))")
+    .select("*,tasks!automation_configs_target_task_id_fkey(client_id,title,kind,due_date,recurrence_cadence,clients(name))")
     .order("created_at");
   if (error) fail(error);
   return ((data ?? []) as AutomationConfigJoinRow[]).map(mapAutomationConfigRow);
@@ -4202,11 +4207,59 @@ async function resolveDependsOn(
   return id;
 }
 
+async function validateDailyAutomation(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  targetTaskId: string,
+  config: DailyConfig,
+  active: boolean,
+): Promise<void> {
+  dailyConfigSchema.parse(config);
+  const { data: plan, error: planError } = await supabase.from("tasks")
+    .select("id,client_id,kind,recurrence_cadence").eq("id", targetTaskId).maybeSingle();
+  if (planError) fail(planError);
+  if (!plan || plan.kind !== "plano_acao" || !plan.recurrence_cadence || plan.client_id !== config.clientId) {
+    throw new HttpError(400, "Selecione um Plano recorrente do cliente da diária.");
+  }
+  if (config.adoptedPlanTaskId) {
+    const { data: adopted, error: adoptedError } = await supabase.from("tasks")
+      .select("id,client_id,kind,recurrence_cadence").eq("id", config.adoptedPlanTaskId).maybeSingle();
+    if (adoptedError) fail(adoptedError);
+    if (!adopted || adopted.client_id !== config.clientId || adopted.kind !== "plano_acao" || adopted.recurrence_cadence) {
+      throw new HttpError(400, "A execução adotada precisa ser um Plano do mesmo cliente.");
+    }
+  }
+  if (!active) return;
+  const [workflow, folders] = await Promise.all([
+    publishedWorkflowForKind(supabase, "criativo"),
+    supabase.from("client_drive_links").select("raw_folder_id,uploads_folder_id")
+      .eq("client_id", config.clientId).maybeSingle(),
+  ]);
+  if (folders.error) fail(folders.error);
+  if (!workflow || workflow.delivery_type_id !== config.deliveryTypeId ||
+      !workflow.steps.some((step) => step.key === "roteiro") ||
+      !workflow.steps.some((step) => step.key === "captacao")) {
+    throw new HttpError(409, "Publique um workflow de Criativo com Roteiro e Captação.");
+  }
+  if (!folders.data?.raw_folder_id || !folders.data?.uploads_folder_id) {
+    throw new HttpError(409, "Cadastre as pastas Raw e Edição do cliente antes de ativar a diária.");
+  }
+}
+
 export async function createAutomationConfig(
-  input: { automationKey: string; targetTaskId: string; performanceTemplateId?: string | null; active?: boolean; collectMetricKeys?: string[] | null },
+  input: { automationKey: string; targetTaskId: string; performanceTemplateId?: string | null; active?: boolean; collectMetricKeys?: string[] | null; dailyConfig?: DailyConfig | null },
   createdBy: string,
 ): Promise<AutomationConfig> {
   const supabase = await createClient();
+  if (input.automationKey === "diaria_recorrente") {
+    if (!input.dailyConfig) throw new HttpError(400, "Configure as peças da diária.");
+    await validateDailyAutomation(supabase, input.targetTaskId, input.dailyConfig, input.active ?? true);
+    const { data: rows, error: dailyError } = await supabase.from("automation_configs").insert({
+      automation_key: input.automationKey, target_task_id: input.targetTaskId,
+      daily_config: input.dailyConfig, active: input.active ?? true, created_by: createdBy,
+    }).select("*").limit(1);
+    if (dailyError) fail(dailyError);
+    return mapAutomationConfigRow(rows![0]);
+  }
   const { data, error } = await supabase.rpc("create_automation_config_with_dependency", {
     p_automation_key: input.automationKey,
     p_target_task_id: input.targetTaskId,
@@ -4221,10 +4274,19 @@ export async function createAutomationConfig(
 
 export async function updateAutomationConfig(
   id: string,
-  patch: { targetTaskId?: string; performanceTemplateId?: string | null; active?: boolean; collectMetricKeys?: string[] | null },
+  patch: { targetTaskId?: string; performanceTemplateId?: string | null; active?: boolean; collectMetricKeys?: string[] | null; dailyConfig?: DailyConfig | null },
 ): Promise<AutomationConfig> {
   const supabase = await createClient();
   const fields: Record<string, unknown> = {};
+  const { data: existingRows, error: existingError } = await supabase.from("automation_configs").select("automation_key,target_task_id,daily_config,active").eq("id", id).limit(1);
+  if (existingError) fail(existingError);
+  const existing = existingRows?.[0];
+  if (!existing) throw new HttpError(404, "Automação não encontrada.");
+  if (existing.automation_key === "diaria_recorrente") {
+    const config = patch.dailyConfig === undefined ? existing.daily_config as DailyConfig | null : patch.dailyConfig;
+    if (!config) throw new HttpError(400, "Configure as peças da diária.");
+    await validateDailyAutomation(supabase, patch.targetTaskId ?? existing.target_task_id, config, patch.active ?? existing.active);
+  }
   if (patch.targetTaskId !== undefined) {
     fields.target_task_id = patch.targetTaskId;
     // Trocar o card re-resolve a dependência pelo cliente do novo alvo.
@@ -4236,6 +4298,7 @@ export async function updateAutomationConfig(
   if (patch.performanceTemplateId !== undefined) fields.performance_template_id = patch.performanceTemplateId;
   if (patch.active !== undefined) fields.active = patch.active;
   if (patch.collectMetricKeys !== undefined) fields.collect_metric_keys = patch.collectMetricKeys;
+  if (patch.dailyConfig !== undefined) fields.daily_config = patch.dailyConfig;
   const { data, error } = await supabase.from("automation_configs").update(fields).eq("id", id).select("*").limit(1);
   if (error) fail(error);
   const row = data?.[0] as Record<string, unknown> | undefined;

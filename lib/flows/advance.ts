@@ -110,6 +110,20 @@ async function advanceOneDelivery(
   const existing = await stepsOf(admin, delivery.id);
   if (existing.some((s) => s.workflowStepId === next.workflow_step_id)) return null;
 
+  if (next.key === "captacao" && typeof delivery.payload?.daily_execution_id === "string") {
+    const plan = await getAdminTask(admin, delivery.payload.daily_execution_id);
+    const sharedId = plan?.payload?.daily_capture_task_id;
+    if (typeof sharedId !== "string" || plan?.client_id !== delivery.client_id) {
+      throw new Error("Captação compartilhada desta diária não foi encontrada.");
+    }
+    const shared = await getAdminTask(admin, sharedId);
+    if (!shared || shared.client_id !== delivery.client_id || shared.task_type_id !== next.task_type_id) {
+      throw new Error("Captação compartilhada incompatível com o workflow.");
+    }
+    await linkStep(admin, delivery.id, shared.id, next);
+    return shared;
+  }
+
   const fields = flowStepFields(delivery, next, completedStep, today);
   const id = String(fields.id);
   const { data, error } = await admin.from("tasks").insert(fields).select(TASK_COLUMNS).limit(1);

@@ -5948,3 +5948,17 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
   .creative-drive-toast { margin: 7px 12px 0; }
   .tm-classified-raws-grid { grid-template-columns: minmax(0, 1fr); }
 }
+/* Diária recorrente no card de automação. */
+.auto-daily { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface2); font-size: 12px; }
+.auto-daily p { margin: 0; }
+.auto-daily-piece { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; }
+.auto-daily-piece input { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--a-border); border-radius: 7px; color: var(--a-ink); background: var(--a-surface); font: inherit; }
+.auto-daily-piece label { display: flex; align-items: center; gap: 4px; }
+.auto-daily-piece label input { max-width: 60px; }
+.auto-daily-piece button { border: 0; color: var(--a-muted); background: transparent; cursor: pointer; }
+.auto-daily-manual { border-top: 1px solid var(--a-border); padding-top: 9px; }
+.auto-daily-manual summary { cursor: pointer; font-weight: 600; }
+.auto-daily-manual[open] { display: grid; gap: 9px; }
+.auto-daily-adoption { display: grid; gap: 5px; padding: 9px; border: 1px solid var(--a-border); border-radius: 8px; }
+.auto-daily-adoption a { margin-right: 6px; }
+@media (max-width: 640px) { .auto-daily-piece { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }

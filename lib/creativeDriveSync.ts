@@ -2,7 +2,6 @@ import { createAdminClient } from "./supabase/admin";
 import { HttpError } from "./validation";
 import { getDriveItemMetadata, isGoogleDriveConfigured, listFolderFilesPage, moveDriveItemBetweenFolders } from "./googleDriveApi";
 import type { DriveFile } from "./googleDrive";
-import { BAITA_DRIVE_PLAN_ID } from "./cardMaterials";
 import { updateTaskPayload } from "./automations/taskWrites";
 import { stableCommentId } from "./flows/statusComments";
 
@@ -137,7 +136,7 @@ async function effectiveStageStatus(db: Db, workspace: WorkspaceFolders): Promis
  *  Revisão" (lib/flows/homeArrival.ts). Um final que tinha voltado para Preview
  *  e foi posto na Home de novo conta como chegada: é uma entrega nova. */
 export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolders): Promise<{ newHomeFiles: DriveFile[]; audioToRaw: DriveFile[] }> {
-  if (workspace.plan_task_id !== BAITA_DRIVE_PLAN_ID || workspace.status !== "ready"
+  if (workspace.status !== "ready"
     || !workspace.creative_folder_id || !workspace.preview_folder_id || !isGoogleDriveConfigured()) return { newHomeFiles: [], audioToRaw: [] };
   // Correção pontual primeiro: os restaurados entram como finais já conhecidos
   // (a lista `known` abaixo é lida depois) e não viram "arquivo novo".
@@ -199,7 +198,7 @@ export async function returnEditFinalsToPreview(db: Db, editTaskId: string, crea
   if (!creativeTaskIds.length) return { moved: 0, errors: [] };
   const { data, error } = await db.from("drive_creative_workspaces")
     .select("id,plan_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
-    .eq("plan_task_id", BAITA_DRIVE_PLAN_ID).eq("stage_task_id", editTaskId).eq("status", "ready")
+    .eq("stage_task_id", editTaskId).eq("status", "ready")
     .in("creative_task_id", [...creativeTaskIds]);
   if (error) throw new HttpError(500, error.message);
   let moved = 0;

@@ -31,11 +31,12 @@ async function json<T>(response: Response): Promise<T> {
   return body;
 }
 
-export default function CreativeDriveWorkspace({ taskId, targets, summaries, initialAssetId, initialTab = "raw", selectedAssetIds, onSelectedAssetIdsChange, onChanged, onBack, onClose }: {
+export default function CreativeDriveWorkspace({ taskId, targets, summaries, initialAssetId, initialSource, initialTab = "raw", selectedAssetIds, onSelectedAssetIdsChange, onChanged, onBack, onClose }: {
   taskId: string;
   targets: Target[];
   summaries: CreativeMaterialWorkspace[];
   initialAssetId?: string | null;
+  initialSource?: { kind: "script" | "capture"; file: { id: string; name: string; mimeType: string; size: number | null; webViewLink: string | null } } | null;
   initialTab?: MaterialTab;
   selectedAssetIds: string[];
   onSelectedAssetIdsChange: (ids: string[]) => void;
@@ -53,6 +54,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const [noticeTargetId, setNoticeTargetId] = useState<string | null>(null);
   const [rawTargetId, setRawTargetId] = useState(taskId);
   const [rawFilter, setRawFilter] = useState<RawFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | SourceKind>(initialSource?.kind ?? "all");
   const [sortOrder, setSortOrder] = useState<"oldest" | "newest">("oldest");
   const [recentLinks, setRecentLinks] = useState<Record<string, string[]>>({});
   const rawAnchor = useRef<string | null>(null);
@@ -67,7 +69,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const [searchBusy, setSearchBusy] = useState(false);
   const searchRequest = useRef(0);
   const sourceRequest = useRef(0);
-  const [activeTab, setActiveTab] = useState<MaterialTab>(initialAssetId ? "classified" : initialTab);
+  const [activeTab, setActiveTab] = useState<MaterialTab>(initialSource ? "raw" : initialAssetId ? "classified" : initialTab);
   const [rawPage, setRawPage] = useState(1);
   const [classifiedPage, setClassifiedPage] = useState(1);
   const [previewPage, setPreviewPage] = useState(1);
@@ -83,6 +85,13 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
     const next = await json<Payload>(await fetch(`/api/admin/tasks/${activeTaskId}/drive-workspace${preserveSources ? "?sources=0" : ""}`, { cache: "no-store" }));
     if (requestId !== workspaceRequest.current) return;
     setPayload((previous) => preserveSources && previous?.workspace && next.workspace ? { ...next, workspace: { ...next.workspace, source_files: previous.workspace.source_files, source_next_page_token: previous.workspace.source_next_page_token, source_error: previous.workspace.source_error } } : next);
+    if (initialSource && !preserveSources && initialSource.file.mimeType !== "application/vnd.google-apps.folder") {
+      setActiveTab("raw");
+      setSelected({ id: initialSource.file.id, name: initialSource.file.name,
+        mimeType: initialSource.file.mimeType, size: initialSource.file.size,
+        url: initialSource.file.webViewLink,
+        source: initialSource.kind === "script" ? "Roteiro" : "Captação" });
+    }
     if (initialAssetId && !preserveSources) {
       const asset = next.workspace?.assets.find((item) => item.id === initialAssetId);
       if (asset) setActiveTab(asset.role === "raw" ? "classified" : asset.role === "final" ? "final" : "preview");
@@ -91,10 +100,10 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
       setExtraSources(emptySources());
       setNextPages(next.workspace?.source_next_page_token ?? emptyPages());
     }
-  }, [activeTaskId, initialAssetId]);
+  }, [activeTaskId, initialAssetId, initialSource]);
   useEffect(() => {
     setPayload(null); setSelected(null); setError(""); setExtraSources(emptySources()); setNextPages(emptyPages());
-    setRawTargetId(activeTaskId); setRawFilter("all"); setSelectedRawIds([]); rawAnchor.current = null;
+    setRawTargetId(activeTaskId); setRawFilter("all"); setSourceFilter(initialSource?.kind ?? "all"); setSelectedRawIds([]); rawAnchor.current = null;
     searchRequest.current += 1; setSearchText(""); setRawQuery(""); setSearchSources(emptySources()); setSearchPages(emptyPages());
     setRawPage(1); setClassifiedPage(1); setPreviewPage(1); setFinalPage(1);
     void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Falha ao carregar o Drive."));
@@ -305,7 +314,9 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
   const previewIsRaw = preview?.source === "Roteiro" || preview?.source === "Captação" || preview?.source === "Bruto classificado";
   const previewLinks = preview && previewIsRaw ? targets.filter((target) => linkedToTarget(target.id, preview.id)) : [];
   const rawLinksByFile = new Map(sources.map(({ file }) => [file.id, targets.filter((target) => linkedToTarget(target.id, file.id))]));
-  const visibleSources = orderedSources.filter(({ file }) => rawFilter === "all" || (rawFilter === "linked") === linkedToTarget(rawTargetId, file.id));
+  const visibleSources = orderedSources.filter(({ file, source }) =>
+    (sourceFilter === "all" || source === (sourceFilter === "script" ? "Roteiro" : "Captação")) &&
+    (rawFilter === "all" || (rawFilter === "linked") === linkedToTarget(rawTargetId, file.id)));
   const rawTarget = targets.find((target) => target.id === rawTargetId);
   useEffect(() => { setRawPage((page) => Math.min(page, Math.max(1, Math.ceil(visibleSources.length / RAW_PAGE_SIZE)))); }, [visibleSources.length]);
   function chooseRawTarget(targetId: string) {
@@ -326,6 +337,7 @@ export default function CreativeDriveWorkspace({ taskId, targets, summaries, ini
       {!payload && !error ? <p className="admin-sub">Carregando materiais…</p> : null}
       {payload && (!workspace || workspace.status !== "ready") ? <button type="button" className="admin-btn primary" disabled={Boolean(busy)} onClick={() => void provision()}>{busy === "provision" ? "Preparando…" : "Preparar pastas do Criativo"}</button> : null}
       {workspace?.status === "ready" ? <>
+        {activeTab === "raw" ? <nav className="creative-drive-raw-filters" aria-label="Fonte dos materiais">{([ ["all", "Todos"], ["script", "Roteiro"], ["capture", "Captação"] ] as const).map(([kind, label]) => <button type="button" key={kind} className={sourceFilter === kind ? "on" : ""} aria-pressed={sourceFilter === kind} onClick={() => { setSourceFilter(kind); setRawPage(1); setSelected(null); }}>{label}</button>)}</nav> : null}
         <nav className="creative-drive-tabs" aria-label="Tipos de materiais">{([ ["raw", "Brutos da captação", null], ["classified", "Classificados", classifiedAssets.length], ["preview", "Previews", previewAssets.length], ["final", "Finais", finalVersions.length] ] as const).map(([tab, label, count]) => <button type="button" key={tab} className={activeTab === tab ? "on" : ""} aria-current={activeTab === tab ? "page" : undefined} onClick={() => { setActiveTab(tab); setSelected(null); }}>{label}{count !== null ? <small>{count}</small> : null}</button>)}</nav>
         {workspace.creative_folder_id ? <nav className="creative-drive-folder-links" aria-label="Pastas no Drive"><a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.creative_folder_id)}`} target="_blank" rel="noreferrer">Home · finais ↗</a>{workspace.raw_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.raw_folder_id)}`} target="_blank" rel="noreferrer">Raw ↗</a> : null}{workspace.preview_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.preview_folder_id)}`} target="_blank" rel="noreferrer">Preview ↗</a> : null}</nav> : null}
         {activeTab === "raw" ? <section className="creative-drive-section"><div className="creative-drive-row"><strong>Brutos da captação</strong><small>{rawCountLabel}</small></div><div className="creative-drive-raw-controls"><div className="creative-drive-raw-target">Para <strong>{rawTarget?.title ?? currentTarget?.title ?? "Criativo"}</strong></div><nav className="creative-drive-raw-filters" aria-label="Filtrar brutos">{([["pending", "Pendentes"], ["all", "Todos"], ["linked", "Já classificados"]] as const).map(([filter, label]) => <button type="button" key={filter} className={rawFilter === filter ? "on" : ""} aria-pressed={rawFilter === filter} onClick={() => { setRawFilter(filter); setRawPage(1); setSelectedRawIds([]); rawAnchor.current = null; }}>{label}</button>)}</nav><label className="creative-drive-sort">Ordem <select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value as "oldest" | "newest"); setRawPage(1); }}><option value="oldest">Cronológica · antigas primeiro</option><option value="newest">Cronológica · recentes primeiro</option></select></label></div><form className="creative-drive-search" onSubmit={(event) => { event.preventDefault(); void searchRaws(searchText); }}><label htmlFor="creative-drive-raw-search">Encontrar bruto pelo nome</label><div><input id="creative-drive-raw-search" type="search" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Nome ou código do arquivo" /><button type="submit" className="admin-btn ghost" disabled={searchBusy}>{searchBusy ? "Buscando…" : "Buscar"}</button>{rawQuery ? <button type="button" className="admin-btn ghost" onClick={() => { setSearchText(""); void searchRaws(""); }}>Limpar</button> : null}</div></form><p className="admin-sub">Clique para selecionar; Ctrl/Cmd adiciona, Shift seleciona um intervalo. Arraste para uma pasta à direita. A ordem usa a captura quando disponível e a criação no Drive como referência. {workspace.capture_workspace?.daily_folder_id ? <a href={`https://drive.google.com/drive/folders/${encodeURIComponent(workspace.capture_workspace.daily_folder_id)}`} target="_blank" rel="noreferrer">Abrir a diária no Drive ↗</a> : null}</p>

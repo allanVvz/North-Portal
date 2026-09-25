@@ -439,7 +439,7 @@ export async function runOneReportAutomation(
 }
 
 // coleta_metrica_cliente fica de fora (roadmap R6.11 — ainda é só stub).
-const RUN_KEYS = ["relatorio_trafego_semanal", "relatorio_conversao"] as const;
+const RUN_KEYS = ["relatorio_trafego_semanal", "relatorio_conversao", "diaria_recorrente"] as const;
 
 export type RunOptions = {
   /** Dia da execução (ISO). Padrão: hoje NO FUSO DA AGÊNCIA (`agencyToday`), a
@@ -529,7 +529,8 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
     //
     // `runOneReportAutomation` mantém o mesmo gate — é defesa em profundidade e o
     // que os testes exercitam direto.
-    if (config.automation_key === "relatorio_trafego_semanal" && !(await isDueToday(admin, config, today))) continue;
+    if ((config.automation_key === "relatorio_trafego_semanal" || config.automation_key === "diaria_recorrente")
+      && !(await isDueToday(admin, config, today))) continue;
 
     const run = config.automation_key === "relatorio_trafego_semanal"
       ? await claimDailyRun(admin, config, today)
@@ -538,9 +539,17 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
 
     let outcome: RunOutcome;
     try {
-      outcome = config.automation_key === "relatorio_conversao"
-        ? await runConversionFlow(admin, config, today)
-        : await runOneReportAutomation(admin, config, windsor, meta, today);
+      if (config.automation_key === "diaria_recorrente") {
+        const { error } = await admin.rpc("materialize_recurring_daily", {
+          p_config_id: config.id, p_date: today, p_override: null,
+        });
+        if (error) throw error;
+        outcome = "ran";
+      } else {
+        outcome = config.automation_key === "relatorio_conversao"
+          ? await runConversionFlow(admin, config, today)
+          : await runOneReportAutomation(admin, config, windsor, meta, today);
+      }
     } catch (error) {
       outcome = { error: errorMessage(error) };
     }

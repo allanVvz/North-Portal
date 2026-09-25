@@ -56,7 +56,7 @@ export default function CommentText({ text, onLinkClick, showLinkPreview = false
             >
               {part.label ?? part.url}
             </a>
-            {drive ? <GoogleDrivePreview link={drive} url={part.url} onLinkClick={onLinkClick} /> : null}
+            {drive ? <GoogleDrivePreview link={drive} url={part.url} name={part.label} onLinkClick={onLinkClick} /> : null}
           </Fragment>
         );
       })}

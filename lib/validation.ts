@@ -560,7 +560,21 @@ const automationKeySchema = z.enum([
   "provisionar_card_metricas",
   "coleta_metrica_cliente",
   "relatorio_conversao",
+  "diaria_recorrente",
 ]);
+export const dailyPieceSchema = z.object({
+  key: z.string().uuid(),
+  name: z.string().trim().min(1).max(240),
+  format: z.string().trim().min(1).max(80),
+  offsetDays: z.number().int().min(-30).max(180),
+});
+export const dailyConfigSchema = z.object({
+  clientId: z.string().uuid(),
+  deliveryTypeId: z.string().uuid(),
+  adoptedPlanTaskId: z.string().uuid().nullable().optional(),
+  pieces: z.array(dailyPieceSchema).min(1).max(50),
+}).refine((value) => new Set(value.pieces.map((piece) => piece.key)).size === value.pieces.length, "Peças repetidas.");
+export type DailyConfig = z.infer<typeof dailyConfigSchema>;
 // Only meaningful for coleta_metrica_cliente: which metricDefs keys the card
 // asks the client for.
 const collectMetricKeysSchema = z.array(z.string().min(1).max(40)).max(20).nullable().optional();
@@ -572,6 +586,7 @@ export const automationConfigCreateSchema = z.object({
   // supabase/migrations/20260821030010_automations_v2.sql.
   performanceTemplateId: z.string().min(1).max(80).nullable().optional(),
   collectMetricKeys: collectMetricKeysSchema,
+  dailyConfig: dailyConfigSchema.nullable().optional(),
   active: z.boolean().optional(),
 });
 // Triagem de lead: só status e notas. Os campos de identidade (nome, empresa,
@@ -592,6 +607,7 @@ export const automationConfigPatchSchema = z.object({
   targetTaskId: z.string().uuid().optional(),
   performanceTemplateId: z.string().min(1).max(80).nullable().optional(),
   collectMetricKeys: collectMetricKeysSchema,
+  dailyConfig: dailyConfigSchema.nullable().optional(),
   active: z.boolean().optional(),
 });
 export const automationProvisionSchema = z.object({

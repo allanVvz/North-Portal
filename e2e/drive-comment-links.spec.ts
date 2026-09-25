@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
 
-test("link do Drive no comentário usa miniatura compacta e abre preview amplo", async ({ page }, testInfo) => {
+test("link do Drive no comentário usa miniatura compacta e abre o destino conhecido", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await page.goto("/login");
   await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);
@@ -14,12 +14,15 @@ test("link do Drive no comentário usa miniatura compacta e abre preview amplo",
   await expect(page.locator(".tm-comment-text iframe")).toHaveCount(0);
   await attachment.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("comment-attachment-desktop.png") });
+  const href = await attachment.getAttribute("href");
+  expect(href).toBeTruthy();
   await attachment.click();
-  const modal = page.locator(".gdrive-link-modal");
-  await expect(modal).toBeVisible();
-  await expect(modal.locator("iframe")).toBeVisible();
-  await modal.getByRole("button", { name: "Voltar para o card" }).click();
-  await expect(modal).toHaveCount(0);
+  await expect(page.locator(".gdrive-link-modal")).toHaveCount(0);
+  await expect.poll(async () =>
+    /drive\.google\.com|docs\.google\.com/.test(page.url()) ||
+    await page.locator(".creative-drive-workspace, .docprev-tm").count() > 0,
+  ).toBe(true);
+  if (!page.url().includes("/admin/")) return;
   await page.setViewportSize({ width: 390, height: 844 });
   await attachment.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("comment-attachment-narrow.png") });
@@ -43,7 +46,6 @@ test("PDF anexado por outra URL do mesmo Drive usa o modal de documentos", async
   await page.goto("/admin/operacao?task=08adb443-4d3a-4c38-8b32-be1b27cc111b");
   const docTab = page.locator(".tm-material-tabs").getByRole("button", { name: /Documentos/ });
   await expect(docTab).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(".tm-comment-text .gdrive-comment-attachment")).toHaveCount(0);
-  await page.locator('.tm-comment-text a[href*="docs.google.com/document/d/1aAaJI53PNaCyW6QcFCdx6j5n7I71ke3l_N0BehjNAHk"]').click();
+  await page.locator('.tm-comment-text a[href*="docs.google.com/document/d/1aAaJI53PNaCyW6QcFCdx6j5n7I71ke3l_N0BehjNAHk"]').first().click();
   await expect(page.locator(".docprev-tm:not(.gdrive-link-modal)")).toBeVisible();
 });

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { BAITA_DRIVE_PLAN_ID } from "@/lib/creativeDrive";
 import { syncCreativeDriveFolders } from "@/lib/creativeDriveSync";
 import { applyCaptureHomeArrivals, applyEditHomeArrival, recordAudioToRaw } from "@/lib/flows/homeArrival";
 import { createClient } from "@/lib/supabase/server";
@@ -17,9 +16,9 @@ type Db = ReturnType<typeof createAdminClient>;
 async function materialIndex(db: Db, syncWarnings: string[] = []) {
     const [workspaceResult, captureResult] = await Promise.all([db.from("drive_creative_workspaces")
       .select("id,plan_task_id,capture_task_id,creative_task_id,status,assets:drive_assets!drive_assets_workspace_id_fkey(id,drive_file_id,name,mime_type,size_bytes,role,state,web_view_link,created_at),raw_links:drive_raw_asset_links!drive_raw_asset_links_workspace_id_fkey(asset_id),final_versions:drive_final_versions!drive_final_versions_workspace_id_fkey(id,asset_id,version_number,state,promoted_at)")
-      .eq("plan_task_id", BAITA_DRIVE_PLAN_ID), db.from("drive_capture_workspaces")
+      , db.from("drive_capture_workspaces")
       .select("capture_task_id,script_folder_id,capture_folder_id")
-      .eq("plan_task_id", BAITA_DRIVE_PLAN_ID)]);
+      ]);
     const { data, error } = workspaceResult;
     if (error) throw error;
     const creativeIds = [...new Set((data ?? []).map((workspace) => workspace.creative_task_id))];
@@ -69,7 +68,7 @@ export async function POST(request: Request) {
     const taskId = typeof body.taskId === "string" && /^[0-9a-f-]{36}$/i.test(body.taskId) ? body.taskId : null;
     const { data: folders, error } = await db.from("drive_creative_workspaces")
       .select("id,plan_task_id,routine_task_id,capture_task_id,capture_workspace_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
-      .eq("plan_task_id", BAITA_DRIVE_PLAN_ID).eq("status", "ready");
+      .eq("status", "ready");
     if (error) throw error;
     const relevant = (folders ?? []).filter((folder) => !taskId || [
       folder.routine_task_id, folder.plan_task_id, folder.capture_task_id,
