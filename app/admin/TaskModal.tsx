@@ -31,7 +31,7 @@ import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, currentRecurringExecutionOf, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf } from "@/lib/taskRelations";
+import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, currentRecurringExecutionOf, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf, stageInDelivery } from "@/lib/taskRelations";
 import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
 import { relevantParentRelationKinds, type ParentRelationKind } from "@/lib/flows/parentBoxes";
 import { mirroredParentAssignee, mirroredParentDate, mirroredParentStatus, projectParentStatus } from "@/lib/flows/parentStatus";
@@ -311,6 +311,7 @@ export default function TaskModal({
   // A ENTREGA é o card ligado a uma versão de workflow; a ETAPA é um filho dela
   // cujo subtipo diz que etapa é.
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
+  const sharedStageDeliveryCount = liveTask ? deliveryParentIdsOf(liveTask).length : 0;
   const [flowDeliveries, setFlowDeliveries] = useState<TaskRecord[]>([]);
   // A entrega de verdade por trás do card aberto — ela mesma quando o card
   // aberto É a entrega, o pai buscado à parte quando o card aberto é uma
@@ -320,6 +321,7 @@ export default function TaskModal({
   // "primeiro pai" arbitrário: uma única Entrega basta para calcular o resumo
   // ascendente; caso contrário o modal mostra todos os contextos.
   const chainDelivery = isDelivery ? liveTask : flowDeliveries.length === 1 ? flowDeliveries[0] : null;
+  const contextualStage = liveTask && chainDelivery && !isDelivery ? stageInDelivery(liveTask, chainDelivery.id) : null;
   // Os Planos de Ação a que este card pertence (pode ser mais de um) — não
   // aparecem no quadro, então quase sempre precisam ser buscados por id
   // (igual às Entregas de fluxo).
@@ -398,6 +400,8 @@ export default function TaskModal({
   }, [mode]);
   const { name: currentUserName } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const statusBusyRef = useRef(false);
   const [error, setError] = useState("");
   const [editingDescription, setEditingDescription] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -470,7 +474,10 @@ export default function TaskModal({
     const scheduledDate = (draft.start_date || draft.due_date).trim();
     return {
       title: draft.title.trim(), kind: draft.kind, subtype: draft.subtype || null,
-      status: draft.status, priority: draft.priority, assignee: draft.assignee.trim() || null,
+      // O status de Plano/Entrega/Rotina pertence aos filhos. Enviar até o valor
+      // inalterado causa 409 no PATCH e impede salvar os demais campos do pai.
+      ...(!liveTask || (!isDelivery && !kd.isPlan && !isRecurringParent && !chainDelivery) ? { status: draft.status } : {}),
+      priority: draft.priority, assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
       reviewer_id: effectiveReviewerId,
       approver_id: effectiveApproverId,
@@ -492,7 +499,7 @@ export default function TaskModal({
       slug: draft.clientSlug || null,
       payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, formato: draft.formato.trim() || null, plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
     };
-  }, [draft, effectiveApproverId, effectiveReviewerId, kd.isPlan, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
+  }, [draft, effectiveApproverId, effectiveReviewerId, isDelivery, isRecurringParent, kd.isPlan, chainDelivery?.id, liveTask?.id, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
   const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
     // Concluir uma etapa cria a próxima no mesmo request. O servidor devolve
     // esse card junto para a pessoa não ficar olhando uma etapa concluída sem
@@ -776,7 +783,7 @@ export default function TaskModal({
   const projectedParentStatus = liveTask && (isDelivery || kd.isPlan || isRecurringParent)
     ? projectParentStatus(liveTask, isDelivery ? flowSteps : effectiveParentMembers, membersByParent)
     : null;
-  const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: projectedParentStatus ?? draft.status } : null;
+  const progressTask = liveTask ? { ...liveTask, kind: draft.kind, status: projectedParentStatus ?? contextualStage?.status ?? draft.status } : null;
   const headerPct = progressTask
     ? (isDelivery
         ? taskProgress(progressTask, flowSteps, membersByParent)
@@ -1224,12 +1231,51 @@ export default function TaskModal({
     return () => { cancelled = true; };
   }, [liveTask?.id]);
 
-  // Edição na linha de uma etapa/atividade (StepRow): o PATCH é no card DELA,
-  // o mesmo de abrir e editar — cascata e notificações valem igual. Concluir a
-  // etapa pode criar a próxima; ela volta junto e entra no estado da tela.
+  // O andamento de uma etapa dentro de uma Entrega pertence ao ELO. O card
+  // executável pode ser compartilhado e mantém seus próprios arquivos.
+  async function changeDeliveryStatus(deliveryId: string, status: TaskStatus, stageTaskId?: string, expectedStatus?: TaskStatus) {
+    if (statusBusyRef.current) return;
+    statusBusyRef.current = true;
+    setStatusBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${deliveryId}/delivery-status`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, ...(stageTaskId ? { stage_task_id: stageTaskId } : {}), ...(expectedStatus ? { expected_status: expectedStatus } : {}) }),
+      });
+      const body = await res.json().catch(() => null) as { stage?: TaskRecord; delivery?: TaskRecord; next?: TaskRecord | null; error?: string } | null;
+      if (!res.ok || !body?.stage || !body.delivery) throw new Error(body?.error ?? "Não foi possível mudar o andamento da Entrega.");
+      onTaskPatched?.(body.stage);
+      onTaskPatched?.(body.delivery);
+      if (body.next) onTaskPatched?.(body.next);
+      if (liveTask?.id === deliveryId) {
+        setLiveTask(body.delivery);
+        if (body.next) setFlowNext(body.next);
+      } else if (liveTask?.id === body.stage.id) {
+        setLiveTask(body.stage);
+        if (body.next) setFlowNext(body.next);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível mudar o andamento da Entrega.");
+    } finally {
+      statusBusyRef.current = false;
+      setStatusBusy(false);
+    }
+  }
+
+  // Demais campos da linha continuam no card executável; status de Entrega ou
+  // etapa contextual passa pela rota acima para não atingir outros Criativos.
   async function patchRelatedCard(card: TaskRecord, patch: StepPatch) {
     setError("");
     try {
+      if (patch.status && isFlowDelivery(card)) {
+        await changeDeliveryStatus(card.id, patch.status, undefined, card.status);
+        return;
+      }
+      if (patch.status && liveTask && isDelivery && card.parents.some((parent) => parent.id === liveTask.id && parent.relation_kind === "workflow_step")) {
+        await changeDeliveryStatus(liveTask.id, patch.status, card.id, card.status);
+        return;
+      }
       const res = await fetch(`/api/admin/tasks/${card.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
       });
@@ -1448,7 +1494,7 @@ export default function TaskModal({
       title: draft.title.trim(),
       kind: draft.kind,
       subtype: draft.subtype || null,
-      status: draft.status,
+      ...(!liveTask || (!isDelivery && !kd.isPlan && !isRecurringParent && !chainDelivery) ? { status: draft.status } : {}),
       priority: draft.priority,
       assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
@@ -1586,12 +1632,14 @@ export default function TaskModal({
   const mirroredStatus = mirroredParentStatus(currentChainStep);
   const mirroredDate = mirroredParentDate(currentChainStep);
   const mirroredAssignee = mirroredParentAssignee(currentChainStep);
-  const displayStatus = projectedParentStatus ?? mirroredStatus ?? draft.status;
+  const displayStatus = projectedParentStatus ?? mirroredStatus ?? contextualStage?.status ?? draft.status;
   // Só um card que tem status PRÓPRIO pode ter o status trocado pelo stepper.
   // Numa entrega espelhada, clicar ali escreveria na coluna do pai um valor
   // que a próxima etapa a mudar sobrescreveria na tela — um controle que não
   // controla nada.
-  const stepperEditable = projectedParentStatus === null && mirroredStatus === null;
+  const stepperEditable = sharedStageDeliveryCount > 1
+    ? false
+    : isDelivery ? Boolean(currentChainStep) : projectedParentStatus === null && mirroredStatus === null;
   const stepIdx = WORKFLOW_ORDER.indexOf(displayStatus);
 
   // Cor por papel no dropdown de responsável: o subtipo relevante é o da
@@ -1622,6 +1670,7 @@ export default function TaskModal({
       <div className={`tm tm-tone-${tone} tm-lg${mode === "new" ? " tm-new" : ""}`} onClick={(e) => e.stopPropagation()}>
         {coverCandidates.length ? <CardCover key={coverCandidates[0].fileId} candidates={coverCandidates} title={draft.title || "card"} className="tm-cover" /> : null}
         {mode === "edit" ? (
+          <>
           <div className={`tm-head tm-head-tone-${tone}`}>
             <div className="tm-head-identity">
               {onBack ? <button type="button" className="tm-back" onClick={() => void closeAfterSave(onBack)} aria-label="Voltar para o card anterior" title="Voltar"><BackArrowIcon /></button> : null}
@@ -1716,9 +1765,14 @@ export default function TaskModal({
                     type="button"
                     key={column.status}
                     className={`tm-step ${column.status !== "parada" && stepIdx >= 0 && WORKFLOW_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${displayStatus === column.status ? "current" : ""} ${column.status === "parada" ? "tm-step-halt" : ""}`}
-                    onClick={() => { if (stepperEditable) set("status", column.status); }}
-                    disabled={!stepperEditable}
-                    title={stepperEditable ? undefined : "O status da entrega espelha a etapa corrente — mova a etapa, não o pai."}
+                    onClick={() => {
+                      if (!stepperEditable) return;
+                      if (isDelivery && liveTask && currentChainStep) void changeDeliveryStatus(liveTask.id, column.status, currentChainStep.id, currentChainStep.status);
+                      else if (chainDelivery && liveTask && contextualStage) void changeDeliveryStatus(chainDelivery.id, column.status, liveTask.id, contextualStage.status);
+                      else set("status", column.status);
+                    }}
+                    disabled={!stepperEditable || statusBusy}
+                    title={sharedStageDeliveryCount > 1 ? "Etapa compartilhada: abra o Criativo para mudar só uma Entrega" : isDelivery ? "Muda apenas a etapa atual desta Entrega" : stepperEditable ? undefined : "O status deste card acompanha suas atividades."}
                   >
                     <span className="tm-step-dot" />
                     <span className="tm-step-label">{column.label}</span>
@@ -1743,6 +1797,8 @@ export default function TaskModal({
               <button className="kb-modal-close" onClick={() => void closeAfterSave()} aria-label="Fechar">✕</button>
             </div>
           </div>
+          {sharedStageDeliveryCount > 1 ? <p className="tm-shared-stage-hint">Esta etapa serve {sharedStageDeliveryCount} Criativos. Abra o Criativo desejado para mudar apenas o andamento dele.</p> : null}
+          </>
         ) : (
           <div className="tm-head tm-head-plain">
             <div className="tm-head-text">
@@ -2007,7 +2063,7 @@ export default function TaskModal({
                 currentTaskId={liveTask.id}
                 candidatesFor={chainCandidates}
                 candidateDetail={stepCandidateDetail}
-                busy={busy}
+                busy={busy || statusBusy}
                 canOpen={Boolean(onOpenRelatedTask)}
                 team={adminReviewers}
                 onOpenStep={(card) => void openRelatedTask(card)}
@@ -2050,12 +2106,14 @@ export default function TaskModal({
                         card={m}
                         label={isDeferredTask(m) ? `${m.title} · futura` : m.title}
                         team={adminReviewers}
-                        busy={busy}
+                        busy={busy || statusBusy}
                         canOpen={Boolean(onOpenRelatedTask)}
                         onOpen={() => void openRelatedTask(m)}
                         onUnlink={() => void unlinkMember(m.id, liveTask.id)}
                         unlinkTitle={isRecurringParent ? `Remover ligação com ${m.title}` : `Desvincular ${m.title} do plano`}
                         lockDateWhenDone={isRecurringParent}
+                        editableFields={isFlowDelivery(m) ? "status" : kindDef(m.kind).isPlan || Boolean(m.recurrence_cadence) ? "none" : "all"}
+                        statusTitle={isFlowDelivery(m) ? "Muda a primeira etapa pendente apenas nesta Entrega" : undefined}
                         onPatch={patchRelatedCard}
                         onComment={commentRelatedCard}
                       />

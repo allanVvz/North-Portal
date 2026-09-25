@@ -48,12 +48,12 @@ export function justCompleted(
   return !before.completed_at && Boolean(after.completed_at);
 }
 
-type WorkflowParent = { delivery: TaskRecord; workflowStepId: string };
+type WorkflowParent = { delivery: TaskRecord; workflowStepId: string; statusOverride: TaskRecord["status"] | null };
 
 async function parentsOf(admin: AdminClient, childId: string): Promise<WorkflowParent[]> {
-  const { data, error } = await admin.from("task_links").select("parent_id,workflow_step_id").eq("child_id", childId).eq("relation_kind", "workflow_step");
+  const { data, error } = await admin.from("task_links").select("parent_id,workflow_step_id,status_override").eq("child_id", childId).eq("relation_kind", "workflow_step");
   if (error) throw error;
-  const links = (data ?? []) as { parent_id: string; workflow_step_id: string | null }[];
+  const links = (data ?? []) as { parent_id: string; workflow_step_id: string | null; status_override: TaskRecord["status"] | null }[];
   const ids = links.map((link) => link.parent_id);
   if (!ids.length) return [];
   const { data: rows, error: rowsError } = await admin.from("tasks").select(TASK_COLUMNS).in("id", ids);
@@ -64,16 +64,16 @@ async function parentsOf(admin: AdminClient, childId: string): Promise<WorkflowP
   }));
   return links.flatMap((link) => {
     const delivery = deliveries.get(link.parent_id);
-    return delivery && link.workflow_step_id ? [{ delivery, workflowStepId: link.workflow_step_id }] : [];
+    return delivery && link.workflow_step_id ? [{ delivery, workflowStepId: link.workflow_step_id, statusOverride: link.status_override ?? null }] : [];
   });
 }
 
-async function stepsOf(admin: AdminClient, parentId: string): Promise<{ id: string; workflowStepId: string }[]> {
-  const { data, error } = await admin.from("task_links").select("child_id,workflow_step_id").eq("parent_id", parentId).eq("relation_kind", "workflow_step");
+async function stepsOf(admin: AdminClient, parentId: string): Promise<{ id: string; workflowStepId: string; statusOverride: TaskRecord["status"] | null; completedAtOverride: string | null }[]> {
+  const { data, error } = await admin.from("task_links").select("child_id,workflow_step_id,status_override,completed_at_override").eq("parent_id", parentId).eq("relation_kind", "workflow_step");
   if (error) throw error;
-  return ((data ?? []) as { child_id: string; workflow_step_id: string | null }[])
-    .filter((row): row is { child_id: string; workflow_step_id: string } => Boolean(row.workflow_step_id))
-    .map((row) => ({ id: row.child_id, workflowStepId: row.workflow_step_id }));
+  return ((data ?? []) as { child_id: string; workflow_step_id: string | null; status_override: TaskRecord["status"] | null; completed_at_override: string | null }[])
+    .filter((row): row is typeof row & { workflow_step_id: string } => Boolean(row.workflow_step_id))
+    .map((row) => ({ id: row.child_id, workflowStepId: row.workflow_step_id, statusOverride: row.status_override ?? null, completedAtOverride: row.completed_at_override ?? null }));
 }
 
 async function linkStep(admin: AdminClient, parentId: string, childId: string, step: WorkflowStepDef): Promise<void> {
@@ -210,10 +210,10 @@ export async function settleWorkflowDelivery(admin: AdminClient, parentId: strin
   if (links.length !== workflow.steps.length) return false;
   const declared = new Set(workflow.steps.map((step) => step.workflow_step_id));
   if (links.some((link) => !declared.has(link.workflowStepId))) return false;
-  const { data, error } = await admin.from("tasks").select("completed_at").in("id", links.map((l) => l.id));
+  const { data, error } = await admin.from("tasks").select("id,completed_at").in("id", links.map((l) => l.id));
   if (error) throw error;
-  const completedSteps = (data ?? []) as { completed_at: string | null }[];
-  if (!completedSteps.every((step) => Boolean(step.completed_at))) return false;
+  const completedById = new Map(((data ?? []) as { id: string; completed_at: string | null }[]).map((step) => [step.id, step.completed_at]));
+  if (!links.every((link) => Boolean(link.statusOverride === null ? completedById.get(link.id) : link.completedAtOverride))) return false;
 
   // O banco projeta a conclusão do pai a partir de todas as etapas declaradas.
   // Não escrever `tasks.status` aqui: uma escrita direta concorreria com essa
@@ -245,7 +245,10 @@ export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord,
 
   const today = todayIso();
 
-  for (const { delivery, workflowStepId } of parents) {
+  for (const { delivery, workflowStepId, statusOverride } of parents) {
+    // Um override pertence à Entrega. A conclusão do card compartilhado não
+    // pode avançar uma ligação que foi ajustada individualmente.
+    if (statusOverride !== null) continue;
     if (!delivery.workflow_version_id) continue;
     const workflow = await workflowByVersionId(admin, delivery.workflow_version_id);
     if (!workflow?.steps.length) continue;
@@ -253,6 +256,21 @@ export async function advanceFlow(admin: AdminClient, completedStep: TaskRecord,
     if (created) outcome.created.push(created);
     if (await settleWorkflowDelivery(admin, delivery.id, actorId)) outcome.finished.push(delivery.id);
   }
+  return outcome;
+}
+
+/** Avança apenas a Entrega cujo vínculo de etapa foi concluído na interface. */
+export async function advanceDeliveryForStep(admin: AdminClient, deliveryId: string, childId: string, actorId: string | null = null): Promise<AdvanceOutcome> {
+  const outcome: AdvanceOutcome = { created: [], finished: [] };
+  const [step, parents] = await Promise.all([getAdminTask(admin, childId), parentsOf(admin, childId)]);
+  const parent = parents.find(({ delivery }) => delivery.id === deliveryId);
+  if (!step || !parent?.delivery.workflow_version_id) return outcome;
+  if (parent.statusOverride !== "aprovado" && (parent.statusOverride !== null || !step.completed_at)) return outcome;
+  const workflow = await workflowByVersionId(admin, parent.delivery.workflow_version_id);
+  if (!workflow?.steps.length) return outcome;
+  const created = await advanceOneDelivery(admin, parent.delivery, step, workflow, parent.workflowStepId, todayIso(), actorId);
+  if (created) outcome.created.push(created);
+  if (await settleWorkflowDelivery(admin, parent.delivery.id, actorId)) outcome.finished.push(parent.delivery.id);
   return outcome;
 }
 

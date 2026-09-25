@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceFlow, justCompleted, materializeFirstStep, nextFlowStepCardOf } from "./advance";
+import { advanceDeliveryForStep, advanceFlow, justCompleted, materializeFirstStep, nextFlowStepCardOf } from "./advance";
 import { flowStepTaskId } from "./ids";
 import { RECURRENCE_GROUP_KEY } from "@/lib/recurrenceState";
 import type { AdminClient } from "@/lib/automations/taskAccess";
@@ -306,6 +306,30 @@ describe("nextFlowStepCardOf", () => {
     await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
     const next = await nextFlowStepCardOf(admin, doneStep("card-roteiro", "roteiro"));
     expect(next?.id).toBe(flowStepTaskId("entrega", "captacao"));
+  });
+
+  it("conclusão global ignora a Entrega que tem andamento próprio", async () => {
+    const state = world();
+    state.tasks.push(delivery("outra-entrega", "Outra peça") as unknown as Row);
+    state.task_links[0].status_override = "em_producao";
+    state.task_links.push({ parent_id: "outra-entrega", child_id: "card-roteiro", relation_kind: "workflow_step", workflow_step_id: "ws-roteiro", slot: "roteiro", position: 10 });
+    const { admin } = fakeAdmin(state);
+    const outcome = await advanceFlow(admin, doneStep("card-roteiro", "roteiro"));
+    expect(outcome.created.map((step) => step.id)).toEqual([flowStepTaskId("outra-entrega", "captacao")]);
+    expect(state.task_links.some((link) => link.parent_id === "entrega" && link.slot === "captacao")).toBe(false);
+  });
+
+  it("conclusão contextual avança só a Entrega escolhida mesmo com card compartilhado aberto", async () => {
+    const state = world();
+    state.tasks[1] = { ...state.tasks[1], status: "backlog", completed_at: null };
+    state.tasks.push(delivery("outra-entrega", "Outra peça") as unknown as Row);
+    state.task_links[0].status_override = "aprovado";
+    state.task_links[0].completed_at_override = "2026-09-25T10:00:00Z";
+    state.task_links.push({ parent_id: "outra-entrega", child_id: "card-roteiro", relation_kind: "workflow_step", workflow_step_id: "ws-roteiro", slot: "roteiro", position: 10 });
+    const { admin } = fakeAdmin(state);
+    const outcome = await advanceDeliveryForStep(admin, "entrega", "card-roteiro");
+    expect(outcome.created.map((step) => step.id)).toEqual([flowStepTaskId("entrega", "captacao")]);
+    expect(state.task_links.some((link) => link.parent_id === "outra-entrega" && link.slot === "captacao")).toBe(false);
   });
 
   it("reutiliza o card externo já ligado ao passo seguinte", async () => {

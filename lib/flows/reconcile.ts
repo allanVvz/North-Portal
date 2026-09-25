@@ -14,7 +14,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, errorMessage } from "@/lib/automations/taskAccess";
-import { advanceFlow, materializeFirstStep } from "./advance";
+import { advanceDeliveryForStep, advanceFlow, materializeFirstStep } from "./advance";
 
 export type ReconcileSummary = { checked: number; created: number; errors: { taskId: string; message: string }[] };
 
@@ -75,6 +75,26 @@ export async function reconcileFlows(): Promise<ReconcileSummary> {
       // Per-step isolation: one broken template must not stop the sweep for
       // every other flow in the agency.
       summary.errors.push({ taskId: step.id, message: errorMessage(advanceError) });
+    }
+  }
+
+  // Conclusões contextuais não alteram tasks.completed_at. Varra também os
+  // vínculos concluídos para recuperar uma próxima etapa se a requisição caiu
+  // entre gravar o andamento e materializar o sucessor.
+  const { data: contextual, error: contextualError } = await admin.from("task_links")
+    .select("parent_id,child_id")
+    .eq("relation_kind", "workflow_step")
+    .eq("status_override", "aprovado")
+    .order("created_at", { ascending: false })
+    .limit(BATCH);
+  if (contextualError) throw contextualError;
+  for (const link of contextual ?? []) {
+    summary.checked += 1;
+    try {
+      const outcome = await advanceDeliveryForStep(admin, link.parent_id, link.child_id);
+      summary.created += outcome.created.length;
+    } catch (advanceError) {
+      summary.errors.push({ taskId: link.child_id, message: errorMessage(advanceError) });
     }
   }
   return summary;

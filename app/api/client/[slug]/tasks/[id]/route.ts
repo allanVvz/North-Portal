@@ -6,7 +6,7 @@ import { requireClientAccess } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { appendedCommentPayload, getAdminTask } from "@/lib/automations/taskAccess";
 import { flowCommentTargetId } from "@/lib/flows/commentTarget";
-import { isFlowDelivery } from "@/lib/taskRelations";
+import { deliveryParentIdsOf, isFlowDelivery } from "@/lib/taskRelations";
 import { clientApprovalActionSchema, HttpError, validateSlug } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -34,6 +34,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     if (!task) throw new HttpError(404, "Tarefa nao encontrada.");
     if (isFlowDelivery(task)) {
       throw new HttpError(409, "A Entrega acompanha a etapa atual; aprove ou solicite ajustes nela.");
+    }
+    if (action === "aprovar" && deliveryParentIdsOf(task).length > 1) {
+      throw new HttpError(409, "Esta etapa é usada por várias Entregas. Peça à equipe para aprovar no Criativo correto.");
     }
     const isOwnApprover = task.approver_id === session.userId;
     const isManager = session.level === "gerente";

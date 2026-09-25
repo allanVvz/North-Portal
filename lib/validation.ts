@@ -433,6 +433,11 @@ export type TaskParentLink = {
   position: number;
   relation_kind: TaskRelationKind;
   workflow_step_id?: string | null;
+  // Andamento contextual desta etapa nesta Entrega. Null acompanha o card
+  // compartilhado; um valor explícito pertence somente a este vínculo.
+  status_override?: TaskStatus | null;
+  completed_at_override?: string | null;
+  paused_from_status?: TaskStatus | null;
 };
 
 export type TaskRecord = {

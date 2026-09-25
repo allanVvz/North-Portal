@@ -168,6 +168,21 @@ export function stepOrderOf(task: TaskRelation, parentId: string): number {
   return (task.parents ?? []).find((p) => p.id === parentId)?.position ?? 0;
 }
 
+/** Lê o andamento do elo desta Entrega sem alterar o card compartilhado. */
+export function stageInDelivery<T extends TaskRelation>(task: T, parentId: string): T {
+  const link = task.parents.find((parent) => parent.id === parentId && parent.relation_kind === "workflow_step");
+  if (!link?.status_override || !("status" in task)) return task;
+  const original = task as T & Pick<TaskRecord, "status" | "completed_at" | "payload">;
+  return {
+    ...task,
+    status: link.status_override,
+    completed_at: link.completed_at_override ?? null,
+    payload: link.status_override === "parada" && link.paused_from_status
+      ? { ...original.payload, pre_parada_status: link.paused_from_status }
+      : original.payload,
+  } as T;
+}
+
 /** Etapas de uma entrega: filhos ligados COM slot, na ordem da corrente.
  *
  * Ordenar aqui dentro (e não em cada chamador) é de propósito: numeração do
@@ -177,6 +192,7 @@ export function stepOrderOf(task: TaskRelation, parentId: string): number {
 export function flowStepsOf<T extends TaskRelation>(parentId: string, tasks: readonly T[]): T[] {
   return tasks
     .filter((task) => (task.parents ?? []).some((p) => p.id === parentId && relationKindOf(p) === "workflow_step"))
+    .map((task) => stageInDelivery(task, parentId))
     .sort((a, b) => stepOrderOf(a, parentId) - stepOrderOf(b, parentId));
 }
 
@@ -255,7 +271,8 @@ export function childrenByParent<T extends TaskRelation>(tasks: readonly T[]): M
   for (const task of tasks) {
     for (const parentId of parentIdsOf(task)) {
       const list = map.get(parentId);
-      if (list) list.push(task); else map.set(parentId, [task]);
+      const member = stageInDelivery(task, parentId);
+      if (list) list.push(member); else map.set(parentId, [member]);
     }
   }
   return map;

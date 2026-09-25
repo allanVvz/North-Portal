@@ -3,7 +3,7 @@ import { apiError } from "@/lib/api";
 import { deleteTask, getClient, getClientFlowFlags, getTaskById, promoteTaskToFlowDelivery, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceWeekdays } from "@/lib/recurrence";
-import { isFlowDelivery, recurrenceParentIdOf } from "@/lib/taskRelations";
+import { deliveryParentIdsOf, isFlowDelivery, recurrenceParentIdOf } from "@/lib/taskRelations";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
@@ -89,6 +89,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
+    if (patch.status !== undefined && patch.status !== current.status && deliveryParentIdsOf(current).length > 1) {
+      throw new HttpError(409, "Esta etapa serve vários Criativos. Abra a Entrega desejada e altere o andamento nela.");
+    }
     if (patch.status === "aprovado" && !current.completed_at) {
       const feedbackProblem = await feedbackMetricApprovalProblem(createAdminClient(), current.id);
       if (feedbackProblem) throw new HttpError(409, feedbackProblem);

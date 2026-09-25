@@ -8,6 +8,7 @@ import { requireAdmin } from "@/lib/supabase/auth";
 import { workflowByVersionId } from "@/lib/workflows";
 import { HttpError } from "@/lib/validation";
 import { BAITA_DRIVE_PLAN_ID, provisionCreativeDriveWorkspace } from "@/lib/creativeDrive";
+import { flowStepsOf } from "@/lib/taskRelations";
 
 async function refreshCreativeFolders(creativeTaskId: string) {
   const db = createAdminClient();
@@ -65,7 +66,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (child.task_type_id !== step.task_type_id) {
         throw new HttpError(400, `Escolha um card do subtipo ${step.label}.`);
       }
-      const children = await listRelatedTasks(id);
+      const children = flowStepsOf(id, await listRelatedTasks(id));
       const previous = workflow!.steps.filter((candidate) => candidate.order_index < step.order_index)
         .find((candidate) => !children.some((task) => task.completed_at && task.parents.some((link) => link.id === id && link.workflow_step_id === candidate.workflow_step_id)));
       if (previous) throw new HttpError(409, `Conclua ${previous.label} antes de vincular ${step.label}.`);
@@ -122,7 +123,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
     const { data, error } = await db.from("task_links")
-      .update({ child_id: input.child_id })
+      .update({ child_id: input.child_id, status_override: null, completed_at_override: null, paused_from_status: null })
       .eq("parent_id", id)
       .eq("child_id", input.current_child_id)
       .eq("relation_kind", "workflow_step")

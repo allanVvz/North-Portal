@@ -46,7 +46,7 @@
 
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord, type AdminClient } from "@/lib/automations/taskAccess";
-import { isFlowDelivery, stepOrderOf } from "@/lib/taskRelations";
+import { isFlowDelivery, stageInDelivery, stepOrderOf } from "@/lib/taskRelations";
 import { HttpError, type TaskRecord } from "@/lib/validation";
 import { currentFlowStepOf } from "./currentStep";
 
@@ -61,11 +61,11 @@ export const COMMENT_STAGE_AMBIGUOUS = "COMMENT_STAGE_AMBIGUOUS";
 async function adminFlowStepsOf(admin: AdminClient, deliveryId: string): Promise<TaskRecord[]> {
   const { data: links, error: linksError } = await admin
     .from("task_links")
-    .select("child_id,slot,position")
+    .select("child_id,slot,position,status_override,completed_at_override,paused_from_status")
     .eq("parent_id", deliveryId)
     .eq("relation_kind", "workflow_step");
   if (linksError) throw linksError;
-  const rows = (links ?? []) as { child_id: string; slot: string | null; position: number | null }[];
+  const rows = (links ?? []) as { child_id: string; slot: string | null; position: number | null; status_override?: TaskRecord["status"] | null; completed_at_override?: string | null; paused_from_status?: TaskRecord["status"] | null }[];
   if (!rows.length) return [];
 
   const { data: steps, error: stepsError } = await admin
@@ -74,9 +74,9 @@ async function adminFlowStepsOf(admin: AdminClient, deliveryId: string): Promise
     .in("id", rows.map((r) => r.child_id));
   if (stepsError) throw stepsError;
 
-  const parents = new Map(rows.map((r) => [r.child_id, [{ id: deliveryId, relation_kind: "workflow_step" as const, slot: r.slot, position: r.position ?? 0 }]]));
+  const parents = new Map(rows.map((r) => [r.child_id, [{ id: deliveryId, relation_kind: "workflow_step" as const, slot: r.slot, position: r.position ?? 0, status_override: r.status_override ?? null, completed_at_override: r.completed_at_override ?? null, paused_from_status: r.paused_from_status ?? null }]]));
   return (steps ?? [])
-    .map((row) => ({ ...asTaskRecord(row), parents: parents.get((row as { id: string }).id) ?? [] }))
+    .map((row) => stageInDelivery({ ...asTaskRecord(row), parents: parents.get((row as { id: string }).id) ?? [] }, deliveryId))
     .sort((a, b) => stepOrderOf(a, deliveryId) - stepOrderOf(b, deliveryId));
 }
 

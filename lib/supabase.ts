@@ -81,7 +81,7 @@ export { TASK_COLUMNS } from "./taskColumns";
 // of the bare TASK_COLUMNS so `assignee` always reflects linked accounts too.
 const TASK_ASSIGNEES_JOIN = "task_assignees(profile:profiles(id,full_name))";
 // !inner NÃO: um card sem pai nenhum é o caso comum e precisa vir mesmo assim.
-const TASK_LINKS_JOIN = "task_links!task_links_child_id_fkey(parent_id,relation_kind,workflow_step_id,slot,position)";
+const TASK_LINKS_JOIN = "task_links!task_links_child_id_fkey(parent_id,relation_kind,workflow_step_id,slot,position,status_override,completed_at_override,paused_from_status)";
 const TASK_AUTHOR_JOIN = "created_by_profile:profiles!tasks_created_by_fkey(full_name)";
 const TASK_COLUMNS_WITH_ASSIGNEES = `${TASK_COLUMNS},${TASK_ASSIGNEES_JOIN},${TASK_AUTHOR_JOIN},${TASK_LINKS_JOIN}`;
 
@@ -94,7 +94,7 @@ type TaskAssigneesJoin = {
   // mesma consulta, como os responsáveis: todo o front trabalha com arrays de
   // TaskRecord e resolve pai/filho de forma síncrona (KanbanBoard, TaskModal,
   // portal). Buscar os elos à parte obrigaria a tornar assíncrono tudo isso.
-  task_links?: { parent_id: string; relation_kind: TaskParentLink["relation_kind"]; workflow_step_id: string | null; slot: string | null; position: number | null }[] | null;
+  task_links?: { parent_id: string; relation_kind: TaskParentLink["relation_kind"]; workflow_step_id: string | null; slot: string | null; position: number | null; status_override: TaskParentLink["status_override"]; completed_at_override: string | null; paused_from_status: TaskParentLink["paused_from_status"] }[] | null;
 };
 
 // Merges linked-account names into the legacy free-text `assignee` column
@@ -119,7 +119,7 @@ function mergeTaskAssigneeRow<T extends { assignee: string | null } & TaskAssign
     assignee: mergeAssigneeDisplay(rest.assignee, linkedProfiles.map((p) => p.full_name)),
     assignee_profile_ids: linkedProfiles.map((p) => p.id),
     created_by_name: author?.full_name ?? null,
-    parents: (task_links ?? []).map((l) => ({ id: l.parent_id, relation_kind: l.relation_kind, workflow_step_id: l.workflow_step_id, slot: l.slot, position: l.position ?? 0 })),
+    parents: (task_links ?? []).map((l) => ({ id: l.parent_id, relation_kind: l.relation_kind, workflow_step_id: l.workflow_step_id, slot: l.slot, position: l.position ?? 0, status_override: l.status_override, completed_at_override: l.completed_at_override, paused_from_status: l.paused_from_status })),
   };
 }
 

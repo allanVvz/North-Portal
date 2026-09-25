@@ -11,7 +11,7 @@ import type { TaskRecord } from "@/lib/validation";
 // supabase-js encadeia — e um fake explícito falha se a consulta mudar de
 // forma, que é exatamente o alarme que se quer.
 function fakeAdmin(
-  links: { child_id: string; slot: string | null; position: number | null }[],
+  links: { child_id: string; slot: string | null; position: number | null; status_override?: TaskRecord["status"] | null; completed_at_override?: string | null }[],
   tasks: Record<string, unknown>[],
   taskAssignees: { task_id: string; profile_id: string }[] = [],
 ): AdminClient {
@@ -56,6 +56,16 @@ async function expectAmbiguous(promise: Promise<unknown>, candidates: string[]) 
 }
 
 describe("flowCommentTargetId — onde um comentário no card pai é gravado", () => {
+  it("usa o status desta Entrega ao escolher a etapa, sem confundir o card compartilhado", async () => {
+    const admin = fakeAdmin(
+      [
+        { child_id: "roteiro", slot: "roteiro", position: 10, status_override: "aprovado", completed_at_override: "2026-09-25T12:00:00Z" },
+        { child_id: "captacao", slot: "captacao", position: 20 },
+      ],
+      [step("roteiro", null, { status: "backlog" }), step("captacao", null)],
+    );
+    expect(await flowCommentTargetId(admin, delivery())).toBe("captacao");
+  });
   it("desvia para a primeira etapa ainda aberta", async () => {
     const admin = fakeAdmin(
       [

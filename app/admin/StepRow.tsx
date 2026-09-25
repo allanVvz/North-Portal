@@ -59,6 +59,8 @@ export default function StepRow({
   onPatch,
   onComment,
   lockDateWhenDone = false,
+  editableFields = "all",
+  statusTitle,
 }: {
   card: TaskRecord;
   label: string;
@@ -83,6 +85,9 @@ export default function StepRow({
    * porque esta trava é só do jeito que o MOLDE mostra a linha, não um
    * estado do card. */
   lockDateWhenDone?: boolean;
+  /** Pais exibem andamento contextual, mas data e responsável pertencem à etapa. */
+  editableFields?: "all" | "status" | "none";
+  statusTitle?: string;
 }) {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -121,7 +126,7 @@ export default function StepRow({
       {/* Não usar .tm-step-line: é o traço absoluto de 2px do stepper, e a
           linha inteira (check, título, comentários) sumia atrás do conteúdo. */}
       <div className="tm-steprow-head">
-        <input
+        {editableFields === "all" ? <input
           type="checkbox"
           className="tm-step-check"
           checked={done}
@@ -129,7 +134,7 @@ export default function StepRow({
           onChange={(event) => void run({ status: event.target.checked ? "aprovado" : "em_producao" })}
           title={done ? "Reabrir" : "Concluir sem abrir o card"}
           aria-label={done ? `Reabrir ${label}` : `Concluir ${label}`}
-        />
+        /> : <span className="tm-step-check" aria-hidden="true" />}
         {showState ? <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span> : null}
         <button type="button" className="tm-member-open" onClick={onOpen} disabled={!canOpen || busy || isOpenCard} title={`Abrir ${card.title}`}>
           {leadingIcon ?? <TaskKindIcon kind={card.kind} size="sm" />}
@@ -142,20 +147,20 @@ export default function StepRow({
           <select
             className="tm-step-status"
             aria-label={`Status de ${label}`}
-            title="Status"
+            title={statusTitle ?? (editableFields === "none" ? "Abra o card para editar a etapa" : "Status")}
             value={card.status}
-            disabled={disabled}
+            disabled={disabled || editableFields === "none"}
             onChange={(event) => void run({ status: event.target.value as TaskStatus })}
           >
             {COLUMNS.map((column) => <option key={column.status} value={column.status}>{column.label}</option>)}
           </select>
-          <input
+          {editableFields === "all" ? <><input
             type="date"
             className="tm-step-date"
             aria-label={`Data prevista de ${label}`}
             title={dateLocked ? "Data travada — ciclo concluído. Abra a execução para alterar." : "Data prevista"}
             value={card.due_date ?? ""}
-            disabled={disabled || dateLocked}
+            disabled={disabled || dateLocked || editableFields !== "all"}
             onChange={(event) => {
               const value = event.target.value || null;
               void run({ due_date: value, start_date: value, end_date: value });
@@ -166,7 +171,7 @@ export default function StepRow({
             aria-label={`Responsável por ${label}`}
             title="Responsável"
             value={assigneeId}
-            disabled={disabled}
+            disabled={disabled || editableFields !== "all"}
             onChange={(event) => {
               const member = team.find((candidate) => candidate.id === event.target.value);
               void run(member ? { assignee: member.label, assignee_profile_ids: [member.id] } : { assignee: null, assignee_profile_ids: [] });
@@ -174,7 +179,7 @@ export default function StepRow({
           >
             <option value="">{card.assignee && !assigneeId ? card.assignee : "Sem responsável"}</option>
             {team.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}
-          </select>
+          </select></> : null}
         </div>
 
         <button

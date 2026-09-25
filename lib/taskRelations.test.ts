@@ -106,6 +106,30 @@ describe("relações de tarefa (task_links)", () => {
     expect(slotOf(compartilhado, "inexistente")).toBeNull();
   });
 
+  it("lê andamentos diferentes do mesmo card em duas Entregas sem alterar o original", () => {
+    const shared = {
+      id: "captacao", status: "backlog", completed_at: null, payload: {},
+      parents: [
+        { ...elo("entrega-a", "captacao"), status_override: "revisao" as const, completed_at_override: null },
+        { ...elo("entrega-b", "captacao"), status_override: "aprovado" as const, completed_at_override: "2026-09-25T10:00:00Z" },
+      ],
+    };
+    expect(flowStepsOf("entrega-a", [shared])[0]).toMatchObject({ status: "revisao", completed_at: null });
+    expect(flowStepsOf("entrega-b", [shared])[0]).toMatchObject({ status: "aprovado", completed_at: "2026-09-25T10:00:00Z" });
+    expect(childrenByParent([shared]).get("entrega-a")?.[0]).toMatchObject({ status: "revisao" });
+    expect(childrenByParent([shared]).get("entrega-b")?.[0]).toMatchObject({ status: "aprovado" });
+    expect(shared.status).toBe("backlog");
+  });
+
+  it("congela o progresso de uma etapa parada no estado anterior do vínculo", () => {
+    const shared = {
+      status: "backlog", completed_at: null, payload: {},
+      parents: [{ ...elo("entrega-a", "roteiro"), status_override: "parada" as const, completed_at_override: null, paused_from_status: "revisao" as const }],
+    };
+    expect(flowStepsOf("entrega-a", [shared])[0]).toMatchObject({ status: "parada", payload: { pre_parada_status: "revisao" } });
+    expect(shared.payload).toEqual({});
+  });
+
   it("usa somente a execução aberta mais recente de uma rotina", () => {
     const tasks = [
       { payload: { recurrence_parent_id: "routine" }, completed_at: "2026-09-01T12:00:00Z", due_date: "2026-09-01", created_at: "2026-09-01T00:00:00Z" },
