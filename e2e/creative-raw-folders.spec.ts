@@ -36,6 +36,7 @@ test("Raw, Preview e Home do Criativo mantem os materiais nas categorias certas"
   await expect(page.locator(".creative-drive-folder-links")).toContainText("Home · finais");
   await expect(page.locator(".creative-drive-folder-links")).toContainText("Raw");
   await expect(page.locator(".creative-drive-folder-links")).toContainText("Preview");
+  await expect(page.locator(".creative-drive-folder-links")).toBeVisible();
   await page.locator(".creative-drive-tabs").getByRole("button", { name: /Classificados/ }).click();
   const audioTile = page.locator(`[data-classified-asset-id="${audio?.id}"]`);
   await expect(audioTile).toBeVisible();
@@ -43,6 +44,7 @@ test("Raw, Preview e Home do Criativo mantem os materiais nas categorias certas"
   await expect(audioTile.getByRole("link", { name: /Baixar/ })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("raw-folders-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".creative-drive-folder-links")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("raw-folders-mobile.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
 });
