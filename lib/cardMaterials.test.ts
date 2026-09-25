@@ -39,7 +39,20 @@ describe("materials in the card cascade", () => {
     const previous = { ...workspaces[0], final_versions: [
       ...workspaces[0].final_versions,
       { id: "previous", asset_id: "old-asset", version_number: 0, state: "superseded" as const, promoted_at: "2026-09-19T00:00:00Z" },
-    ], assets: [...workspaces[0].assets, { ...workspaces[0].assets[0], id: "old-asset", drive_file_id: "fallback" }] };
+    ], assets: [...workspaces[0].assets, { ...workspaces[0].assets[0], id: "old-asset", drive_file_id: "fallback", created_at: "2026-09-19T00:00:00Z" }] };
     expect(materialCoverCandidates([previous, workspaces[1]]).map((item) => item.fileId)).toEqual(["latest", "older", "fallback"]);
+  });
+
+  it("uses the newest Home file before Preview and never chooses classified raw", () => {
+    const base = workspaces[0];
+    const assets = [
+      { ...base.assets[0], id: "preview-new", drive_file_id: "preview-new", role: "preview" as const, created_at: "2026-09-24T00:00:00Z" },
+      { ...base.assets[0], id: "home-new", drive_file_id: "home-new", created_at: "2026-09-23T00:00:00Z" },
+      { ...base.assets[0], id: "raw", drive_file_id: "raw", role: "raw" as const, created_at: "2026-09-25T00:00:00Z" },
+    ];
+    expect(materialCoverCandidates([{ ...base, assets: [...base.assets, ...assets] }]).map((item) => item.fileId))
+      .toEqual(["home-new", "older", "preview-new"]);
+    expect(materialCoverCandidates([{ ...base, assets: assets.filter((asset) => asset.role !== "final") }]).map((item) => item.fileId))
+      .toEqual(["preview-new"]);
   });
 });

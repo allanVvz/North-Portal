@@ -15,13 +15,15 @@ import { agencyToday } from "../recurringState";
 import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
 import { subtypeLabel } from "@/lib/taskCatalog";
 import PlanSearchBar from "./PlanSearchBar";
+import CreativeFeedView from "./CreativeFeedView";
 import StrategicPlanDeliveriesView from "./StrategicPlanDeliveriesView";
 import { hydratePlanDeliveries } from "./strategicTree";
 import { isRecurrenceTemplate } from "@/lib/recurrenceState";
 import type { ActionPlan, FlowDelivery, ParentCard } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
+import type { CreativeMaterialWorkspace } from "@/lib/cardMaterials";
 
-type View = "lista" | "estrategica";
+type View = "lista" | "estrategica" | "feed";
 type EditingTarget = { task: TaskRecord; clientName: string; clientSlug: string; relatedTasks: TaskRecord[]; parentTask?: TaskRecord };
 
 function matches(parent: ParentCard, query: string) {
@@ -115,6 +117,10 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   const searchParams = useSearchParams();
   const [view, setView] = useState<View>("lista");
   const [query, setQuery] = useState("");
+  const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
+  const [coversLoading, setCoversLoading] = useState(false);
+  const [coversError, setCoversError] = useState(false);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<EditingTarget | null>(null);
   // A URL representa o modal aberto. Depois de atender esse deep link, guardar
@@ -132,8 +138,34 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   }));
   const orderedPlans = useMemo(() => sorted(hydratedPlans), [hydratedPlans, sort]);
   const orderedDeliveries = useMemo(() => sorted(visibleDeliveriesSource), [visibleDeliveriesSource, sort]);
-  const visiblePlans = useMemo(() => orderedPlans.filter((card) => matches(card, query)), [orderedPlans, query]);
-  const visibleDeliveries = useMemo(() => orderedDeliveries.filter((card) => matches(card, query)), [orderedDeliveries, query]);
+  const clientPlans = useMemo(() => orderedPlans.filter((card) => !selectedClient || card.clientName === selectedClient), [orderedPlans, selectedClient]);
+  const clientDeliveries = useMemo(() => orderedDeliveries.filter((card) => !selectedClient || card.clientName === selectedClient), [orderedDeliveries, selectedClient]);
+  const visiblePlans = useMemo(() => clientPlans.filter((card) => matches(card, query)), [clientPlans, query]);
+  const visibleDeliveries = useMemo(() => clientDeliveries.filter((card) => matches(card, query)), [clientDeliveries, query]);
+  const feedDeliveries = useMemo(() => visibleDeliveries.filter((card) => card.kind === "criativo" && !card.subtype), [visibleDeliveries]);
+
+  useEffect(() => {
+    if (view !== "feed") return;
+    let active = true;
+    const read = async (method: "GET" | "POST") => {
+      const response = await fetch("/api/admin/drive/baita/materials", method === "POST"
+        ? { method, headers: { "Content-Type": "application/json" }, body: "{}", cache: "no-store" }
+        : { cache: "no-store" });
+      if (!response.ok) return false;
+      const data = await response.json() as { workspaces?: CreativeMaterialWorkspace[] };
+      if (active && data.workspaces) setMaterialWorkspaces(data.workspaces);
+      return Boolean(data.workspaces);
+    };
+    setCoversLoading(true);
+    setCoversError(false);
+    void (async () => {
+      await read("GET").catch(() => false);
+      if (!active) return;
+      const synced = await read("POST").catch(() => false);
+      if (active) { setCoversError(!synced); setCoversLoading(false); }
+    })();
+    return () => { active = false; };
+  }, [view]);
 
   useEffect(() => {
     const id = searchParams.get("task");
@@ -159,8 +191,9 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
       <div className="kb-viewtabs" aria-label="Visualização de Planos e Entregas">
         <button type="button" className={view === "lista" ? "on" : ""} onClick={() => setView("lista")}>Lista</button>
         <button type="button" className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
+        <button type="button" className={view === "feed" ? "on" : ""} onClick={() => setView("feed")}>Feed</button>
       </div>
-      <PlanSearchBar q={query} onQChange={setQuery} plans={all} placeholder="Buscar por Plano, Entrega ou etapa…" />
+      <PlanSearchBar q={query} onQChange={setQuery} plans={all} selectedClient={selectedClient} onClientChange={setSelectedClient} placeholder={view === "feed" ? "Buscar Criativo ou etapa…" : "Buscar por Plano, Entrega ou etapa…"} />
       <div className="kb-spacer" />
       <NewTaskButton label="+ Tarefa" className="admin-btn primary kb-newtask-btn" />
       <SortMenu sort={sort} onChange={setSort} />
@@ -168,7 +201,8 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
     {view === "lista" ? <div className="parent-columns">
       <ParentColumn title="Planos" cards={visiblePlans} empty={query ? "Nenhum Plano para essa busca." : "Nenhum Plano ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} />
       <ParentColumn title="Entregas" cards={visibleDeliveries} empty={query ? "Nenhuma Entrega para essa busca." : "Nenhuma Entrega ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} />
-    </div> : <StrategicPlanDeliveriesView plans={orderedPlans} deliveries={orderedDeliveries} query={query} onOpenPlan={open} onOpenPlanActivity={openChild} onOpenDelivery={open} onOpenStep={openChild} />}
+    </div> : view === "estrategica" ? <StrategicPlanDeliveriesView plans={clientPlans} deliveries={clientDeliveries} query={query} onOpenPlan={open} onOpenPlanActivity={openChild} onOpenDelivery={open} onOpenStep={openChild} />
+      : <CreativeFeedView deliveries={feedDeliveries} workspaces={materialWorkspaces} loading={coversLoading} error={coversError} onOpen={open} />}
     {editing ? <CardModalLauncher task={editing.task} clientName={editing.clientName} clientSlug={editing.clientSlug} initialRelatedTasks={editing.relatedTasks} parentTask={editing.parentTask} onClose={() => { setEditing(null); router.refresh(); }} onSaved={() => { setEditing(null); router.refresh(); }} onDeleted={() => { setEditing(null); router.refresh(); }} onChanged={() => router.refresh()} /> : null}
   </div>;
 }

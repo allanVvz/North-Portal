@@ -40,12 +40,13 @@ describe("client creative material", () => {
     { id: "f1", role: "final", state: "active", web_view_link: "https://drive/final", created_at: "2026-09-22" },
   ];
 
-  it("prefere o final atual", () => {
+  it("prefere o arquivo mais recente da Home", () => {
     expect(selectCreativeMaterialUrl(assets, [{ asset_id: "f1", state: "current", version_number: 3 }])).toBe("https://drive/final");
+    expect(selectCreativeMaterialUrl([...assets, { id: "f2", role: "final", state: "active", web_view_link: "https://drive/final-new", created_at: "2026-09-23" }], [])).toBe("https://drive/final-new");
   });
 
   it("cai apenas para o Preview individual, nunca para EDICAO", () => {
-    expect(selectCreativeMaterialUrl(assets, [])).toBe("https://drive/preview-new");
+    expect(selectCreativeMaterialUrl(assets.filter((asset) => asset.role !== "final"), [])).toBe("https://drive/preview-new");
     expect(selectCreativeMaterialUrl([], [])).toBeNull();
   });
 });

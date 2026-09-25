@@ -28,15 +28,9 @@ export function creativeDriveAppProperties(identity: CreativeDriveIdentity, role
 export type MaterialAsset = { id: string; role: string; state: string; web_view_link: string | null; created_at: string };
 export type MaterialVersion = { asset_id: string; state: string; version_number: number };
 
-/** Final atual vence; sem ele, usa somente o Preview mais recente do Criativo. */
-export function selectCreativeMaterialUrl(assets: MaterialAsset[], versions: MaterialVersion[]): string | null {
-  const currentFinal = versions
-    .filter((version) => version.state === "current")
-    .sort((a, b) => b.version_number - a.version_number)
-    .map((version) => assets.find((asset) => asset.id === version.asset_id && asset.state === "active" && asset.web_view_link))
-    .find(Boolean);
-  if (currentFinal?.web_view_link) return currentFinal.web_view_link;
+/** The client portal follows the same Home -> Preview folder priority. */
+export function selectCreativeMaterialUrl(assets: MaterialAsset[], _versions: MaterialVersion[]): string | null {
   return assets
-    .filter((asset) => asset.role === "preview" && asset.state === "active" && asset.web_view_link)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.web_view_link ?? null;
+    .filter((asset) => (asset.role === "final" || asset.role === "preview") && asset.state === "active" && asset.web_view_link)
+    .sort((a, b) => (a.role === b.role ? b.created_at.localeCompare(a.created_at) : a.role === "final" ? -1 : 1))[0]?.web_view_link ?? null;
 }

@@ -63,13 +63,20 @@ export function currentFinalAsset(workspace: CreativeMaterialWorkspace): Creativ
 }
 
 export function materialCoverCandidates(workspaces: readonly CreativeMaterialWorkspace[]): TaskCover[] {
-  const promoted = workspaces.flatMap((workspace) => workspace.final_versions.flatMap((version) => {
-    if (version.state === "trashed") return [];
-    const asset = workspace.assets.find((item) => item.id === version.asset_id && item.state === "active");
-    return asset ? [{ version, asset }] : [];
-  })).sort((a, b) => {
-    if (a.version.state !== b.version.state) return a.version.state === "current" ? -1 : 1;
-    return b.version.promoted_at.localeCompare(a.version.promoted_at);
-  });
-  return promoted.map(({ asset }) => ({ fileId: asset.drive_file_id, source: "comments" as const }));
+  // The physical folder decides the cover: newest file in Home, then newest
+  // file in Preview. Keep all older files as thumbnail fallbacks. A final
+  // version can remain in the ledger after a file moves to Preview, so the
+  // asset's current role is the source of truth here.
+  const active = workspaces.flatMap((workspace) => workspace.assets)
+    .filter((asset) => asset.state === "active" && (asset.role === "final" || asset.role === "preview"))
+    .sort((a, b) => {
+      if (a.role !== b.role) return a.role === "final" ? -1 : 1;
+      return b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id);
+    });
+  const seen = new Set<string>();
+  return active.filter((asset) => {
+    if (seen.has(asset.drive_file_id)) return false;
+    seen.add(asset.drive_file_id);
+    return true;
+  }).map((asset) => ({ fileId: asset.drive_file_id, source: "comments" as const }));
 }

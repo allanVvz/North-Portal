@@ -12,11 +12,15 @@ export default function PlanSearchBar({
   onQChange,
   plans,
   placeholder,
+  selectedClient,
+  onClientChange,
 }: {
   q: string;
   onQChange: (value: string) => void;
   plans: ActionPlan[];
   placeholder?: string;
+  selectedClient?: string | null;
+  onClientChange?: (name: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -48,6 +52,7 @@ export default function PlanSearchBar({
   return (
     <div className="kb-searchbar" ref={ref}>
       <div className="kb-searchbar-box" onClick={() => setOpen(true)}>
+        {selectedClient && onClientChange ? <span className="kb-filterchip"><b>{selectedClient}</b><button type="button" aria-label="Remover filtro de cliente" onClick={(e) => { e.stopPropagation(); onClientChange(null); }}>×</button></span> : null}
         <input
           className="kb-searchbar-input"
           value={q}
@@ -67,9 +72,9 @@ export default function PlanSearchBar({
                 <button
                   type="button"
                   key={name}
-                  className={`kb-chip ${q === name ? "on" : ""}`}
-                  aria-pressed={q === name}
-                  onClick={() => { onQChange(q === name ? "" : name); setOpen(false); }}
+                  className={`kb-chip ${(onClientChange ? selectedClient === name : q === name) ? "on" : ""}`}
+                  aria-pressed={onClientChange ? selectedClient === name : q === name}
+                  onClick={() => { if (onClientChange) onClientChange(selectedClient === name ? null : name); else onQChange(q === name ? "" : name); setOpen(false); }}
                 >
                   {name}
                 </button>
