@@ -126,7 +126,7 @@ function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDra
             {routine ? <span className="op-routine-mark" title={`Rotina ${CADENCE_LABEL[routine.cadence]?.toLowerCase() ?? ""}`}>↻ {CADENCE_LABEL[routine.cadence] ?? "Rotina"}</span> : null}
           </span>
         </span>
-        <span className="kb-card-titleline"><TaskKindIcon kind={task.kind} /><span className="kb-card-title op-card-title">{task.title}</span></span>
+        <span className="kb-card-titleline"><TaskKindIcon kind={task.kind} subtype={task.subtype} /><span className="kb-card-title op-card-title">{task.title}</span></span>
         {flowBadge || showKind || showSubtype || formato || plataforma ? (
           <span className="kb-card-meta">
             {flowBadge ? (
@@ -535,7 +535,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
                 <div className={`rec-list-row-wrap is-${tone}`} key={item.id}>
                   <button className="rec-list-row" type="button" onClick={() => open(item)}>
                     <span className="rec-list-title">
-                      <TaskKindIcon kind={item.task.kind} />
+                      <TaskKindIcon kind={item.task.kind} subtype={item.task.subtype} />
                       <span><strong title={item.task.title}>{item.task.title}</strong><small><span className={`kb-situacao s-${tone}`}>{label}</span>{item.routine ? " ↻ Rotina" : ""}</small></span>
                     </span>
                     <span>{item.clientName}</span>

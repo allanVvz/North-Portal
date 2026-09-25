@@ -190,7 +190,7 @@ function SingleParentCardsBoard({
                   <button type="button" className="plan-acc-title" onClick={() => openParent(d)}>
                     <span className="plan-card-titleline">
                       <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span>
-                      <TaskKindIcon kind={d.kind} size="lg" /><strong>{d.title}</strong>
+                      <TaskKindIcon kind={d.kind} subtype={d.subtype} size="lg" /><strong>{d.title}</strong>
                     </span>
                     <em>
                       {d.clientName} · {showTypeLabel ? `${d.typeLabel} · ` : ""}
@@ -221,7 +221,7 @@ function SingleParentCardsBoard({
                           <li key={a.id}>
                             <button type="button" className={`plan-acc-actrow is-${activityState}`} onClick={() => openChild(d, a.id)}>
                               <span className={`kb-situacao s-${activityState}`}>{DEADLINE_LABEL[activityState]}</span>
-                              <TaskKindIcon kind={a.kind} />
+                              <TaskKindIcon kind={a.kind} subtype={a.subtype} />
                               <span className="plan-acc-actitle">{subtypeLabel(a.subtype) || a.title}</span>
                               <span className="plan-acc-status">{STATUS_LABEL[a.status]}</span>
                               <span className="plan-acc-status">{a.due_date ? a.due_date.split("-").reverse().slice(0, 2).join("/") : "sem data"}</span>

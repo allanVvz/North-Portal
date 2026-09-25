@@ -58,7 +58,7 @@ export default function CardParentBox({
         {items.map((item) => (
           <div className="tm-member" key={`${item.relation}-${item.parent.id}`}>
             <button type="button" className="tm-member-open" onClick={() => onOpen(item.parent)} disabled={!canOpen}>
-              <TaskKindIcon kind={item.parent.kind} size="sm" />
+              <TaskKindIcon kind={item.parent.kind} subtype={item.parent.subtype} size="sm" />
               <span className="tm-parentbox-main">
                 <span className="tm-member-title">{item.parent.title}</span>
                 <span className="tm-parentbox-sub">

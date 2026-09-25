@@ -424,7 +424,7 @@ export const performanceSyncSchema = z.object({
 // no molde), não a posição do card no quadro. São coisas diferentes e ficaram
 // confundidas por um tempo: ordenar as etapas por `task.position` numerava a
 // corrente pela ordem em que os cards calharam de estar no Kanban.
-export type TaskRelationKind = "structural_member" | "workflow_step" | "reference" | "dependency";
+export type TaskRelationKind = "structural_member" | "workflow_step" | "reference" | "dependency" | "recurrence_cycle";
 // Persisted and mandatory since 20260917035220. A missing kind is a corrupt
 // DTO, not a legacy meaning to infer from `slot`.
 export type TaskParentLink = {

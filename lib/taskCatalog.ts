@@ -52,15 +52,20 @@ export const TASK_KINDS: Record<TaskKind, KindDef> = {
   },
   plano_acao: {
     label: "Plano",
-    icon: "◆",
+    icon: "☑",
     tone: "green",
     blurb: "Agrega tarefas, datas e progresso do conjunto",
     performance: true,
     isPlan: true,
   },
   criativo: {
+    // "▸" é o ícone GENÉRICO da Entrega — pra quando o formato de publicação
+    // (reels/story/carrossel/anúncio/banner) ainda não está definido. Uma vez
+    // que o subtype da etapa de publicação define o formato, `TaskKindIcon`
+    // troca esse ícone pelo de SUBTYPE_ICON (mais específico), sem precisar
+    // de nenhuma condição aqui.
     label: "Entrega",
-    icon: "✦",
+    icon: "▸",
     tone: "purple",
     blurb: "Entrega versionada; as etapas pertencem ao workflow persistido",
     performance: true,
@@ -108,7 +113,32 @@ export const SUBTYPE_LABEL: Record<string, string> = {
   relatorio_conversao: "Relatório de conversão",
   relatorio_trafego: "Relatório de anúncios",
   agendamentos: "Agendamentos",
+  // Formatos de publicação — antes só existiam informalmente como rótulo do
+  // contador de quantidade em app/admin/contentPlan.ts (gerava tarefa
+  // kind=operacional genérica, sem subtype próprio). Agora são subtypes de
+  // verdade: servem tanto pra uma etapa comum ("Publicação — Reels") quanto
+  // pra classificar a própria Entrega ("Entrega tipo Reels").
+  reels: "Reels",
+  story: "Story",
+  carrossel: "Carrossel",
+  anuncio: "Anúncio",
+  banner: "Banner",
 };
+
+/** Ícone por SUBTYPE — a maioria dos subtypes não tem um (herdam o do kind,
+ *  ver `TaskKindIcon`); só os formatos de publicação abaixo ganharam ícone
+ *  próprio até agora, porque são a categoria onde "qual card é este, de
+ *  relance" mais importa numa lista longa de etapas. Ausente aqui != erro —
+ *  é o comportamento padrão pra todo o resto do vocabulário. */
+export const SUBTYPE_ICON: Partial<Record<string, string>> = {
+  reels: "▶",
+  story: "◔",
+  carrossel: "▦",
+  anuncio: "◎",
+  banner: "▬",
+};
+export const subtypeIcon = (subtype: string | null | undefined): string | null =>
+  (subtype && SUBTYPE_ICON[subtype]) || null;
 
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];
 

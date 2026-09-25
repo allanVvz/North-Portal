@@ -141,7 +141,7 @@ export default function StepRow({
         /> : <span className="tm-step-check" aria-hidden="true" />}
         {showState ? <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span> : null}
         <button type="button" className="tm-member-open" onClick={onOpen} disabled={!canOpen || busy || isOpenCard} title={`Abrir ${card.title}`}>
-          {leadingIcon ?? <TaskKindIcon kind={card.kind} size="sm" />}
+          {leadingIcon ?? <TaskKindIcon kind={card.kind} subtype={card.subtype} size="sm" />}
           {showCardTitle ? <span className="tm-member-title" title={card.title}>{card.title}</span> : <span className="tm-member-title">{label}</span>}
           {isCurrent ? <span className="tm-step-current">etapa atual</span> : null}
           {isOpenCard ? <span className="tm-member-status">você está aqui</span> : <span className="tm-member-arrow" aria-hidden>↗</span>}

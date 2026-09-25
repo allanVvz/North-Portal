@@ -51,7 +51,7 @@ function DeliveryBranch({
           <span className={`plan-acc-caret ${open ? "on" : ""}`} aria-hidden>▸</span>
           <span className="plan-strat-headtext">
             <BranchTags label="Entrega" state={state} />
-            <span className="plan-card-titleline"><TaskKindIcon kind={delivery.kind} /><strong>{delivery.title}</strong></span>
+            <span className="plan-card-titleline"><TaskKindIcon kind={delivery.kind} subtype={delivery.subtype} /><strong>{delivery.title}</strong></span>
             <span className="plan-strat-count">{delivery.activities.length} etapa{delivery.activities.length === 1 ? "" : "s"}</span>
           </span>
         </button>
@@ -61,7 +61,7 @@ function DeliveryBranch({
         <div className="plan-delivery-steps">
           {delivery.activities.length ? delivery.activities.map((step) => (
             <button key={step.id} type="button" className="plan-delivery-step" onClick={() => onOpenStep(delivery, step.id)}>
-              <TaskKindIcon kind={step.kind} />
+              <TaskKindIcon kind={step.kind} subtype={step.subtype} />
               <span>{step.title}</span><small>{fmtDate(step.due_date)} · {STATUS_LABEL[step.status]}</small>
             </button>
           )) : <p className="admin-sub">Nenhuma etapa materializada ainda.</p>}
@@ -114,7 +114,7 @@ function PlanBranch({
             <DeliveryBranch key={`${plan.id}:${delivery.card.id}`} node={delivery} nested query={query} onOpenDelivery={onOpenDelivery} onOpenStep={onOpenStep} />
           )) : null}
           {simpleActivities.length ? <div className="plan-simple-activities">
-            {simpleActivities.map((activity) => <button type="button" key={activity.id} onClick={() => onOpenPlanActivity(plan, activity.id)}><TaskKindIcon kind={activity.kind} /><span>{activity.title}</span><small>{STATUS_LABEL[activity.status]}</small></button>)}
+            {simpleActivities.map((activity) => <button type="button" key={activity.id} onClick={() => onOpenPlanActivity(plan, activity.id)}><TaskKindIcon kind={activity.kind} subtype={activity.subtype} /><span>{activity.title}</span><small>{STATUS_LABEL[activity.status]}</small></button>)}
           </div> : null}
           {!node.deliveries.length && !simpleActivities.length ? <p className="admin-sub">Nenhum card vinculado a este plano.</p> : null}
         </div>

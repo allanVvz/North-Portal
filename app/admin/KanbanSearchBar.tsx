@@ -196,7 +196,7 @@ export default function KanbanSearchBar({
                         key={t.id}
                         onClick={() => { onPickTask(t.id); setOpen(false); }}
                       >
-                        <TaskKindIcon kind={t.kind} size="sm" />
+                        <TaskKindIcon kind={t.kind} subtype={t.subtype} size="sm" />
                         <span className="kb-searchbar-result-title">{t.title}</span>
                         {t.clientName ? <span className="kb-searchbar-result-client">{t.clientName}</span> : null}
                       </button>

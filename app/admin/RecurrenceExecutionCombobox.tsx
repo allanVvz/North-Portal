@@ -5,7 +5,7 @@ import TaskKindIcon from "./TaskKindIcon";
 import { agencyToday } from "./recurringState";
 import { normalizeSearchText } from "@/lib/taskSearch";
 
-type Candidate = { id: string; title: string; kind: string; due_date?: string | null };
+type Candidate = { id: string; title: string; kind: string; subtype?: string | null; due_date?: string | null };
 
 export default function RecurrenceExecutionCombobox({ candidates, templateKind, busy, onLink, onCreate }: {
   candidates: Candidate[]; templateKind: string; busy: boolean;
@@ -56,7 +56,7 @@ export default function RecurrenceExecutionCombobox({ candidates, templateKind, 
       {mode === "link" ? <div className="pac-section">
         <p className="pac-section-title">Cards disponíveis<span>Escolha a data desta execução</span></p>
         {matches.map((candidate) => <div className="pac-link-row" key={candidate.id}>
-          <TaskKindIcon kind={candidate.kind} size="sm" /><span title={candidate.title}>{candidate.title}</span>
+          <TaskKindIcon kind={candidate.kind} subtype={candidate.subtype} size="sm" /><span title={candidate.title}>{candidate.title}</span>
           <input aria-label={`Data de ${candidate.title}`} type="date" defaultValue={candidate.due_date ?? ""} />
           <button type="button" disabled={busy} onClick={(event) => { const input = event.currentTarget.parentElement?.querySelector("input") as HTMLInputElement | null; onLink(candidate, input?.value || candidate.due_date || agencyToday()); setOpen(false); }}>Vincular</button>
         </div>)}

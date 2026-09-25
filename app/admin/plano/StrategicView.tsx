@@ -281,7 +281,7 @@ export default function StrategicView<T extends ActionPlan>({
                     >
                       <span className={`plan-acc-caret ${open ? "on" : ""}`} aria-hidden>▸</span>
                       <span className="plan-strat-headtext">
-                        <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} size="lg" /><strong>{p.title}</strong></span>
+                        <span className="plan-card-titleline"><TaskKindIcon kind={p.kind} subtype={p.subtype} size="lg" /><strong>{p.title}</strong></span>
                         {/* Entrega conta pelo MOLDE ("etapa 2/4"), plano conta o que
                             tem. Esta tela dizia "N atividades" para os dois, o que fazia
                             uma entrega com só o roteiro pronto parecer um plano de um
@@ -328,7 +328,7 @@ export default function StrategicView<T extends ActionPlan>({
                                 title={a.title}
                                 onClick={() => onOpenActivity(p, a.id)}
                               >
-                                <span className="plan-strat-chiptitle"><TaskKindIcon kind={a.kind} /><span><small>O quê</small>{a.title}</span></span>
+                                <span className="plan-strat-chiptitle"><TaskKindIcon kind={a.kind} subtype={a.subtype} /><span><small>O quê</small>{a.title}</span></span>
                                 <span className="plan-strat-chipmeta">
                                   <span className="plan-strat-chipdue"><small>Quando</small>{fmtDate(a.due_date)}</span>
                                   <span className="plan-strat-chipstatus">{STATUS_LABEL[a.status]}</span>

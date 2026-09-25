@@ -143,7 +143,7 @@ export default function TaskDetailPanel({
       </div>
 
       <div className="tdp-titleline">
-        <TaskKindIcon kind={task.kind} size="lg" />
+        <TaskKindIcon kind={task.kind} subtype={task.subtype} size="lg" />
         <h2 className="tdp-title">{task.title}</h2>
       </div>
 

@@ -100,7 +100,7 @@ function ParentColumn({
                 </div>
                 {open ? <div className="plan-acc-body">
                   {card.activities.length ? <ul className="plan-acc-list">{card.activities.map((activity) => (
-                    <li key={activity.id}><button type="button" className="plan-acc-actrow" onClick={() => onOpenChild(card, activity.id)}><TaskKindIcon kind={activity.kind} /><span className="plan-acc-actitle">{subtypeLabel(activity.subtype) || activity.title}</span><span className="plan-acc-status">{STATUS_LABEL[activity.status]}</span></button></li>
+                    <li key={activity.id}><button type="button" className="plan-acc-actrow" onClick={() => onOpenChild(card, activity.id)}><TaskKindIcon kind={activity.kind} subtype={activity.subtype} /><span className="plan-acc-actitle">{subtypeLabel(activity.subtype) || activity.title}</span><span className="plan-acc-status">{STATUS_LABEL[activity.status]}</span></button></li>
                   ))}</ul> : <p className="admin-sub">Nenhum card vinculado ainda.</p>}
                 </div> : null}
               </article>

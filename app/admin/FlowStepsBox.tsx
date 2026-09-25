@@ -87,7 +87,7 @@ function ChainPicker({
               onClick={() => { setOpen(false); onPick(candidate); }}
               disabled={busy}
             >
-              <TaskKindIcon kind={candidate.kind} size="sm" />
+              <TaskKindIcon kind={candidate.kind} subtype={candidate.subtype} size="sm" />
               <span className="tm-chain-option-content"><span className="tm-chain-option-title">{candidate.title}</span>{candidateDetail?.(candidate) ? <small>{candidateDetail(candidate)}</small> : null}</span>
               <span className="tm-chain-option-status">{STATUS_LABEL[candidate.status]}</span>
             </button>

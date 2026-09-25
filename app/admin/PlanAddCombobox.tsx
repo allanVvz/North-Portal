@@ -73,7 +73,7 @@ export default function PlanAddCombobox({
   onLinkExisting,
   onCreate,
 }: {
-  candidates: { id: string; title: string; kind: string }[];
+  candidates: { id: string; title: string; kind: string; subtype?: string | null }[];
   types: TypeOption[];
   defaultType: string;
   busy: boolean;
@@ -203,7 +203,7 @@ export default function PlanAddCombobox({
                   disabled={busy}
                   onClick={() => { onLinkExisting(candidate); setQuery(""); }}
                 >
-                  <TaskKindIcon kind={candidate.kind} size="sm" />
+                  <TaskKindIcon kind={candidate.kind} subtype={candidate.subtype} size="sm" />
                   <span>{candidate.title}</span>
                   <span className="pac-row-hint">vincular</span>
                 </button>

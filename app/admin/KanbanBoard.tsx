@@ -703,7 +703,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
             {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
           </span>
         </div>
-        <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} /><p className="kb-card-title">{t.title}</p></div>
+        <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} subtype={t.subtype} /><p className="kb-card-title">{t.title}</p></div>
         {flowBadge ? (
           <div className="kb-card-meta">
             <span className="kb-card-pill kb-flow-step" title={`Etapa ${flowBadge.step} de ${flowBadge.total} · ${flowBadge.delivery}`}>
@@ -846,7 +846,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                                   onClick={() => openTask(t.id)}
                                   title={t.title}
                                 >
-                                  <TaskKindIcon kind={t.kind} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
+                                  <TaskKindIcon kind={t.kind} subtype={t.subtype} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                                 </button>
                               </div>
                             ))}
@@ -879,7 +879,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                                       onClick={() => openTask(t.id)}
                                       title={t.title}
                                     >
-                                      <TaskKindIcon kind={t.kind} size="sm" />{t.title}
+                                      <TaskKindIcon kind={t.kind} subtype={t.subtype} size="sm" />{t.title}
                                     </button>
                                   ))}
                                   {(routinesByDay.get(key) ?? []).map((routine) => (
@@ -931,7 +931,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                             onClick={() => openTask(t.id)}
                             title={t.title}
                           >
-                            <TaskKindIcon kind={t.kind} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
+                            <TaskKindIcon kind={t.kind} subtype={t.subtype} size="sm" /> {t.title}{visible("progress") ? ` · ${progressOf(t)}%` : ""}
                           </button>
                         </div>
                       ))}
@@ -957,7 +957,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                             onClick={() => openTask(t.id)}
                             title={t.title}
                           >
-                            <TaskKindIcon kind={t.kind} size="sm" />{horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
+                            <TaskKindIcon kind={t.kind} subtype={t.subtype} size="sm" />{horaOf(t) ? <b>{horaOf(t)} </b> : null}{t.title}
                           </button>
                         ))}
                         {(routinesByDay.get(dayKey(d)) ?? []).map((routine) => (
@@ -1066,7 +1066,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                         {t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
                         {commentsOf(t).length > 0 ? <span className="kb-comments" title="Comentários no card"> 💬 {commentsOf(t).length}</span> : null}
                       </td>
-                      <td><TaskKindIcon kind={t.kind} /></td>
+                      <td><TaskKindIcon kind={t.kind} subtype={t.subtype} /></td>
                       {visible("status") ? <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td> : null}
                       {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>● {t.assignee}</span> : "—"}</td> : null}
                       <td>{fmtDue(t.due_date)}{dueRelative ? <small className="kb-table-rel"> · {dueRelative}</small> : null}</td>
