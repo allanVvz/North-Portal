@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { BAITA_DRIVE_PLAN_ID } from "@/lib/creativeDrive";
 import { syncCreativeDriveFolders } from "@/lib/creativeDriveSync";
+import { applyCaptureHomeArrivals, applyEditHomeArrival } from "@/lib/flows/homeArrival";
+import { createClient } from "@/lib/supabase/server";
 import { listFolderFilesPage } from "@/lib/googleDriveApi";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/supabase/auth";
@@ -66,7 +68,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as { taskId?: unknown };
     const taskId = typeof body.taskId === "string" && /^[0-9a-f-]{36}$/i.test(body.taskId) ? body.taskId : null;
     const { data: folders, error } = await db.from("drive_creative_workspaces")
-      .select("id,plan_task_id,routine_task_id,capture_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
+      .select("id,plan_task_id,routine_task_id,capture_task_id,capture_workspace_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
       .eq("plan_task_id", BAITA_DRIVE_PLAN_ID).eq("status", "ready");
     if (error) throw error;
     const relevant = (folders ?? []).filter((folder) => !taskId || [
@@ -76,6 +78,19 @@ export async function POST(request: Request) {
     const results = await Promise.allSettled(relevant.map((folder) => syncCreativeDriveFolders(db, folder)));
     const warnings = results.flatMap((result, index) => result.status === "rejected"
       ? [`${relevant[index].creative_task_id}: ${result.reason instanceof Error ? result.reason.message : "Falha ao sincronizar o Drive."}`] : []);
+    // Arquivo novo na Home da etapa → Revisão (lib/flows/homeArrival.ts):
+    // Edição por criativo; Roteiro e Captação pelas pastas da diária. Falha
+    // aqui vira aviso, nunca derruba a leitura dos materiais.
+    const session = await createClient();
+    const arrivals = await Promise.allSettled([
+      ...results.map((result, index) => result.status === "fulfilled"
+        ? applyEditHomeArrival(db, session, { creativeTaskId: relevant[index].creative_task_id, stageTaskId: relevant[index].stage_task_id, files: result.value.newHomeFiles })
+        : Promise.resolve(false)),
+      ...[...new Set(relevant.map((folder) => folder.capture_workspace_id).filter(Boolean))].map((captureId) => applyCaptureHomeArrivals(db, captureId)),
+    ]);
+    for (const arrival of arrivals) {
+      if (arrival.status === "rejected") warnings.push(`Revisão automática: ${arrival.reason instanceof Error ? arrival.reason.message : "falha ao aplicar."}`);
+    }
     return await materialIndex(db, warnings);
   } catch (error) {
     return apiError(error);

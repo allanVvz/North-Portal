@@ -213,7 +213,11 @@ function decorateWorkflowSteps<T extends TaskTypeEditorNode>(
           order_index: mapping.order_index,
           lead_days: mapping.lead_days,
           progress_weight: mapping.progress_weight,
-          default_assignee: mapping.default_assignee,
+          // A versão publicada é imutável ("Criativo v1" não tem responsável em
+          // nenhuma etapa). Sem responsável no passo da versão, vale o do tipo
+          // de etapa — que a tela Etapas edita (25/09: Roteiro = Luiza,
+          // Captação = Alisson). Sem nenhum dos dois, quem cria cai no North Ai.
+          default_assignee: mapping.default_assignee || subtype.default_assignee || null,
           client_visible: mapping.client_visible,
           creation_trigger: mapping.creation_trigger,
         } : null;

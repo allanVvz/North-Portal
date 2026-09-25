@@ -7,6 +7,8 @@ import { deliveryParentIdsOf, isFlowDelivery, recurrenceParentIdOf } from "@/lib
 import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
+import { creativesFollowingStage } from "@/lib/flows/homeArrival";
+import { eventCommentId, isCreativeStatusScope, recordStatusComment, statusChangeText, stepLabelOf } from "@/lib/flows/statusComments";
 import { BAITA_DRIVE_PLAN_ID, provisionCreativeDriveWorkspace } from "@/lib/creativeDrive";
 import { createClient } from "@/lib/supabase/server";
 import { justCompleted, nextFlowStepCardOf } from "@/lib/flows/advance";
@@ -258,13 +260,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     if (current.subtype === "edicao" && current.status === "revisao" && saved.status === "em_producao") {
       try {
-        const result = await returnEditFinalsToPreview(createAdminClient(), saved.id);
+        // A etapa inteira mudou: alcança só os criativos sem andamento próprio.
+        const admin = createAdminClient();
+        const result = await returnEditFinalsToPreview(admin, saved.id, await creativesFollowingStage(admin, saved.id));
         if (result.errors.length) driveSyncWarning = `Card salvo, mas ${result.errors.length} pasta(s) do Drive ainda precisam sincronizar. Abra os materiais para tentar novamente.`;
       } catch {
         driveSyncWarning = "Card salvo, mas nao foi possivel sincronizar os finais do Drive agora.";
       }
     }
     await notifyTaskChange(current, saved);
+    // Toda mudança de status de criativo fica no thread, no nome de quem mudou
+    // (25/09) — modal e Kanban passam por aqui. Relatórios ficam de fora: um
+    // comentário humano lá seria lido como pedido de revisão.
+    if (saved.status !== current.status && await isCreativeStatusScope(createAdminClient(), saved)) {
+      await recordStatusComment(createAdminClient(), {
+        targetId: saved.id,
+        authorId: session.userId,
+        text: statusChangeText(stepLabelOf(saved), current.status, saved.status, false),
+        commentId: eventCommentId("status"),
+      });
+    }
     return NextResponse.json({ ...await withFlowNextTask(current, saved), ...(driveSyncWarning ? { drive_sync_warning: driveSyncWarning } : {}) });
   } catch (error) {
     return apiError(error);

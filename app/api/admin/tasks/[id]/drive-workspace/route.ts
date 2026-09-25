@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { getCreativeDriveWorkspace, provisionCreativeDriveWorkspace, resolveCreativeDriveContext } from "@/lib/creativeDrive";
 import { syncCreativeDriveFolders } from "@/lib/creativeDriveSync";
+import { applyEditHomeArrival } from "@/lib/flows/homeArrival";
+import { createClient } from "@/lib/supabase/server";
 import { HttpError } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -18,10 +20,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     // Resolve primeiro: impede consultar por tentativa um workspace fora do piloto.
     const driveContext = await resolveCreativeDriveContext(db, id);
     const { data: folders, error: foldersError } = await db.from("drive_creative_workspaces")
-      .select("id,plan_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
+      .select("id,plan_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
       .eq("creative_task_id", id).maybeSingle();
     if (foldersError) throw foldersError;
-    if (folders) await syncCreativeDriveFolders(db, folders);
+    if (folders) {
+      const { newHomeFiles } = await syncCreativeDriveFolders(db, folders);
+      // Arquivo novo na Home do criativo → a Edição deste criativo vai para
+      // Revisão (lib/flows/homeArrival.ts). Com a sessão de quem abriu.
+      await applyEditHomeArrival(db, await createClient(), { creativeTaskId: id, stageTaskId: folders.stage_task_id, files: newHomeFiles });
+    }
     const includeSources = new URL(request.url).searchParams.get("sources") !== "0";
     return NextResponse.json({ context: driveContext, workspace: await getCreativeDriveWorkspace(db, id, includeSources) });
   } catch (error) {

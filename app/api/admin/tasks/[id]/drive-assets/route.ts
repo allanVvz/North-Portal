@@ -16,6 +16,8 @@ import {
 import { getDriveItemMetadata } from "@/lib/googleDriveApi";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/supabase/auth";
+import { applyEditHomeArrivalForCreative } from "@/lib/flows/homeArrival";
+import { createClient } from "@/lib/supabase/server";
 import { HttpError } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -88,7 +90,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       case "move_to_raw":
         return NextResponse.json(await moveCreativeAssetToRaw(db, id, input.assetId));
       case "promote":
-        return NextResponse.json(await promoteCreativeAsset(db, session.userId, id, input.assetId));
+      {
+        const promoted = await promoteCreativeAsset(db, session.userId, id, input.assetId);
+        // Promover é pôr o arquivo na Home do criativo: mesma regra da
+        // sincronização — Edição deste criativo em Entrada/Em produção → Revisão.
+        const { data: asset } = await db.from("drive_assets").select("drive_file_id,name").eq("id", input.assetId).maybeSingle();
+        if (asset) {
+          try {
+            await applyEditHomeArrivalForCreative(db, await createClient(), id, [{ id: asset.drive_file_id, name: asset.name }]);
+          } catch (cause) {
+            console.warn("[drive-assets] promoção salva, revisão automática falhou:", cause instanceof Error ? cause.message : cause);
+          }
+        }
+        return NextResponse.json(promoted);
+      }
       case "trash_final":
         await setFinalVersionTrashed(db, id, input.versionId, true);
         return NextResponse.json({ ok: true });

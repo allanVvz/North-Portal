@@ -95,6 +95,13 @@ class Query implements PromiseLike<Result> {
   delete(): this { this.mode = "delete"; this.returning = false; return this; }
   eq(column: string, value: unknown): this { this.filters.push((row) => valueAt(row, column) === value); return this; }
   neq(column: string, value: unknown): this { this.filters.push((row) => valueAt(row, column) !== value); return this; }
+  /** Como o Postgres: sem `%`, é igualdade sem diferenciar maiúsculas. */
+  ilike(column: string, pattern: string): this {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`^${escaped.replace(/%/g, ".*").replace(/_/g, ".")}$`, "i");
+    this.filters.push((row) => regex.test(String(valueAt(row, column) ?? "")));
+    return this;
+  }
   in(column: string, values: readonly unknown[]): this { this.filters.push((row) => values.includes(valueAt(row, column))); return this; }
   is(column: string, value: null): this { this.filters.push((row) => (valueAt(row, column) ?? null) === value); return this; }
   not(column: string, operator: string, value: unknown): this {
@@ -119,6 +126,12 @@ class Query implements PromiseLike<Result> {
   }
   order(column: string, options?: { ascending?: boolean }): this { this.orderBy = column; this.descending = options?.ascending === false; return this; }
   limit(count: number): this { this.max = count; return this; }
+  /** Como o supabase-js: a primeira linha, ou `null` quando não há nenhuma. */
+  async maybeSingle(): Promise<{ data: Row | null; error: DbError | null }> {
+    const result = await this.execute();
+    if (result.error) return { data: null, error: result.error };
+    return { data: result.data?.[0] ?? null, error: null };
+  }
 
   then<T1 = Result, T2 = never>(
     onfulfilled?: ((value: Result) => T1 | PromiseLike<T1>) | null,

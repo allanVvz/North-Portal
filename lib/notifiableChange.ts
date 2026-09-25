@@ -32,7 +32,7 @@ export function formatDateBR(value: string): string {
 // Rótulo curto do status para a mensagem. Deliberadamente sem o prefixo
 // "Kanban ·" que STATUS_KANBAN usa em lib/supabase.ts: ali o contexto é a
 // coluna do quadro, aqui é uma frase.
-const STATUS_LABEL: Record<string, string> = {
+export const STATUS_LABEL: Record<string, string> = {
   backlog: "Entrada",
   em_producao: "Em produção",
   revisao: "Revisão",

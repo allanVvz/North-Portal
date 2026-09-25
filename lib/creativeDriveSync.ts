@@ -3,11 +3,14 @@ import { HttpError } from "./validation";
 import { getDriveItemMetadata, isGoogleDriveConfigured, listFolderFilesPage, moveDriveItemBetweenFolders } from "./googleDriveApi";
 import type { DriveFile } from "./googleDrive";
 import { BAITA_DRIVE_PLAN_ID } from "./cardMaterials";
+import { updateTaskPayload } from "./automations/taskWrites";
+import { stableCommentId } from "./flows/statusComments";
 
 type Db = ReturnType<typeof createAdminClient>;
 type WorkspaceFolders = {
   id: string;
   plan_task_id: string;
+  creative_task_id: string;
   stage_task_id: string | null;
   creative_folder_id: string | null;
   raw_folder_id: string | null;
@@ -24,7 +27,7 @@ function isMaterial(file: DriveFile): boolean {
   return Boolean(file.id) && file.mimeType !== FOLDER && file.mimeType !== SHORTCUT;
 }
 
-async function directFiles(folderId: string): Promise<DriveFile[]> {
+export async function directFiles(folderId: string): Promise<DriveFile[]> {
   const files: DriveFile[] = [];
   let token: string | null = null;
   for (let page = 0; page < 20; page += 1) {
@@ -36,12 +39,13 @@ async function directFiles(folderId: string): Promise<DriveFile[]> {
   throw new HttpError(409, "Pasta do Criativo excede o limite de sincronizacao; nenhum arquivo foi registrado parcialmente.");
 }
 
-async function registerFile(db: Db, workspace: WorkspaceFolders, file: DriveFile, role: "raw" | "preview" | "final") {
+/** Devolve se o arquivo foi registrado (false = saiu da pasta no meio da leitura). */
+async function registerFile(db: Db, workspace: WorkspaceFolders, file: DriveFile, role: "raw" | "preview" | "final"): Promise<boolean> {
   const parentId = role === "final" ? workspace.creative_folder_id : role === "raw" ? workspace.raw_folder_id : workspace.preview_folder_id;
   if (!parentId) throw new HttpError(409, "Pasta do Criativo incompleta.");
   const verified = await getDriveItemMetadata(file.id);
   // A pessoa pode mover o arquivo no Drive entre a listagem e a leitura.
-  if (!verified?.parents?.includes(parentId) || !isMaterial({ ...file, mimeType: verified.mimeType })) return;
+  if (!verified?.parents?.includes(parentId) || !isMaterial({ ...file, mimeType: verified.mimeType })) return false;
   const { error } = await db.rpc(role === "raw" ? "register_drive_raw_folder_asset" : "register_drive_folder_asset", {
     p_workspace_id: workspace.id,
     p_drive_file_id: verified.id,
@@ -53,28 +57,55 @@ async function registerFile(db: Db, workspace: WorkspaceFolders, file: DriveFile
     p_source_created_at: file.createdTime ?? null,
   });
   if (error) throw new HttpError(500, error.message);
+  return true;
 }
 
-async function moveRootFinalsToPreview(db: Db, workspace: WorkspaceFolders): Promise<number> {
-  if (!workspace.creative_folder_id || !workspace.preview_folder_id) return 0;
+/** Move os finais da Home do criativo para Preview e deixa um comentário
+ *  North Ai no card do criativo — "sempre que isso ocorrer" (25/09): quem abre
+ *  o card precisa saber por que a aba Finais esvaziou. Devolve os nomes. */
+async function moveRootFinalsToPreview(db: Db, workspace: WorkspaceFolders): Promise<string[]> {
+  if (!workspace.creative_folder_id || !workspace.preview_folder_id) return [];
   const files = await directFiles(workspace.creative_folder_id);
-  let moved = 0;
+  const moved: DriveFile[] = [];
   for (const file of files) {
     await moveDriveItemBetweenFolders(file.id, workspace.creative_folder_id, workspace.preview_folder_id);
     await registerFile(db, workspace, file, "preview");
-    moved += 1;
+    moved.push(file);
   }
-  return moved;
+  if (moved.length) {
+    await updateTaskPayload(db, workspace.creative_task_id, {
+      text: `A Edição voltou para produção — os finais voltaram para Preview: ${moved.map((file) => file.name).join(", ")}.`,
+      commentId: stableCommentId("finals-to-preview", workspace.creative_task_id, ...moved.map((file) => file.id).sort()),
+    });
+  }
+  return moved.map((file) => file.name);
 }
 
-/** Reconcile the physical folders with the card. No content is copied. */
-export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolders): Promise<void> {
+/** Status da Edição PARA ESTE criativo: a etapa é compartilhada, e desde 25/09
+ *  cada Entrega pode ter o próprio andamento (`task_links.status_override`). */
+async function effectiveStageStatus(db: Db, workspace: WorkspaceFolders): Promise<string | null> {
+  if (!workspace.stage_task_id) return null;
+  const [{ data: stage, error }, { data: link, error: linkError }] = await Promise.all([
+    db.from("tasks").select("status").eq("id", workspace.stage_task_id).maybeSingle(),
+    db.from("task_links").select("status_override").eq("parent_id", workspace.creative_task_id)
+      .eq("child_id", workspace.stage_task_id).eq("relation_kind", "workflow_step").maybeSingle(),
+  ]);
+  if (error) throw new HttpError(500, error.message);
+  if (linkError) throw new HttpError(500, linkError.message);
+  return (link as { status_override?: string | null } | null)?.status_override ?? (stage as { status?: string } | null)?.status ?? null;
+}
+
+/** Reconcile the physical folders with the card. No content is copied.
+ *
+ *  Devolve os arquivos que CHEGARAM à Home do criativo nesta leitura — os que
+ *  não eram finais ativos antes. É o gatilho de "arquivo novo na Home →
+ *  Revisão" (lib/flows/homeArrival.ts). Um final que tinha voltado para Preview
+ *  e foi posto na Home de novo conta como chegada: é uma entrega nova. */
+export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolders): Promise<{ newHomeFiles: DriveFile[] }> {
   if (workspace.plan_task_id !== BAITA_DRIVE_PLAN_ID || workspace.status !== "ready"
-    || !workspace.creative_folder_id || !workspace.preview_folder_id || !isGoogleDriveConfigured()) return;
+    || !workspace.creative_folder_id || !workspace.preview_folder_id || !isGoogleDriveConfigured()) return { newHomeFiles: [] };
   if (workspace.last_error?.startsWith(MOVE_PENDING)) {
-    const { data: edit, error } = await db.from("tasks").select("status").eq("id", workspace.stage_task_id).maybeSingle();
-    if (error) throw new HttpError(500, error.message);
-    if (edit?.status === "em_producao") {
+    if (await effectiveStageStatus(db, workspace) === "em_producao") {
       const pendingRoot = await directFiles(workspace.creative_folder_id);
       pendingRoot.sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? "") || a.id.localeCompare(b.id));
       for (const file of pendingRoot) await registerFile(db, workspace, file, "final");
@@ -83,30 +114,51 @@ export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolde
       if (clearError) throw new HttpError(500, clearError.message);
     }
   }
-  const [root, previews] = await Promise.all([
-    directFiles(workspace.creative_folder_id), directFiles(workspace.preview_folder_id),
+  const [root, previews, known] = await Promise.all([
+    directFiles(workspace.creative_folder_id), directFiles(workspace.preview_folder_id), activeFinalFileIds(db, workspace.id),
   ]);
   // The Drive creation time is the order in which several new finals arrived.
   root.sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? "") || a.id.localeCompare(b.id));
-  for (const file of root) await registerFile(db, workspace, file, "final");
+  const newHomeFiles: DriveFile[] = [];
+  for (const file of root) {
+    if (await registerFile(db, workspace, file, "final") && !known.has(file.id)) newHomeFiles.push(file);
+  }
   for (const file of previews) await registerFile(db, workspace, file, "preview");
   if (workspace.raw_folder_id) {
     for (const file of await directFiles(workspace.raw_folder_id)) await registerFile(db, workspace, file, "raw");
   }
+  return { newHomeFiles };
 }
 
-/** A shared Edit card may control several independent Creative folders. */
-export async function returnEditFinalsToPreview(db: Db, editTaskId: string): Promise<{ moved: number; errors: string[] }> {
+/** Os arquivos que JÁ eram finais ativos deste criativo, antes da leitura. */
+async function activeFinalFileIds(db: Db, workspaceId: string): Promise<Set<string>> {
+  const { data, error } = await db.from("drive_assets").select("drive_file_id")
+    .eq("workspace_id", workspaceId).eq("role", "final").eq("state", "active");
+  if (error) throw new HttpError(500, error.message);
+  return new Set(((data ?? []) as { drive_file_id: string }[]).map((row) => row.drive_file_id));
+}
+
+/**
+ * Devolve para Preview os finais dos criativos que VOLTARAM para produção.
+ *
+ * Só os de `creativeTaskIds`. A Edição é compartilhada ("Edição — 6 Reels"
+ * controla 6 pastas), e desde 25/09 o andamento pode ser por criativo: reabrir
+ * a Edição só de "Divulgação Evento" varria as 6 pastas e apagou os finais
+ * de outros cinco. Quem chama diz quais criativos de fato voltaram.
+ */
+export async function returnEditFinalsToPreview(db: Db, editTaskId: string, creativeTaskIds: readonly string[]): Promise<{ moved: number; errors: string[] }> {
+  if (!creativeTaskIds.length) return { moved: 0, errors: [] };
   const { data, error } = await db.from("drive_creative_workspaces")
-    .select("id,plan_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
-    .eq("plan_task_id", BAITA_DRIVE_PLAN_ID).eq("stage_task_id", editTaskId).eq("status", "ready");
+    .select("id,plan_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
+    .eq("plan_task_id", BAITA_DRIVE_PLAN_ID).eq("stage_task_id", editTaskId).eq("status", "ready")
+    .in("creative_task_id", [...creativeTaskIds]);
   if (error) throw new HttpError(500, error.message);
   let moved = 0;
   const errors: string[] = [];
   for (const workspace of (data ?? []) as WorkspaceFolders[]) {
     try {
       await syncCreativeDriveFolders(db, { ...workspace, last_error: null });
-      moved += await moveRootFinalsToPreview(db, workspace);
+      moved += (await moveRootFinalsToPreview(db, workspace)).length;
       const { error: clearError } = await db.from("drive_creative_workspaces").update({ last_error: null }).eq("id", workspace.id);
       if (clearError) throw clearError;
     } catch (cause) {

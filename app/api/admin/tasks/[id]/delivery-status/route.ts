@@ -10,6 +10,8 @@ import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { deliveryParentIdsOf, flowStepsOf, isFlowDelivery, stageInDelivery } from "@/lib/taskRelations";
 import { feedbackMetricApprovalProblem } from "@/lib/automations/conversionFlow";
 import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
+import { creativesFollowingStage } from "@/lib/flows/homeArrival";
+import { eventCommentId, recordStatusComment, statusChangeText, stepLabelOf } from "@/lib/flows/statusComments";
 import { notifyTaskParticipants, statusChangedMessage } from "@/lib/notifications";
 import { HttpError, TASK_STATUSES, type TaskRecord } from "@/lib/validation";
 
@@ -73,7 +75,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     if (storedStage.subtype === "edicao" && stage.status === "revisao" && input.status === "em_producao") {
       try {
-        const sync = await returnEditFinalsToPreview(createAdminClient(), stage.id);
+        // Só os criativos que de fato voltaram: este, quando o andamento é por
+        // Entrega; senão, os que acompanham a etapa (sem andamento próprio).
+        const admin = createAdminClient();
+        const creatives = contextual ? [id] : await creativesFollowingStage(admin, stage.id);
+        const sync = await returnEditFinalsToPreview(admin, stage.id, creatives);
         if (sync.errors.length) driveSyncWarning = `${sync.errors.length} pasta(s) do Drive ainda precisam sincronizar.`;
       } catch { driveSyncWarning = "Não foi possível sincronizar os finais do Drive agora."; }
     }
@@ -82,6 +88,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (stage.status !== input.status) {
       try { await notifyTaskParticipants(id, "task_status_changed", statusChangedMessage(delivery.title, input.status)); }
       catch { /* O andamento já foi salvo; falha de notificação não desfaz a ação. */ }
+      // Toda mudança de status de criativo fica no thread, no nome de quem mudou
+      // (25/09). Por Entrega vai no card do criativo; a da etapa inteira vai na
+      // etapa, que o thread de cada criativo que a compartilha já mostra.
+      if (delivery.kind === "criativo") {
+        await recordStatusComment(createAdminClient(), {
+          targetId: contextual ? id : stage.id,
+          authorId: session.userId,
+          text: statusChangeText(stepLabelOf(storedStage), stage.status, input.status, contextual),
+          commentId: eventCommentId("status"),
+        });
+      }
     }
     return NextResponse.json({
       stage: updatedStage,

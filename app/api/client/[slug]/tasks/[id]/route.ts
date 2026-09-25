@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { notifyTaskParticipants, statusChangedMessage, taskCommentedMessage } from "@/lib/notifications";
+import { eventCommentId, isCreativeStatusScope, recordStatusComment, statusChangeText, stepLabelOf } from "@/lib/flows/statusComments";
 import { getProfileName, getTaskById, updateTaskGroup } from "@/lib/supabase";
 import { requireClientAccess } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -80,6 +81,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     }
 
     let updated;
+    // Aprovação do cliente também é mudança de status de criativo: fica no
+    // thread no nome de quem aprovou (25/09), no mesmo lugar da regra admin.
+    let statusNote: { targetId: string; stepLabel: string; perDelivery: boolean } | null = null;
     if (isDelivery) {
       // O portal exibe a Entrega projetada, não necessariamente a etapa bruta:
       // uma etapa compartilhada pode estar em Aprovação apenas neste elo.
@@ -105,14 +109,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
           if (!changed) throw new HttpError(409, "O andamento mudou. Atualize a página e tente novamente.");
           await advanceDeliveryForStep(admin, id, stage.id, session.userId);
           updated = { id, status: "aprovado", stage_task_id: stage.id };
+          statusNote = { targetId: id, stepLabel: stepLabelOf(stage), perDelivery: true };
         } else {
           updated = await updateTaskGroup(stage.id, stage, { status: "aprovado" }, session.userId);
+          statusNote = { targetId: stage.id, stepLabel: stepLabelOf(stage), perDelivery: false };
         }
       } else {
         updated = task;
       }
     } else {
       updated = await updateTaskGroup(id, task, patch, session.userId);
+      if (action === "aprovar") statusNote = { targetId: id, stepLabel: stepLabelOf(task), perDelivery: false };
     }
 
     // O cliente comentando no portal era o caminho MUDO mais importante — e é
@@ -129,6 +136,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     }
     if (action === "aprovar") {
       await notifyTaskParticipants(id, "task_status_changed", statusChangedMessage(task.title, "aprovado"));
+    }
+    if (statusNote && (isDelivery ? task.kind === "criativo" : await isCreativeStatusScope(admin, task))) {
+      await recordStatusComment(admin, {
+        targetId: statusNote.targetId,
+        authorId: session.userId,
+        text: statusChangeText(statusNote.stepLabel, "aprovacao", "aprovado", statusNote.perDelivery),
+        commentId: eventCommentId("status"),
+      });
     }
     return NextResponse.json(updated);
   } catch (error) {
