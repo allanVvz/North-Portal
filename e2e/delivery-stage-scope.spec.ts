@@ -28,9 +28,16 @@ test.describe("andamento por Entrega com etapa compartilhada", () => {
 
   test.beforeAll(() => { sb = serviceClient(); });
   test.afterAll(async () => {
-    if (parentIds.length) await sb.from("tasks").delete().in("id", parentIds);
+    const parentDeletion = parentIds.length
+      ? await sb.from("tasks").delete().in("id", parentIds)
+      : { error: null };
     const { data: created } = await sb.from("tasks").select("id").like("title", `${PREFIX}%`);
-    if (created?.length) await sb.from("tasks").delete().in("id", created.map((task) => task.id));
+    const childDeletion = created?.length
+      ? await sb.from("tasks").delete().in("id", created.map((task) => task.id))
+      : { error: null };
+    if (parentDeletion.error || childDeletion.error) throw parentDeletion.error ?? childDeletion.error;
+    const { count, error } = await sb.from("tasks").select("id", { count: "exact", head: true }).like("title", `${PREFIX}%`);
+    if (error || count !== 0) throw error ?? new Error(`${count} card(s) temporário(s) não foram removidos.`);
   });
 
   test("Plano move só o Criativo escolhido; cabeçalho conclui a primeira etapa pendente", async ({ page }) => {
@@ -61,7 +68,7 @@ test.describe("andamento por Entrega com etapa compartilhada", () => {
     });
     expect(replace.ok(), await replace.text()).toBeTruthy();
 
-    await page.goto(`/admin/operacao?task=${planId}`);
+    await page.goto(`/admin/operacao?area=planos-entregas&task=${planId}`);
     const modal = page.locator(".tm");
     await expect(modal).toBeVisible({ timeout: 20_000 });
     const firstRow = modal.locator(".tm-member", { hasText: firstTitle }).first();
@@ -84,7 +91,7 @@ test.describe("andamento por Entrega com etapa compartilhada", () => {
     const direct = await page.request.patch(`/api/admin/tasks/${first.stepId}`, { data: { status: "revisao" } });
     expect(direct.status()).toBe(409);
 
-    await page.goto(`/admin/operacao?task=${first.deliveryId}`);
+    await page.goto(`/admin/operacao?area=planos-entregas&task=${first.deliveryId}`);
     const deliveryModal = page.locator(".tm");
     await expect(deliveryModal).toBeVisible({ timeout: 20_000 });
     await deliveryModal.getByRole("button", { name: "Concluído", exact: true }).click();
