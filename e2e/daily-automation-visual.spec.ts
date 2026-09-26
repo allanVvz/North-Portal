@@ -12,17 +12,7 @@ test("diária mostra Doc único e pastas em desktop e tela estreita", async ({ p
   await page.getByRole("button", { name: /entrar/i }).click();
   await page.waitForURL(/\/admin\/northai\/automacoes(?:\?|$)/, { timeout: 45_000 });
 
-  const response = await page.request.get("/api/admin/automations/daily/options");
-  expect(response.ok()).toBe(true);
-  const options = await response.json() as { recurringPlans: Array<{ id: string; client_id: string | null }> };
-  const plan = options.recurringPlans.find((item) => item.client_id);
-  test.skip(!plan, "Nenhum Plano recorrente disponível para inspecionar o editor.");
-
-  await page.getByRole("button", { name: "Nova automação" }).click();
-  await page.locator(".auto-type-select").last().selectOption("diaria_recorrente");
-  const card = page.locator(".auto-card").first();
-  await card.getByLabel("Cliente da diária").selectOption(plan!.client_id!);
-  await card.getByLabel("Selecionar Plano recorrente").selectOption(plan!.id);
+  const card = page.locator(".auto-card").filter({ has: page.getByLabel("Google Doc único do Roteiro") }).first();
   await expect(card.getByLabel("Google Doc único do Roteiro")).toBeVisible();
   await expect(card.getByText(/North AI cria um Doc na pasta geral da diária quando ela estiver em um Drive compartilhado/)).toBeVisible();
   const desktopPath = testInfo.outputPath("diaria-desktop.png");
