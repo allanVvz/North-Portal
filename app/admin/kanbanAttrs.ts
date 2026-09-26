@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CANONICAL_DELIVERY_FORMATS } from "@/lib/canonicalDeliveryFormats";
 
 export type AttrKind = "Texto" | "Seleção" | "Pessoa" | "Data" | "Número";
 
@@ -33,7 +34,7 @@ export type AttrDef = {
 export const ATTR_DEFS: AttrDef[] = [
   { key: "kind", label: "Tipo", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "formato", label: "Formato", scope: "Entrega", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
-  { key: "plataforma", label: "Plataforma", scope: "Entrega", kinds: ["criativo"], kind: "Seleção", defaultOn: false },
+  { key: "plataforma", label: "Plataforma", scope: "Entrega", kinds: ["criativo", ...CANONICAL_DELIVERY_FORMATS.map((format) => format.key)], kind: "Seleção", defaultOn: false },
   { key: "assignee", label: "Responsável", scope: "Todos", kinds: "base", kind: "Pessoa" },
   // Revisor e Aprovador NÃO são atributos de card: são campos de workflow
   // amarrados à tela Configurações › Etapas (as flags `revisaoAdmin` /

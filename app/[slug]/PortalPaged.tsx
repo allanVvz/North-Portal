@@ -14,6 +14,7 @@ import { briefSteps, folders } from "./content";
 import ManualDoCliente from "./ManualDoCliente";
 import TrilhaViewer from "./TrilhaViewer";
 import { kindLabel, kindTone, taskProgress, checkpointsProgress } from "@/lib/taskCatalog";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import { AVATAR_STYLES, briefingNav, defaultContent, type Tone } from "./portalData";
 
 type SaveChip = "" | "Salvando..." | "Salvo" | "Erro ao salvar" | "Concluido";
@@ -1438,7 +1439,7 @@ function EntregasPage(props: {
             const yourTurn = canActOn(t);
             const canAct = yourTurn && !busyId;
             const comments = commentsOf(t.payload);
-            const materialLink = t.kind === "criativo"
+            const materialLink = isCreativeDeliveryKind(t.kind)
               ? t.creative_drive_material_url ?? null
               : extractLatestLink(comments);
             return (
@@ -1458,7 +1459,7 @@ function EntregasPage(props: {
                   {t.description ? <div className="np-approval-note"><p>{t.description}</p></div> : null}
                   {materialLink ? (
                     <a className="np-link" href={materialLink} target="_blank" rel="noopener noreferrer">
-                      {t.kind === "criativo" ? "Abrir entrega" : "Ver material"} <Ico name="arrow" />
+                      {isCreativeDeliveryKind(t.kind) ? "Abrir entrega" : "Ver material"} <Ico name="arrow" />
                     </a>
                   ) : null}
                   {comments.length > 0 ? (

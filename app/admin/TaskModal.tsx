@@ -1954,7 +1954,7 @@ export default function TaskModal({
                   </select>
                 </Cell>
               ) : null}
-              {draft.kind === "criativo" ? (
+              {isCreativeDeliveryKind(draft.kind) ? (
                 <Cell icon="◔" label="Plataforma" hidden={!visible("plataforma")}>
                   <select value={draft.plataforma} onChange={(e) => set("plataforma", e.target.value)}>
                     <option value="">—</option>

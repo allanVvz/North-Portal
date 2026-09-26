@@ -11,6 +11,7 @@ import { flowCommentTargetId } from "@/lib/flows/commentTarget";
 import { advanceDeliveryForStep } from "@/lib/flows/advance";
 import { deliveryParentIdsOf, isFlowDelivery } from "@/lib/taskRelations";
 import { clientApprovalActionSchema, HttpError, validateSlug } from "@/lib/validation";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -138,7 +139,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ slug:
     if (action === "aprovar") {
       await notifyTaskParticipants(id, "task_status_changed", statusChangedMessage(task.title, "aprovado"));
     }
-    if (statusNote && (isDelivery ? task.kind === "criativo" : await isCreativeStatusScope(admin, task))) {
+    if (statusNote && (isDelivery ? isCreativeDeliveryKind(task.kind) : await isCreativeStatusScope(admin, task))) {
       await recordStatusComment(admin, {
         targetId: statusNote.targetId,
         authorId: session.userId,
