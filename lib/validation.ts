@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { PortalContent } from "@/app/[slug]/portalData";
 import { AGENCY_TIMEZONE } from "./time/agency";
+import { parseGoogleDriveUrl } from "./googleDrive";
 
 const MAX_ANSWERS_BYTES = 50000;
 const MAX_TEXT_BYTES = 5000;
@@ -573,6 +574,10 @@ export const dailyConfigSchema = z.object({
   clientId: z.string().uuid(),
   deliveryTypeId: z.string().uuid(),
   adoptedPlanTaskId: z.string().uuid().nullable().optional(),
+  seriesFolderId: z.string().min(3).max(200).nullable().optional(),
+  scriptDocUrl: z.string().trim().url().max(2048)
+    .refine((value) => value.startsWith("https://") && parseGoogleDriveUrl(value)?.kind === "document", "Informe um link HTTPS do Google Docs.")
+    .nullable().optional(),
   pieces: z.array(dailyPieceSchema).min(1).max(50),
 }).refine((value) => new Set(value.pieces.map((piece) => piece.key)).size === value.pieces.length, "Peças repetidas.");
 export type DailyConfig = z.infer<typeof dailyConfigSchema>;

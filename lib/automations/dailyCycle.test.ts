@@ -4,7 +4,14 @@ import { prepareDailyCycle } from "./dailyCycle";
 
 const provision = vi.hoisted(() => vi.fn());
 const comment = vi.hoisted(() => vi.fn());
+const series = vi.hoisted(() => vi.fn());
+const shortcut = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/creativeDrive", () => ({ provisionCreativeDriveWorkspace: provision }));
+vi.mock("./dailySeries", () => ({ ensureDailySeries: series }));
+vi.mock("@/lib/googleDriveApi", () => ({
+  getDriveItemMetadata: vi.fn(async () => ({ id: "doc1", name: "Roteiro único", mimeType: "application/vnd.google-apps.document" })),
+  createDriveShortcut: shortcut,
+}));
 vi.mock("./taskWrites", () => ({ automationCommentId: (...parts: string[]) => parts.join(":"), updateTaskPayload: comment }));
 
 const PLAN = "00000000-0000-4000-8000-000000000001";
@@ -44,6 +51,10 @@ function admin(clientOfSecond = CLIENT): AdminClient {
 beforeEach(() => {
   provision.mockReset();
   comment.mockReset();
+  series.mockReset();
+  shortcut.mockReset();
+  series.mockResolvedValue({ folderId: "series", docId: "doc1", docUrl: "https://docs.google.com/document/d/doc1/edit", docName: "Roteiro único" });
+  shortcut.mockResolvedValue("shortcut1");
   comment.mockResolvedValue(null);
   provision.mockImplementation(async (_db, creativeId) => ({
     status: "ready", raw_folder_id: `raw-${creativeId}`,
@@ -56,8 +67,9 @@ describe("daily cycle Drive preparation", () => {
     const result = await prepareDailyCycle(admin(), PLAN);
     expect(result).toEqual({ total: 2, prepared: 2, errors: [] });
     expect(provision.mock.calls.map((call) => call[1])).toEqual(CREATIVES);
-    expect(comment.mock.calls.map((call) => call[1])).toEqual([...CREATIVES, SCRIPT, CAPTURE, PLAN]);
-    expect(comment.mock.calls[2][2].commentId).toBe(`daily-script-folder:${PLAN}`);
+    expect(comment.mock.calls.map((call) => call[1])).toEqual([...CREATIVES, PLAN, SCRIPT, SCRIPT, CAPTURE, PLAN]);
+    expect(comment.mock.calls[4][2].commentId).toBe(`daily-script-folder:${PLAN}`);
+    expect(shortcut).toHaveBeenCalledWith(expect.objectContaining({ parentId: "script", targetId: "doc1" }));
   });
 
   it("retries a failed folder without recreating a cycle or changing comment keys", async () => {

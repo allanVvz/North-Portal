@@ -189,6 +189,19 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
     }
     const saved: AutomationConfig = await res.json();
     updateSlot(slot.key, { id: saved.id, dependsOnConfigId: saved.dependsOnConfigId ?? null });
+    if (slot.automationKey === "diaria_recorrente" && slot.dailyConfig && dailyOptions.driveConfigured) {
+      try {
+        const setupResponse = await fetch("/api/admin/automations/daily/series", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ configId: saved.id }),
+        });
+        const setup = await setupResponse.json();
+        if (!setupResponse.ok) throw new Error(setup.error ?? "Falha ao preparar o Drive.");
+        updateSlot(slot.key, { dailyConfig: { ...slot.dailyConfig, scriptDocUrl: setup.docUrl, seriesFolderId: setup.folderId } });
+        return { ok: true, message: "Salvo. Pasta geral e Roteiro único preparados no Drive." };
+      } catch (error) {
+        return { ok: true, message: `Automação salva; Drive pendente: ${error instanceof Error ? error.message : "tente novamente"}` };
+      }
+    }
     return { ok: true };
   }
 
@@ -324,7 +337,7 @@ function AutomationConfigCard({
   const dailyReady = dailyOptions.workflowReady && dailyOptions.driveConfigured &&
     Boolean(dailyFolders?.raw_folder_id && dailyFolders?.uploads_folder_id);
   const canSave = Boolean(slot.automationKey && slot.targetTask &&
-    (slot.automationKey !== "diaria_recorrente" || (slot.dailyConfig?.pieces.length && dailyReady &&
+    (slot.automationKey !== "diaria_recorrente" || (slot.dailyConfig?.pieces.length && (!slot.active || dailyReady) &&
       slot.dailyConfig.pieces.every((piece) => Boolean(piece.deliveryTypeId) || Boolean(slot.id)))));
   const showDetails = Boolean(slot.automationKey);
 
@@ -332,7 +345,7 @@ function AutomationConfigCard({
     setBusy(true);
     setMsg("");
     const result = await onSave();
-    setMsg(result.ok ? "Salvo ✓" : result.message ?? "Erro ao salvar");
+    setMsg(result.ok ? result.message ?? "Salvo ✓" : result.message ?? "Erro ao salvar");
     setBusy(false);
   }
 
@@ -534,6 +547,14 @@ function AutomationConfigCard({
               {slot.dailyConfig ? <>
                 <p><b>Plano:</b> {slot.targetTask?.title ?? "Selecione um Plano recorrente"}</p>
                 <p><b>Roteiro e Captação:</b> compartilhados por gravação</p>
+                <label className="auto-daily-doc">Google Doc único do Roteiro
+                  <input type="url" value={slot.dailyConfig.scriptDocUrl ?? ""}
+                    placeholder="Opcional: cole um link do Google Docs"
+                    onChange={(event) => onChange({ dailyConfig: { ...slot.dailyConfig!, scriptDocUrl: event.target.value.trim() || null } })} />
+                </label>
+                <p className="admin-sub">Se o link ficar vazio, North AI cria um Doc na pasta geral da diária. A roteirista acrescenta nele as páginas de cada gravação.</p>
+                {slot.dailyConfig.scriptDocUrl ? <p><a href={slot.dailyConfig.scriptDocUrl} target="_blank" rel="noreferrer">Abrir Roteiro canônico ↗</a></p> : null}
+                {slot.dailyConfig.seriesFolderId ? <p><a href={`https://drive.google.com/drive/folders/${slot.dailyConfig.seriesFolderId}`} target="_blank" rel="noreferrer">Abrir pasta geral da diária ↗</a></p> : null}
                 <label>Plano histórico de referência
                   <select value={slot.dailyConfig.adoptedPlanTaskId ?? ""} onChange={(event) => onChange({ dailyConfig: { ...slot.dailyConfig!, adoptedPlanTaskId: event.target.value || null } })}>
                     <option value="">Nenhuma</option>
@@ -618,7 +639,7 @@ function ManualDailyCycle({ configId, config, formats }: { configId: string; con
       if (!response.ok) throw new Error(result.error ?? "Falha ao criar a gravação.");
       const pending = result.preparation?.errors?.length ?? 0;
       setMessage(pending
-        ? `Gravação criada: ${result.executionId}. ${pending} pasta(s) pendente(s); tente concluir novamente.`
+        ? `Gravação criada: ${result.executionId}. ${pending} etapa(s) do Drive pendente(s); tente concluir novamente.`
         : `Gravação e pastas preparadas: ${result.executionId}`);
       await loadCycles();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao criar a gravação."); }

@@ -1,5 +1,8 @@
 import { provisionCreativeDriveWorkspace } from "@/lib/creativeDrive";
+import { createDriveShortcut, getDriveItemMetadata } from "@/lib/googleDriveApi";
+import { parseGoogleDriveUrl } from "@/lib/googleDrive";
 import { HttpError } from "@/lib/validation";
+import { ensureDailySeries } from "./dailySeries";
 import type { AdminClient } from "./taskAccess";
 import { errorMessage } from "./taskAccess";
 import { automationCommentId, updateTaskPayload } from "./taskWrites";
@@ -55,10 +58,17 @@ export async function prepareDailyCycle(
   const errors: DailyCyclePreparation["errors"] = [];
   const prepared: PreparedFolder[] = [];
   let shared: { daily?: string | null; script?: string | null; capture?: string | null } | null = null;
+  let series;
+  try {
+    series = await ensureDailySeries(admin, daily.payload.daily_config_id as string);
+  } catch (error) {
+    return { total: creatives.length, prepared: 0,
+      errors: [{ creativeTaskId: creatives[0], message: errorMessage(error) }] };
+  }
   // Sequential provisioning reuses the same recorded Capture workspace.
   for (const creativeTaskId of creatives) {
     try {
-      const workspace = await provisionCreativeDriveWorkspace(admin, creativeTaskId);
+      const workspace = await provisionCreativeDriveWorkspace(admin, creativeTaskId, series);
       if (workspace.status !== "ready" || !workspace.raw_folder_id) {
         throw new Error("Pasta Raw ainda não está pronta.");
       }
@@ -79,22 +89,50 @@ export async function prepareDailyCycle(
   if (!errors.length && shared) {
     const scriptId = daily.payload?.daily_script_task_id;
     const captureId = daily.payload?.daily_capture_task_id;
-    if (typeof scriptId === "string" && shared.script) {
+    try {
+      if (typeof scriptId !== "string" || typeof captureId !== "string" || !shared.script) {
+        throw new HttpError(409, "Roteiro ou Captação compartilhados não encontrados.");
+      }
+      const effective = daily.payload?.daily_effective as { scriptDocUrl?: string | null } | undefined;
+      const savedUrl = typeof daily.payload?.daily_script_doc_url === "string" ? daily.payload.daily_script_doc_url : null;
+      const docUrl = savedUrl ?? effective?.scriptDocUrl ?? series.docUrl;
+      const parsed = parseGoogleDriveUrl(docUrl);
+      if (parsed?.kind !== "document") throw new HttpError(409, "O Roteiro canônico precisa ser um Google Doc.");
+      const doc = await getDriveItemMetadata(parsed.id);
+      if (!doc || doc.mimeType !== "application/vnd.google-apps.document") {
+        throw new HttpError(409, "O Google Doc do Roteiro não está acessível à integração do Drive.");
+      }
+      const shortcutId = await createDriveShortcut({
+        name: doc.name, parentId: shared.script, targetId: doc.id,
+        appProperties: { client_id: daily.client_id!, plan_task_id: executionId,
+          capture_task_id: captureId, north_role: "daily_script_shortcut", document_id: doc.id },
+      });
+      await updateTaskPayload(admin, executionId, { patch: {
+        daily_script_doc_url: docUrl, daily_script_doc_id: doc.id,
+        daily_script_shortcut_id: shortcutId, daily_series_folder_id: series.folderId,
+      } });
+      await updateTaskPayload(admin, scriptId, {
+        patch: { daily_script_doc_url: docUrl, daily_script_doc_id: doc.id },
+        text: `North AI vinculou o Roteiro único desta diária: [abrir Google Doc](${docUrl}).`,
+        commentId: automationCommentId("daily-script-doc", executionId, doc.id),
+      });
       await updateTaskPayload(admin, scriptId, {
         text: `North AI preparou a pasta do Roteiro: [abrir pasta](${folderLink(shared.script)}).`,
         commentId: automationCommentId("daily-script-folder", executionId),
       });
-    }
-    if (typeof captureId === "string" && shared.capture) {
-      await updateTaskPayload(admin, captureId, {
-        text: `North AI preparou a pasta da Captação: [abrir pasta](${folderLink(shared.capture)}).`,
-        commentId: automationCommentId("daily-capture-folder", executionId),
+      if (shared.capture) {
+        await updateTaskPayload(admin, captureId, {
+          text: `North AI preparou a pasta da Captação: [abrir pasta](${folderLink(shared.capture)}).`,
+          commentId: automationCommentId("daily-capture-folder", executionId),
+        });
+      }
+      await updateTaskPayload(admin, executionId, {
+        text: `North AI preparou ${creatives.length} Entrega(s) e as pastas desta gravação${shared.daily ? `: [abrir pasta](${folderLink(shared.daily)})` : ""}.`,
+        commentId: automationCommentId("daily-ready", executionId),
       });
+    } catch (error) {
+      errors.push({ creativeTaskId: scriptId as string, message: errorMessage(error) });
     }
-    await updateTaskPayload(admin, executionId, {
-      text: `North AI preparou ${creatives.length} Entrega(s) e as pastas desta gravação${shared.daily ? `: [abrir pasta](${folderLink(shared.daily)})` : ""}.`,
-      commentId: automationCommentId("daily-ready", executionId),
-    });
   }
   return { total: creatives.length, prepared: prepared.length, errors };
 }

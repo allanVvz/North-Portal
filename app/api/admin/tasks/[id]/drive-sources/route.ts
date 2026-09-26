@@ -33,7 +33,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const folderId = kind === "script" ? data?.script_folder_id : data?.capture_folder_id;
     if (!folderId) throw new HttpError(409, "A pasta da Captação ainda não está pronta.");
     const page = await listFolderFilesPage(folderId, 1000, pageToken, true, query);
-    return NextResponse.json(page, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ ...page, files: page.files.filter((file) =>
+      file.mimeType !== "application/vnd.google-apps.shortcut" &&
+      file.mimeType !== "application/vnd.google-apps.folder") },
+    { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return apiError(error);
   }

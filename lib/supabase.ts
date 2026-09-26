@@ -2,7 +2,8 @@ import { createClient } from "./supabase/server";
 import { TASK_COLUMNS } from "./taskColumns";
 import { AUTOMATION_DEFINITIONS, isAutomationKey } from "./automationCatalog";
 import { dailyConfigSchema, type DailyConfig } from "./validation";
-import { isGoogleDriveConfigured } from "./googleDriveApi";
+import { getDriveItemMetadata, isGoogleDriveConfigured } from "./googleDriveApi";
+import { parseGoogleDriveUrl } from "./googleDrive";
 import { canonicalFormatKey } from "./canonicalDeliveryFormats";
 import {
   currentRecurringExecutionFields,
@@ -4233,6 +4234,13 @@ async function validateDailyAutomation(
   if (!active) return;
   if (!isGoogleDriveConfigured()) {
     throw new HttpError(409, "Configure a conexão do Google Drive antes de ativar a diária.");
+  }
+  if (config.scriptDocUrl) {
+    const docId = parseGoogleDriveUrl(config.scriptDocUrl)?.id;
+    const doc = docId ? await getDriveItemMetadata(docId) : null;
+    if (!doc || doc.mimeType !== "application/vnd.google-apps.document") {
+      throw new HttpError(409, "Compartilhe o Google Doc do Roteiro com a integração do Drive antes de ativar a diária.");
+    }
   }
   const [workflow, folders] = await Promise.all([
     publishedWorkflowForKind(supabase, "criativo"),

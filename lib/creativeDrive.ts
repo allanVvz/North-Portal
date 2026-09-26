@@ -15,6 +15,7 @@ import {
 import { creativeDriveAppProperties } from "./creativeDriveModel";
 import { BAITA_DRIVE_PLAN_ID } from "./cardMaterials";
 import { isCreativeDeliveryKind } from "./canonicalDeliveryFormats";
+import { ensureDailySeries, type DailySeries } from "./automations/dailySeries";
 
 export { BAITA_DRIVE_PLAN_ID };
 
@@ -37,6 +38,7 @@ type LinkRow = { parent_id: string; child_id: string; slot: string | null; relat
 
 export type CreativeDriveContext = {
   clientId: string;
+  dailyConfigId: string | null;
   routineTaskId: string | null;
   planTaskId: string;
   captureTaskId: string | null;
@@ -159,6 +161,7 @@ export async function resolveCreativeDriveContext(db: Db, creativeTaskId: string
 
   return {
     clientId: creative.client_id,
+    dailyConfigId: typeof plan.payload?.daily_config_id === "string" ? plan.payload.daily_config_id : null,
     routineTaskId: plan.plan_id,
     planTaskId: plan.id,
     captureTaskId: capture?.id ?? null,
@@ -187,7 +190,7 @@ export async function canManageCreativeAssets(db: Db, userId: string, level: str
   return Boolean(data?.length);
 }
 
-export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: string): Promise<CreativeDriveWorkspace> {
+export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: string, preparedSeries?: DailySeries): Promise<CreativeDriveWorkspace> {
   const context = await resolveCreativeDriveContext(db, creativeTaskId);
   // resolveCreativeDriveContext has already checked the configured client and
   // exact structural Plan. Workspaces are still keyed by that execution Plan.
@@ -198,6 +201,9 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
   if (!links?.raw_folder_id || !links?.uploads_folder_id) {
     throw new HttpError(409, "Cadastre as pastas Raw e Edição do cliente antes de provisionar.");
   }
+  const series = context.dailyConfigId
+    ? preparedSeries ?? await ensureDailySeries(db, context.dailyConfigId) : null;
+  const dailyParentId = series?.folderId ?? links.raw_folder_id;
 
   let captureWorkspace: { id: string; daily_folder_id: string | null; script_folder_id: string | null; capture_folder_id: string | null; provision_attempts: number } | null = null;
   if (context.captureTaskId) {
@@ -230,11 +236,12 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
     const names = creativeFolderNames(context);
     // The capture is shared by several creatives. Reuse its recorded folders
     // before searching by tags; legacy runs created duplicate same-name folders.
-    async function recordedFolder(id: string | null, parentId: string): Promise<{ id: string } | null> {
+    async function recordedFolder(id: string | null, parentId: string, legacyParentId?: string): Promise<{ id: string } | null> {
       if (!id) return null;
       const file = await getDriveItemMetadata(id);
       if (!file) throw new HttpError(502, "Uma pasta registrada esta inacessivel no Google Drive.");
-      if (file.mimeType !== "application/vnd.google-apps.folder" || !file.parents?.includes(parentId)) {
+      if (file.mimeType !== "application/vnd.google-apps.folder" ||
+          !file.parents?.some((parent) => parent === parentId || parent === legacyParentId)) {
         throw new HttpError(409, "Uma pasta registrada nao pertence a pasta esperada.");
       }
       return { id: file.id };
@@ -243,8 +250,8 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
     let script: { id: string } | null = null;
     let capture: { id: string } | null = null;
     if (captureWorkspace) {
-      daily = await recordedFolder(captureWorkspace.daily_folder_id, links.raw_folder_id) ?? await ensureDriveFolder({
-        name: dailyLabel(context.captureDate), parentId: links.raw_folder_id,
+      daily = await recordedFolder(captureWorkspace.daily_folder_id, dailyParentId, series ? links.raw_folder_id : undefined) ?? await ensureDriveFolder({
+        name: dailyLabel(context.captureDate), parentId: dailyParentId,
         appProperties: creativeDriveAppProperties(context, "daily_root"),
       });
       [script, capture] = await Promise.all([
@@ -337,6 +344,9 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string, 
     captureWorkspace?.script_folder_id ? listFolderFilesPage(captureWorkspace.script_folder_id, 1000, null, true) : { files: [], nextPageToken: null },
     captureWorkspace?.capture_folder_id ? listFolderFilesPage(captureWorkspace.capture_folder_id, 1000, null, true) : { files: [], nextPageToken: null },
   ]) : [{ status: "fulfilled", value: { files: [], nextPageToken: null } }, { status: "fulfilled", value: { files: [], nextPageToken: null } }] as const;
+  const sourceFiles = (files: readonly Awaited<ReturnType<typeof listFolderFilesPage>>["files"][number][]) =>
+    files.filter((file) => file.mimeType !== "application/vnd.google-apps.shortcut" &&
+      file.mimeType !== "application/vnd.google-apps.folder");
   return {
     ...row,
     capture_workspace: captureWorkspace ?? null,
@@ -344,8 +354,8 @@ export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string, 
     raw_links: rawLinks ?? [],
     final_versions: versions ?? [],
     source_files: {
-      script: scriptResult.status === "fulfilled" ? scriptResult.value.files : [],
-      capture: captureResult.status === "fulfilled" ? captureResult.value.files : [],
+      script: scriptResult.status === "fulfilled" ? sourceFiles(scriptResult.value.files) : [],
+      capture: captureResult.status === "fulfilled" ? sourceFiles(captureResult.value.files) : [],
     },
     source_next_page_token: {
       script: scriptResult.status === "fulfilled" ? scriptResult.value.nextPageToken : null,
@@ -393,7 +403,9 @@ export async function linkRawAsset(db: Db, userId: string, creativeTaskId: strin
   const verified = await getDriveItemMetadata(file.id);
   const allowedParents = [workspace.capture_workspace?.script_folder_id, workspace.capture_workspace?.capture_folder_id]
     .filter((id): id is string => Boolean(id));
-  if (!verified || !verified.parents?.some((parent) => allowedParents.includes(parent))) {
+  if (!verified || verified.mimeType === "application/vnd.google-apps.shortcut" ||
+      verified.mimeType === "application/vnd.google-apps.folder" ||
+      !verified.parents?.some((parent) => allowedParents.includes(parent))) {
     throw new HttpError(400, "O bruto nao pertence ao Roteiro ou a Captacao desta diaria.");
   }
   file = verified;

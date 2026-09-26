@@ -21,6 +21,7 @@
 
 import type { AdminClient } from "@/lib/automations/taskAccess";
 import { directFiles } from "@/lib/creativeDriveSync";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import { isGoogleDriveConfigured } from "@/lib/googleDriveApi";
 import { parseGoogleDriveUrl } from "@/lib/googleDrive";
 import { commentsOf, splitCommentText } from "@/lib/comments";
@@ -41,7 +42,9 @@ async function creativeIdsOf(admin: AdminClient, stepId: string): Promise<string
   if (!parentIds.length) return [];
   const { data: parents, error: parentError } = await admin.from("tasks").select("id,kind").in("id", parentIds);
   if (parentError) throw parentError;
-  return ((parents ?? []) as { id: string; kind: string | null }[]).filter((row) => row.kind === "criativo").map((row) => row.id);
+  return ((parents ?? []) as { id: string; kind: string | null }[])
+    .filter((row) => row.kind !== null && isCreativeDeliveryKind(row.kind))
+    .map((row) => row.id);
 }
 
 async function captureOf(admin: AdminClient, step: Step, creativeIds: readonly string[]): Promise<Capture | null> {
@@ -84,7 +87,12 @@ export async function stepDeliveryText(admin: AdminClient, step: Step): Promise<
 
   if (step.subtype === "roteiro") {
     const links: string[] = [];
-    if (capture?.script_folder_id) {
+    const canonicalDoc = typeof step.payload?.daily_script_doc_url === "string"
+      && parseGoogleDriveUrl(step.payload.daily_script_doc_url)?.kind === "document"
+      ? step.payload.daily_script_doc_url : null;
+    if (canonicalDoc) {
+      links.push(`[Roteiro da diária](${canonicalDoc})`);
+    } else if (capture?.script_folder_id) {
       const files = await safeFiles(capture.script_folder_id);
       if (files?.length) links.push(...files.map((file) => `[${file.name}](${file.webViewLink || fileUrl(file.id)})`));
       else links.push(`[Roteiros${dia ? ` · diária ${dia}` : ""}](${folderUrl(capture.script_folder_id)})`);

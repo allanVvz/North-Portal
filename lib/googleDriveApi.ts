@@ -23,6 +23,7 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
+const DOCUMENT_MIME = "application/vnd.google-apps.document";
 
 // Subfolders created under each client's root folder. The keys map 1:1 to the
 // columns already on client_drive_links, so the automation fills exactly the
@@ -193,6 +194,29 @@ export async function ensureDriveFolder(input: {
   const data = await res.json() as { id?: string };
   if (!data.id) throw new HttpError(502, "Google Drive nao retornou o id da pasta.");
   return { id: data.id, url: folderUrl(data.id) };
+}
+
+/** One editable Google Doc for a configured daily series. Reconciliation uses
+ * its automation identity, so retrying after a partial run reuses the file. */
+export async function ensureDriveDocument(input: {
+  name: string;
+  parentId: string;
+  appProperties: Record<string, string>;
+}): Promise<DriveItemMetadata> {
+  const found = await findDriveItemByAppProperties(input.parentId, input.appProperties, DOCUMENT_MIME);
+  if (found) return found;
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const res = await fetch(`${DRIVE_FILES}?fields=id,name,mimeType,webViewLink&supportsAllDrives=true`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: input.name, mimeType: DOCUMENT_MIME, parents: [input.parentId], appProperties: input.appProperties }),
+  });
+  if (!res.ok) throw new HttpError(502, `Falha ao criar Google Doc da diaria (HTTP ${res.status}).`);
+  const file = await res.json() as Partial<DriveItemMetadata>;
+  if (!file.id || file.mimeType !== DOCUMENT_MIME) throw new HttpError(502, "Google Drive nao confirmou o Doc da diaria.");
+  return { id: file.id, name: file.name ?? input.name, mimeType: DOCUMENT_MIME,
+    size: null, webViewLink: file.webViewLink ?? `https://docs.google.com/document/d/${file.id}/edit` };
 }
 
 /** Rename only the folder already recorded for this parent. Its ID and contents stay intact. */

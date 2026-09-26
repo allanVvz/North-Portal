@@ -5952,6 +5952,8 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 /* Diária recorrente no card de automação. */
 .auto-daily { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--a-border); border-radius: 10px; background: var(--a-surface2); font-size: 12px; }
 .auto-daily p { margin: 0; }
+.auto-daily-doc { display: grid; gap: 5px; min-width: 0; }
+.auto-daily-doc input { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--a-border); border-radius: 7px; color: var(--a-ink); background: var(--a-surface); font: inherit; }
 .auto-daily-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0; }
 .auto-daily-steps li { padding: 5px 8px; border: 1px solid var(--a-border); border-radius: 8px; background: var(--a-surface); }
 .auto-daily-piece { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; }

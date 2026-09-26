@@ -14,13 +14,13 @@ import { recordStepDelivery } from "./stepDelivery";
 const LUIZA = "p-luiza";
 const ALISSON = "p-alisson";
 
-function world(options: { roteiroComments?: Row[]; captacaoComments?: Row[]; withCapture?: boolean } = {}) {
+function world(options: { roteiroComments?: Row[]; captacaoComments?: Row[]; withCapture?: boolean; canonicalKinds?: boolean; canonicalDocUrl?: string } = {}) {
   const withCapture = options.withCapture ?? true;
   const db = createFakeTaskDb({
     tasks: [
-      { id: "c1", kind: "criativo", title: "Promoções", workflow_version_id: "wv", status: "backlog", payload: { comments: [] } },
-      { id: "c2", kind: "criativo", title: "Paz", workflow_version_id: "wv", status: "backlog", payload: { comments: [] } },
-      { id: "roteiro", kind: "operacional", subtype: "roteiro", title: "Roteiro do bloco", status: "aprovado", assignee: "Luiza", completed_at: "2026-09-18T17:27:21.000Z", payload: { comments: options.roteiroComments ?? [] } },
+      { id: "c1", kind: options.canonicalKinds ? "entrega_reels" : "criativo", title: "Promoções", workflow_version_id: "wv", status: "backlog", payload: { comments: [] } },
+      { id: "c2", kind: options.canonicalKinds ? "entrega_story" : "criativo", title: "Paz", workflow_version_id: "wv", status: "backlog", payload: { comments: [] } },
+      { id: "roteiro", kind: "operacional", subtype: "roteiro", title: "Roteiro do bloco", status: "aprovado", assignee: "Luiza", completed_at: "2026-09-18T17:27:21.000Z", payload: { comments: options.roteiroComments ?? [], ...(options.canonicalDocUrl ? { daily_script_doc_url: options.canonicalDocUrl } : {}) } },
       { id: "captacao", kind: "operacional", subtype: "captacao", title: "Gravação do bloco", status: "aprovado", assignee: "Alisson", completed_at: "2026-09-18T17:27:21.000Z", payload: { comments: options.captacaoComments ?? [] } },
     ],
     task_links: [
@@ -53,6 +53,25 @@ beforeEach(() => {
 });
 
 describe("entrega do Roteiro", () => {
+  it("entrega somente o Doc canônico quando a diária possui um link vinculado", async () => {
+    const canonicalDocUrl = "https://docs.google.com/document/d/canonical123/edit";
+    const db = world({ canonicalKinds: true, canonicalDocUrl });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await recordStepDelivery(db as any, "roteiro");
+    const [comment] = db.comments("roteiro");
+    expect(String(comment.text)).toContain(`[Roteiro da diária](${canonicalDocUrl})`);
+    expect(String(comment.text)).not.toContain("doc1");
+  });
+
+  it("encontra o Roteiro único também nas Entregas de formato canônico", async () => {
+    const db = world({ canonicalKinds: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await recordStepDelivery(db as any, "roteiro");
+    const [comment] = db.comments("roteiro");
+    expect(String(comment.text)).toContain("2 criativos prontos para gravar");
+    expect(String(comment.text)).toContain("https://docs.google.com/document/d/doc1/edit");
+  });
+
   it("Luiza entrega os arquivos da pasta Roteiro da diária, contando os criativos", async () => {
     const db = world();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

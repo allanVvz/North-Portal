@@ -25,6 +25,14 @@ export async function GET(request: Request) {
       .select("id,client_id,plan_task_id,capture_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,capture_workspace:drive_capture_workspaces(script_folder_id,capture_folder_id,daily_folder_id)")
       .eq("client_id", task.client_id).eq("status", "ready");
     if (workspacesError) throw workspacesError;
+    const canonicalPlans = new Map<string, { client_id: string | null; payload: Record<string, unknown> | null }>();
+    if (link.kind === "document" && workspaces?.length) {
+      const planIds = [...new Set(workspaces.map((workspace) => workspace.plan_task_id))];
+      const { data: plans, error: plansError } = await db.from("tasks")
+        .select("id,client_id,payload").in("id", planIds);
+      if (plansError) throw plansError;
+      for (const plan of plans ?? []) canonicalPlans.set(plan.id, plan);
+    }
     for (const workspace of workspaces ?? []) {
       const direct = [workspace.plan_task_id, workspace.capture_task_id,
         workspace.creative_task_id, workspace.stage_task_id].includes(taskId);
@@ -38,6 +46,14 @@ export async function GET(request: Request) {
       }
       if (!related) continue;
       const capture = Array.isArray(workspace.capture_workspace) ? workspace.capture_workspace[0] : workspace.capture_workspace;
+      const canonicalPlan = canonicalPlans.get(workspace.plan_task_id);
+      if (link.kind === "document" && canonicalPlan && canonicalPlan.client_id === task.client_id &&
+          canonicalPlan.payload?.daily_script_doc_id === link.id) {
+        return NextResponse.json({ resolved: true, taskId: workspace.creative_task_id,
+          source: "script", file: { id: link.id, name: "Roteiro da diária",
+            mimeType: "application/vnd.google-apps.document",
+            webViewLink: `https://docs.google.com/document/d/${link.id}/edit`, size: null } });
+      }
       if (link.id === capture?.daily_folder_id) {
         return NextResponse.json({ resolved: true, taskId: workspace.creative_task_id, tab: "raw" });
       }
