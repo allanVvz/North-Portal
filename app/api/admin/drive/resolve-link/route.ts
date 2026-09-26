@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     if (taskError) throw taskError;
     if (!task?.client_id) throw new HttpError(404, "Card não encontrado.");
     const { data: workspaces, error: workspacesError } = await db.from("drive_creative_workspaces")
-      .select("id,client_id,plan_task_id,capture_task_id,creative_task_id,stage_task_id,capture_workspace:drive_capture_workspaces(script_folder_id,capture_folder_id,daily_folder_id)")
+      .select("id,client_id,plan_task_id,capture_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,capture_workspace:drive_capture_workspaces(script_folder_id,capture_folder_id,daily_folder_id)")
       .eq("client_id", task.client_id).eq("status", "ready");
     if (workspacesError) throw workspacesError;
     for (const workspace of workspaces ?? []) {
@@ -38,6 +38,15 @@ export async function GET(request: Request) {
       }
       if (!related) continue;
       const capture = Array.isArray(workspace.capture_workspace) ? workspace.capture_workspace[0] : workspace.capture_workspace;
+      if (link.id === capture?.daily_folder_id) {
+        return NextResponse.json({ resolved: true, taskId: workspace.creative_task_id, tab: "raw" });
+      }
+      if (link.id === workspace.raw_folder_id || link.id === workspace.preview_folder_id ||
+          link.id === workspace.creative_folder_id) {
+        const tab = link.id === workspace.raw_folder_id ? "classified"
+          : link.id === workspace.preview_folder_id ? "preview" : "final";
+        return NextResponse.json({ resolved: true, taskId: workspace.creative_task_id, tab });
+      }
       const file = await getDriveItemMetadata(link.id);
       if (!file) continue;
       const source = file.id === capture?.script_folder_id || file.parents?.includes(capture?.script_folder_id ?? "") ? "script"

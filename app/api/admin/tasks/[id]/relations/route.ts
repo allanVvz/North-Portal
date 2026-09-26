@@ -7,16 +7,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { workflowByVersionId } from "@/lib/workflows";
 import { HttpError } from "@/lib/validation";
-import { BAITA_DRIVE_PLAN_ID, provisionCreativeDriveWorkspace } from "@/lib/creativeDrive";
+import { provisionCreativeDriveWorkspaceIfConfigured } from "@/lib/creativeDrive";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import { flowStepsOf } from "@/lib/taskRelations";
 
 async function refreshCreativeFolders(creativeTaskId: string) {
   const db = createAdminClient();
-  const { data: membership, error } = await db.from("task_links").select("child_id")
-    .eq("parent_id", BAITA_DRIVE_PLAN_ID).eq("child_id", creativeTaskId).eq("relation_kind", "structural_member").maybeSingle();
-  if (error) throw error;
-  if (!membership) return;
-  try { await provisionCreativeDriveWorkspace(db, creativeTaskId); }
+  try { await provisionCreativeDriveWorkspaceIfConfigured(db, creativeTaskId); }
   catch (cause) { console.error("Falha ao preparar pastas do Criativo", cause); }
 }
 
@@ -79,8 +76,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     await linkTasks(id, child_id, workflowStepId ?? null, relationKind, crossClient ? createAdminClient() : undefined);
-    if (relationKind === "structural_member" && id === BAITA_DRIVE_PLAN_ID && child.kind === "criativo") await refreshCreativeFolders(child_id);
-    if (relationKind === "workflow_step" && parent.kind === "criativo") await refreshCreativeFolders(id);
+    if (relationKind === "structural_member" && parent.kind === "plano_acao" && isCreativeDeliveryKind(child.kind)) await refreshCreativeFolders(child_id);
+    if (relationKind === "workflow_step" && isCreativeDeliveryKind(parent.kind)) await refreshCreativeFolders(id);
     return NextResponse.json(await getTaskById(child_id));
   } catch (error) {
     return apiError(error);
@@ -131,7 +128,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       .select("child_id").maybeSingle();
     if (error) throw new HttpError(409, error.message);
     if (!data) throw new HttpError(409, "A etapa foi alterada. Reabra o card e tente novamente.");
-    if (parent.kind === "criativo") await refreshCreativeFolders(id);
+    if (isCreativeDeliveryKind(parent.kind)) await refreshCreativeFolders(id);
     const [previous, next] = await Promise.all([getTaskById(input.current_child_id), getTaskById(input.child_id)]);
     return NextResponse.json({ previous, current: next });
   } catch (error) {

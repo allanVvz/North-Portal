@@ -13,6 +13,7 @@ import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
 import { creativesFollowingStage } from "@/lib/flows/homeArrival";
 import { eventCommentId, recordStatusComment, statusChangeText, stepLabelOf } from "@/lib/flows/statusComments";
 import { recordStepDelivery } from "@/lib/flows/stepDelivery";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import { notifyTaskParticipants, statusChangedMessage } from "@/lib/notifications";
 import { HttpError, TASK_STATUSES, type TaskRecord } from "@/lib/validation";
 
@@ -92,7 +93,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       // Toda mudança de status de criativo fica no thread, no nome de quem mudou
       // (25/09). Por Entrega vai no card do criativo; a da etapa inteira vai na
       // etapa, que o thread de cada criativo que a compartilha já mostra.
-      if (delivery.kind === "criativo") {
+      if (isCreativeDeliveryKind(delivery.kind)) {
         await recordStatusComment(createAdminClient(), {
           targetId: contextual ? id : stage.id,
           authorId: session.userId,

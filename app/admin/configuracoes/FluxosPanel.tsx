@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { TaskTypeEditorNode, TaskTypeEditorSubtype, VocabUsageMap } from "@/lib/taskTypes";
 import { usageKey } from "@/lib/taskTypes";
 import NovoFluxoModal from "./NovoFluxoModal";
+import { CANONICAL_DELIVERY_FORMATS } from "@/lib/canonicalDeliveryFormats";
 
 // Configurações › Tipos e fluxos — o molde das Entregas fora do SQL.
 //
@@ -22,6 +23,7 @@ const BEHAVIOR_LABEL: Record<string, string> = {
 };
 
 export type StepDraft = {
+  key?: string;
   label: string;
   lead_days: number;
   progress_weight: number;
@@ -29,8 +31,9 @@ export type StepDraft = {
   client_visible: boolean;
 };
 
-function toStepDraft(step: TaskTypeEditorSubtype): StepDraft {
+function toStepDraft(step: Pick<TaskTypeEditorSubtype, "key" | "label" | "lead_days" | "progress_weight" | "default_assignee" | "client_visible">): StepDraft {
   return {
+    key: step.key,
     label: step.label,
     lead_days: step.lead_days,
     progress_weight: step.progress_weight,
@@ -54,6 +57,13 @@ export default function FluxosPanel() {
   const [typeLabel, setTypeLabel] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [novoFluxoOpen, setNovoFluxoOpen] = useState(false);
+  const [canonicalPreset, setCanonicalPreset] = useState<(typeof CANONICAL_DELIVERY_FORMATS)[number] | null>(null);
+  const [workflowToEdit, setWorkflowToEdit] = useState<TaskTypeEditorNode | null>(null);
+
+  async function refreshTypes() {
+    const response = await fetch("/api/admin/task-types?scope=editor");
+    if (response.ok) setData(await response.json() as EditorData);
+  }
   // Tudo nasce recolhido — só as etapas de um tipo que a pessoa abriu de
   // propósito aparecem. Tipo inativo (molde velho, sem card nenhum) nem entra
   // na lista até "Mostrar inativos" — não é escondido por padrão nem no que
@@ -268,18 +278,46 @@ export default function FluxosPanel() {
           <h2 className="set-h">Tipos e fluxos</h2>
           <p className="admin-sub">Clique num tipo para ver e editar as etapas dele.</p>
         </div>
-        <button className="admin-btn primary" onClick={() => setNovoFluxoOpen(true)}>+ Novo tipo</button>
+        <button className="admin-btn primary" onClick={() => { setCanonicalPreset(null); setNovoFluxoOpen(true); }}>+ Novo tipo</button>
       </div>
 
       {error ? <p className="admin-error">{error}</p> : null}
 
+      <div className="auto-format-list">
+        <strong>Formatos canônicos</strong>
+        <p className="admin-sub">Crie cada formato separadamente. As etapas começam como as de Criativo e podem ser ajustadas por formato depois.</p>
+        <div className="set-actions">
+          {CANONICAL_DELIVERY_FORMATS.map((format) => {
+            const created = data.types.find((type) => type.key === format.key);
+            return <button key={format.key} type="button" className="admin-btn ghost"
+              onClick={() => {
+                if (created) { setExpanded((current) => new Set(current).add(created.id)); return; }
+                setCanonicalPreset(format);
+                setNovoFluxoOpen(true);
+              }}>
+              {format.icon} {format.label} {created ? "· ver cascata" : "· criar cascata"}
+            </button>;
+          })}
+        </div>
+      </div>
+
       {novoFluxoOpen ? (
         <NovoFluxoModal
-          onClose={() => setNovoFluxoOpen(false)}
-          onCreated={(created) => {
-            setData((cur) => (cur ? { ...cur, types: [...cur.types, created] } : cur));
+          onClose={() => { setNovoFluxoOpen(false); setWorkflowToEdit(null); }}
+          preset={workflowToEdit ? {
+            key: workflowToEdit.key, label: workflowToEdit.label, icon: workflowToEdit.icon ?? "▸",
+            editId: workflowToEdit.id,
+            steps: workflowToEdit.workflowSteps.map((step) => toStepDraft(step)),
+          } : canonicalPreset ? {
+            ...canonicalPreset,
+            steps: (data.types.find((type) => type.key === "criativo")?.workflowSteps ?? [])
+              .map((step) => toStepDraft(step)),
+          } : undefined}
+          onCreated={() => {
             setNovoFluxoOpen(false);
+            void refreshTypes();
           }}
+          onUpdated={() => { setNovoFluxoOpen(false); setWorkflowToEdit(null); void refreshTypes(); }}
         />
       ) : null}
 
@@ -347,7 +385,12 @@ export default function FluxosPanel() {
 
               {isExpanded ? (
               <div className="voc-steps">
-                {isDelivery ? <p className="admin-sub">Sequência composta por subtipos reutilizáveis de Tarefa. Edite o subtipo na seção Tarefa.</p> : null}
+                {isDelivery ? <div className="set-actions">
+                  <p className="admin-sub">Esta Entrega usa etapas reutilizáveis de Tarefa. Uma alteração publica uma nova versão; cards existentes mantêm a versão anterior.</p>
+                  <button type="button" className="admin-btn ghost" onClick={() => { setWorkflowToEdit(type); setCanonicalPreset(null); setNovoFluxoOpen(true); }}>
+                    Editar cascata
+                  </button>
+                </div> : null}
                 {displayedSteps.map((step, index) =>
                   editing === step.id ? (
                     <StepEditor

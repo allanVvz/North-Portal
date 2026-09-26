@@ -4,20 +4,18 @@ import NorthAiTabs from "../NorthAiTabs";
 
 export const dynamic = "force-dynamic";
 
-// A tela de Automações de sempre, agora como aba do NorthAi. Uma implementação
-// só (AutomationSettings); /admin/automacoes redireciona para cá.
 export default async function NorthAiAutomacoesPage() {
   const clients = await listClients();
   return (
     <section className="admin-page kb-wide">
       <header className="admin-head">
         <div>
-          <h1 className="admin-title">NorthAi</h1>
-          <p className="admin-sub">Automações que rodam sozinhas nos cards dos clientes.</p>
+          <h1 className="admin-title">North AI</h1>
+          <p className="admin-sub">Configure por cliente o Plano, a recorrência, as peças, as pastas e o trabalho que o North AI prepara.</p>
         </div>
       </header>
       <NorthAiTabs />
-      <AutomationSettings clients={clients.map((c) => ({ slug: c.slug, name: c.name }))} />
+      <AutomationSettings clients={clients.map((client) => ({ slug: client.slug, name: client.name }))} />
     </section>
   );
 }

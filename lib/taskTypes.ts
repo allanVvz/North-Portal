@@ -553,6 +553,7 @@ export async function createTaskSubtype(
 
 export type TaskTypeCreateInput = {
   label: string;
+  key?: string;
   behavior: TaskBehavior;
   icon: string;
   tone: TaskKindTone;
@@ -597,7 +598,7 @@ async function insertWorkflowStep(
 export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput): Promise<TaskTypeEditorNode> {
   if (!input.steps.length) throw new HttpError(400, "Um fluxo em cascata precisa de pelo menos uma etapa.");
 
-  const key = slugifyTypeKey(input.label);
+  const key = input.key ?? slugifyTypeKey(input.label);
   if (!key) throw new HttpError(400, "O nome do tipo precisa ter ao menos uma letra ou numero.");
   const [{ types: existingTypes }, { data: catalogData, error: catalogError }] = await Promise.all([
     listTaskTypesForEditor(db),

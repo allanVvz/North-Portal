@@ -70,6 +70,17 @@ describe("escopo: o que é status de criativo", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(await isCreativeStatusScope(db as any, { id: "solto", kind: "criativo", workflow_version_id: null })).toBe(true);
   });
+
+  it("etapa de formato canônico entra no thread sem ativar relatórios", async () => {
+    const db = world({ tasks: [
+      { id: "story", kind: "entrega_story", workflow_version_id: "wv-story" },
+      { id: "story-edicao", kind: "operacional", subtype: "edicao" },
+    ], links: [link("story", "story-edicao"), link("entrega-relatorio", "relatorio")] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(await isCreativeStatusScope(db as any, { id: "story-edicao", kind: "operacional" })).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(await isCreativeStatusScope(db as any, { id: "relatorio", kind: "operacional" })).toBe(false);
+  });
 });
 
 describe("responsável da etapa", () => {

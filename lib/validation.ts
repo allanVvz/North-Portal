@@ -566,6 +566,7 @@ export const dailyPieceSchema = z.object({
   key: z.string().uuid(),
   name: z.string().trim().min(1).max(240),
   format: z.string().trim().min(1).max(80),
+  deliveryTypeId: z.string().uuid().optional(),
   offsetDays: z.number().int().min(-30).max(180),
 });
 export const dailyConfigSchema = z.object({
@@ -703,6 +704,7 @@ export const TASK_KIND_TONES = ["green", "gold", "blue", "purple", "neutral"] as
 // Entrega precisa declarar ao menos a primeira etapa antes de qualquer INSERT.
 export const taskTypeCreateSchema = z.object({
   label: z.string().min(1).max(80),
+  key: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).optional(),
   behavior: z.enum(["entrega", "plano", "simples"]).default("entrega"),
   icon: z.string().min(1).max(4),
   tone: z.enum(TASK_KIND_TONES),

@@ -26,7 +26,8 @@ import { HttpError, type TaskRecord } from "@/lib/validation";
 import type { taskCreateSchema } from "@/lib/validation";
 import { createClient } from "@/lib/supabase/server";
 import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
-import { BAITA_DRIVE_PLAN_ID, provisionCreativeDriveWorkspace } from "@/lib/creativeDrive";
+import { provisionCreativeDriveWorkspaceIfConfigured } from "@/lib/creativeDrive";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const TASK_CREATE_SCOPES = ["task", "plan", "routine"] as const;
@@ -132,8 +133,8 @@ export async function createTaskFromInput(
   // Ligar o passo, como se fazia, punha um pedaço da corrente no plano e
   // deixava a peça inteira de fora.
   if (planLink) await linkTasks(planLink, flow ? flow.delivery.id : task.id, null, "structural_member");
-  if (planLink === BAITA_DRIVE_PLAN_ID && (flow?.delivery.kind ?? task.kind) === "criativo") {
-    try { await provisionCreativeDriveWorkspace(createAdminClient(), flow?.delivery.id ?? task.id); }
+  if (planLink && isCreativeDeliveryKind(flow?.delivery.kind ?? task.kind)) {
+    try { await provisionCreativeDriveWorkspaceIfConfigured(createAdminClient(), flow?.delivery.id ?? task.id); }
     catch (cause) { console.error("Falha ao preparar pastas do Criativo", cause); }
   }
   if (assignee_profile_ids?.length) {

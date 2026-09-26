@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { AgencyProfile, CheckpointTemplate, LegalDoc, ResponsibilityAssignment, TeamMember } from "@/lib/supabase";
 import { uploadAvatarFile } from "@/lib/avatarUpload";
 import UserAvatar from "../../avatar/UserAvatar";
@@ -26,7 +27,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "politicas", label: "Políticas" },
   { key: "notificacoes", label: "Notificações" },
   { key: "etapas", label: "Etapas" },
-  { key: "fluxos", label: "Tipos e fluxos" },
+  { key: "fluxos", label: "Entregas e cascatas" },
   { key: "checkpoints", label: "Checkpoints comerciais" },
   { key: "faturamento", label: "Faturamento" },
   { key: "landing-pages", label: "Landing Pages" },
@@ -49,6 +50,7 @@ export default function SettingsPanel({
   clients,
   currentUser,
   responsibilities,
+  driveStatus,
 }: {
   legalDocs: LegalDoc[];
   agency: AgencyProfile;
@@ -57,19 +59,28 @@ export default function SettingsPanel({
   clients: { slug: string; name: string }[];
   currentUser: { fullName: string; email: string; bio: string | null; avatarUrl: string | null };
   responsibilities: ResponsibilityAssignment[];
+  driveStatus: { configured: boolean; readyClients: number; totalClients: number };
 }) {
   const [tab, setTab] = useState<Tab>("perfil");
+  const searchParams = useSearchParams();
 
   useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("tab");
+    const requested = searchParams.get("tab");
     if (requested && TABS.some((t) => t.key === requested)) setTab(requested as Tab);
-  }, []);
+  }, [searchParams]);
+
+  function selectTab(next: Tab) {
+    setTab(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", next);
+    window.history.replaceState(null, "", url);
+  }
 
   return (
-    <div className="set">
+    <div className={`set set-${tab}`}>
       <nav className="set-nav">
         {TABS.map((t) => (
-          <button key={t.key} className={`set-nav-item ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
+          <button key={t.key} className={`set-nav-item ${tab === t.key ? "active" : ""}`} onClick={() => selectTab(t.key)}>
             {t.label}
           </button>
         ))}
@@ -92,7 +103,14 @@ export default function SettingsPanel({
         ) : null}
         {tab === "notificacoes" ? <NotificationsSettings /> : null}
         {tab === "etapas" ? <EtapasPanel clients={clients} /> : null}
-        {tab === "fluxos" ? <FluxosPanel /> : null}
+        {tab === "fluxos" ? <>
+          <div className="set-card">
+            <h2 className="set-h">Formatos e cascatas</h2>
+            <p className="admin-sub">Cada formato de Entrega tem uma cascata própria. Crie Reels, Story, Carrossel, Anúncio e Banner individualmente; todos começam com a mesma estrutura e podem evoluir de forma independente.</p>
+            <a className="admin-btn ghost" href="/admin/northai/automacoes">Configurar automações no North AI →</a>
+          </div>
+          <FluxosPanel />
+        </> : null}
         {tab === "checkpoints" ? <CheckpointTemplates initial={checkpointTemplates} /> : null}
         {tab === "faturamento" ? (
           <div className="set-card set-empty">
@@ -106,7 +124,7 @@ export default function SettingsPanel({
             <MetaIntegration clients={clients} />
             <WindsorIntegration clients={clients} />
             <AiProviderIntegration />
-            <DriveIntegration />
+            <DriveIntegration status={driveStatus} />
           </>
         ) : null}
       </div>

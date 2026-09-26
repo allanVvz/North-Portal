@@ -13,7 +13,7 @@ export default function NorthAiTabs() {
   return (
     <nav className="clients-section-tabs nai-tabs" aria-label="Telas do NorthAi">
       {TABS.map((tab) => {
-        const on = tab.href === "/admin/northai" ? pathname === tab.href : pathname.startsWith(tab.href);
+        const on = tab.href === "/admin/northai" ? pathname === tab.href : pathname.startsWith("/admin/northai/automacoes");
         return (
           <Link key={tab.href} href={tab.href} className={on ? "on" : ""} aria-current={on ? "page" : undefined}>
             {tab.label}

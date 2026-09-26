@@ -14,6 +14,7 @@ import {
 } from "./googleDriveApi";
 import { creativeDriveAppProperties } from "./creativeDriveModel";
 import { BAITA_DRIVE_PLAN_ID } from "./cardMaterials";
+import { isCreativeDeliveryKind } from "./canonicalDeliveryFormats";
 
 export { BAITA_DRIVE_PLAN_ID };
 
@@ -24,6 +25,7 @@ type TaskRow = {
   plan_id: string | null;
   title: string;
   kind: string;
+  workflow_version_id: string | null;
   subtype: string | null;
   payload: Record<string, unknown> | null;
   due_date: string | null;
@@ -103,7 +105,7 @@ function dailyLabel(date: string | null): string {
 
 async function taskById(db: Db, id: string): Promise<TaskRow> {
   const { data, error } = await db.from("tasks")
-    .select("id,client_id,plan_id,title,kind,subtype,payload,due_date,start_date,scheduled_start_at")
+    .select("id,client_id,plan_id,title,kind,subtype,workflow_version_id,payload,due_date,start_date,scheduled_start_at")
     .eq("id", id).maybeSingle();
   failDb(error);
   if (!data) throw new HttpError(404, "Card nao encontrado.");
@@ -113,7 +115,7 @@ async function taskById(db: Db, id: string): Promise<TaskRow> {
 /** Resolve a diaria pelo card compartilhado de Captacao, nunca pela data. */
 export async function resolveCreativeDriveContext(db: Db, creativeTaskId: string): Promise<CreativeDriveContext> {
   const creative = await taskById(db, creativeTaskId);
-  if (creative.kind !== "criativo") throw new HttpError(400, "O workspace pertence a uma Entrega.");
+  if (!creative.workflow_version_id || !isCreativeDeliveryKind(creative.kind)) throw new HttpError(400, "O workspace pertence a uma Entrega criativa.");
 
   const { data: parentLinks, error: parentError } = await db.from("task_links")
     .select("parent_id,child_id,slot,relation_kind").eq("child_id", creativeTaskId).eq("relation_kind", "structural_member");
@@ -303,6 +305,19 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
     throw cause;
   }
   return getCreativeDriveWorkspace(db, creativeTaskId) as Promise<CreativeDriveWorkspace>;
+}
+
+/** Cards fora de um Plano com materiais configurados não precisam de workspace. */
+export async function provisionCreativeDriveWorkspaceIfConfigured(
+  db: Db, creativeTaskId: string,
+): Promise<CreativeDriveWorkspace | null> {
+  try {
+    await resolveCreativeDriveContext(db, creativeTaskId);
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 403) return null;
+    throw error;
+  }
+  return provisionCreativeDriveWorkspace(db, creativeTaskId);
 }
 
 export async function getCreativeDriveWorkspace(db: Db, creativeTaskId: string, includeSources = true): Promise<CreativeDriveWorkspace | null> {

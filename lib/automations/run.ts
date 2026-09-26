@@ -23,6 +23,7 @@ import { collectAndStorePreviews } from "./creativeAssets";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { fetchPostsForAccount, reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { advanceFlowMold, clonePlanForReport, ensureFlowOccurrence, materializeOccurrenceForReport } from "./execute";
+import { prepareDailyCycle } from "./dailyCycle";
 import { runConversionFlow } from "./conversionFlow";
 import { detachSupersededReportDocuments, nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
 import { logReportRun } from "./reportLog";
@@ -540,10 +541,14 @@ export async function runAutomations(options: RunOptions = {}): Promise<Automati
     let outcome: RunOutcome;
     try {
       if (config.automation_key === "diaria_recorrente") {
-        const { error } = await admin.rpc("materialize_recurring_daily", {
+        const { data: executionId, error } = await admin.rpc("materialize_recurring_daily", {
           p_config_id: config.id, p_date: today, p_override: null,
         });
         if (error) throw error;
+        const preparation = await prepareDailyCycle(admin, executionId as string);
+        if (preparation.errors.length) {
+          throw new Error(`Pastas da diária: ${preparation.prepared}/${preparation.total} prontas; ${preparation.errors.map((item) => item.message).join("; ")}`);
+        }
         outcome = "ran";
       } else {
         outcome = config.automation_key === "relatorio_conversao"

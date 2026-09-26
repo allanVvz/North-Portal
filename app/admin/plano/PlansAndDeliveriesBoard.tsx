@@ -142,7 +142,8 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   const clientDeliveries = useMemo(() => orderedDeliveries.filter((card) => !selectedClient || card.clientName === selectedClient), [orderedDeliveries, selectedClient]);
   const visiblePlans = useMemo(() => clientPlans.filter((card) => matches(card, query)), [clientPlans, query]);
   const visibleDeliveries = useMemo(() => clientDeliveries.filter((card) => matches(card, query)), [clientDeliveries, query]);
-  const feedDeliveries = useMemo(() => visibleDeliveries.filter((card) => card.kind === "criativo" && !card.subtype), [visibleDeliveries]);
+  const feedDeliveries = useMemo(() => visibleDeliveries.filter((card) => card.workflow_version_id && !card.subtype &&
+    (card.kind === "criativo" || typeof card.payload?.daily_piece_key === "string")), [visibleDeliveries]);
 
   useEffect(() => {
     if (view !== "feed") return;

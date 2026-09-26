@@ -21,12 +21,13 @@ import { STATUS_LABEL } from "@/lib/notifiableChange";
 import { SUBTYPE_LABEL } from "@/lib/taskCatalog";
 import type { AdminClient } from "@/lib/automations/taskAccess";
 import { updateTaskPayload } from "@/lib/automations/taskWrites";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 
 type TaskLike = { id: string; kind?: string | null; subtype?: string | null; workflow_version_id?: string | null };
 
 /** Etapa de uma Entrega criativa, ou criativo avulso (sem fluxo). */
 export async function isCreativeStatusScope(admin: AdminClient, task: TaskLike): Promise<boolean> {
-  if (task.kind === "criativo" && !task.workflow_version_id) return true;
+  if (task.kind && isCreativeDeliveryKind(task.kind) && !task.workflow_version_id) return true;
   const { data: links, error } = await admin.from("task_links").select("parent_id")
     .eq("child_id", task.id).eq("relation_kind", "workflow_step");
   if (error) throw error;
@@ -34,7 +35,7 @@ export async function isCreativeStatusScope(admin: AdminClient, task: TaskLike):
   if (!parentIds.length) return false;
   const { data: parents, error: parentError } = await admin.from("tasks").select("kind").in("id", parentIds);
   if (parentError) throw parentError;
-  return ((parents ?? []) as { kind: string | null }[]).some((parent) => parent.kind === "criativo");
+  return ((parents ?? []) as { kind: string | null }[]).some((parent) => Boolean(parent.kind && isCreativeDeliveryKind(parent.kind)));
 }
 
 export function stepLabelOf(task: { subtype?: string | null; title?: string | null }): string {

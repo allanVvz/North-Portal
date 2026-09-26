@@ -33,15 +33,19 @@ function reorderLocal(steps: StepDraft[], draggedIndex: number, beforeIndex: num
 export default function NovoFluxoModal({
   onClose,
   onCreated,
+  onUpdated,
+  preset,
 }: {
   onClose: () => void;
   onCreated: (type: TaskTypeEditorNode) => void;
+  onUpdated?: () => void;
+  preset?: { key: string; label: string; icon: string; editId?: string; steps: StepDraft[] };
 }) {
-  const [label, setLabel] = useState("");
-  const [icon, setIcon] = useState(ICON_OPTIONS[0]);
+  const [label, setLabel] = useState(preset?.label ?? "");
+  const [icon, setIcon] = useState(preset?.icon ?? ICON_OPTIONS[0]);
   const [tone, setTone] = useState<(typeof TONE_OPTIONS)[number]["value"]>("purple");
   const [showInPerformance, setShowInPerformance] = useState(true);
-  const [steps, setSteps] = useState<StepDraft[]>([]);
+  const [steps, setSteps] = useState<StepDraft[]>(preset?.steps ?? []);
   const [stepDraft, setStepDraft] = useState<StepDraft>(EMPTY_STEP);
   const [editingIndex, setEditingIndex] = useState<number | null | "new">(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -69,17 +73,25 @@ export default function NovoFluxoModal({
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/admin/task-types", {
+      const res = await fetch(preset?.editId ? `/api/admin/task-types/${preset.editId}/workflow` : "/api/admin/task-types", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(preset?.editId ? {
+          steps: steps.map((step) => ({
+            key: step.key ?? step.label.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""),
+            label: step.label, lead_days: step.lead_days, progress_weight: step.progress_weight,
+            default_assignee: step.default_assignee.trim() || null, client_visible: step.client_visible,
+          })),
+        } : {
           label: trimmedLabel,
+          key: preset?.key,
           behavior: "entrega",
           icon,
           tone,
           show_in_performance: showInPerformance,
           steps: steps.map((s) => ({
             label: s.label,
+            key: s.key,
             lead_days: s.lead_days,
             progress_weight: s.progress_weight,
             default_assignee: s.default_assignee.trim() || null,
@@ -93,7 +105,8 @@ export default function NovoFluxoModal({
         setBusy(false);
         return;
       }
-      onCreated(payload as TaskTypeEditorNode);
+      if (preset?.editId) onUpdated?.();
+      else onCreated(payload as TaskTypeEditorNode);
     } catch {
       setError("Não foi possível criar o fluxo — verifique sua conexão.");
       setBusy(false);
@@ -105,19 +118,19 @@ export default function NovoFluxoModal({
       <div className="novofluxo" onClick={(e) => e.stopPropagation()}>
         <div className="attrcfg-head">
           <div>
-            <h2>Novo fluxo em cascata</h2>
-            <p className="admin-sub">Uma Entrega nova composta por etapas reutilizáveis de Tarefa — reels, carrossel, o que for.</p>
+            <h2>{preset?.editId ? `Editar cascata de ${preset.label}` : "Novo fluxo em cascata"}</h2>
+            <p className="admin-sub">{preset?.editId ? "A nova versão valerá para Entregas futuras. Etapas novas precisam existir em Tarefa." : "Uma Entrega nova composta por etapas reutilizáveis de Tarefa — reels, carrossel, o que for."}</p>
           </div>
           <button className="kb-modal-close" onClick={onClose} aria-label="Fechar" disabled={busy}>✕</button>
         </div>
 
         <div className="novofluxo-body">
-          <label className="admin-field">
+          {!preset?.editId ? <label className="admin-field">
             <span>Nome do fluxo</span>
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex.: Reels" autoFocus />
-          </label>
+          </label> : null}
 
-          <div className="admin-field">
+          {!preset?.editId ? <div className="admin-field">
             <span>Ícone</span>
             <div className="novofluxo-icons">
               {ICON_OPTIONS.map((opt) => (
@@ -132,9 +145,9 @@ export default function NovoFluxoModal({
                 </button>
               ))}
             </div>
-          </div>
+          </div> : null}
 
-          <div className="admin-field">
+          {!preset?.editId ? <div className="admin-field">
             <span>Cor</span>
             <div className="novofluxo-tones">
               {TONE_OPTIONS.map((opt) => (
@@ -150,13 +163,13 @@ export default function NovoFluxoModal({
                 </button>
               ))}
             </div>
-          </div>
+          </div> : null}
 
-          <label className="admin-toggle">
+          {!preset?.editId ? <label className="admin-toggle">
             <input type="checkbox" checked={showInPerformance} onChange={(e) => setShowInPerformance(e.target.checked)} />
             <span className="sw" />
             <span>Aparece na Performance</span>
-          </label>
+          </label> : null}
 
           <div className="novofluxo-steps">
             <span className="admin-sub">Etapas de Tarefa usadas nesta cascata — arraste para ordenar</span>
@@ -240,7 +253,7 @@ export default function NovoFluxoModal({
           <div className="kb-modal-actions-right">
             <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
             <button className="admin-btn primary" onClick={submit} disabled={busy}>
-              {busy ? "Criando…" : "Criar fluxo"}
+              {busy ? "Salvando…" : preset?.editId ? "Publicar nova versão" : "Criar fluxo"}
             </button>
           </div>
         </div>

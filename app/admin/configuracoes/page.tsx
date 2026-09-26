@@ -1,6 +1,8 @@
 import { getAgencyProfile, getMyProfile, getProfileName, listCheckpointTemplates, listClients, listLegalDocs, listResponsibilityAssignments, listTeam } from "@/lib/supabase";
 import { getSession } from "@/lib/supabase/auth";
 import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isGoogleDriveConfigured } from "@/lib/googleDriveApi";
 import SettingsPanel from "./SettingsPanel";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +11,7 @@ export default async function ConfiguracoesPage() {
   const session = await getSession();
   if (!session || session.role !== "admin") redirect("/login");
 
-  const [legalDocs, agency, team, checkpointTemplates, clients, profileName, myProfile, responsibilities] = await Promise.all([
+  const [legalDocs, agency, team, checkpointTemplates, clients, profileName, myProfile, responsibilities, driveLinks] = await Promise.all([
     listLegalDocs(),
     getAgencyProfile(),
     listTeam(),
@@ -18,7 +20,11 @@ export default async function ConfiguracoesPage() {
     getProfileName(session.userId),
     getMyProfile(session.userId),
     listResponsibilityAssignments(),
+    createAdminClient().from("client_drive_links").select("client_id,raw_folder_id,uploads_folder_id"),
   ]);
+  if (driveLinks.error) throw driveLinks.error;
+  const readyClients = new Set((driveLinks.data ?? [])
+    .filter((link) => link.raw_folder_id && link.uploads_folder_id).map((link) => link.client_id));
   return (
     <section className="admin-page">
       <header className="admin-head">
@@ -34,6 +40,7 @@ export default async function ConfiguracoesPage() {
         clients={clients.map((c) => ({ slug: c.slug, name: c.name }))}
         currentUser={{ fullName: profileName ?? "", email: session.email ?? "", bio: myProfile.bio, avatarUrl: myProfile.avatar_url }}
         responsibilities={responsibilities}
+        driveStatus={{ configured: isGoogleDriveConfigured(), readyClients: readyClients.size, totalClients: clients.length }}
       />
     </section>
   );

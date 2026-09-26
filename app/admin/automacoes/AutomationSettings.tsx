@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { TaskRecord } from "@/lib/validation";
 import type { DailyConfig } from "@/lib/validation";
 import { AUTOMATION_DEFINITIONS, AUTOMATION_KEYS, type AutomationKey } from "@/lib/automationCatalog";
@@ -16,9 +16,20 @@ type ClientLite = { slug: string; name: string };
 type Row = TaskRecord & { clientName?: string };
 type PerformanceTemplateLite = { id: string; name: string; scope: string };
 type DailyOptions = { deliveryTypeId: string | null; workflowReady: boolean;
+  workflowLabel: string | null;
+  workflowSteps: Array<{ key: string; label: string; defaultAssignee: string | null }>;
+  driveConfigured: boolean;
+  formats: Array<{ key: string; label: string; icon: string; deliveryTypeId: string | null; ready: boolean; steps: string[] }>;
+  clients: Array<{ id: string; slug: string; name: string }>;
   folders: Array<{ client_id: string; raw_folder_id: string | null; uploads_folder_id: string | null }>;
   recurringPlans: Array<{ id: string; title: string; kind: string; client_id: string | null;
     clientName: string | null; recurrence_cadence: string | null }> };
+
+function initialDailyPiece(options: Pick<DailyOptions, "formats">, index = 1): DailyConfig["pieces"][number] {
+  const format = options.formats.find((item) => item.ready && item.deliveryTypeId);
+  return { key: crypto.randomUUID(), name: `Peça ${index}`, format: format?.label ?? "Reels",
+    ...(format?.deliveryTypeId ? { deliveryTypeId: format.deliveryTypeId } : {}), offsetDays: 3 };
+}
 // Minimal shape the card actually renders — satisfied both by a freshly
 // picked/created Row (in-session) and by the backend-resolved summary below.
 type TargetTaskDisplay = {
@@ -71,6 +82,7 @@ type Slot = {
   active: boolean;
   collectMetricKeys: string[];
   dailyConfig: DailyConfig | null;
+  draftClientId: string;
   dependsOnConfigId: string | null;
 };
 
@@ -92,12 +104,13 @@ function slotFromConfig(config: AutomationConfig): Slot {
     active: config.active,
     collectMetricKeys: config.collectMetricKeys ?? [],
     dailyConfig: config.dailyConfig ?? null,
+    draftClientId: config.dailyConfig?.clientId ?? config.targetTask?.clientId ?? "",
     dependsOnConfigId: config.dependsOnConfigId ?? null,
   };
 }
 
 function blankSlot(): Slot {
-  return { key: crypto.randomUUID(), id: null, automationKey: "", targetTask: null, performanceTemplateId: "", active: true, collectMetricKeys: [], dailyConfig: null, dependsOnConfigId: null };
+  return { key: crypto.randomUUID(), id: null, automationKey: "", targetTask: null, performanceTemplateId: "", active: true, collectMetricKeys: [], dailyConfig: null, draftClientId: "", dependsOnConfigId: null };
 }
 
 // Automações (promovida de uma aba de Configurações para tela própria no menu
@@ -113,7 +126,9 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingCardFor, setCreatingCardFor] = useState<string | null>(null);
-  const [dailyOptions, setDailyOptions] = useState<DailyOptions>({ deliveryTypeId: null, workflowReady: false, folders: [], recurringPlans: [] });
+  const [createCardMessage, setCreateCardMessage] = useState("");
+  const [dailyOptions, setDailyOptions] = useState<DailyOptions>({ deliveryTypeId: null, workflowReady: false,
+    workflowLabel: null, workflowSteps: [], driveConfigured: false, formats: [], clients: [], folders: [], recurringPlans: [] });
 
   useEffect(() => {
     let cancelled = false;
@@ -177,13 +192,55 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
     return { ok: true };
   }
 
+  async function useCreatedCard(task: TaskRecord, slotKey: string) {
+    const slot = slots.find((item) => item.key === slotKey);
+    setTasks((current) => [...current, task]);
+    if (slot?.automationKey !== "diaria_recorrente") {
+      updateSlot(slotKey, { targetTask: task });
+      setCreatingCardFor(null);
+      return;
+    }
+    const moldId = task.recurrence_cadence ? task.id
+      : typeof task.payload?.recurrence_parent_id === "string" ? task.payload.recurrence_parent_id
+        : task.plan_id;
+    try {
+      if (!moldId) throw new Error("O Plano criado não possui molde recorrente.");
+      const response = await fetch(`/api/admin/tasks/${moldId}`);
+      if (!response.ok) throw new Error("O Plano foi criado, mas não foi possível localizar seu molde.");
+      const mold = await response.json() as Row;
+      if (mold.kind !== "plano_acao" || !mold.recurrence_cadence || !mold.client_id || !dailyOptions.deliveryTypeId) {
+        throw new Error("O card criado precisa ser um Plano recorrente do cliente.");
+      }
+      const clientName = dailyOptions.clients.find((client) => client.id === mold.client_id)?.name ?? null;
+      setDailyOptions((current) => ({
+        ...current,
+        recurringPlans: current.recurringPlans.some((plan) => plan.id === mold.id) ? current.recurringPlans
+          : [...current.recurringPlans, { id: mold.id, title: mold.title, kind: mold.kind,
+              client_id: mold.client_id, clientName, recurrence_cadence: mold.recurrence_cadence }],
+      }));
+      updateSlot(slotKey, {
+        targetTask: { ...mold, clientName },
+        draftClientId: mold.client_id,
+        dailyConfig: { clientId: mold.client_id, deliveryTypeId: dailyOptions.deliveryTypeId,
+          pieces: [initialDailyPiece(dailyOptions)] },
+      });
+    } catch (error) {
+      setCreateCardMessage(error instanceof Error ? error.message : "Não foi possível usar o Plano criado.");
+    } finally {
+      setCreatingCardFor(null);
+    }
+  }
+
   if (loading) {
     return <div className="auto-grid"><div className="auto-card auto-loading">Carregando…</div></div>;
   }
 
   return (
     <div className="auto-grid">
-      {slots.map((slot) => (
+      {createCardMessage ? <p className="admin-warn" role="alert">{createCardMessage}</p> : null}
+      {slots.slice().sort((left, right) =>
+        Number(right.automationKey === "diaria_recorrente") - Number(left.automationKey === "diaria_recorrente"))
+        .map((slot) => (
         <AutomationConfigCard
           key={slot.key}
           slot={slot}
@@ -193,7 +250,13 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
           onChange={(patch) => updateSlot(slot.key, patch)}
           onSave={() => saveSlot(slot)}
           onRemove={() => removeSlot(slot)}
-          onCreateCard={() => setCreatingCardFor(slot.key)}
+          onCreateCard={() => { setCreateCardMessage(""); setCreatingCardFor(slot.key); }}
+          onFoldersReady={(folders) => setDailyOptions((current) => ({ ...current,
+            folders: [...current.folders.filter((item) => item.client_id !== folders.clientId), {
+              client_id: folders.clientId, raw_folder_id: folders.raw_folder_id,
+              uploads_folder_id: folders.uploads_folder_id,
+            }],
+          }))}
         />
       ))}
 
@@ -207,6 +270,12 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
           mode="new"
           task={null}
           slug=""
+          prefill={slots.find((item) => item.key === creatingCardFor)?.automationKey === "diaria_recorrente"
+            ? { kind: "plano_acao", clientSlug: dailyOptions.clients.find((client) =>
+                client.id === slots.find((item) => item.key === creatingCardFor)?.draftClientId)?.slug }
+            : undefined}
+          creationRequirement={slots.find((item) => item.key === creatingCardFor)?.automationKey === "diaria_recorrente"
+            ? "recurring_plan" : undefined}
           clients={clients}
           assignees={assignees}
           clientName=""
@@ -214,16 +283,7 @@ export default function AutomationSettings({ clients }: { clients: ClientLite[] 
           clientReviewers={[]}
           planoVisibilityOn={false}
           onClose={() => setCreatingCardFor(null)}
-          onSaved={(task) => {
-            setTasks((current) => [...current, task]);
-            const slot = slots.find((item) => item.key === creatingCardFor);
-            updateSlot(creatingCardFor, { targetTask: task,
-              dailyConfig: slot?.automationKey === "diaria_recorrente" && task.client_id && dailyOptions.deliveryTypeId
-                ? { clientId: task.client_id, deliveryTypeId: dailyOptions.deliveryTypeId,
-                    pieces: [{ key: crypto.randomUUID(), name: "Peça 1", format: "Reels", offsetDays: 3 }] }
-                : slot?.dailyConfig ?? null });
-            setCreatingCardFor(null);
-          }}
+          onSaved={(task) => { void useCreatedCard(task, creatingCardFor); }}
           onDeleted={() => setCreatingCardFor(null)}
         />
       ) : null}
@@ -240,6 +300,7 @@ function AutomationConfigCard({
   onSave,
   onRemove,
   onCreateCard,
+  onFoldersReady,
 }: {
   slot: Slot;
   tasks: Row[];
@@ -249,15 +310,22 @@ function AutomationConfigCard({
   onSave: () => Promise<{ ok: boolean; message?: string }>;
   onRemove: () => void;
   onCreateCard: () => void;
+  onFoldersReady: (folders: { clientId: string; raw_folder_id: string; uploads_folder_id: string }) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [provisionMsg, setProvisionMsg] = useState("");
   const [provisioning, setProvisioning] = useState(false);
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [folderMessage, setFolderMessage] = useState("");
 
   const def = slot.automationKey ? AUTOMATION_DEFINITIONS[slot.automationKey] : null;
+  const dailyFolders = dailyOptions.folders.find((item) => item.client_id === slot.draftClientId);
+  const dailyReady = dailyOptions.workflowReady && dailyOptions.driveConfigured &&
+    Boolean(dailyFolders?.raw_folder_id && dailyFolders?.uploads_folder_id);
   const canSave = Boolean(slot.automationKey && slot.targetTask &&
-    (slot.automationKey !== "diaria_recorrente" || (slot.dailyConfig?.pieces.length && dailyOptions.workflowReady)));
+    (slot.automationKey !== "diaria_recorrente" || (slot.dailyConfig?.pieces.length && dailyReady &&
+      slot.dailyConfig.pieces.every((piece) => Boolean(piece.deliveryTypeId) || Boolean(slot.id)))));
   const showDetails = Boolean(slot.automationKey);
 
   async function save() {
@@ -304,6 +372,26 @@ function AutomationConfigCard({
     setProvisioning(false);
   }
 
+  async function prepareClientFolders() {
+    if (!slot.draftClientId) return;
+    setFolderBusy(true);
+    setFolderMessage("");
+    try {
+      const response = await fetch("/api/admin/automations/daily/folders", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: slot.draftClientId }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error ?? "Não foi possível preparar as pastas.");
+      onFoldersReady(result);
+      setFolderMessage("Pastas Raw e Edição prontas para este cliente.");
+    } catch (error) {
+      setFolderMessage(error instanceof Error ? error.message : "Não foi possível preparar as pastas.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
   return (
     <div className={`auto-card ${showDetails ? "auto-card-open" : ""}`}>
       <div className="auto-card-head">
@@ -331,7 +419,7 @@ function AutomationConfigCard({
           <button
             type="button"
             className="auto-chip auto-chip-type"
-            onClick={() => onChange({ automationKey: "", targetTask: null, performanceTemplateId: "" })}
+            onClick={() => onChange({ automationKey: "", targetTask: null, performanceTemplateId: "", dailyConfig: null, draftClientId: "" })}
             title={def?.description}
           >
             <span aria-hidden>{AUTOMATION_ICON[slot.automationKey as AutomationKey]}</span>
@@ -367,22 +455,36 @@ function AutomationConfigCard({
           ) : (
             <div className="auto-pick">
               {slot.automationKey === "diaria_recorrente" ? (
-                <select className="auto-template-select" value="" aria-label="Selecionar Plano recorrente"
-                  onChange={(event) => {
-                    const task = dailyOptions.recurringPlans.find((item) => item.id === event.target.value);
-                    if (!task?.client_id || !dailyOptions.deliveryTypeId) return;
-                    onChange({ targetTask: task, dailyConfig: {
-                      clientId: task.client_id, deliveryTypeId: dailyOptions.deliveryTypeId,
-                      pieces: [{ key: crypto.randomUUID(), name: "Peça 1", format: "Reels", offsetDays: 3 }],
-                    } });
-                  }}>
-                  <option value="">Selecionar Plano recorrente</option>
-                  {dailyOptions.recurringPlans.map((plan) => <option key={plan.id} value={plan.id}>
-                    {plan.clientName ? `${plan.clientName} · ` : ""}{plan.title}
-                  </option>)}
-                </select>
+                <>
+                  <label className="auto-field">
+                    <span>Cliente da diária</span>
+                    <select className="auto-template-select" value={slot.draftClientId}
+                      onChange={(event) => onChange({ draftClientId: event.target.value, targetTask: null, dailyConfig: null })}>
+                      <option value="">Selecionar cliente</option>
+                      {dailyOptions.clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                    </select>
+                  </label>
+                  {slot.draftClientId ? <label className="auto-field">
+                    <span>Plano recorrente</span>
+                    <select className="auto-template-select" value="" aria-label="Selecionar Plano recorrente"
+                      onChange={(event) => {
+                        const task = dailyOptions.recurringPlans.find((item) => item.id === event.target.value);
+                        if (!task?.client_id || !dailyOptions.deliveryTypeId) return;
+                        onChange({ targetTask: task, draftClientId: task.client_id, dailyConfig: {
+                          clientId: task.client_id, deliveryTypeId: dailyOptions.deliveryTypeId,
+                          pieces: [initialDailyPiece(dailyOptions)],
+                        } });
+                      }}>
+                      <option value="">Selecionar Plano recorrente</option>
+                      {dailyOptions.recurringPlans.filter((plan) => plan.client_id === slot.draftClientId)
+                        .map((plan) => <option key={plan.id} value={plan.id}>{plan.title}</option>)}
+                    </select>
+                  </label> : null}
+                </>
               ) : <AutomationCardPicker tasks={tasks} onPick={(task) => onChange({ targetTask: task, dailyConfig: null })} />}
-              <button type="button" className="auto-linklike" onClick={onCreateCard}>+ Criar card</button>
+              <button type="button" className="auto-linklike" onClick={onCreateCard}>
+                {slot.automationKey === "diaria_recorrente" ? "+ Criar Plano recorrente" : "+ Criar card"}
+              </button>
             </div>
           )}
 
@@ -411,11 +513,28 @@ function AutomationConfigCard({
 
           {slot.automationKey === "diaria_recorrente" ? (
             <div className="auto-daily">
-              {!dailyOptions.workflowReady ? <p className="admin-warn">Publique o workflow de Criativo com Roteiro e Captação.</p> : null}
+              <p className="admin-sub">1. Escolha o cliente e crie ou vincule o Plano recorrente. 2. Defina as peças. 3. Confira a cascata e as pastas antes de ativar.</p>
+              <p><b>Cascata dos Criativos:</b> {dailyOptions.workflowLabel ?? "pendente"} · <a href="/admin/configuracoes?tab=fluxos">Configurar etapas</a></p>
+              {dailyOptions.workflowSteps.length ? <ol className="auto-daily-steps">
+                {dailyOptions.workflowSteps.map((step) => <li key={step.key}>{step.label}
+                  {step.defaultAssignee ? <small> · {step.defaultAssignee}</small> : null}
+                </li>)}
+              </ol> : null}
+              {!dailyOptions.workflowReady ? <p className="admin-warn">Publique a cascata de Criativo iniciada em Roteiro e com Captação.</p> : null}
+              {!dailyOptions.driveConfigured ? <p className="admin-warn">A conexão de Google Drive do servidor precisa estar configurada.</p> : null}
+              {!dailyOptions.formats.some((format) => format.ready) ? <p className="admin-warn">Crie ao menos uma cascata de formato em Configurações para montar uma diária nova.</p> : null}
+              {slot.draftClientId ? <div className="auto-daily-folders">
+                <b>Pastas do cliente:</b> {dailyFolders?.raw_folder_id ? <a href={`https://drive.google.com/drive/folders/${dailyFolders.raw_folder_id}`} target="_blank" rel="noreferrer">Raw</a> : "Raw pendente"} · {dailyFolders?.uploads_folder_id ? <a href={`https://drive.google.com/drive/folders/${dailyFolders.uploads_folder_id}`} target="_blank" rel="noreferrer">Edição</a> : "Edição pendente"}
+                {!dailyFolders?.raw_folder_id || !dailyFolders?.uploads_folder_id ? <button type="button" className="admin-btn ghost"
+                  disabled={folderBusy || !dailyOptions.driveConfigured} onClick={() => void prepareClientFolders()}>
+                  {folderBusy ? "Preparando…" : "Preparar pastas"}
+                </button> : null}
+                {folderMessage ? <p role="status">{folderMessage}</p> : null}
+              </div> : null}
               {slot.dailyConfig ? <>
                 <p><b>Plano:</b> {slot.targetTask?.title ?? "Selecione um Plano recorrente"}</p>
                 <p><b>Roteiro e Captação:</b> compartilhados por gravação</p>
-                <label>Execução existente para aproveitar
+                <label>Plano histórico de referência
                   <select value={slot.dailyConfig.adoptedPlanTaskId ?? ""} onChange={(event) => onChange({ dailyConfig: { ...slot.dailyConfig!, adoptedPlanTaskId: event.target.value || null } })}>
                     <option value="">Nenhuma</option>
                     {tasks.filter((task) => task.kind === "plano_acao" && !task.recurrence_cadence && task.client_id === slot.dailyConfig?.clientId)
@@ -423,19 +542,28 @@ function AutomationConfigCard({
                   </select>
                 </label>
                 {slot.dailyConfig.adoptedPlanTaskId ? <AdoptedDailySummary planId={slot.dailyConfig.adoptedPlanTaskId} /> : null}
-                {(() => {
-                  const folders = dailyOptions.folders.find((item) => item.client_id === slot.dailyConfig?.clientId);
-                  return <p><b>Drive:</b> {folders?.raw_folder_id ? <a href={`https://drive.google.com/drive/folders/${folders.raw_folder_id}`} target="_blank" rel="noreferrer">Raw</a> : "Raw pendente"} · {folders?.uploads_folder_id ? <a href={`https://drive.google.com/drive/folders/${folders.uploads_folder_id}`} target="_blank" rel="noreferrer">Edição</a> : "Edição pendente"}</p>;
-                })()}
+                {slot.dailyConfig.adoptedPlanTaskId ? <p className="admin-sub">Referência visual: os cards e arquivos históricos não são movidos para ciclos novos.</p> : null}
+                <p className="admin-sub">North AI prepara as pastas e registra os links. Os responsáveis de cada etapa continuam definidos na cascata.</p>
                 <strong>Peças ({slot.dailyConfig.pieces.length})</strong>
                 {slot.dailyConfig.pieces.map((piece, index) => <div className="auto-daily-piece" key={piece.key}>
                   <input aria-label={`Nome da peça ${index + 1}`} value={piece.name} onChange={(event) => onChange({ dailyConfig: { ...slot.dailyConfig!, pieces: slot.dailyConfig!.pieces.map((item) => item.key === piece.key ? { ...item, name: event.target.value } : item) } })} />
-                  <input aria-label={`Formato da peça ${index + 1}`} value={piece.format} onChange={(event) => onChange({ dailyConfig: { ...slot.dailyConfig!, pieces: slot.dailyConfig!.pieces.map((item) => item.key === piece.key ? { ...item, format: event.target.value } : item) } })} />
+                  <select aria-label={`Formato da peça ${index + 1}`} value={piece.deliveryTypeId ?? "legacy"}
+                    onChange={(event) => {
+                      const format = dailyOptions.formats.find((item) => item.deliveryTypeId === event.target.value);
+                      if (!format?.deliveryTypeId) return;
+                      const deliveryTypeId = format.deliveryTypeId;
+                      onChange({ dailyConfig: { ...slot.dailyConfig!, pieces: slot.dailyConfig!.pieces.map((item) => item.key === piece.key
+                        ? { ...item, format: format.label, deliveryTypeId } : item) } });
+                    }}>
+                    {!piece.deliveryTypeId ? <option value="legacy">{piece.format} · cascata Criativo anterior</option> : null}
+                    {dailyOptions.formats.map((format) => <option key={format.key} value={format.deliveryTypeId ?? format.key}
+                      disabled={!format.ready || !format.deliveryTypeId}>{format.icon} {format.label}{format.ready ? "" : " · configurar cascata"}</option>)}
+                  </select>
                   <label>Prazo após gravação <input type="number" min="-30" max="180" value={piece.offsetDays} onChange={(event) => onChange({ dailyConfig: { ...slot.dailyConfig!, pieces: slot.dailyConfig!.pieces.map((item) => item.key === piece.key ? { ...item, offsetDays: Number(event.target.value) } : item) } })} /> dias</label>
                   <button type="button" disabled={slot.dailyConfig!.pieces.length === 1} onClick={() => onChange({ dailyConfig: { ...slot.dailyConfig!, pieces: slot.dailyConfig!.pieces.filter((item) => item.key !== piece.key) } })}>Remover</button>
                 </div>)}
-                <button type="button" className="auto-linklike" onClick={() => onChange({ dailyConfig: { ...slot.dailyConfig!, pieces: [...slot.dailyConfig!.pieces, { key: crypto.randomUUID(), name: `Peça ${slot.dailyConfig!.pieces.length + 1}`, format: "Reels", offsetDays: 3 }] } })}>+ Peça</button>
-                {slot.id ? <ManualDailyCycle configId={slot.id} config={slot.dailyConfig} /> : null}
+                <button type="button" className="auto-linklike" onClick={() => onChange({ dailyConfig: { ...slot.dailyConfig!, pieces: [...slot.dailyConfig!.pieces, initialDailyPiece(dailyOptions, slot.dailyConfig!.pieces.length + 1)] } })}>+ Peça</button>
+                {slot.id ? <ManualDailyCycle configId={slot.id} config={slot.dailyConfig} formats={dailyOptions.formats} /> : null}
               </> : null}
             </div>
           ) : null}
@@ -461,32 +589,75 @@ function AutomationConfigCard({
   );
 }
 
-function ManualDailyCycle({ configId, config }: { configId: string; config: DailyConfig }) {
+function ManualDailyCycle({ configId, config, formats }: { configId: string; config: DailyConfig; formats: DailyOptions["formats"] }) {
+  type Cycle = { id: string; title: string; date: string | null; pieceCount: number;
+    scriptTaskId: string | null; captureTaskId: string | null;
+    folders: Array<{ daily_folder_id: string | null; script_folder_id: string | null; capture_folder_id: string | null; status: string }> };
   const [date, setDate] = useState(agencyToday());
   const [pieces, setPieces] = useState(config.pieces);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [cyclesError, setCyclesError] = useState("");
+  useEffect(() => { setPieces(config.pieces); }, [config.pieces]);
+  const loadCycles = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/admin/automations/daily/cycles?configId=${configId}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error ?? "Não foi possível carregar os ciclos.");
+      setCycles(result.cycles ?? []);
+      setCyclesError("");
+    } catch (error) { setCyclesError(error instanceof Error ? error.message : "Não foi possível carregar os ciclos."); }
+  }, [configId]);
+  useEffect(() => { void loadCycles(); }, [loadCycles]);
+  async function createCycle(cycleDate: string, cyclePieces?: DailyConfig["pieces"]) {
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch("/api/admin/automations/daily/cycles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ configId, date: cycleDate, ...(cyclePieces ? { pieces: cyclePieces } : {}) }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Falha ao criar a gravação.");
+      const pending = result.preparation?.errors?.length ?? 0;
+      setMessage(pending
+        ? `Gravação criada: ${result.executionId}. ${pending} pasta(s) pendente(s); tente concluir novamente.`
+        : `Gravação e pastas preparadas: ${result.executionId}`);
+      await loadCycles();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao criar a gravação."); }
+    finally { setBusy(false); }
+  }
   return <details className="auto-daily-manual">
-    <summary>Criar gravação manualmente</summary>
+    <summary>Gravações e criação manual</summary>
+    {cyclesError ? <p className="admin-warn">{cyclesError}</p> : null}
+    {cycles.length ? <div className="auto-daily-cycles">
+      <strong>Ciclos existentes</strong>
+      {cycles.map((cycle) => <div key={cycle.id} className="auto-daily-cycle">
+        <a href={`/admin/operacao?task=${cycle.id}`}>{cycle.title} · {cycle.date ?? "sem data"}</a>
+        <span>{cycle.pieceCount} peça(s)</span>
+        {cycle.folders[0]?.daily_folder_id ? <a href={`https://drive.google.com/drive/folders/${cycle.folders[0].daily_folder_id}`} target="_blank" rel="noreferrer">Pasta da gravação</a> : <span>Pastas pendentes</span>}
+        {cycle.date ? <button type="button" className="admin-btn ghost" disabled={busy} onClick={() => void createCycle(cycle.date!)}>Conferir e concluir pastas</button> : null}
+      </div>)}
+    </div> : null}
     <label>Data da gravação <input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
     <p>Ajustes abaixo valem somente para esta gravação.</p>
     {pieces.map((piece, index) => <div className="auto-daily-piece" key={piece.key}>
       <input aria-label={`Nome da peça do ciclo ${index + 1}`} value={piece.name} onChange={(event) => setPieces((current) => current.map((item) => item.key === piece.key ? { ...item, name: event.target.value } : item))} />
-      <input aria-label={`Formato da peça do ciclo ${index + 1}`} value={piece.format} onChange={(event) => setPieces((current) => current.map((item) => item.key === piece.key ? { ...item, format: event.target.value } : item))} />
+      <select aria-label={`Formato da peça do ciclo ${index + 1}`} value={piece.deliveryTypeId ?? "legacy"}
+        onChange={(event) => {
+          const format = formats.find((item) => item.deliveryTypeId === event.target.value);
+          if (!format?.deliveryTypeId) return;
+          const deliveryTypeId = format.deliveryTypeId;
+          setPieces((current) => current.map((item) => item.key === piece.key
+            ? { ...item, format: format.label, deliveryTypeId } : item));
+        }}>
+        {!piece.deliveryTypeId ? <option value="legacy">{piece.format} · cascata Criativo anterior</option> : null}
+        {formats.map((format) => <option key={format.key} value={format.deliveryTypeId ?? format.key}
+          disabled={!format.ready || !format.deliveryTypeId}>{format.icon} {format.label}</option>)}
+      </select>
       <input aria-label={`Dias após gravação da peça ${index + 1}`} type="number" min="-30" max="180" value={piece.offsetDays} onChange={(event) => setPieces((current) => current.map((item) => item.key === piece.key ? { ...item, offsetDays: Number(event.target.value) } : item))} />
       <button type="button" disabled={pieces.length === 1} onClick={() => setPieces((current) => current.filter((item) => item.key !== piece.key))}>Remover</button>
     </div>)}
-    <button type="button" onClick={() => setPieces((current) => [...current, { key: crypto.randomUUID(), name: `Peça ${current.length + 1}`, format: "Reels", offsetDays: 3 }])}>+ Peça neste ciclo</button>
-    <button type="button" className="admin-btn primary" disabled={busy || !date || pieces.some((piece) => !piece.name.trim() || !piece.format.trim())} onClick={async () => {
-      setBusy(true); setMessage("");
-      try {
-        const response = await fetch("/api/admin/automations/daily/cycles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ configId, date, pieces }) });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error ?? "Falha ao criar a gravação.");
-        setMessage(`Gravação criada: ${result.executionId}`);
-      } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao criar a gravação."); }
-      finally { setBusy(false); }
-    }}>{busy ? "Criando…" : "Confirmar gravação"}</button>
+    <button type="button" onClick={() => setPieces((current) => [...current, initialDailyPiece({ formats }, current.length + 1)])}>+ Peça neste ciclo</button>
+    <button type="button" className="admin-btn primary" disabled={busy || !date || pieces.some((piece) => !piece.name.trim() || !piece.format.trim())}
+      onClick={() => void createCycle(date, pieces)}>{busy ? "Criando…" : "Confirmar gravação"}</button>
     {message ? <p role="status">{message}</p> : null}
   </details>;
 }
@@ -494,7 +665,7 @@ function ManualDailyCycle({ configId, config }: { configId: string; config: Dail
 function AdoptedDailySummary({ planId }: { planId: string }) {
   const [summary, setSummary] = useState<{
     plan: { id: string; title: string };
-    cards: Array<{ id: string; title: string; kind: string; subtype: string | null }>;
+    cards: Array<{ id: string; title: string; kind: string; subtype: string | null; payload?: Record<string, unknown> | null }>;
     captures: Array<{ daily_folder_id: string | null; script_folder_id: string | null; capture_folder_id: string | null }>;
     creatives: Array<{ creative_task_id: string; creative_folder_id: string | null; raw_folder_id: string | null }>;
   } | null>(null);
@@ -508,10 +679,10 @@ function AdoptedDailySummary({ planId }: { planId: string }) {
   if (!summary) return <p>Carregando cards existentes…</p>;
   const captures = summary.cards.filter((card) => card.subtype === "captacao");
   const scripts = summary.cards.filter((card) => card.subtype === "roteiro");
-  const creatives = summary.cards.filter((card) => card.kind === "criativo");
+  const creatives = summary.cards.filter((card) => card.kind === "criativo" || typeof card.payload?.daily_piece_key === "string");
   const cardLink = (card: { id: string; title: string }) => <a key={card.id} href={`/admin/operacao?task=${card.id}`}>{card.title}</a>;
   return <div className="auto-daily-adoption">
-    <p><b>Execução adotada:</b> {cardLink(summary.plan)}</p>
+    <p><b>Plano histórico:</b> {cardLink(summary.plan)}</p>
     <p><b>Roteiro:</b> {scripts.length ? scripts.map(cardLink) : "sem card"}</p>
     <p><b>Captação:</b> {captures.length ? captures.map(cardLink) : "sem card"}</p>
     <p><b>Criativos ({creatives.length}):</b> {creatives.map(cardLink)}</p>

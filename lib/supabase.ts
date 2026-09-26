@@ -2,6 +2,8 @@ import { createClient } from "./supabase/server";
 import { TASK_COLUMNS } from "./taskColumns";
 import { AUTOMATION_DEFINITIONS, isAutomationKey } from "./automationCatalog";
 import { dailyConfigSchema, type DailyConfig } from "./validation";
+import { isGoogleDriveConfigured } from "./googleDriveApi";
+import { canonicalFormatKey } from "./canonicalDeliveryFormats";
 import {
   currentRecurringExecutionFields,
   explicitDateExecutionFields,
@@ -4229,6 +4231,9 @@ async function validateDailyAutomation(
     }
   }
   if (!active) return;
+  if (!isGoogleDriveConfigured()) {
+    throw new HttpError(409, "Configure a conexão do Google Drive antes de ativar a diária.");
+  }
   const [workflow, folders] = await Promise.all([
     publishedWorkflowForKind(supabase, "criativo"),
     supabase.from("client_drive_links").select("raw_folder_id,uploads_folder_id")
@@ -4239,6 +4244,22 @@ async function validateDailyAutomation(
       !workflow.steps.some((step) => step.key === "roteiro") ||
       !workflow.steps.some((step) => step.key === "captacao")) {
     throw new HttpError(409, "Publique um workflow de Criativo com Roteiro e Captação.");
+  }
+  for (const piece of config.pieces) {
+    if (!piece.deliveryTypeId) continue;
+    const { data: type, error: typeError } = await supabase.from("task_types")
+      .select("key").eq("id", piece.deliveryTypeId).maybeSingle();
+    if (typeError) fail(typeError);
+    if (type?.key !== canonicalFormatKey(piece.format)) {
+      throw new HttpError(400, `O formato ${piece.format} não corresponde à cascata escolhida.`);
+    }
+    const formatWorkflow = type?.key ? await publishedWorkflowForKind(supabase, type.key) : null;
+    if (!formatWorkflow || formatWorkflow.delivery_type_id !== piece.deliveryTypeId ||
+        formatWorkflow.steps[0]?.key !== "roteiro" ||
+        formatWorkflow.steps.find((step) => step.key === "roteiro")?.task_type_id !== workflow.steps.find((step) => step.key === "roteiro")?.task_type_id ||
+        formatWorkflow.steps.find((step) => step.key === "captacao")?.task_type_id !== workflow.steps.find((step) => step.key === "captacao")?.task_type_id) {
+      throw new HttpError(409, `O formato ${piece.format} precisa de uma cascata publicada com Roteiro e Captação compatíveis.`);
+    }
   }
   if (!folders.data?.raw_folder_id || !folders.data?.uploads_folder_id) {
     throw new HttpError(409, "Cadastre as pastas Raw e Edição do cliente antes de ativar a diária.");

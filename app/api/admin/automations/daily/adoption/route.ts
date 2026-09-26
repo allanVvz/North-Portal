@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     if (!plan || plan.kind !== "plano_acao") throw new HttpError(404, "Plano não encontrado.");
     const ids = (linksResult.data ?? []).map((link) => link.child_id);
     const { data: cards, error: cardsError } = ids.length
-      ? await db.from("tasks").select("id,title,kind,subtype,client_id").in("id", ids)
+      ? await db.from("tasks").select("id,title,kind,subtype,client_id,payload").in("id", ids)
       : { data: [], error: null };
     if (cardsError) throw cardsError;
     const ordered = ids.map((id) => (cards ?? []).find((card) => card.id === id)).filter(Boolean);

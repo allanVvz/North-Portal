@@ -26,6 +26,7 @@ import CardCover from "./CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
 import { parseGoogleDriveUrl } from "@/lib/googleDrive";
 import { creativeWorkspacesForCard, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
+import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
@@ -86,7 +87,7 @@ export type TaskCreationScope = "task" | "plan" | "routine";
 
 /** Pré-preenchimento opcional que uma tela pode passar — nunca comportamento.
  *  Ex.: o "+" embaixo de uma coluna do quadro abre o modal já com aquele status. */
-export type TaskCreationPrefill = { clientSlug?: string; status?: TaskStatus; assignee?: string };
+export type TaskCreationPrefill = { clientSlug?: string; kind?: string; status?: TaskStatus; assignee?: string };
 
 type PendingMember =
   | { key: string; kind: "existing"; taskId: string; title: string }
@@ -104,7 +105,7 @@ function draftFrom(
 ): Draft {
   const initialStatus = prefill?.status;
   const initialAssignee = prefill?.assignee;
-  const requestedKind = task?.kind ?? "operacional";
+  const requestedKind = task?.kind ?? prefill?.kind ?? "operacional";
   const classification = canonicalTaskClassification(requestedKind, task?.subtype);
   const p = (task?.payload ?? {}) as Record<string, unknown>;
   const str = (k: string) => (typeof p[k] === "string" ? (p[k] as string) : "");
@@ -256,6 +257,7 @@ export default function TaskModal({
   onClose,
   onSaved,
   onDeleted,
+  creationRequirement,
 }: {
   mode: "new" | "edit";
   task: TaskRecord | null;
@@ -281,6 +283,7 @@ export default function TaskModal({
   onClose: () => void;
   onSaved: (task: TaskRecord, isNew: boolean) => void;
   onDeleted: (id: string) => void;
+  creationRequirement?: "recurring_plan";
 }) {
   const [draft, setDraft] = useState<Draft>(() => draftFrom(task, slug, prefill));
   // O id que o campo "Plano de Ação" mostrava quando o formulário foi
@@ -588,7 +591,7 @@ export default function TaskModal({
   useEffect(() => { setRecentlyCreatedCard(null); }, [liveTask?.id]);
   const creativeCandidates = useMemo(() => {
     const candidates = [...materialCards, ...flowDeliveries];
-    return Array.from(new Map(candidates.filter((card) => card.kind === "criativo" &&
+    return Array.from(new Map(candidates.filter((card) => card.workflow_version_id &&
       (typeof card.payload?.daily_execution_id === "string" || materialWorkspaces.some((workspace) => workspace.creative_task_id === card.id)))
       .map((card) => [card.id, card])).values());
   }, [materialCards, flowDeliveries, materialWorkspaces]);
@@ -1478,6 +1481,11 @@ export default function TaskModal({
   async function save() {
     if (!draft.title.trim()) return;
     setError("");
+    if (mode === "new" && creationRequirement === "recurring_plan" &&
+        (effectiveScope !== "plan" || !draft.clientSlug || !draft.recurrence_cadence)) {
+      setError("Para esta automação, crie um Plano com cliente e recorrência.");
+      return;
+    }
     if (draft.recurrence_cadence && !draft.start_date.trim()) {
       setError("Informe o início da recorrência.");
       return;
@@ -1618,7 +1626,7 @@ export default function TaskModal({
   // tecla digitada no título.
   const coverCandidates = useMemo(
     () => {
-      const promoted = liveTask && (liveTask.kind === "criativo" || kindDef(liveTask.kind).isPlan)
+      const promoted = liveTask && (isCreativeDeliveryKind(liveTask.kind) || kindDef(liveTask.kind).isPlan)
         ? materialCoverCandidates(cardWorkspaces) : [];
       const previous = taskCoverCandidates({ description: draft.description, payload: task?.payload });
       const seen = new Set(promoted.map((candidate) => candidate.fileId));
