@@ -217,6 +217,9 @@ export async function ensureDriveDocument(input: {
       error?: { status?: string; errors?: Array<{ reason?: string }> };
     } | null;
     const reason = detail?.error?.errors?.[0]?.reason ?? detail?.error?.status ?? "desconhecido";
+    if (reason === "storageQuotaExceeded") {
+      throw new HttpError(409, "A conta de serviço não pode criar Google Docs no Meu Drive. Crie o Doc com uma conta pessoal, vincule o link na automação e tente novamente, ou use um Drive compartilhado.");
+    }
     throw new HttpError(502, `Falha ao criar Google Doc da diaria (HTTP ${res.status}; motivo: ${reason}).`);
   }
   const file = await res.json() as Partial<DriveItemMetadata>;

@@ -24,7 +24,7 @@ test("diária mostra Doc único e pastas em desktop e tela estreita", async ({ p
   await card.getByLabel("Cliente da diária").selectOption(plan!.client_id!);
   await card.getByLabel("Selecionar Plano recorrente").selectOption(plan!.id);
   await expect(card.getByLabel("Google Doc único do Roteiro")).toBeVisible();
-  await expect(card.getByText(/North AI cria um Doc na pasta geral da diária/)).toBeVisible();
+  await expect(card.getByText(/North AI cria um Doc na pasta geral da diária quando ela estiver em um Drive compartilhado/)).toBeVisible();
   const desktopPath = testInfo.outputPath("diaria-desktop.png");
   await card.screenshot({ path: desktopPath });
   await testInfo.attach("diaria-desktop", { path: desktopPath, contentType: "image/png" });

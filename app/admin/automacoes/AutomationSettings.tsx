@@ -552,7 +552,7 @@ function AutomationConfigCard({
                     placeholder="Opcional: cole um link do Google Docs"
                     onChange={(event) => onChange({ dailyConfig: { ...slot.dailyConfig!, scriptDocUrl: event.target.value.trim() || null } })} />
                 </label>
-                <p className="admin-sub">Se o link ficar vazio, North AI cria um Doc na pasta geral da diária. A roteirista acrescenta nele as páginas de cada gravação.</p>
+                <p className="admin-sub">Se o link ficar vazio, North AI cria um Doc na pasta geral da diária quando ela estiver em um Drive compartilhado. Para pastas no Meu Drive, vincule um Google Doc criado por uma pessoa com acesso à pasta. A roteirista acrescenta nele as páginas de cada gravação.</p>
                 {slot.dailyConfig.scriptDocUrl ? <p><a href={slot.dailyConfig.scriptDocUrl} target="_blank" rel="noreferrer">Abrir Roteiro canônico ↗</a></p> : null}
                 {slot.dailyConfig.seriesFolderId ? <p><a href={`https://drive.google.com/drive/folders/${slot.dailyConfig.seriesFolderId}`} target="_blank" rel="noreferrer">Abrir pasta geral da diária ↗</a></p> : null}
                 <label>Plano histórico de referência
