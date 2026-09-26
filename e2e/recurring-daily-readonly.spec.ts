@@ -13,12 +13,8 @@ test("catálogo e editor da diária em desktop e tela estreita", async ({ page }
   await page.locator(".auto-type-select").last().selectOption("diaria_recorrente");
   const planPicker = page.getByRole("combobox", { name: "Selecionar Plano recorrente" });
   await expect(planPicker).toBeVisible();
-  const options = await planPicker.locator("option").evaluateAll((nodes) =>
-    nodes.map((node) => (node as HTMLOptionElement).value).filter(Boolean));
-  if (options.length) {
-    await planPicker.selectOption(options[0]);
-    await expect(page.getByText("Peças (1)")).toBeVisible();
-  }
+  // Never bind this read-only visual check to a real production Plan by list order.
+  await expect(planPicker).toHaveValue("");
   await page.screenshot({ path: testInfo.outputPath("daily-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".auto-daily, .auto-pick").last()).toBeVisible();
