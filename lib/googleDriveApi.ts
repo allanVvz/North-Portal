@@ -212,7 +212,13 @@ export async function ensureDriveDocument(input: {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ name: input.name, mimeType: DOCUMENT_MIME, parents: [input.parentId], appProperties: input.appProperties }),
   });
-  if (!res.ok) throw new HttpError(502, `Falha ao criar Google Doc da diaria (HTTP ${res.status}).`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null) as {
+      error?: { status?: string; errors?: Array<{ reason?: string }> };
+    } | null;
+    const reason = detail?.error?.errors?.[0]?.reason ?? detail?.error?.status ?? "desconhecido";
+    throw new HttpError(502, `Falha ao criar Google Doc da diaria (HTTP ${res.status}; motivo: ${reason}).`);
+  }
   const file = await res.json() as Partial<DriveItemMetadata>;
   if (!file.id || file.mimeType !== DOCUMENT_MIME) throw new HttpError(502, "Google Drive nao confirmou o Doc da diaria.");
   return { id: file.id, name: file.name ?? input.name, mimeType: DOCUMENT_MIME,
