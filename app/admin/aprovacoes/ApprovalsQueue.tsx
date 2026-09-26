@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import CardModalLauncher from "../CardModalLauncher";
 import { commentsOf, formatCommentTime } from "@/lib/comments";
 import type { ApprovalRecord } from "@/lib/supabase";
-import { kindLabel, kindTone } from "@/lib/taskCatalog";
+import { kindTone } from "@/lib/taskCatalog";
+import { taskClassificationLabel } from "@/lib/taskClassification";
 import { filterByClient, groupApprovalQueue } from "../approvalGroups";
 import { useCurrentAdminUser } from "../CurrentUserContext";
 
@@ -106,7 +107,7 @@ export default function ApprovalsQueue({
                 <span className={`ap-thumb tone-${tone(t)}`} aria-hidden />
                 <div className="ap-body">
                   <div className="ap-metaline">
-                    <span className={`ap-type tone-${tone(t)}`}>{kindLabel(t.kind)}</span>
+                    <span className={`ap-type tone-${tone(t)}`}>{taskClassificationLabel(t.kind, t.subtype)}</span>
                     <span className="ap-client">{t.clientName}</span>
                     {comments.length > 0 ? <span className="ap-comment-badge" title="Comentários no card">💬 {comments.length}</span> : null}
                   </div>
@@ -153,7 +154,7 @@ export default function ApprovalsQueue({
                 <span className={`ap-thumb tone-${tone(t)}`} aria-hidden />
                 <div className="ap-body">
                   <div className="ap-metaline">
-                    <span className={`ap-type tone-${tone(t)}`}>{kindLabel(t.kind)}</span>
+                    <span className={`ap-type tone-${tone(t)}`}>{taskClassificationLabel(t.kind, t.subtype)}</span>
                     <span className="ap-client">{t.clientName}</span>
                   </div>
                   <p className="ap-title">{t.title}</p>

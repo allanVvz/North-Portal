@@ -5,6 +5,7 @@ import { dailyConfigSchema, type DailyConfig } from "./validation";
 import { getDriveItemMetadata, isGoogleDriveConfigured } from "./googleDriveApi";
 import { parseGoogleDriveUrl } from "./googleDrive";
 import { canonicalFormatKey } from "./canonicalDeliveryFormats";
+import { normalizeDeliveryPayload } from "./taskClassification";
 import {
   currentRecurringExecutionFields,
   explicitDateExecutionFields,
@@ -1952,7 +1953,7 @@ export async function createFlowDelivery(
     recurrence_cadence: null,
     recurrence_weekdays: [],
     recurrence_day_of_month: null,
-    payload: { ...((input.payload ?? {}) as Record<string, unknown>) },
+    payload: normalizeDeliveryPayload(type.key, { ...((input.payload ?? {}) as Record<string, unknown>) }),
   });
 
   try {
@@ -2011,7 +2012,7 @@ export async function createRecurringFlowDelivery(
     due_date: startDate,
     start_date: startDate,
     end_date: typeof input.end_date === "string" && input.end_date >= startDate ? input.end_date : startDate,
-    payload: recurrenceParentPayload({ ...((input.payload ?? {}) as Record<string, unknown>) }),
+    payload: recurrenceParentPayload(normalizeDeliveryPayload(type.key, { ...((input.payload ?? {}) as Record<string, unknown>) })),
   });
 
   try {
@@ -2077,7 +2078,7 @@ export async function promoteTaskToFlowDelivery(id: string, current: TaskRecord,
     // começou, e ela não aparece no quadro — deixá-la em Backlog (o status que
     // a atividade comum já tinha) a prenderia num arrasto que ninguém vai dar.
     status: "backlog",
-    payload: { ...(current.payload ?? {}) },
+    payload: normalizeDeliveryPayload(type.key, { ...(current.payload ?? {}) }),
   });
 
   // Best-effort, como a materialização da ocorrência recorrente: falhar aqui

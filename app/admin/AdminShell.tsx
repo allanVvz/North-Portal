@@ -11,6 +11,7 @@ import NotificationsList from "./NotificationsList";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
 import type { NotificationRecord } from "@/lib/notificationTypes";
 import { buildLiveKindDefs, setLiveKinds } from "@/lib/taskCatalog/liveKinds";
+import { setVisibleTaskTypes } from "@/lib/taskClassification";
 import { isNavItemActive } from "./navActive";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 
@@ -272,7 +273,7 @@ export default function AdminShell({
     fetch("/api/admin/task-types")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { types: TaskTypeDef[] } | null) => {
-        if (data) setLiveKinds(buildLiveKindDefs(data.types));
+        if (data) { setVisibleTaskTypes(data.types); setLiveKinds(buildLiveKindDefs(data.types)); }
       })
       .catch(() => {});
   }, []);

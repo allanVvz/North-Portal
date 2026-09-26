@@ -15,9 +15,10 @@ import { taskCoverCandidates } from "@/lib/taskCover";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatCommentTime } from "@/lib/comments";
-import { kindDef, kindLabel } from "@/lib/taskCatalog";
+import { kindDef } from "@/lib/taskCatalog";
 import type { TaskTypeDef } from "@/lib/taskTypes";
-import { planParentIdOf } from "@/lib/taskRelations";
+import { TASK_BASE_TYPES, classifyTask, deliverySubtypeTypes, type TaskBaseTypeKey } from "@/lib/taskClassification";
+import { flowStepsOf, isFlowDelivery, planParentIdOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
 
@@ -67,13 +68,16 @@ export default function TaskDetailPanel({
       .then((data) => { if (Array.isArray(data?.types)) setTaskTypes(data.types as TaskTypeDef[]); })
       .catch(() => {});
   }, []);
-  // Só o que se pode criar — mais o tipo atual, para um card provisionado
-  // (checkpoint) não perder a própria identidade no select. Enquanto a busca
-  // não volta, o tipo do card é a única opção: melhor um select curto do que um
-  // que troca o tipo sozinho.
-  const typeOptions = taskTypes.length
-    ? taskTypes.filter((t) => t.creatable || t.key === task.kind).map((t) => ({ key: t.key, label: t.label }))
-    : [{ key: task.kind, label: kindLabel(task.kind) }];
+  // O painel e o modal usam a mesma classificação e a mesma trava da corrente.
+  const classification = classifyTask(task.kind, task.subtype, taskTypes);
+  const deliveryClassificationLocked = isFlowDelivery(task) && flowStepsOf(task.id, clientTasks).some((step) => step.status !== "backlog");
+  const deliveryOptions = deliverySubtypeTypes(taskTypes, task.kind);
+  const subtypeOptions = classification.baseType === "entrega" ? deliveryOptions : classification.baseType === "tarefa"
+    ? taskTypes.find((type) => type.key === "operacional")?.subtypes ?? [] : [];
+  function selectBaseType(base: TaskBaseTypeKey) {
+    if (base === "entrega") void patch({ kind: deliveryOptions.find((type) => type.key === task.kind)?.key ?? deliveryOptions.find((type) => type.key === "criativo")?.key ?? "criativo", subtype: null });
+    else void patch({ kind: base === "plano" ? "plano_acao" : "operacional", subtype: null });
+  }
 
   const payload = (task.payload ?? {}) as Record<string, unknown>;
   const isPlan = kindDef(task.kind).isPlan;
@@ -242,10 +246,18 @@ export default function TaskDetailPanel({
             oferecia opções que o modal já tinha aposentado. */}
         <div className="tdp-attr">
           <span>Tipo</span>
-          <select value={task.kind} disabled={busy} onChange={(e) => patch({ kind: e.target.value })}>
-            {typeOptions.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          <select value={classification.baseType} disabled={busy || classification.baseType === "checkpoint" || deliveryClassificationLocked} onChange={(e) => selectBaseType(e.target.value as TaskBaseTypeKey)}>
+            {classification.baseType === "checkpoint" ? <option value="checkpoint">Checkpoint</option> : TASK_BASE_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
         </div>
+        {classification.baseType === "tarefa" || classification.baseType === "entrega" ? <div className="tdp-attr">
+          <span>Subtipo</span>
+          <select value={classification.subtypeKey ?? ""} disabled={busy || !subtypeOptions.length || deliveryClassificationLocked} onChange={(e) => void patch(classification.baseType === "entrega" ? { kind: e.target.value, subtype: null } : { subtype: e.target.value || null })}>
+            {classification.baseType === "tarefa" ? <option value="">Sem subtipo</option> : null}
+            {subtypeOptions.map((subtype) => <option key={subtype.key} value={subtype.key} disabled={"creatable" in subtype && !subtype.creatable && subtype.key !== task.kind}>{subtype.label}</option>)}
+            {classification.baseType === "entrega" && !subtypeOptions.some((subtype) => subtype.key === task.kind) ? <option value={task.kind} disabled>{classification.subtypeLabel ?? "Carregando subtipos…"}</option> : null}
+          </select>
+        </div> : null}
         {shouldRenderClientVisibilityToggle(planoVisibilityOn) ? (
           <div className="tdp-visible">
             <VisibleToggleField

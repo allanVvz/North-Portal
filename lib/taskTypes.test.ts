@@ -120,13 +120,14 @@ function fakeDb(seedTypes: Record<string, unknown>[] = [], failStepIndex: number
   const state: Record<FakeTable, Record<string, unknown>[]> = {
     task_types: [
       { id: "operacional", parent_id: null, key: "operacional", label: "Tarefa", order_index: 10, behavior: "simples", creatable: true, active: true },
+      { id: "entrega", parent_id: null, key: "entrega", label: "Entrega", order_index: 20, behavior: "entrega", creatable: false, active: true },
       ...seedTypes,
     ],
     tasks: [],
     workflow_versions: [],
     workflow_version_steps: [],
   };
-  let insertCount = -1; // -1 = a próxima insert é a linha de topo; 0+ = índice da etapa
+  let insertCount = -1; // -1 = a próxima insert é o subtipo de Entrega; 0+ = índice da etapa
 
   function builder(table: FakeTable) {
     let mode: "select" | "insert" | "update" | "delete" = "select";
@@ -194,11 +195,13 @@ const baseCreateInput = {
   steps: [{ label: "Roteiro" }, { label: "Gravação" }, { label: "Corte" }],
 };
 
-describe("createTaskType — nasce um tipo de topo novo", () => {
-  it("cria a linha de topo e as etapas na ordem enviada", async () => {
+describe("createTaskType — subtipo da raiz Entrega", () => {
+  it("cria o subtipo sob Entrega e as etapas na ordem enviada", async () => {
     const db = fakeDb();
     const created = await createTaskType(db, baseCreateInput);
     expect(created.key).toBe("reels");
+    const { data } = (await db.from("task_types").select()) as { data: { key: string; parent_id: string | null }[] };
+    expect(data.find((row) => row.key === "reels")?.parent_id).toBe("entrega");
     expect(created.icon).toBe("▶");
     expect(created.tone).toBe("purple");
     expect(created.subtypes).toEqual([]);
@@ -221,7 +224,7 @@ describe("createTaskType — nasce um tipo de topo novo", () => {
     const db = fakeDb([], 1); // a 2ª etapa (índice 1) falha
     await expect(createTaskType(db, baseCreateInput)).rejects.toThrow(/simulado/);
     const { data } = (await db.from("task_types").select()) as { data: unknown[] };
-    expect(data).toHaveLength(1);
+    expect(data).toHaveLength(2);
     expect(data?.[0]).toMatchObject({ key: "operacional" });
   });
 });

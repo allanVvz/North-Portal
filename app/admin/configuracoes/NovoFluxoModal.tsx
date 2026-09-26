@@ -4,8 +4,8 @@ import { useState } from "react";
 import { EMPTY_STEP, StepEditor, type StepDraft } from "./FluxosPanel";
 import type { TaskTypeEditorNode } from "@/lib/taskTypes";
 
-// Modal de criação de um TIPO de topo novo (reels, carrossel, automação...) —
-// monta a Entrega e sua sequência de subtipos de Tarefa numa
+// Modal de criação de um subtipo de Entrega (Reels, Carrossel, Automação...) —
+// monta a variante interna e sua sequência de subtipos de Tarefa numa
 // tacada só: nada é gravado até o "Criar fluxo" final — arrastar pra
 // reordenar aqui é só array local, sem PATCH por etapa (diferente do drag em
 // FluxosPanel.tsx, que já opera sobre linhas salvas).
@@ -118,15 +118,15 @@ export default function NovoFluxoModal({
       <div className="novofluxo" onClick={(e) => e.stopPropagation()}>
         <div className="attrcfg-head">
           <div>
-            <h2>{preset?.editId ? `Editar cascata de ${preset.label}` : "Novo fluxo em cascata"}</h2>
-            <p className="admin-sub">{preset?.editId ? "A nova versão valerá para Entregas futuras. Etapas novas precisam existir em Tarefa." : "Uma Entrega nova composta por etapas reutilizáveis de Tarefa — reels, carrossel, o que for."}</p>
+            <h2>{preset?.editId ? `Editar cascata de ${preset.label}` : "Novo subtipo de Entrega"}</h2>
+            <p className="admin-sub">{preset?.editId ? "A nova versão valerá para Entregas futuras. Etapas novas precisam existir em Tarefa." : "Defina o subtipo e as etapas de Tarefa que compõem sua cascata."}</p>
           </div>
           <button className="kb-modal-close" onClick={onClose} aria-label="Fechar" disabled={busy}>✕</button>
         </div>
 
         <div className="novofluxo-body">
           {!preset?.editId ? <label className="admin-field">
-            <span>Nome do fluxo</span>
+            <span>Nome do subtipo</span>
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex.: Reels" autoFocus />
           </label> : null}
 
@@ -253,7 +253,7 @@ export default function NovoFluxoModal({
           <div className="kb-modal-actions-right">
             <button className="admin-btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
             <button className="admin-btn primary" onClick={submit} disabled={busy}>
-              {busy ? "Salvando…" : preset?.editId ? "Publicar nova versão" : "Criar fluxo"}
+              {busy ? "Salvando…" : preset?.editId ? "Publicar nova versão" : "Criar subtipo e fluxo"}
             </button>
           </div>
         </div>

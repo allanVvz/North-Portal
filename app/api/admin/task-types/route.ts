@@ -26,11 +26,9 @@ export async function GET(request: Request) {
   }
 }
 
-// POST /api/admin/task-types -> cria uma ETAPA (subtipo) de um tipo existente
-// OU um TIPO de topo novo, conforme o corpo tem `parent_id` ou não. Um tipo de
-// topo novo (2026-09-13) já nasce com identidade visual própria (icon/tone,
-// colunas de task_types) — lib/taskCatalog.ts le isso via o cache ao vivo
-// (lib/taskCatalog/liveKinds.ts) em vez de precisar de uma entrada em código.
+// POST /api/admin/task-types -> com `parent_id`, cria subtipo simples sob
+// Tarefa; sem `parent_id`, cria subtipo de Entrega com fluxo versionado.
+// As raízes do catálogo permanecem fixas.
 export async function POST(request: Request) {
   try {
     await requireAdmin();

@@ -18,7 +18,7 @@ import VisibleToggleField from "./VisibleToggleField";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { ATTR_DEFS, useAttrVisibility } from "./kanbanAttrs";
 import {
-  COLUMNS, FORMATO_OPTIONS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, WORKFLOW_ORDER,
+  COLUMNS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, WORKFLOW_ORDER,
   TONES, commentsOf, initials,
 } from "./kanbanShared";
 import CommentAvatar from "./CommentAvatar";
@@ -31,6 +31,7 @@ import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
 import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
+import { TASK_BASE_TYPES, classifyTask, deliverySubtypeTypes, taskBaseType, type TaskBaseTypeKey } from "@/lib/taskClassification";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
 import { actionPlanMembersOf, activatedTaskPayload, childrenByParent, currentRecurringExecutionOf, deliveryParentIdsOf, flowStepKeyOf, flowStepsOf, isDeferredTask, isFlowDelivery, planParentIdOf, planParentIdsOf, recurrenceExecutionsOf, recurrenceParentIdOf, recurrenceParentOf, referenceParentIdsOf, stageInDelivery } from "@/lib/taskRelations";
 import { isRecurrenceTemplate, recurrenceCycleOf, recurrenceRevisionOf, recurrenceStopped } from "@/lib/recurrenceState";
@@ -96,7 +97,7 @@ type PendingMember =
   // que faltava, o que fazia o mesmo composer criar Entrega quando o plano já
   // existia e Tarefa quando não existia (o sintoma "o mesmo botão dá resultado
   // diferente conforme a tela").
-  | { key: string; kind: "new"; taskKind: string; title: string; assignee: string; due_date: string; description?: string };
+  | { key: string; kind: "new"; taskKind: string; taskSubtype?: string | null; title: string; assignee: string; due_date: string; description?: string };
 
 function draftFrom(
   task: TaskRecord | null,
@@ -416,25 +417,15 @@ export default function TaskModal({
 
   const kd = kindDef(draft.kind);
   const tone = kindTone(draft.kind);
-  // Um card existente sempre mostra o próprio tipo, mesmo que esteja inativo
-  // no catálogo. Etapa de fluxo é uma Tarefa comum e nunca pode parecer um
-  // subtipo de Entrega ao abrir o modal.
-  // Uma porta só: na criação o dropdown de Tipo lista TUDO que se pode criar —
-  // Tarefa, Plano de Ação, cada entrega, e a porta sintética Rotina. Escolher o
-  // tipo é que decide o que nasce; nenhuma tela restringe mais essa lista. Fora
-  // ficam só os tipos não-criáveis (checkpoint comercial, que é provisionado);
-  // em edição, um card que já é plano só troca por outro plano.
-  const realTypes = taskTypes.filter((type) => {
-    if (!type.creatable && type.key !== draft.kind) return false;
-    if (mode === "edit" && kd.isPlan) return type.behavior === "plano";
-    return true;
-  });
-  // Rotina só aparece na criação: em edição o Tipo mostra o kind real do card e
-  // a recorrência tem campo próprio.
-  const creationTypes = mode === "new" ? [...realTypes, ROTINA_OPTION] : realTypes;
-  const typeLabelOf = (key: string) => taskTypes.find((t) => t.key === key)?.label ?? kindLabel(key);
-  const subtypeOptions = currentType?.behavior === "entrega" ? [] : currentType?.subtypes ?? [];
-  const subtypeLabelOf = (key: string) => subtypeOptions.find((sub) => sub.key === key)?.label ?? subtypeLabel(key);
+  const classification = classifyTask(draft.kind, draft.subtype || null, taskTypes);
+  const baseType = taskBaseType(draft.kind, taskTypes);
+  const baseOptions = baseType === "checkpoint"
+    ? [{ key: "checkpoint", label: "Checkpoint", kind: draft.kind }]
+    : mode === "edit" && kd.isPlan ? TASK_BASE_TYPES.filter((type) => type.key === "plano") : TASK_BASE_TYPES;
+  const deliveryOptions = deliverySubtypeTypes(taskTypes, mode === "edit" ? draft.kind : undefined);
+  const taskSubtypeOptions = taskTypes.find((type) => type.key === "operacional")?.subtypes ?? [];
+  const subtypeOptions = baseType === "entrega" ? deliveryOptions : baseType === "tarefa" ? taskSubtypeOptions : [];
+  const subtypeLabelOf = (key: string) => taskSubtypeOptions.find((sub) => sub.key === key)?.label ?? subtypeLabel(key);
   // The Cliente attribute can change the target client in both modes now, so
   // the header label tracks the draft instead of the (possibly stale) prop.
   // Falls back to the prop for edit mode before `clients` has loaded.
@@ -500,7 +491,7 @@ export default function TaskModal({
       description: draft.description.trim() || null,
       client_visible: planoVisibilityOn ? draft.client_visible : false,
       slug: draft.clientSlug || null,
-      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, formato: draft.formato.trim() || null, plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
+      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
     };
   }, [draft, effectiveApproverId, effectiveReviewerId, isDelivery, isRecurringParent, kd.isPlan, chainDelivery?.id, liveTask?.id, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
   const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
@@ -765,7 +756,7 @@ export default function TaskModal({
         kind,
         // Trocar de tipo troca o vocabulário de subtipo. Entrega não recebe
         // subtipo: suas etapas são materializadas pela versão persistida.
-        subtype: type?.behavior === "entrega" ? "" : type?.subtypes[0]?.key ?? "",
+        subtype: type?.behavior === "entrega" || kind === "operacional" ? "" : type?.subtypes[0]?.key ?? "",
         // A plan can't belong to another plan.
         plan_id: def.isPlan ? "" : d.plan_id,
         recurrence_cadence: clearRecurrence ? null : d.recurrence_cadence,
@@ -773,6 +764,16 @@ export default function TaskModal({
         recurrence_day_of_month: clearRecurrence ? null : d.recurrence_day_of_month,
       };
     });
+  }
+
+  function pickBaseType(base: TaskBaseTypeKey) {
+    if (base === "entrega") pickKind(deliveryOptions.find((type) => type.key === draft.kind)?.key ?? deliveryOptions.find((type) => type.key === "criativo")?.key ?? deliveryOptions[0]?.key ?? "criativo");
+    else pickKind(base === "plano" ? "plano_acao" : "operacional");
+  }
+
+  function pickVisibleSubtype(key: string) {
+    if (baseType === "entrega") pickKind(key);
+    else set("subtype", key);
   }
 
   // Plan ↔ activity linking (for plano_acao cards): members are tasks whose
@@ -1183,7 +1184,7 @@ export default function TaskModal({
   // etapa nenhuma). A porta é a mesma do NewTaskButton — POST
   // /api/admin/tasks?scope=task — então um tipo `behavior:'entrega'` já
   // cascateia sozinho (createFlowDelivery), sem lógica nova aqui.
-  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string; kind: string; description?: string }, showNextAction = false) {
+  async function createLinkedActivity(data: { title: string; assignee: string; due_date: string; kind: string; subtype?: string | null; description?: string }, showNextAction = false) {
     if (!liveTask) return;
     setBusy(true);
     setError("");
@@ -1191,6 +1192,7 @@ export default function TaskModal({
       title: data.title,
       description: data.description ?? null,
       kind: data.kind,
+      subtype: data.subtype ?? null,
       assignee: data.assignee || null,
       due_date: data.due_date || null,
       start_date: data.due_date || null,
@@ -1500,7 +1502,7 @@ export default function TaskModal({
     payload.statusTone = draft.statusTone;
     payload.barTone = draft.barTone;
     const strOrDelete = (key: string, value: string) => { if (value.trim()) payload[key] = value.trim(); else delete payload[key]; };
-    strOrDelete("formato", draft.formato);
+    if (!isCreativeDeliveryKind(draft.kind)) strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
     delete payload.explicit_occurrence_dates;
@@ -1585,6 +1587,7 @@ export default function TaskModal({
             title: member.title,
             description: member.description ?? null,
             kind: member.taskKind,
+            subtype: member.taskSubtype ?? null,
             assignee: member.assignee || null,
             due_date: member.due_date || null,
             start_date: member.due_date || null,
@@ -1718,61 +1721,35 @@ export default function TaskModal({
                     </button>
                   ))}
                 </HeadDropdown>
-                {visible("kind") && !isDelivery ? (
+                {visible("kind") ? (
                   <>
                     <span className="tm-head-sep">·</span>
                     <HeadDropdown
                       className="tm-headpick-kind"
-                      trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{kindIcon(draft.kind)}</span>{typeLabelOf(draft.kind)}</span>}
+                      trigger={<span className="tm-headpick-label">Tipo: {classification.baseLabel}</span>}
                     >
-                      {creationTypes.map((type) => (
-                        <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)} disabled={deliveryClassificationLocked}>
-                          <span className="tm-headpick-ico" aria-hidden>{kindIcon(type.key)}</span>{type.label}
+                      {baseOptions.map((type) => (
+                        <button type="button" key={type.key} className={`tm-headpick-option ${baseType === type.key ? "on" : ""}`} onClick={() => { if (type.key !== "checkpoint") pickBaseType(type.key as TaskBaseTypeKey); }} disabled={deliveryClassificationLocked || type.key === "checkpoint"}>
+                          {type.label}
                         </button>
                       ))}
                     </HeadDropdown>
                   </>
                 ) : null}
-                {isDelivery ? (
-                  // O card da ENTREGA não ocupa slot nenhum — ele É a soma das
-                  // etapas ("Criativo" agregado = roteiro + captação + edição +
-                  // publicação), então o seletor de Subtipo não fazia sentido
-                  // aqui: escolher uma etapa nele não move nada na corrente, só
-                  // reescrevia um campo que o card pai não usa. Bug relatado
-                  // (P1-D2): nada na tela avisava que este card É o pai —
-                  // mostrava só "Subtipo" vazio, igual a qualquer card comum.
-                  <>
-                    <span className="tm-head-sep">·</span>
-                    {deliveryClassificationLocked ? (
-                      <span className="tm-headpick-label tm-head-parentflag" title="Tipo bloqueado após a primeira etapa sair de Entrada.">
-                        <span aria-hidden>✦</span> Entrega · <span aria-hidden>{kindIcon(draft.kind)}</span> {typeLabelOf(draft.kind)}
-                      </span>
-                    ) : (
-                      <HeadDropdown
-                        className="tm-headpick-kind"
-                        trigger={<span className="tm-headpick-label tm-head-parentflag"><span aria-hidden>✦</span> Entrega · <span aria-hidden>{kindIcon(draft.kind)}</span> {typeLabelOf(draft.kind)}</span>}
-                      >
-                        {creationTypes.filter((type) => type.behavior === "entrega").map((type) => (
-                          <button type="button" key={type.key} className={`tm-headpick-option ${draft.kind === type.key ? "on" : ""}`} onClick={() => pickKind(type.key)}>
-                            <span className="tm-headpick-ico" aria-hidden>{kindIcon(type.key)}</span>{type.label}
-                          </button>
-                        ))}
-                      </HeadDropdown>
-                    )}
-                  </>
-                ) : subtypeOptions.length ? (
+                {baseType === "tarefa" || baseType === "entrega" ? (
                   <>
                     <span className="tm-head-sep">·</span>
                     <HeadDropdown
                       className="tm-headpick-subtype"
-                      trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}
+                      trigger={<span className="tm-headpick-label">Subtipo: {classification.subtypeLabel ?? "—"}</span>}
                     >
-                      <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")} disabled={deliveryClassificationLocked}>— Sem subtipo —</button>
+                      {baseType === "tarefa" ? <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => pickVisibleSubtype("")} disabled={deliveryClassificationLocked}>— Sem subtipo —</button> : null}
                       {subtypeOptions.map((sub) => (
-                        <button type="button" key={sub.key} className={`tm-headpick-option ${draft.subtype === sub.key ? "on" : ""}`} onClick={() => set("subtype", sub.key)} disabled={deliveryClassificationLocked}>
+                        <button type="button" key={sub.key} className={`tm-headpick-option ${classification.subtypeKey === sub.key ? "on" : ""}`} onClick={() => pickVisibleSubtype(sub.key)} disabled={deliveryClassificationLocked || ("creatable" in sub && !sub.creatable && sub.key !== draft.kind)}>
                           {sub.label}
                         </button>
                       ))}
+                      {baseType === "entrega" && !subtypeOptions.some((sub) => sub.key === draft.kind) ? <button type="button" className="tm-headpick-option on" disabled>{classification.subtypeLabel}</button> : null}
                     </HeadDropdown>
                   </>
                 ) : null}
@@ -1823,32 +1800,23 @@ export default function TaskModal({
           <div className="tm-head tm-head-plain">
             <div className="tm-head-text">
               <div className="tm-new-headline">
-                <h2>Nova Tarefa</h2>
+                <h2>Novo card</h2>
                 <HeadDropdown
                   className="tm-new-kind"
-                  trigger={<span className="tm-headpick-label"><span className="tm-headpick-ico" aria-hidden>{rotinaMode ? ROTINA_OPTION.icon : kindIcon(draft.kind)}</span>{rotinaMode ? ROTINA_OPTION.label : typeLabelOf(draft.kind)}</span>}
+                  trigger={<span className="tm-headpick-label">Tipo: {classification.baseLabel}</span>}
                 >
-                  {creationTypes.map((type) => {
-                    const isRotina = type.key === ROTINA_KEY;
-                    const on = isRotina ? rotinaMode : !rotinaMode && draft.kind === type.key;
-                    return (
-                      <button type="button" key={type.key} className={`tm-headpick-option ${on ? "on" : ""}`} onClick={() => pickKind(type.key)}>
-                        <span className="tm-headpick-ico" aria-hidden>{isRotina ? ROTINA_OPTION.icon : kindIcon(type.key)}</span>{type.label}
-                        {type.behavior === "entrega" ? <span className="tm-headpick-hint">corrente de etapas</span> : null}
-                        {isRotina ? <span className="tm-headpick-hint">se repete sozinha</span> : null}
-                      </button>
-                    );
-                  })}
+                  {TASK_BASE_TYPES.map((type) => <button type="button" key={type.key} className={`tm-headpick-option ${baseType === type.key ? "on" : ""}`} onClick={() => pickBaseType(type.key)}>{type.label}</button>)}
                 </HeadDropdown>
-                {subtypeOptions.length ? (
+                {baseType === "tarefa" || baseType === "entrega" ? (
                   <HeadDropdown
                     className="tm-new-kind"
-                    trigger={<span className="tm-headpick-label">{draft.subtype ? subtypeLabelOf(draft.subtype) : "Subtipo"}</span>}
+                    trigger={<span className="tm-headpick-label">Subtipo: {classification.subtypeLabel ?? "—"}</span>}
                   >
-                    <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => set("subtype", "")}>— Sem subtipo —</button>
+                    {baseType === "tarefa" ? <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => pickVisibleSubtype("")}>— Sem subtipo —</button> : null}
                     {subtypeOptions.map((sub) => (
-                      <button type="button" key={sub.key} className={`tm-headpick-option ${draft.subtype === sub.key ? "on" : ""}`} onClick={() => set("subtype", sub.key)}>{sub.label}</button>
+                      <button type="button" key={sub.key} className={`tm-headpick-option ${classification.subtypeKey === sub.key ? "on" : ""}`} onClick={() => pickVisibleSubtype(sub.key)} disabled={"creatable" in sub && !sub.creatable}>{sub.label}</button>
                     ))}
+                    {!subtypeOptions.length ? <button type="button" className="tm-headpick-option" disabled>Carregando subtipos…</button> : null}
                   </HeadDropdown>
                 ) : null}
               </div>
@@ -1946,14 +1914,6 @@ export default function TaskModal({
               </Cell>
 
               {/* Atributos por kind */}
-              {draft.kind === "criativo" ? (
-                <Cell icon="◧" label="Formato" hidden={!visible("formato")}>
-                  <select value={draft.formato} onChange={(e) => set("formato", e.target.value)}>
-                    <option value="">—</option>
-                    {FORMATO_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </Cell>
-              ) : null}
               {isCreativeDeliveryKind(draft.kind) ? (
                 <Cell icon="◔" label="Plataforma" hidden={!visible("plataforma")}>
                   <select value={draft.plataforma} onChange={(e) => set("plataforma", e.target.value)}>
@@ -2131,7 +2091,7 @@ export default function TaskModal({
                           {/* O ícone do tipo que a pessoa escolheu — antes era
                               sempre o de Tarefa, e a fila mostrava um ✦ Entrega
                               disfarçado de ⚙ Tarefa até o plano ser salvo. */}
-                          <TaskKindIcon kind={m.kind === "new" ? m.taskKind : "operacional"} size="sm" />
+                          <TaskKindIcon kind={m.kind === "new" ? m.taskKind : "operacional"} subtype={m.kind === "new" ? m.taskSubtype : null} size="sm" />
                           <span className="tm-member-title">{m.title}</span>
                           <span className="tm-member-status">
                             {m.kind === "existing" ? "Vincular ao criar" : [m.assignee, m.due_date].filter(Boolean).join(" · ") || "Criar ao salvar"}
@@ -2173,8 +2133,12 @@ export default function TaskModal({
                     // (createLinkedActivity); sem ele o membro fica numa fila
                     // local e nasce em `save()`, pela mesma rota e com o mesmo
                     // `kind`.
-                    types={taskTypes.filter((t) => t.creatable && t.behavior !== "plano")}
-                    defaultType={taskTypes.find((t) => t.key === "operacional")?.key ?? taskTypes[0]?.key ?? "operacional"}
+                    types={[
+                      { key: "operacional", label: "Sem subtipo", kind: "operacional", subtype: null, baseType: "tarefa" as const, behavior: "simples" },
+                      ...taskSubtypeOptions.filter((sub) => !('active' in sub) || sub.active).map((sub) => ({ key: `operacional/${sub.key}`, label: sub.label, kind: "operacional", subtype: sub.key, baseType: "tarefa" as const, behavior: "simples" })),
+                      ...deliveryOptions.filter((type) => type.creatable).map((type) => ({ key: type.key, label: type.label, kind: type.key, subtype: null, baseType: "entrega" as const, behavior: "entrega" })),
+                    ]}
+                    defaultType="operacional"
                     busy={busy}
                     contextHint={[
                       draft.assignee ? `Nascem com ${draft.assignee}` : "Nascem sem responsável",
@@ -2187,6 +2151,7 @@ export default function TaskModal({
                         title: item.title,
                         description: item.description,
                         kind: item.kind,
+                        subtype: item.subtype ?? null,
                         assignee: draft.assignee,
                         due_date: item.offsetDays !== undefined ? addDaysIso(base, item.offsetDays) : draft.start_date || draft.due_date || "",
                       }));
@@ -2198,7 +2163,7 @@ export default function TaskModal({
                       }
                       setPendingMembers((current) => [
                         ...current,
-                        ...rows.map(({ kind, ...row }, index) => ({ key: `n-${Date.now()}-${index}`, kind: "new" as const, taskKind: kind, ...row })),
+                        ...rows.map(({ kind, subtype, ...row }, index) => ({ key: `n-${Date.now()}-${index}`, kind: "new" as const, taskKind: kind, taskSubtype: subtype, ...row })),
                       ]);
                     }}
                   />

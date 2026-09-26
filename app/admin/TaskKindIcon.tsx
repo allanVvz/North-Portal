@@ -1,6 +1,7 @@
 "use client";
 
-import { kindIcon, kindLabel, kindTone, publicationFormatSubtype, subtypeIcon, subtypeLabel } from "@/lib/taskCatalog";
+import { kindIcon, kindTone, subtypeIcon, subtypeLabel } from "@/lib/taskCatalog";
+import { classifyTask } from "@/lib/taskClassification";
 import { useLiveKindsVersion } from "@/lib/taskCatalog/useLiveKindsVersion";
 
 /** `subtype` é opcional e só troca o GLIFO — a cor/tom continua vindo do
@@ -12,9 +13,10 @@ export default function TaskKindIcon({ kind, subtype, format, size = "md", class
   // esquentar — sem isto, um ícone desenhado antes da busca terminar ficaria
   // no fallback genérico até algo NÃO relacionado forçar outro render.
   useLiveKindsVersion();
-  const visibleSubtype = subtype ?? (kind === "criativo" ? publicationFormatSubtype(format) : null);
+  const classification = classifyTask(kind, subtype ?? null);
+  const visibleSubtype = classification.baseType === "entrega" && kind.startsWith("entrega_") ? kind.slice("entrega_".length) : subtype;
   const icon = subtypeIcon(visibleSubtype) ?? kindIcon(kind);
-  const label = visibleSubtype && subtypeIcon(visibleSubtype) ? `${kindLabel(kind)} · ${subtypeLabel(visibleSubtype)}` : kindLabel(kind);
+  const label = `${classification.baseLabel}${classification.subtypeLabel ? ` · ${classification.baseType === "tarefa" ? subtypeLabel(subtype) : classification.subtypeLabel}` : ""}`;
   return (
     <span
       className={`task-kind-icon task-kind-icon-${size} task-kind-tone-${kindTone(kind)} ${className}`.trim()}

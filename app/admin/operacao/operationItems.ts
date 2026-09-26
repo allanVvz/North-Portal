@@ -1,4 +1,4 @@
-import { kindLabel, subtypeLabel } from "@/lib/taskCatalog";
+import { classifyTask } from "@/lib/taskClassification";
 import { belongsToTaskScreen, isDeferredTask, recurrenceParentIdOf } from "@/lib/taskRelations";
 import type { RecurringTask } from "@/lib/supabase";
 import type { TaskRecord } from "@/lib/validation";
@@ -61,19 +61,20 @@ export function normalizeOperationItems(tasks: readonly OperationTask[], routine
 }
 
 export function itemTypeTags(item: OperationItem): string[] {
-  return item.routine ? [item.task.kind, "rotina"] : [item.task.kind];
+  const base = classifyTask(item.task.kind, item.task.subtype).baseType;
+  return item.routine ? [base, "rotina"] : [base];
 }
 
 export function itemTypeLabels(item: OperationItem): string[] {
-  return [...itemTypeTags(item).map((tag) => tag === "rotina" ? "Rotina" : kindLabel(tag))];
+  return [classifyTask(item.task.kind, item.task.subtype).baseLabel, ...(item.routine ? ["Rotina"] : [])];
 }
 
 export function compatibleSubtypes(items: readonly OperationItem[], selectedTypes: readonly string[]): string[] {
   return [...new Set(items
     .filter((item) => selectedTypes.every((tag) => itemTypeTags(item).includes(tag)))
-    .map((item) => item.task.subtype)
+    .map((item) => classifyTask(item.task.kind, item.task.subtype).subtypeKey)
     .filter((value): value is string => Boolean(value)))]
-    .sort((a, b) => subtypeLabel(a).localeCompare(subtypeLabel(b), "pt-BR"));
+    .sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
 function assignees(item: OperationItem): string[] {
@@ -99,7 +100,7 @@ export function operationMatchesFilters(item: OperationItem, filters: readonly O
   return filters.every((filter) => {
     if (filter.attr === "status") return true;
     if (filter.attr === "tipo") return itemTypeTags(item).includes(filter.value);
-    if (filter.attr === "subtipo") return item.task.subtype === filter.value;
+    if (filter.attr === "subtipo") return classifyTask(item.task.kind, item.task.subtype).subtypeKey === filter.value;
     if (filter.attr === "situacao") return operationSituation(item, today) === filter.value;
     if (filter.attr === "cliente") return item.clientName === filter.value;
     if (filter.attr === "frequencia") return item.routine && (item.task as RecurringTask).cadence === filter.value;

@@ -29,6 +29,7 @@ import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
 import { provisionCreativeDriveWorkspaceIfConfigured } from "@/lib/creativeDrive";
 import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizeDeliveryPayload } from "@/lib/taskClassification";
 
 export const TASK_CREATE_SCOPES = ["task", "plan", "routine"] as const;
 export type TaskCreateScope = (typeof TASK_CREATE_SCOPES)[number];
@@ -80,6 +81,7 @@ export async function createTaskFromInput(
     // recorrente existe, mas nasce pelo tipo Entrega + o toggle, não por aqui.
     if (behavior === "entrega") throw new HttpError(400, "Uma entrega nao pode ser uma rotina.");
   }
+  fields.payload = normalizeDeliveryPayload(fields.kind ?? "operacional", fields.payload ?? {});
 
   if (fields.recurrence_cadence) {
     const start = fields.start_date ?? fields.due_date;

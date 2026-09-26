@@ -19,7 +19,8 @@
 //  - Acento-insensível nos dois lados ("relatorio" acha "relatório").
 
 import { commentsOf } from "@/lib/comments";
-import { kindLabel, subtypeLabel } from "@/lib/taskCatalog";
+import { taskClassificationLabel } from "@/lib/taskClassification";
+import { subtypeLabel } from "@/lib/taskCatalog";
 import type { TaskRecord } from "@/lib/validation";
 import { PRIORITY_LABEL, STATUS_LABEL } from "@/app/admin/kanbanShared";
 import { formatShortDate } from "@/app/admin/taskDates";
@@ -72,7 +73,7 @@ function baseHaystack(task: TaskRecord): string {
   const parts: Array<string | null | undefined> = [
     task.title,
     task.description,
-    kindLabel(task.kind),
+    taskClassificationLabel(task.kind, task.subtype),
     subtypeLabel(task.subtype),
     STATUS_LABEL[task.status],
     PRIORITY_LABEL[task.priority],

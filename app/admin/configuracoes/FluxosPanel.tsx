@@ -270,36 +270,28 @@ export default function FluxosPanel() {
 
   const inactiveCount = data.types.filter((t) => !t.active).length;
   const visibleTypes = showInactive ? data.types : data.types.filter((t) => t.active);
+  const taskRoot = data.types.find((type) => type.key === "operacional");
+  const groups = [
+    { key: "tarefa", label: "Tarefa", types: visibleTypes.filter((type) => type.key === "operacional") },
+    { key: "entrega", label: "Entrega", types: visibleTypes.filter((type) => type.behavior === "entrega") },
+    { key: "plano", label: "Plano", types: visibleTypes.filter((type) => type.key === "plano_acao") },
+    { key: "checkpoint", label: "Checkpoint", types: visibleTypes.filter((type) => type.key === "checkpoint_comercial") },
+  ];
 
   return (
     <div className="set-card">
       <div className="set-appearance-head">
         <div>
           <h2 className="set-h">Tipos e fluxos</h2>
-          <p className="admin-sub">Clique num tipo para ver e editar as etapas dele.</p>
+          <p className="admin-sub">Tarefa e Entrega têm subtipos. Cada subtipo de Entrega possui sua própria versão de fluxo.</p>
         </div>
-        <button className="admin-btn primary" onClick={() => { setCanonicalPreset(null); setNovoFluxoOpen(true); }}>+ Novo tipo</button>
+        <div className="set-actions">
+          <button className="admin-btn ghost" disabled={!taskRoot || busy} onClick={() => { if (!taskRoot) return; setExpanded((current) => new Set(current).add(taskRoot.id)); setEditing(`new:${taskRoot.id}`); setStepDraft(EMPTY_STEP); }}>+ Novo subtipo de Tarefa</button>
+          <button className="admin-btn primary" onClick={() => { setWorkflowToEdit(null); setCanonicalPreset(null); setNovoFluxoOpen(true); }}>+ Novo subtipo de Entrega</button>
+        </div>
       </div>
 
       {error ? <p className="admin-error">{error}</p> : null}
-
-      <div className="auto-format-list">
-        <strong>Formatos canônicos</strong>
-        <p className="admin-sub">Crie cada formato separadamente. As etapas começam como as de Criativo e podem ser ajustadas por formato depois.</p>
-        <div className="set-actions">
-          {CANONICAL_DELIVERY_FORMATS.map((format) => {
-            const created = data.types.find((type) => type.key === format.key);
-            return <button key={format.key} type="button" className="admin-btn ghost"
-              onClick={() => {
-                if (created) { setExpanded((current) => new Set(current).add(created.id)); return; }
-                setCanonicalPreset(format);
-                setNovoFluxoOpen(true);
-              }}>
-              {format.icon} {format.label} {created ? "· ver cascata" : "· criar cascata"}
-            </button>;
-          })}
-        </div>
-      </div>
 
       {novoFluxoOpen ? (
         <NovoFluxoModal
@@ -322,7 +314,9 @@ export default function FluxosPanel() {
       ) : null}
 
       <div className="voc-list">
-        {visibleTypes.map((type) => {
+        {groups.map((group) => <div className="voc-group" key={group.key}>
+          <h3 className="set-h">{group.label}</h3>
+          {group.types.map((type) => {
           const typeUsage = data.usage[usageKey(type.key)];
           const isExpanded = expanded.has(type.id);
           const isDelivery = type.behavior === "entrega";
@@ -338,7 +332,7 @@ export default function FluxosPanel() {
                 {editing === type.id ? (
                   <div className="voc-inline">
                     <label className="admin-field">
-                      <span>Nome do tipo</span>
+                      <span>{isDelivery ? "Nome do subtipo" : "Nome do tipo"}</span>
                       <input value={typeLabel} onChange={(e) => setTypeLabel(e.target.value)} autoFocus />
                     </label>
                     <div className="kb-modal-actions-right">
@@ -368,16 +362,16 @@ export default function FluxosPanel() {
                       </div>
                     </button>
                     <div className="voc-actions">
-                      <button
+                      {type.key !== "operacional" && type.key !== "plano_acao" && type.key !== "checkpoint_comercial" ? <button
                         className="admin-btn ghost"
                         onClick={() => { setEditing(type.id); setTypeLabel(type.label); }}
                         disabled={busy || editing !== null}
                       >
                         Renomear
-                      </button>
-                      <button className="admin-btn ghost" onClick={() => void toggleTypeActive(type)} disabled={busy || editing !== null}>
+                      </button> : null}
+                      {type.key !== "operacional" && type.key !== "plano_acao" && type.key !== "checkpoint_comercial" ? <button className="admin-btn ghost" onClick={() => void toggleTypeActive(type)} disabled={busy || editing !== null}>
                         {type.active ? "Desativar" : "Ativar"}
-                      </button>
+                      </button> : null}
                     </div>
                   </>
                 )}
@@ -454,7 +448,7 @@ export default function FluxosPanel() {
                   ),
                 )}
 
-                {!isDelivery && editing === `new:${type.id}` ? (
+                {type.key === "operacional" && editing === `new:${type.id}` ? (
                   <StepEditor
                     draft={stepDraft}
                     setDraft={setStepDraft}
@@ -462,20 +456,24 @@ export default function FluxosPanel() {
                     onCancel={closeEditor}
                     onSave={() => void saveStep(type)}
                   />
-                ) : !isDelivery ? (
+                ) : type.key === "operacional" ? (
                   <button
                     className="admin-btn ghost voc-add"
                     onClick={() => { setEditing(`new:${type.id}`); setStepDraft(EMPTY_STEP); }}
                     disabled={busy || editing !== null}
                   >
-                    + Etapa em {type.label}
+                    + Novo subtipo de Tarefa
                   </button>
                 ) : null}
               </div>
               ) : null}
             </section>
           );
-        })}
+          })}
+          {group.key === "entrega" ? <div className="set-actions">
+            {CANONICAL_DELIVERY_FORMATS.filter((format) => !data.types.some((type) => type.key === format.key)).map((format) => <button key={format.key} type="button" className="admin-btn ghost" onClick={() => { setCanonicalPreset(format); setNovoFluxoOpen(true); }}>+ {format.label}</button>)}
+          </div> : null}
+        </div>)}
 
         {inactiveCount > 0 ? (
           <button type="button" className="admin-btn ghost voc-showinactive" onClick={() => setShowInactive((v) => !v)}>

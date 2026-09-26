@@ -14,7 +14,8 @@ import { agencyToday, RECURRING_STATE_LABEL, type RecurringState } from "../recu
 import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "../calendarUtils";
 import { deadlineStateOf, DEADLINE_LABEL, type DeadlineState } from "../deadlineState";
 import { formatRelativeAge } from "@/lib/comments";
-import { kindDef, kindLabel, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
+import { kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
+import { TASK_BASE_TYPES, classifyTask, taskClassificationLabel } from "@/lib/taskClassification";
 import { childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
 import { taskMatchesQuery } from "@/lib/taskSearch";
 import type { RecurringTask } from "@/lib/supabase";
@@ -101,7 +102,7 @@ function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDra
   const { tone, label } = cardState(item, today);
   const dueRelative = tone === "concluida" ? null : relativeDue(due, today);
   const period = formatPeriod(task.start_date, task.end_date);
-  const formato = visible("formato") ? payloadStr(task, "formato") : "";
+  const formato = visible("formato") && classifyTask(task.kind, task.subtype).baseType !== "entrega" ? payloadStr(task, "formato") : "";
   const plataforma = visible("plataforma") ? payloadStr(task, "plataforma") : "";
   const comments = commentsOf(task).length;
   const showKind = visible("kind");
@@ -134,8 +135,8 @@ function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDra
                 {flowBadge.step}/{flowBadge.total} · {subtypeLabel(task.subtype) || "Etapa"}
               </span>
             ) : null}
-            {showKind ? <span className="kb-card-pill">{kindLabel(task.kind)}</span> : null}
-            {showSubtype ? <span className="kb-card-pill">{subtypeLabel(task.subtype)}</span> : null}
+            {showKind ? <span className="kb-card-pill">{classifyTask(task.kind, task.subtype).baseLabel}</span> : null}
+            {showSubtype ? <span className="kb-card-pill">{classifyTask(task.kind, task.subtype).subtypeLabel}</span> : null}
             {formato ? <span className="kb-card-pill">{formato}</span> : null}
             {plataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
           </span>
@@ -277,15 +278,18 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
     }
     if (attr === "tipo") {
       const entries: [string, string][] = [
-        ...catalogTypes.map((type): [string, string] => [type.key, type.label]),
-        ...allItems.flatMap(itemTypeTags).map((value): [string, string] => [value, value === "rotina" ? "Rotina" : kindLabel(value)]),
+        ...TASK_BASE_TYPES.map((type): [string, string] => [type.key, type.label]),
+        ...allItems.flatMap(itemTypeTags).map((value): [string, string] => [value, value === "rotina" ? "Rotina" : TASK_BASE_TYPES.find((type) => type.key === value)?.label ?? "Checkpoint"]),
         ["rotina", "Rotina"],
       ];
       return [...new Map(entries).entries()].map(([value, label]) => ({ value, label }));
     }
     if (attr === "subtipo") {
-      const catalog = catalogTypes.filter((type) => selectedTypes.filter((key) => key !== "rotina").includes(type.key)).flatMap((type) => [...type.subtypes, ...type.workflowSteps].map((subtype) => ({ value: subtype.key, label: subtype.label })));
-      const present = compatibleSubtypes(allItems, selectedTypes).map((value) => ({ value, label: subtypeLabel(value) }));
+      const catalog = [
+        ...(selectedTypes.includes("tarefa") ? catalogTypes.find((type) => type.key === "operacional")?.subtypes.map((subtype) => ({ value: subtype.key, label: subtype.label })) ?? [] : []),
+        ...(selectedTypes.includes("entrega") ? catalogTypes.filter((type) => type.behavior === "entrega").map((type) => ({ value: type.key, label: type.label })) : []),
+      ];
+      const present = compatibleSubtypes(allItems, selectedTypes).map((value) => ({ value, label: allItems.map((item) => classifyTask(item.task.kind, item.task.subtype)).find((classification) => classification.subtypeKey === value)?.subtypeLabel ?? subtypeLabel(value) }));
       return [...new Map([...catalog, ...present].map((option) => [option.value, option])).values()];
     }
     if (attr === "cliente") return [...new Set(allItems.map((item) => item.clientName))].sort().map((value) => ({ value, label: value }));
@@ -303,7 +307,8 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
     if (!types.length) return next.filter((filter) => filter.attr !== "subtipo");
     const valid = new Set([
       ...compatibleSubtypes(allItems, types),
-      ...catalogTypes.filter((type) => types.filter((key) => key !== "rotina").includes(type.key)).flatMap((type) => [...type.subtypes, ...type.workflowSteps].map((subtype) => subtype.key)),
+      ...(types.includes("tarefa") ? catalogTypes.find((type) => type.key === "operacional")?.subtypes.map((subtype) => subtype.key) ?? [] : []),
+      ...(types.includes("entrega") ? catalogTypes.filter((type) => type.behavior === "entrega").map((type) => type.key) : []),
     ]);
     return next.filter((filter) => filter.attr !== "subtipo" || valid.has(filter.value));
   }, [allItems, catalogTypes]);
@@ -539,7 +544,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
                       <span><strong title={item.task.title}>{item.task.title}</strong><small><span className={`kb-situacao s-${tone}`}>{label}</span>{item.routine ? " ↻ Rotina" : ""}</small></span>
                     </span>
                     <span>{item.clientName}</span>
-                    <span>{kindLabel(item.task.kind)}{item.task.subtype ? ` · ${subtypeLabel(item.task.subtype)}` : ""}</span>
+                    <span>{taskClassificationLabel(item.task.kind, item.task.subtype)}</span>
                     <span>{item.routine ? CADENCE_LABEL[(item.task as RecurringTask).cadence] : "—"}</span>
                     <span className="rec-list-due">{formatShortDate(due)}{dueRelative ? <small className="rec-list-period">{dueRelative}</small> : null}</span>
                     <span className={`kb-prio p-${item.task.priority}`}>{PRIORITY_LABEL[item.task.priority]}</span>

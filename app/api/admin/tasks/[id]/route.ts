@@ -19,6 +19,7 @@ import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { feedbackMetricApprovalProblem } from "@/lib/automations/conversionFlow";
 import { flowStepKeyOf } from "@/lib/taskRelations";
 import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
+import { canonicalDeliveryFormat, normalizeDeliveryPayload } from "@/lib/taskClassification";
 import { notifyProfiles, notifyTaskParticipants } from "@/lib/notifications";
 import { notifiableChange } from "@/lib/notifiableChange";
 import { HttpError, taskPatchSchema, type TaskRecord } from "@/lib/validation";
@@ -215,6 +216,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // card pertence a vários (`planParentIdOf` escolhe arbitrariamente). Sem
     // isto, `setTaskPlanLink` não tem como saber QUAL elo trocar e soltava
     // todos de uma vez quando o campo era limpo.
+    const effectiveKind = patch.kind ?? baseTask.kind;
+    if (canonicalDeliveryFormat(effectiveKind)) {
+      patch.payload = normalizeDeliveryPayload(effectiveKind, patch.payload ?? baseTask.payload ?? {});
+      if (payload_patch) delete payload_patch.formato;
+    }
     const { plan_id: planLink, plan_id_previous: planLinkPrevious, ...taskPatch } = patch as Record<string, unknown>;
     let task = await updateTaskGroup(id, baseTask, taskPatch, session.userId);
     let crossClientPlanLink = false;

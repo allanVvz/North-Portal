@@ -710,7 +710,7 @@ export const TASK_KIND_TONES = ["green", "gold", "blue", "purple", "neutral"] as
 export const taskTypeCreateSchema = z.object({
   label: z.string().min(1).max(80),
   key: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).optional(),
-  behavior: z.enum(["entrega", "plano", "simples"]).default("entrega"),
+  behavior: z.literal("entrega").default("entrega"),
   icon: z.string().min(1).max(4),
   tone: z.enum(TASK_KIND_TONES),
   show_in_performance: z.boolean().optional().default(true),

@@ -2932,6 +2932,9 @@ textarea.answer, .answer-field textarea, textarea.feedback {
    A ordem das etapas na lista É a ordem da cascata, por isso a linha de etapa
    é arrastável e carrega a posição impressa à esquerda. */
 .voc-list { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.voc-group { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--a-border); border-radius: 14px; }
+.voc-group > .set-h { margin: 0 0 2px; }
+.voc-group > .set-actions { margin-top: 4px; }
 .voc-type { border: 1px solid var(--a-border); border-radius: 12px; padding: 14px 16px; background: var(--a-surface); }
 .voc-type.off { opacity: .6; }
 .voc-type-head { display: flex; align-items: flex-start; gap: 12px; }

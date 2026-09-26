@@ -1,14 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD } from "./adminAuth";
+import { openAdminSession } from "./adminSession";
 
 test("catálogo e editor da diária em desktop e tela estreita", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/login");
-  await page.getByPlaceholder("voce@empresa.com").fill(ADMIN_EMAIL);
-  await page.getByPlaceholder("Sua senha").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: /Entrar/ }).click();
-  await page.waitForURL(/\/admin/, { timeout: 30_000 });
+  await openAdminSession(page);
   await page.goto("/admin/northai/automacoes");
   await page.getByRole("button", { name: "Nova automação" }).click();
   await page.locator(".auto-type-select").last().selectOption("diaria_recorrente");
@@ -30,17 +26,13 @@ test("catálogo e editor da diária em desktop e tela estreita", async ({ page }
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
 
   await page.goto("/admin/configuracoes?tab=fluxos");
-  await expect(page.getByText("Formatos canônicos")).toBeVisible();
-  const reels = page.getByRole("button", { name: /Reels.*(?:criar|ver) cascata/ });
+  await expect(page.getByText("Formatos canônicos")).toHaveCount(0);
+  const deliveryGroup = page.locator(".voc-group", { has: page.getByRole("heading", { name: "Entrega", exact: true }) });
+  await expect(deliveryGroup).toBeVisible();
+  const reels = deliveryGroup.locator(".voc-type", { hasText: "Reels" });
   await expect(reels).toBeVisible();
-  if ((await reels.textContent())?.includes("criar")) {
-    await reels.click();
-    await expect(page.getByRole("heading", { name: "Novo fluxo em cascata" })).toBeVisible();
-    await expect(page.locator(".novofluxo-steps .voc-step")).toHaveCount(4);
-  } else {
-    await reels.click();
-    await expect(page.getByRole("button", { name: "Editar cascata" }).first()).toBeVisible();
-  }
+  await reels.locator(".voc-type-toggle").click();
+  await expect(reels.getByRole("button", { name: "Editar cascata" })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.mouse.move(1200, 40);
   await page.screenshot({ path: testInfo.outputPath("formats-desktop.png"), fullPage: true });

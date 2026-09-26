@@ -24,6 +24,7 @@ import { COLUMNS, PRIORITY_LABEL, STATUS_LABEL, commentsOf, taskTone, visibleCol
 import { DEADLINE_LABEL, deadlineStateOf, type DeadlineState } from "./deadlineState";
 import { formatRelativeAge } from "@/lib/comments";
 import { kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
+import { classifyTask } from "@/lib/taskClassification";
 import { useTaskRealtime } from "@/lib/useTaskRealtime";
 import { parseAssignees } from "@/lib/assignees";
 import { belongsToTaskScreen, childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
@@ -145,7 +146,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   const [calOpenDay, setCalOpenDay] = useState<string | null>(null);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const { map: attrMap, save: saveAttrMap, visible } = useAttrVisibility();
-  const tableColCount = 4 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
+  const tableColCount = 5 + ["status", "assignee", "progress", "priority", "client_visible"].filter((k) => visible(k)).length;
   const { sidebarEnabled, setSidebarEnabled } = useSidebarEnabledPref();
   const [planoVisibilityOn, setPlanoVisibilityOn] = useState(false);
   // Whether ANY client currently has Revisão/Aprovação admin-enabled — drives
@@ -668,7 +669,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
   function renderCard(t: BoardRow, onDropBefore: () => void) {
     const formato = payloadStr(t, "formato");
     const plataforma = payloadStr(t, "plataforma");
-    const showFormato = visible("formato") && Boolean(formato);
+    const showFormato = visible("formato") && Boolean(formato) && classifyTask(t.kind, t.subtype).baseType !== "entrega";
     const showPlataforma = visible("plataforma") && Boolean(plataforma);
     // A situação é a PRIMEIRA informação do card (ATA 14/09): status | data de
     // entrega | responsável | cliente. O bloco inteiro ganha a cor da situação —
@@ -1046,6 +1047,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                     <th>Situação</th>
                     <th>Tarefa</th>
                     <th>Tipo</th>
+                    <th>Subtipo</th>
                     {visible("status") ? <th>Etapa</th> : null}
                     {visible("assignee") ? <th>Resp.</th> : null}
                     <th>Prazo</th>
@@ -1066,7 +1068,8 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
                         {t.clientName ? <span className="kb-card-client"> {t.clientName}</span> : null}
                         {commentsOf(t).length > 0 ? <span className="kb-comments" title="Comentários no card"> 💬 {commentsOf(t).length}</span> : null}
                       </td>
-                      <td><TaskKindIcon kind={t.kind} subtype={t.subtype} /></td>
+                      <td><TaskKindIcon kind={t.kind} subtype={t.subtype} /> {classifyTask(t.kind, t.subtype).baseLabel}</td>
+                      <td>{classifyTask(t.kind, t.subtype).subtypeLabel ?? "—"}</td>
                       {visible("status") ? <td>{COLUMNS.find((c) => c.status === t.status)?.label}</td> : null}
                       {visible("assignee") ? <td>{t.assignee ? <span className="kb-assignee" title={t.assignee}>● {t.assignee}</span> : "—"}</td> : null}
                       <td>{fmtDue(t.due_date)}{dueRelative ? <small className="kb-table-rel"> · {dueRelative}</small> : null}</td>

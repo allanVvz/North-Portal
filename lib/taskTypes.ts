@@ -538,8 +538,8 @@ export async function createTaskSubtype(
 ): Promise<TaskTypeEditorSubtype> {
   const { type, subtype } = await locate(db, parentId);
   if (subtype) throw new HttpError(400, "Uma etapa nao pode ter etapas dentro dela.");
-  if (type.behavior === "entrega") {
-    throw new HttpError(400, "Etapas sao subtipos de Tarefa; uma Entrega apenas escolhe quais delas compoem seu fluxo.");
+  if (type.key !== "operacional") {
+    throw new HttpError(400, "Novos subtipos simples pertencem à Tarefa. Subtipos de Entrega são criados com um fluxo versionado.");
   }
 
   const key = slugifyTypeKey(input.key ?? input.label);
@@ -586,16 +586,11 @@ async function insertWorkflowStep(
   if (error) throw error;
 }
 
-/** Cria um TIPO de topo novo — a peça que faltava para "criar um fluxo em
- * cascata pela tela" funcionar de ponta a ponta. Ícone/tom vêm no input (uma
- * paleta fixa escolhida na tela, lib/taskCatalog.ts lê isso via o cache ao
- * vivo em vez de precisar de uma entrada em código para cada tipo novo).
- *
- * Uma Entrega nova cria apenas sua raiz e os elos para subtipos de Tarefa. Se
- * uma etapa ainda não existe no vocabulário comum, ela é criada ali — nunca
- * como filha da Entrega. A associação é a ordem específica do fluxo.
+/** Cria um subtipo de Entrega com sua versão inicial de workflow. As etapas
+ * pertencem ao vocabulário de Tarefa e se ligam à variante pela versão.
  */
 export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput): Promise<TaskTypeEditorNode> {
+  if (input.behavior !== "entrega") throw new HttpError(400, "Novos subtipos com fluxo pertencem à Entrega.");
   if (!input.steps.length) throw new HttpError(400, "Um fluxo em cascata precisa de pelo menos uma etapa.");
 
   const key = input.key ?? slugifyTypeKey(input.label);
@@ -607,7 +602,8 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
   if (catalogError) throw catalogError;
   const catalogRows = (catalogData ?? []) as Row[];
   const deliveryRoot = catalogRows.find((row) => !row.parent_id && row.key === "entrega");
-  if (existingTypes.some((t) => t.key === key)) {
+  if (!deliveryRoot) throw new HttpError(503, "A raiz Entrega não está configurada; nenhuma linha foi criada.");
+  if (catalogRows.some((row) => row.key === key)) {
     throw new HttpError(409, `Já existe um tipo com a chave "${key}".`);
   }
 
@@ -624,13 +620,11 @@ export async function createTaskType(db: TypeWriter, input: TaskTypeCreateInput)
     stepKeys.push(stepKey);
   }
 
-  const deliverySiblings = deliveryRoot
-    ? catalogRows.filter((row) => row.parent_id === deliveryRoot.id)
-    : existingTypes;
+  const deliverySiblings = catalogRows.filter((row) => row.parent_id === deliveryRoot.id);
   const { data, error } = await db
     .from("task_types")
     .insert({
-      parent_id: deliveryRoot?.id ?? null,
+      parent_id: deliveryRoot.id,
       key,
       label: input.label.trim(),
       order_index: nextOrderIndex(deliverySiblings),
@@ -737,6 +731,11 @@ export type TypePatch = Partial<{
 export async function updateTaskType(db: TypeWriter, id: string, patch: TypePatch): Promise<void> {
   const { usage, type, subtype } = await locate(db, id);
   const target = subtype ?? type;
+  if (!subtype && ["operacional", "plano_acao", "checkpoint_comercial"].includes(type.key)) {
+    if (patch.label !== undefined || patch.active !== undefined || patch.creatable !== undefined) {
+      throw new HttpError(400, "As raízes Tarefa, Plano e Checkpoint são fixas.");
+    }
+  }
 
   if (patch.active === false && target.active) {
     const key = subtype ? usageKey(type.key, subtype.key) : usageKey(type.key);

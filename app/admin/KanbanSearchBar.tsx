@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PRIORITY_LABEL } from "./kanbanShared";
 import { taskMatchesQuery } from "@/lib/taskSearch";
-import { TASK_KIND_KEYS, kindLabel } from "@/lib/taskCatalog";
+import { TASK_BASE_TYPES, classifyTask } from "@/lib/taskClassification";
 import type { TaskRecord } from "@/lib/validation";
 import TaskKindIcon from "./TaskKindIcon";
 import { DEADLINE_LABEL, DEADLINE_ORDER, deadlineStateOf, type DeadlineState } from "./deadlineState";
@@ -11,7 +11,7 @@ import { agencyToday } from "./recurringState";
 
 type Row = TaskRecord & { clientName?: string };
 
-export type FilterAttr = "situacao" | "cliente" | "tipo" | "prioridade" | "responsavel";
+export type FilterAttr = "situacao" | "cliente" | "tipo" | "subtipo" | "prioridade" | "responsavel";
 export type ActiveFilter = { attr: FilterAttr; value: string; label: string };
 
 const ATTR_DEFS: { key: FilterAttr; label: string; icon: string }[] = [
@@ -20,6 +20,7 @@ const ATTR_DEFS: { key: FilterAttr; label: string; icon: string }[] = [
   { key: "situacao", label: "Situação", icon: "◉" },
   { key: "cliente", label: "Cliente", icon: "◔" },
   { key: "tipo", label: "Tipo", icon: "◧" },
+  { key: "subtipo", label: "Subtipo", icon: "▢" },
   { key: "prioridade", label: "Prioridade", icon: "⚑" },
   { key: "responsavel", label: "Responsável", icon: "◑" },
 ];
@@ -29,7 +30,8 @@ export function taskMatchesFilters(t: Row, filters: ActiveFilter[], today: strin
   return filters.every((f) => {
     if (f.attr === "situacao") return deadlineStateOf(t, today) === f.value;
     if (f.attr === "cliente") return (t.clientName ?? "Outros") === f.value;
-    if (f.attr === "tipo") return t.kind === f.value;
+    if (f.attr === "tipo") return classifyTask(t.kind, t.subtype).baseType === f.value || t.kind === f.value;
+    if (f.attr === "subtipo") return classifyTask(t.kind, t.subtype).subtypeKey === f.value;
     if (f.attr === "prioridade") return t.priority === f.value;
     return (t.assignee?.trim() || "Sem responsável") === f.value;
   });
@@ -91,17 +93,23 @@ export default function KanbanSearchBar({
     if (pendingAttr === "cliente") {
       return Array.from(new Set(tasks.map((t) => t.clientName ?? "Outros"))).sort((a, b) => (a === "Outros" ? 1 : b === "Outros" ? -1 : a.localeCompare(b)));
     }
-    if (pendingAttr === "tipo") return TASK_KIND_KEYS.map((k) => kindLabel(k));
+    if (pendingAttr === "tipo") return [...TASK_BASE_TYPES.map((type) => type.label), ...(tasks.some((task) => classifyTask(task.kind, task.subtype).baseType === "checkpoint") ? ["Checkpoint"] : [])];
+    if (pendingAttr === "subtipo") {
+      const chosen = filters.find((filter) => filter.attr === "tipo")?.value;
+      return [...new Set(tasks.filter((task) => !chosen || classifyTask(task.kind, task.subtype).baseType === chosen)
+        .map((task) => classifyTask(task.kind, task.subtype).subtypeLabel).filter((label): label is string => Boolean(label)))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    }
     if (pendingAttr === "prioridade") return Object.values(PRIORITY_LABEL);
     return Array.from(new Set(tasks.map((t) => t.assignee?.trim() || "Sem responsável"))).sort((a, b) => (a === "Sem responsável" ? 1 : b === "Sem responsável" ? -1 : a.localeCompare(b)));
-  }, [pendingAttr, tasks]);
+  }, [pendingAttr, tasks, filters]);
 
   // Tipo/Prioridade values are stored as raw keys (kind/priority), everything
   // else is already the display value — this maps a picked label back to the
   // value actually compared against tasks.
   function valueKeyFor(attr: FilterAttr, label: string): string {
     if (attr === "situacao") return (Object.entries(DEADLINE_LABEL) as [DeadlineState, string][]).find(([, l]) => l === label)?.[0] ?? label;
-    if (attr === "tipo") return TASK_KIND_KEYS.find((k) => kindLabel(k) === label) ?? label;
+    if (attr === "tipo") return TASK_BASE_TYPES.find((type) => type.label === label)?.key ?? "checkpoint";
+    if (attr === "subtipo") return tasks.map((task) => classifyTask(task.kind, task.subtype)).find((classification) => classification.subtypeLabel === label && (!filters.some((filter) => filter.attr === "tipo") || filters.some((filter) => filter.attr === "tipo" && filter.value === classification.baseType)))?.subtypeKey ?? label;
     if (attr === "prioridade") {
       return (Object.entries(PRIORITY_LABEL).find(([, l]) => l === label)?.[0] ?? label);
     }
@@ -110,12 +118,12 @@ export default function KanbanSearchBar({
 
   function addFilter(attr: FilterAttr, label: string) {
     const value = valueKeyFor(attr, label);
-    onFiltersChange([...filters.filter((f) => f.attr !== attr), { attr, value, label }]);
+    onFiltersChange([...filters.filter((f) => f.attr !== attr && !(attr === "tipo" && f.attr === "subtipo")), { attr, value, label }]);
     setPendingAttr(null);
     setOpen(false);
   }
   function removeFilter(attr: FilterAttr) {
-    onFiltersChange(filters.filter((f) => f.attr !== attr));
+    onFiltersChange(filters.filter((f) => f.attr !== attr && !(attr === "tipo" && f.attr === "subtipo")));
   }
 
   const results = useMemo(() => {
@@ -124,7 +132,7 @@ export default function KanbanSearchBar({
     return tasks.filter((t) => taskMatchesQuery(t, needle, { clientName: t.clientName ?? "" })).slice(0, 8);
   }, [tasks, q]);
 
-  const availableAttrs = ATTR_DEFS.filter((a) => !filters.some((f) => f.attr === a.key));
+  const availableAttrs = ATTR_DEFS.filter((a) => !filters.some((f) => f.attr === a.key) && (a.key !== "subtipo" || filters.some((f) => f.attr === "tipo")));
 
   return (
     <div className="kb-searchbar" ref={ref}>
@@ -144,7 +152,7 @@ export default function KanbanSearchBar({
           // Curto de propósito: o atalho "Atrasadas N" divide a caixa e cortava
           // o texto longo no meio ("…ou buscar por t").
           placeholder={filters.length ? "Buscar por título…" : "Filtrar ou buscar tarefas…"}
-          title="Filtre por situação, cliente, tipo, prioridade ou responsável, ou busque pelo título"
+          title="Filtre por situação, cliente, tipo, subtipo, prioridade ou responsável, ou busque pelo título"
         />
         {onToggleOverdue && overdueCount !== undefined && !overdueOn ? (
           <button

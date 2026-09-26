@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import TaskKindIcon from "./TaskKindIcon";
 import { contentPlanSteps, type ContentVolume } from "./contentPlan";
 import { normalizeSearchText } from "@/lib/taskSearch";
+import { taskClassificationLabel } from "@/lib/taskClassification";
 
 // "Adicionar ao plano" — UMA caixa para as três formas de encher um plano, no
 // lugar do bloco fixo "Plano de conteúdo" (três campos numéricos + texto longo,
@@ -19,9 +20,9 @@ import { normalizeSearchText } from "@/lib/taskSearch";
 // ajustam depois na própria linha da atividade (StepRow). Menos formulário,
 // mais ação.
 
-export type PlanAddItem = { title: string; kind: string; description?: string; offsetDays?: number };
+export type PlanAddItem = { title: string; kind: string; subtype?: string | null; description?: string; offsetDays?: number };
 
-type TypeOption = { key: string; label: string; behavior: string };
+type TypeOption = { key: string; label: string; kind: string; subtype: string | null; baseType: "tarefa" | "entrega"; behavior: string };
 
 const CONTENT_ROWS: { key: keyof ContentVolume; label: string; hint: string }[] = [
   { key: "reels", label: "Reels", hint: "vídeo" },
@@ -108,13 +109,13 @@ export default function PlanAddCombobox({
 
   const base = query.trim();
   const needle = normalizeSearchText(base);
-  const matches = needle ? candidates.filter((c) => normalizeSearchText(c.title).includes(needle)).slice(0, 5) : [];
+  const matches = needle ? candidates.filter((c) => normalizeSearchText(`${c.title} ${taskClassificationLabel(c.kind, c.subtype)}`).includes(needle)).slice(0, 5) : [];
 
   const contentSteps = useMemo(() => contentPlanSteps(volume), [volume]);
   const typeItems: PlanAddItem[] = types.flatMap((type) => {
     const n = typeCounts[type.key] ?? 0;
     const title = base || type.label;
-    return Array.from({ length: n }, (_, index) => ({ title: n > 1 ? `${title} ${index + 1}` : title, kind: type.key }));
+    return Array.from({ length: n }, (_, index) => ({ title: n > 1 ? `${title} ${index + 1}` : title, kind: type.kind, subtype: type.subtype }));
   });
   const items: PlanAddItem[] = [
     ...contentSteps.map((step) => ({ title: step.title, description: step.description, offsetDays: step.offsetDays, kind: "operacional" })),
@@ -129,7 +130,7 @@ export default function PlanAddCombobox({
     })),
     ...types.filter((type) => (typeCounts[type.key] ?? 0) > 0).map((type) => ({
       id: `t-${type.key}`,
-      label: `${typeCounts[type.key]} × ${type.label}`,
+      label: `${typeCounts[type.key]} × ${type.baseType === "tarefa" ? "Tarefa" : "Entrega"} · ${type.label}`,
       clear: () => setTypeCounts((current) => ({ ...current, [type.key]: 0 })),
     })),
   ];
@@ -148,7 +149,8 @@ export default function PlanAddCombobox({
       onCreate(items);
       reset();
     } else if (base) {
-      onCreate([{ title: base, kind: singleType }]);
+      const selected = types.find((type) => type.key === singleType);
+      onCreate([{ title: base, kind: selected?.kind ?? "operacional", subtype: selected?.subtype ?? null }]);
       reset();
     }
   }
@@ -205,6 +207,7 @@ export default function PlanAddCombobox({
                 >
                   <TaskKindIcon kind={candidate.kind} subtype={candidate.subtype} size="sm" />
                   <span>{candidate.title}</span>
+                  <span className="pac-row-hint">{taskClassificationLabel(candidate.kind, candidate.subtype)}</span>
                   <span className="pac-row-hint">vincular</span>
                 </button>
               ))}
@@ -212,11 +215,12 @@ export default function PlanAddCombobox({
           ) : null}
 
           <div className="pac-section">
-            <p className="pac-section-title">Criar novo card<span>Escreva o título acima e escolha o tipo</span></p>
+            <p className="pac-section-title">Criar novo card<span>Escreva o título acima e escolha Tipo e Subtipo</span></p>
             <div className="pac-type-choices" role="group" aria-label="Tipo do novo card">
-              {types.map((type) => <button type="button" key={type.key} className={singleType === type.key ? "on" : ""} aria-pressed={singleType === type.key} onClick={() => setSingleType(type.key)}><TaskKindIcon kind={type.key} size="sm" />{type.label}</button>)}
+              {(["tarefa", "entrega"] as const).map((base) => <button type="button" key={base} className={types.find((type) => type.key === singleType)?.baseType === base ? "on" : ""} aria-pressed={types.find((type) => type.key === singleType)?.baseType === base} onClick={() => setSingleType(types.find((type) => type.baseType === base)?.key ?? defaultType)}>{base === "tarefa" ? "Tarefa" : "Entrega"}</button>)}
             </div>
-            {singleType === "criativo" ? <p className="pac-flow-note">O Criativo nasce com Roteiro. Abra o card criado para trocar por um Roteiro existente e escolher a Captação depois de concluir essa etapa.</p> : null}
+            <label className="admin-field"><span>Subtipo</span><select value={singleType} onChange={(event) => setSingleType(event.target.value)}>{types.filter((type) => type.baseType === (types.find((option) => option.key === singleType)?.baseType ?? "tarefa")).map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}</select></label>
+            {types.find((type) => type.key === singleType)?.behavior === "entrega" ? <p className="pac-flow-note">Esta Entrega nasce com a primeira etapa da sua versão publicada.</p> : null}
           </div>
 
           <details className="pac-batch"><summary>Planejar vários cards ou conteúdos</summary><div className="pac-section">
@@ -238,8 +242,8 @@ export default function PlanAddCombobox({
               {types.map((type) => (
                 <QtyRow
                   key={type.key}
-                  icon={<TaskKindIcon kind={type.key} size="sm" />}
-                  label={type.label}
+                  icon={<TaskKindIcon kind={type.kind} subtype={type.subtype} size="sm" />}
+                  label={`${type.baseType === "tarefa" ? "Tarefa" : "Entrega"} · ${type.label}`}
                   hint={type.behavior === "entrega" ? "fluxo em cascata" : undefined}
                   value={typeCounts[type.key] ?? 0}
                   onChange={(next) => setTypeCounts((current) => ({ ...current, [type.key]: next }))}

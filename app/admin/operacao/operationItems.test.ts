@@ -33,9 +33,9 @@ describe("operation collection", () => {
     const automation = routine("auto", [], { kind: "automacao", subtype: "relatorio_trafego" });
     const ordinary = task("ordinary", { kind: "automacao", subtype: "agendamentos" });
     const items = normalizeOperationItems([ordinary], [automation]);
-    const filters = [{ attr: "tipo", value: "rotina", label: "Rotina" }, { attr: "tipo", value: "automacao", label: "Automação" }] as const;
+    const filters = [{ attr: "tipo", value: "rotina", label: "Rotina" }, { attr: "tipo", value: "entrega", label: "Entrega" }, { attr: "subtipo", value: "automacao", label: "Automação" }] as const;
     expect(items.filter((item) => operationMatchesFilters(item, filters, "2026-09-18")).map((item) => item.id)).toEqual(["auto"]);
-    expect(compatibleSubtypes(items, ["rotina", "automacao"])).toEqual(["relatorio_trafego"]);
+    expect(compatibleSubtypes(items, ["rotina", "entrega"])).toEqual(["automacao"]);
   });
 
   it("default filter hides finished cards and closed routines, keeps everything alive", () => {
