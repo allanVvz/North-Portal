@@ -16,7 +16,7 @@ export async function GET() {
       db.from("tasks").select("id,title,client_id,recurrence_cadence,status")
         .eq("kind", "plano_acao").not("recurrence_cadence", "is", null)
         .order("title").limit(500),
-      db.from("clients").select("id,name"),
+      db.from("clients").select("id,name,slug"),
       Promise.all(CANONICAL_DELIVERY_FORMATS.map(async (format) => ({
         ...format, workflow: await publishedWorkflowForKind(db, format.key),
       }))),
