@@ -126,7 +126,7 @@ function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDra
             {routine ? <span className="op-routine-mark" title={`Rotina ${CADENCE_LABEL[routine.cadence]?.toLowerCase() ?? ""}`}>↻ {CADENCE_LABEL[routine.cadence] ?? "Rotina"}</span> : null}
           </span>
         </span>
-        <span className="kb-card-titleline"><TaskKindIcon kind={task.kind} subtype={task.subtype} /><span className="kb-card-title op-card-title">{task.title}</span></span>
+        <span className="kb-card-titleline"><TaskKindIcon kind={task.kind} subtype={task.subtype} format={task.payload?.formato} /><span className="kb-card-title op-card-title">{task.title}</span></span>
         {flowBadge || showKind || showSubtype || formato || plataforma ? (
           <span className="kb-card-meta">
             {flowBadge ? (

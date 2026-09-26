@@ -51,7 +51,7 @@ function DeliveryBranch({
           <span className={`plan-acc-caret ${open ? "on" : ""}`} aria-hidden>▸</span>
           <span className="plan-strat-headtext">
             <BranchTags label="Entrega" state={state} />
-            <span className="plan-card-titleline"><TaskKindIcon kind={delivery.kind} subtype={delivery.subtype} /><strong>{delivery.title}</strong></span>
+            <span className="plan-card-titleline"><TaskKindIcon kind={delivery.kind} subtype={delivery.subtype} format={delivery.payload?.formato} /><strong>{delivery.title}</strong></span>
             <span className="plan-strat-count">{delivery.activities.length} etapa{delivery.activities.length === 1 ? "" : "s"}</span>
           </span>
         </button>

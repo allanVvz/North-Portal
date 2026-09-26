@@ -140,6 +140,16 @@ export const SUBTYPE_ICON: Partial<Record<string, string>> = {
 export const subtypeIcon = (subtype: string | null | undefined): string | null =>
   (subtype && SUBTYPE_ICON[subtype]) || null;
 
+export function publicationFormatSubtype(format: unknown): string | null {
+  if (typeof format !== "string") return null;
+  const normalized = format.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return normalized === "reel" || normalized === "reels" ? "reels"
+    : normalized === "stories" || normalized === "story" ? "story"
+    : normalized === "carrossel" ? "carrossel"
+    : normalized === "anuncio" ? "anuncio"
+    : normalized === "banner" ? "banner" : null;
+}
+
 export const TASK_KIND_KEYS = Object.keys(TASK_KINDS) as TaskKind[];
 
 /** The database is already on the canonical FK catalog. Unknown values pass

@@ -703,7 +703,7 @@ export default function KanbanBoard({ clients, assignees }: { clients: ClientLit
             {t.recurrence_cadence || t.payload?.recurrence_parent_id ? <span className="kb-recurrence-mark" title={t.recurrence_cadence ? "Tarefa recorrente" : "Execução de uma recorrência"}>↻</span> : null}
           </span>
         </div>
-        <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} subtype={t.subtype} /><p className="kb-card-title">{t.title}</p></div>
+        <div className="kb-card-titleline"><TaskKindIcon kind={t.kind} subtype={t.subtype} format={t.payload?.formato} /><p className="kb-card-title">{t.title}</p></div>
         {flowBadge ? (
           <div className="kb-card-meta">
             <span className="kb-card-pill kb-flow-step" title={`Etapa ${flowBadge.step} de ${flowBadge.total} · ${flowBadge.delivery}`}>
