@@ -31,13 +31,17 @@ export type HideTarget =
   | "percentual_comparativo"
   | "alcance"
   | "impressoes"
-  | "cliques";
+  | "cliques"
+  /** Número de compras e custo por compra (pixel) nas boxes de mídia. */
+  | "compras";
 
 export type ReportInstruction =
   /** "Ajuste o comentário: X" — X passa a ser a leitura do período. */
   | { kind: "narrativa"; texto: string }
   /** "Remova o comentário sobre seguidores", "retire o % comparativo". */
-  | { kind: "esconder"; alvo: HideTarget };
+  | { kind: "esconder"; alvo: HideTarget }
+  /** "Corrija o alcance: total 6311" — o número vence o da Meta no PDF. */
+  | { kind: "alcance"; valor: number };
 
 export type ExtractedInstructions = {
   instrucoes: ReportInstruction[];
@@ -57,13 +61,27 @@ const NARRATIVA = /\b(?:ajust\w*|atualiz\w*|troc\w*|substitu\w*|corrij\w*|corrig
  *  O escopo de cada pedido para no próximo verbo de remoção — sem isso, "retire
  *  o alcance e remova as impressões" virava um pedido só, e o segundo alvo
  *  desaparecia dentro do primeiro. */
-const REMOCAO = /\b(?:remov\w*|retir\w*|tir\w*|exclu\w*|ocult\w*|esconde\w*|apagu\w*|sem)\b((?:(?!\b(?:remov\w*|retir\w*|tir\w*|exclu\w*|ocult\w*|esconde\w*|apagu\w*)\b)[^.;\n]){0,120})/gi;
+const REMOCAO = /\b(?:remov\w*|retir\w*|tir\w*|exclu\w*|ocult\w*|esconde\w*|apagu\w*|sem|n[aã]o\s+inclu\w*|nem)\b((?:(?!\b(?:remov\w*|retir\w*|tir\w*|exclu\w*|ocult\w*|esconde\w*|apagu\w*|n[aã]o\s+inclu\w*|nem)\b)[^.;\n]){0,120})/gi;
+
+/** "Leitura da semana: <texto>" — a forma como a equipe manda a leitura pronta
+ *  (Baita e Cris, 28/09), sem o verbo "ajuste o comentário". */
+const LEITURA = /\bleitura d[aoe] (?:semana|per[ií]odo)\s*:\s*([\s\S]+)/i;
+
+/** "Corrija o alcance: total 6311", "alcance corrigir para 12.452", "alcance
+ *  correto 9307". Mesma leitura de número de `revisionAdjustments`. */
+const ALCANCE = /\balcance\b[^\d.;\n]{0,80}(\d[\d.,]*)/i;
+
+/** Frase com número de conversão (seguidores, vendas…) é dado do Feedback, não
+ *  pedido ao relatório — "incluir crescimento de 114 seguidores" não é um
+ *  pedido que o relatório deixou de atender. */
+const DADO_CONVERSAO = /\b(?:seguidor\w*|vendas?|agendamentos?|receita|faturamento)\b[^.;\n]*\d|\d[^.;\n]*\b(?:seguidor\w*|vendas?|agendamentos?|receita|faturamento)\b/i;
 
 const ALVOS: { alvo: HideTarget; teste: RegExp }[] = [
   { alvo: "percentual_comparativo", teste: /%|percentual|porcentagem|comparativ|compara(?:cao|tivo)|periodo anterior|semana anterior/ },
   { alvo: "alcance", teste: /alcance/ },
   { alvo: "impressoes", teste: /impress/ },
   { alvo: "cliques", teste: /clique/ },
+  { alvo: "compras", teste: /compra/ },
 ];
 
 /** "Remova O COMENTÁRIO sobre seguidores" fala do TEXTO no fim do relatório,
@@ -97,14 +115,27 @@ export function extractReportInstructions(comment: string): ExtractedInstruction
   if (!texto) return { instrucoes, naoEntendido };
 
   let restante = texto;
-  const narrativa = NARRATIVA.exec(texto);
+  const alcance = ALCANCE.exec(texto);
+  if (alcance) {
+    const valor = Number(alcance[1].replace(/\D/g, ""));
+    if (Number.isFinite(valor) && valor > 0) {
+      instrucoes.push({ kind: "alcance", valor });
+      // A frase da correção sai do texto: "corrija o alcance…" não é pedido de
+      // remoção nem pedido não entendido.
+      const fim = texto.slice(alcance.index).search(/[.;\n]\s/);
+      restante = texto.slice(0, alcance.index) + (fim < 0 ? "" : texto.slice(alcance.index + fim + 1));
+    }
+  }
+  const narrativa = NARRATIVA.exec(restante) ?? LEITURA.exec(restante);
   if (narrativa) {
     // O texto da narrativa vai até o primeiro pedido de remoção que venha depois.
     const bruto = narrativa[1];
-    const corte = /\b(?:remov\w*|retir\w*|tir\w*|exclu\w*|ocult\w*|esconde\w*)\b/i.exec(bruto);
+    const corte = /\b(?:remov\w*|retir\w*|tir\w*|exclu\w*|ocult\w*|esconde\w*|n[aã]o\s+inclu\w*)\b/i.exec(bruto);
     const conteudo = limparTexto(corte ? bruto.slice(0, corte.index) : bruto);
     if (conteudo) instrucoes.push({ kind: "narrativa", texto: conteudo });
-    restante = corte ? bruto.slice(corte.index) : "";
+    // O que vem ANTES da leitura também pode ter pedidos ("Não incluir número de
+    // compras. Leitura da semana: …", Cris 28/09) — antes era descartado.
+    restante = restante.slice(0, narrativa.index) + (corte ? bruto.slice(corte.index) : "");
   }
 
   const vistos = new Set<HideTarget>();
@@ -130,11 +161,11 @@ export function extractReportInstructions(comment: string): ExtractedInstruction
       continue;
     }
     const frase = limparTexto(`${trecho[0]}`);
-    if (frase.length > 3) naoEntendido.push(frase);
+    if (frase.length > 3 && !DADO_CONVERSAO.test(frase)) naoEntendido.push(frase);
   }
 
   // Nada casou, mas o texto tem cara de pedido: melhor dizer que não entendeu.
-  if (!instrucoes.length && !naoEntendido.length && PARECE_PEDIDO.test(texto)) {
+  if (!instrucoes.length && !naoEntendido.length && PARECE_PEDIDO.test(texto) && !DADO_CONVERSAO.test(texto)) {
     naoEntendido.push(limparTexto(texto).slice(0, 160));
   }
 
@@ -146,6 +177,7 @@ const ROTULO: Record<HideTarget, string> = {
   alcance: "o alcance",
   impressoes: "as impressões",
   cliques: "os cliques",
+  compras: "as compras e o custo por compra",
 };
 
 /**
@@ -160,7 +192,9 @@ export function describeInstructions(extracted: ExtractedInstructions): string[]
   for (const instrucao of extracted.instrucoes) {
     linhas.push(instrucao.kind === "narrativa"
       ? "Troquei a leitura do período pelo texto que você escreveu."
-      : `Tirei ${ROTULO[instrucao.alvo]}.`);
+      : instrucao.kind === "alcance"
+        ? `Corrigi o alcance para ${instrucao.valor.toLocaleString("pt-BR")}.`
+        : `Tirei ${ROTULO[instrucao.alvo]}.`);
   }
   for (const pedido of extracted.naoEntendido) {
     linhas.push(`Não soube aplicar: "${pedido}".`);

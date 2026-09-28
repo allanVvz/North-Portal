@@ -483,7 +483,8 @@ function SalesReportDocument(input: SalesReportInput) {
             kicker="Mídia por objetivo"
             // CPM é exclusivo do relatório de anúncios (decisão de 22/09) — a
             // conversão nunca mostra, mesmo quando o template do cliente o declara.
-            hideMetrics={["cpm"]}
+            // "Não incluir número de compras, nem custo por compra" (Cris, 28/09).
+            hideMetrics={esconde("compras") ? ["cpm", "compras"] : ["cpm"]}
             // % opcional: só aparece quando é ganho > 1%. Queda ou variação
             // pequena não vira placeholder — a linha inteira some do card. O
             // relatório de anúncios não usa esta política; continua mostrando

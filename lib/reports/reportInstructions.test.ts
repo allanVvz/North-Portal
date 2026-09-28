@@ -91,3 +91,31 @@ describe("extractReportInstructions — outras formas de pedir", () => {
     expect(r.instrucoes.filter((i) => i.kind === "esconder")).toEqual([]);
   });
 });
+
+// Comentários reais de 28/09 — nenhum deles era entendido.
+describe("pedidos no jeito que a equipe escreve", () => {
+  it("Cris: alcance corrigido, compras escondidas e a leitura nova", () => {
+    const r = extractReportInstructions("alcance corrigir para 12.452. Substituir as frases de leitura da semana por essas: Não incluir numero de compras, nem custo por compra. Leitura da semana: As campanhas de trafego para site estão sendo direcionadas para as capitais do RS, SC e PR.");
+    expect(r.instrucoes).toEqual([
+      { kind: "alcance", valor: 12452 },
+      { kind: "narrativa", texto: "As campanhas de trafego para site estão sendo direcionadas para as capitais do RS, SC e PR." },
+      { kind: "esconder", alvo: "compras" },
+    ]);
+    expect(r.naoEntendido).toEqual([]);
+  });
+
+  it("Cris: 'não incluir percentual comparativo' esconde o %", () => {
+    const r = extractReportInstructions("No próximo relatorio não incluir nenhum dado percentual comparativo que informe redução nos resultados e aumento nos custos.");
+    expect(r.instrucoes).toEqual([{ kind: "esconder", alvo: "percentual_comparativo" }]);
+  });
+
+  it("Karpinski: correção de alcance é entendida, não volta como 'não soube aplicar'", () => {
+    const r = extractReportInstructions("Corrija o numero de alcance: total 6311. Sendo 8425 da campanha de trafego pro perfil e 3785 da campanha de mensagem pro whastapp");
+    expect(r).toEqual({ instrucoes: [{ kind: "alcance", valor: 6311 }], naoEntendido: [] });
+  });
+
+  it("Baita: número de seguidores não é pedido não entendido; a leitura entra", () => {
+    const r = extractReportInstructions("Incluir crescimento de 114 novo seguidores nos dados do funil e campanhas\n\n\nLeitura da semana: Semana com foco em público novo em NH e POA.");
+    expect(r).toEqual({ instrucoes: [{ kind: "narrativa", texto: "Semana com foco em público novo em NH e POA." }], naoEntendido: [] });
+  });
+});

@@ -121,6 +121,16 @@ function readReportInstructions(occ: TaskRecord): ExtractedInstructions {
   };
 }
 
+/** Junta pedidos novos aos já guardados na ocorrência: o mais recente vence
+ *  por item (uma narrativa, um alcance, cada alvo escondido). Um comentário na
+ *  Conversão não pode apagar o "não incluir percentual" que veio do Feedback. */
+function mergeReportInstructions(occ: TaskRecord, novos: ExtractedInstructions): ExtractedInstructions {
+  const chave = (i: ExtractedInstructions["instrucoes"][number]) => (i.kind === "esconder" ? `esconder:${i.alvo}` : i.kind);
+  const novasChaves = new Set(novos.instrucoes.map(chave));
+  const antigos = readReportInstructions(occ).instrucoes.filter((i) => !novasChaves.has(chave(i)));
+  return { instrucoes: [...antigos, ...novos.instrucoes], naoEntendido: novos.naoEntendido };
+}
+
 export type VisualCommentDecision =
   | { kind: "none" }
   | { kind: "clear"; instruction: string }
@@ -480,7 +490,8 @@ async function generateSalesReport(
   // Snapshot vazio (cliente sem conta de anúncios) = PDF só com o que o gestor
   // relatou, sem investimento/ROAS. Não é erro.
   const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews, trafficFinalView: snapshotFinalView } = traffic.snapshot ?? {};
-  const reachCorrection = reachCorrectionOf(conversionCard);
+  const pedidoAlcance = readReportInstructions(occ).instrucoes.find((i) => i.kind === "alcance");
+  const reachCorrection = reachCorrectionOf(conversionCard) ?? (pedidoAlcance?.kind === "alcance" ? pedidoAlcance.valor : null);
   const trafficFinalView = reachCorrection === null
     ? snapshotFinalView
     : { ...(snapshotFinalView ?? { hideClicks: false, hideImpressions: false }), reach: reachCorrection };
@@ -1078,7 +1089,8 @@ export async function handleConversionRevisionComment(admin: AdminClient, taskId
   const occurrenceId = (data?.[0] as { parent_id?: string } | undefined)?.parent_id;
   if (!occurrenceId) return;
   if (pedidos && (pedidos.instrucoes.length || pedidos.naoEntendido.length)) {
-    await updateTaskPayload(admin, occurrenceId, { patch: { report_instructions: pedidos } });
+    const occurrence = await getAdminTask(admin, occurrenceId);
+    await updateTaskPayload(admin, occurrenceId, { patch: { report_instructions: occurrence ? mergeReportInstructions(occurrence, pedidos) : pedidos } });
   }
   await processConversionFeedback(admin, occurrenceId, visualRequest);
 }
@@ -1147,6 +1159,13 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
       });
     }
     return;
+  }
+  // O Feedback também carrega pedidos para o relatório de conversão ("Leitura
+  // da semana: …", "não incluir número de compras" — Cris e Baita, 28/09). Eles
+  // eram lidos só no card de conversão, que ainda nem existe neste momento.
+  const pedidosFeedback = extractReportInstructions(comment.text);
+  if (pedidosFeedback.instrucoes.length) {
+    await updateTaskPayload(admin, occurrenceId, { patch: { report_instructions: mergeReportInstructions(occurrence, { instrucoes: pedidosFeedback.instrucoes, naoEntendido: [] }) } });
   }
   const previousFollowerGain = parsed.seguidoresGanhoAnterior ?? null;
   if (parsed.seguidoresGanho != null && previousFollowerGain != null) {
