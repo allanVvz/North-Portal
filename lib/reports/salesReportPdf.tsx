@@ -200,7 +200,10 @@ function SalesReportDocument(input: SalesReportInput) {
   ctx.hasProfileObjective = campaignPosts.some((post) => postBlock(post) === "trafego_perfil");
   const objectives = objectiveRows(campaignPosts, prevCampaignPosts, postBlock, outcome);
   const { rows: creatives } = creativeRows(adPosts, outcome, postBlock);
-  const prevCreatives = prevAdPosts?.length ? creativeRows(prevAdPosts, outcome, postBlock).rows : [];
+  // "Não incluir dado comparativo" vale também para o destaque do criativo:
+  // "−11 conversas vs. semana anterior" / "Explica a mudança" é o mesmo
+  // comparativo, só em outro lugar (Cris, 28/09).
+  const prevCreatives = prevAdPosts?.length && !esconde("percentual_comparativo") ? creativeRows(prevAdPosts, outcome, postBlock).rows : [];
   const badges = creativeBadges(creatives, outcome, prevCreatives);
   const rankedHighlights = creativeHighlights(creatives, badges, outcome, 4);
   const highlightedIds = new Set(rankedHighlights.map((item) => item.row.adId));

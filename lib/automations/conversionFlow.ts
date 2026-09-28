@@ -99,7 +99,9 @@ const AUTOMATION_AUTHORS = { has: isAutomationAuthor };
 // v22 (28/09): a "Leitura da semana" mostra a leitura que a equipe mandou
 // ("Leitura da semana: …") e nunca mais pedidos, reclamação de layout ou número
 // solto; alcance corrigido também por objetivo; compras escondíveis.
-const CONVERSION_RENDERER_REVISION = "segment-summary-v22";
+// v23 (28/09): "não incluir comparativo" também tira o comparativo do destaque
+// do criativo ("−11 conversas vs. semana anterior").
+const CONVERSION_RENDERER_REVISION = "segment-summary-v23";
 
 const FEEDBACK_DESCRIPTION = [
   "Este card existe para registrar os números reais da semana — vendas, agendamentos, seguidores e receita informados por quem acompanha o cliente.",
