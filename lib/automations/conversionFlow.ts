@@ -25,6 +25,7 @@ import type { ConversionRow } from "@/lib/ai/extractMetrics";
 import { feedbackTemplate } from "@/lib/ai/commentParser";
 import { CONVERSION_METRICS_DEFAULT, metricTagDef, needsRichExtraction } from "@/lib/metricTags";
 import { renderSalesReportPdf, type SalesPrevTotals } from "@/lib/reports/salesReportPdf";
+import { revisionAdjustments } from "@/lib/reports/adsReportPdf";
 import type { RecurringCadence, TaskRecord } from "@/lib/validation";
 import { markTaskParada } from "./errorHandling";
 import { loadStoredPreviews } from "./creativeAssets";
@@ -129,6 +130,8 @@ const VISUAL_TARGET = /\b(pdf|relat(?:ório|orio)|p(?:á|a)gina|funil|layout|vis
 const VISUAL_ACTION = /\b(corr(?:igir|ija|eção|ecao)|ajust(?:ar|e)|melhor(?:ar|e)|refa(?:zer|ça|ca)|regener(?:ar|e)|ger(?:ar|e)|tro(?:car|que)|mudar|reduz(?:ir|a)|aument(?:ar|e)|centraliz(?:ar|e)|quebr(?:ar|e)|remov(?:er|a)|ocult(?:ar|e)|reorgan(?:izar|e))\b/i;
 const VISUAL_VAGUE = /\b(feio|horr(?:ível|ivel)|ruim|pessimo|péssimo|n(?:ão|a)o ficou bom|n(?:ão|a)o gostei|melhore|arrume|conserte|est(?:á|a) feio|est(?:á|a) ruim)\b/i;
 const VISUAL_SPECIFIC = /\b(sobreposi(?:ção|c)(?:ão|a)o|primeira p(?:ágina|agina)|segunda p(?:ágina|agina)|último nível|ultimo nivel|dentro|fora|largura|altura|vertical|horizontal|linha|coluna|quebra|cortad|invad|espa(?:çamento|camento)|padding|margem|fonte|tamanho|centraliz|alinh|limite)\b/i;
+const VISUAL_DEFECT = /\b(sobrep\w*|invad\w*|cortad\w*|encost\w*|desalinh\w*|vazad\w*|estourad\w*)/i;
+const CONVERSION_DATA = /\b(seguidor\w*|vendas?|agendamentos?|receita|faturamento|verba)\b/i;
 const VISUAL_CLARIFICATION_TARGET = "Em qual lugar está sobrepondo: leitura do período, funil, tabela ou primeira página?";
 const VISUAL_CLARIFICATION_DETAIL = "O que exatamente deve melhorar nesse bloco: largura, espaçamento, posição do texto ou tamanho da fonte?";
 
@@ -156,18 +159,33 @@ export function visualRequestFromText(text: string, sourceCommentAt?: string | n
   return visualRequestSchema.parse({ target, problem, instruction: text.trim(), sourceCommentAt: sourceCommentAt ?? null, needsClarification: false, clarification: null });
 }
 
+/** O comentário traz um número de conversão (seguidores, vendas, receita…). */
+export function isConversionDataComment(text: string): boolean {
+  return CONVERSION_DATA.test(text) && /\d/.test(text);
+}
+
 /** Classifica somente pedidos visuais; não interpreta métrica nem conversa operacional. */
 export function classifyVisualComment(text: string): VisualCommentDecision {
   const normalized = text.trim();
-  if (!normalized || (!VISUAL_TARGET.test(normalized) && !VISUAL_VAGUE.test(normalized))) return { kind: "none" };
+  if (!normalized || (!VISUAL_TARGET.test(normalized) && !VISUAL_VAGUE.test(normalized) && !VISUAL_DEFECT.test(normalized))) return { kind: "none" };
+  // Número de conversão (seguidores, vendas…) é feedback, não pedido de layout —
+  // mesmo que cite "funil" ou "campanhas". Em 28/09 "Incluir crescimento de 114
+  // novo seguidores nos dados do funil" virou a pergunta "onde está
+  // sobrepondo?" e o Feedback da Baita nunca foi registrado.
+  if (isConversionDataComment(normalized)) return { kind: "none" };
   const explicitRegeneration = /\b(regere|regener|gere outra|gerar novamente|nova vers(?:ão|ao)|regerar|refa(?:zer|ça|ca) o relat(?:ório|orio))\b/i.test(normalized);
   const specificObjectAction = VISUAL_ACTION.test(normalized) && VISUAL_TARGET.test(normalized) && !VISUAL_VAGUE.test(normalized);
   if (explicitRegeneration || specificObjectAction || (/\b(troque|mude|remova|oculte)\b/i.test(normalized) && VISUAL_TARGET.test(normalized))) {
     return { kind: "clear", instruction: normalized };
   }
-  if (VISUAL_VAGUE.test(normalized) || (VISUAL_TARGET.test(normalized) && !VISUAL_SPECIFIC.test(normalized))) {
+  // A pergunta de esclarecimento é sobre ONDE está o defeito visual. Só faz
+  // sentido quando o comentário acusa um defeito (vago, ou sobreposição sem
+  // lugar); citar "relatório" numa instrução editorial ("no próximo relatório
+  // não incluir percentuais") não é defeito de layout — segue o caminho normal.
+  if (VISUAL_VAGUE.test(normalized) || (VISUAL_DEFECT.test(normalized) && !VISUAL_SPECIFIC.test(normalized))) {
     return { kind: "ambiguous", question: VISUAL_CLARIFICATION_TARGET };
   }
+  if (!VISUAL_SPECIFIC.test(normalized)) return { kind: "none" };
   return { kind: "clear", instruction: normalized };
 }
 
@@ -189,6 +207,16 @@ export async function requestVisualClarification(
     text: VISUAL_CLARIFICATION_TARGET,
     commentId: automationCommentId("visual-clarification", fingerprint),
     patch: { visual_clarification_pending: true, visual_clarification_stage: "target", visual_clarification_for: fingerprint, visual_request_pending: { instruction: input.text, sourceCommentAt: input.commentAt ?? null } },
+  });
+}
+
+/** A pergunta visual pendente deixa de valer quando o comentário seguinte não é
+ *  sobre layout (um número de Feedback, uma instrução editorial). Sem isso, cada
+ *  comentário novo era somado à pergunta antiga e reclassificado como visual —
+ *  a Cris (28/09) recebeu a mesma pergunta três vezes seguidas. */
+export async function dismissVisualClarification(admin: AdminClient, taskId: string): Promise<void> {
+  await updateTaskPayload(admin, taskId, {
+    patch: { visual_clarification_pending: false, visual_clarification_stage: null, visual_request_pending: null },
   });
 }
 
@@ -318,6 +346,22 @@ function humanComments(cards: TaskRecord[]): SourcedComment[] {
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 }
 
+/** O alcance que a equipe corrigiu no card de conversão, se corrigiu ("corrija
+ *  o alcance: total 6311"). O mais recente vence.
+ *
+ *  O relatório de conversão herda o alcance do snapshot do relatório de
+ *  anúncios, e a única porta para corrigi-lo era regerar o tráfego — que
+ *  recusa comentário depois de aprovado. Em 28/09 a correção da Karpinski,
+ *  escrita na Conversão com o tráfego já aprovado, não chegava a PDF nenhum.
+ *  A correção passa a valer aqui, sem reabrir a etapa aprovada. */
+export function reachCorrectionOf(card: TaskRecord): number | null {
+  for (const comment of humanComments([card]).reverse()) {
+    const reach = revisionAdjustments(comment.text).reach;
+    if (reach !== null) return reach;
+  }
+  return null;
+}
+
 async function openOccurrences(admin: AdminClient, moldId: string): Promise<TaskRecord[]> {
   const { data, error } = await admin
     .from("tasks")
@@ -435,7 +479,11 @@ async function generateSalesReport(
   // números (auditoria, A3), e esta pipeline não depende da API estar no ar.
   // Snapshot vazio (cliente sem conta de anúncios) = PDF só com o que o gestor
   // relatou, sem investimento/ROAS. Não é erro.
-  const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews, trafficFinalView } = traffic.snapshot ?? {};
+  const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews, trafficFinalView: snapshotFinalView } = traffic.snapshot ?? {};
+  const reachCorrection = reachCorrectionOf(conversionCard);
+  const trafficFinalView = reachCorrection === null
+    ? snapshotFinalView
+    : { ...(snapshotFinalView ?? { hideClicks: false, hideImpressions: false }), reach: reachCorrection };
   const templateConfig = await resolveTemplateConfig(admin, config.performance_template_id);
   const conversoes: ConversionRow[] = ext.linhas;
   // "Seguidores: 66" sem dizer se é total ou ganho já saía como os dois
@@ -1082,7 +1130,11 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
   const comment = [...commentsOf(card.payload)].reverse().find((item) => !AUTOMATION_AUTHORS.has(item.author));
   if (!comment) return;
   const parsed = await consolidateAdaptiveFeedback(humanComments([card]), tagsOf(config));
-  const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0;
+  // Seguidores é dado de conversão e basta sozinho — inclusive só o GANHO
+  // ("114 novos seguidores"), que não preenche `valores.seguidores`. A mesma
+  // regra de `feedbackMetricApprovalProblem`; sem isso o Feedback da Baita
+  // (28/09) não aprovava e a conversão nunca saía.
+  const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0 || parsed.seguidoresGanho != null;
   if (!hasMetric) {
     const marker = (card.payload as Record<string, unknown> | null)?.feedback_format_warned_for;
     if (marker !== comment.at) {

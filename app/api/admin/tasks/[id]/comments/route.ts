@@ -7,7 +7,7 @@ import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleTrafficRevisionComment } from "@/lib/automations/run";
-import { classifyVisualComment, handleConversionRevisionComment, markVisualClarificationResolved, recordFeedbackMetricComment, requestVisualClarification, requestVisualDetailClarification, visualRequestFromText } from "@/lib/automations/conversionFlow";
+import { classifyVisualComment, dismissVisualClarification, handleConversionRevisionComment, isConversionDataComment, markVisualClarificationResolved, recordFeedbackMetricComment, requestVisualClarification, requestVisualDetailClarification, visualRequestFromText } from "@/lib/automations/conversionFlow";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
@@ -45,6 +45,11 @@ async function trafficSiblingFor(admin: ReturnType<typeof createAdminClient>, ta
     if (!link.child_id || link.child_id === taskId) continue;
     const sibling = await getTaskById(link.child_id);
     if (sibling?.subtype !== ADS_REPORT_STEP_KEY) continue;
+    // Etapa de anúncios já aprovada não recebe correção: o handler dela ignora
+    // comentário em etapa concluída, e o pedido sumia sem resposta (Karpinski,
+    // 28/09 — "corrija o número de alcance" na Conversão). Sem desvio, o pedido
+    // segue na etapa onde foi escrito e regera a conversão.
+    if (sibling.completed_at) return null;
     // Mídia é uma revisão do revisor. Sem revisor configurado, o fluxo antigo
     // continua permissivo (a etapa já é final automaticamente nesse cadastro).
     if (sibling.reviewer_id && sibling.reviewer_id !== authorId) return null;
@@ -80,15 +85,22 @@ function scheduleCommentAutomation(taskId: string, authorId?: string, text?: str
         const task = await getTaskById(taskId);
         const pending = task?.payload?.visual_request_pending as { instruction?: string; sourceCommentAt?: string | null } | undefined;
         const stage = task?.payload?.visual_clarification_stage;
-        if (pending && stage === "target" && /funil|tabela|primeira p[áa]gina|leitura do per[íi]odo|an[úu]ncio|m[íi]dia/i.test(text) && !/largo|largura|sobrepos|padding|espa[çc]amento|fonte|texto|invad/i.test(text)) {
+        // Número de conversão (seguidores, vendas…) é Feedback: encerra uma
+        // pergunta visual pendente em vez de ser somado a ela. Sem isso a Cris
+        // (28/09) recebeu "onde está sobrepondo?" de novo a cada número enviado.
+        const conversionData = isConversionDataComment(text);
+        if (pending && conversionData) await dismissVisualClarification(admin, taskId);
+        if (!conversionData && pending && stage === "target" && /funil|tabela|primeira p[áa]gina|leitura do per[íi]odo|an[úu]ncio|m[íi]dia/i.test(text) && !/largo|largura|sobrepos|padding|espa[çc]amento|fonte|texto|invad/i.test(text)) {
           await requestVisualDetailClarification(admin, taskId, { text: `${pending.instruction ?? ""} ${text}`, commentAt });
           return;
         }
-        const visual = pending && stage === "detail"
-          ? { kind: "clear" as const, instruction: `${pending.instruction ?? ""} ${text}` }
-          : pending
-            ? classifyVisualComment(`${pending.instruction ?? ""} ${text}`)
-            : classifyVisualComment(text);
+        const visual = conversionData
+          ? { kind: "none" as const }
+          : pending && stage === "detail"
+            ? { kind: "clear" as const, instruction: `${pending.instruction ?? ""} ${text}` }
+            : pending
+              ? classifyVisualComment(`${pending.instruction ?? ""} ${text}`)
+              : classifyVisualComment(text);
         if (visual.kind === "ambiguous") {
           await requestVisualClarification(admin, taskId, { text, commentAt });
           return;

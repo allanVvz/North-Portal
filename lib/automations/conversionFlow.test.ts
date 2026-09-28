@@ -32,7 +32,7 @@ vi.mock("./notify", () => ({
 }));
 vi.mock("./reportLog", () => ({ logReportRun: vi.fn() }));
 
-import { classifyVisualComment, handleConversionRevisionComment, processConversionFeedback, regenerateConversionReport, requestVisualClarification } from "./conversionFlow";
+import { classifyVisualComment, reachCorrectionOf, handleConversionRevisionComment, processConversionFeedback, regenerateConversionReport, requestVisualClarification } from "./conversionFlow";
 
 const OCC = "occ-1";
 const TRAFEGO = "trafego-1";
@@ -45,6 +45,22 @@ const link = (child: string, key: string, position: number) => ({
   parent_id: OCC, child_id: child, relation_kind: "workflow_step", workflow_step_id: `ws-${key}`, slot: key, position,
 });
 
+describe("correção de alcance escrita na Conversão", () => {
+  const card = (texts: string[]) => ({ id: "c", payload: { comments: texts.map((text, i) => ({ author: "Luiza", text, at: `2026-09-28T13:2${i}:00.000Z` })) } }) as never;
+
+  it("lê o total corrigido (Karpinski, 28/09)", () => {
+    expect(reachCorrectionOf(card(["Corrija o numero de alcance: total 6311. Sendo 8425 da campanha de trafego pro perfil"]))).toBe(6311);
+  });
+
+  it("aceita separador de milhar e o comentário mais recente vence (Cris, 28/09)", () => {
+    expect(reachCorrectionOf(card(["alcance 1000", "alcance corrigir para 12.452. Substituir as frases"]))).toBe(12452);
+  });
+
+  it("sem correção de alcance, o snapshot do tráfego vale", () => {
+    expect(reachCorrectionOf(card(["seguidores novos: 39"]))).toBeNull();
+  });
+});
+
 describe("classificação de pedido visual", () => {
   it("pede contexto para uma crítica visual sem local ou correção", () => {
     expect(classifyVisualComment("o pdf está feio")).toMatchObject({ kind: "ambiguous" });
@@ -52,6 +68,20 @@ describe("classificação de pedido visual", () => {
 
   it("libera pedido visual específico para a revisão", () => {
     expect(classifyVisualComment("corrigir a sobreposição do texto na primeira página")).toMatchObject({ kind: "clear" });
+  });
+
+  // Comentários reais de 28/09 que viraram a pergunta "onde está sobrepondo?".
+  it("número de seguidores é feedback, não pedido visual, mesmo citando funil", () => {
+    expect(classifyVisualComment("Incluir crescimento de 114 novo seguidores nos dados do funil e campanhas")).toEqual({ kind: "none" });
+    expect(classifyVisualComment("seguidores novos:39")).toEqual({ kind: "none" });
+  });
+
+  it("instrução editorial sobre o relatório não pergunta onde está sobrepondo", () => {
+    expect(classifyVisualComment("No próximo relatorio não incluir nenhum dado percentual comparativo que informe redução nos resultados e aumento nos custos.")).toEqual({ kind: "none" });
+  });
+
+  it("sobreposição sem lugar ainda pede o ponto exato", () => {
+    expect(classifyVisualComment("Está sobrepondo entre criativos e o título da campanha seguinte")).toMatchObject({ kind: "ambiguous" });
   });
 
   it("não transforma comentário operacional em pedido visual", () => {

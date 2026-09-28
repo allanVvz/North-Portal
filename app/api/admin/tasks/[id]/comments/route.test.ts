@@ -59,6 +59,8 @@ vi.mock("@/lib/automations/conversionFlow", () => ({
   handleConversionRevisionComment: hooks.conversionHook,
   requestVisualClarification: hooks.visualClarification,
   markVisualClarificationResolved: hooks.visualResolved,
+  dismissVisualClarification: vi.fn(),
+  isConversionDataComment: (text: string) => /seguidor|vendas?\b/i.test(text) && /\d/.test(text),
   classifyVisualComment: hooks.visualDecision,
   visualRequestFromText: (text: string, sourceCommentAt: string | null = null) => ({
     target: /funil/i.test(text) ? "funnel" : /tabela/i.test(text) ? "table" : /anúncio|mídia|gráfico/i.test(text) ? "ads" : "first_page",
@@ -316,6 +318,21 @@ describe("roteamento ambíguo ou inválido", () => {
     expect(result.body.id).toBe(CONVERSAO);
     await flushAfter();
     expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO, expect.objectContaining({ instruction: "gere outro relatório" }));
+  });
+
+  // Karpinski, 28/09: "corrija o número de alcance" na Conversão era desviado
+  // para o tráfego já aprovado, que ignora comentário — e o pedido sumia.
+  it("correção de mídia com o tráfego já aprovado fica na conversão e a regenera", async () => {
+    hooks.visualDecision.mockReturnValue({ kind: "none" });
+    seed([
+      { id: TRAFEGO, title: "Tráfego", status: "aprovado" },
+      { id: FEEDBACK, title: "Feedback", status: "aprovado" },
+      { id: CONVERSAO, title: "Conversão", status: "revisao" },
+    ]);
+    await post(CONVERSAO, { text: "Corrija o numero de alcance: total 6311", comment_id: "cid-alcance-01" });
+    await flushAfter();
+    expect(hooks.trafficHook).not.toHaveBeenCalledWith(hooks.db, TRAFEGO, expect.anything());
+    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
   });
 
   it("pedido visual ambíguo pergunta o ponto exato e não regenera", async () => {

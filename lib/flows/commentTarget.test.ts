@@ -240,3 +240,52 @@ describe("resolveFlowCommentTarget — etapa explícita e etapa única", () => {
     expect(await resolveFlowCommentTarget(fakeAdmin([], []), plano, { stageTaskId: "plano" })).toEqual({ targetId: "plano", via: "own" });
   });
 });
+
+// 28/09/2026: pedidos de correção escritos no MOLDE "Relatórios · Automação"
+// ficaram parados no molde, que não tem etapas nem gatilho de comentário.
+describe("comentário no molde de uma recorrência", () => {
+  function moldAdmin(occurrences: Record<string, unknown>[], links: { child_id: string; slot: string; position: number }[], steps: Record<string, unknown>[]): AdminClient {
+    const linksQuery = {
+      select: () => linksQuery,
+      eq: () => linksQuery,
+      then: (resolve: (result: { data: typeof links; error: null }) => unknown) => resolve({ data: links, error: null }),
+    };
+    const tasksQuery = {
+      select: () => tasksQuery,
+      eq: () => tasksQuery,
+      is: () => Promise.resolve({ data: occurrences, error: null }),
+      in: () => Promise.resolve({ data: steps, error: null }),
+    };
+    return { from: (table: string) => (table === "task_links" ? linksQuery : tasksQuery) } as unknown as AdminClient;
+  }
+
+  const mold = { id: "molde", kind: "automacao", recurrence_cadence: "semanal", workflow_version_id: "wv", payload: { recurrence_group: true } } as unknown as TaskRecord;
+  const occurrence = (id: string, day: string) => ({ id, kind: "automacao", workflow_version_id: "wv", payload: { recurrence_parent_id: "molde", occurrence_date: day } });
+  const steps3 = [
+    { child_id: "trafego", slot: "relatorio_anuncios", position: 10 },
+    { child_id: "feedback", slot: "feedback", position: 20 },
+    { child_id: "conversao", slot: "relatorio_conversao", position: 30 },
+  ];
+
+  it("vai para a etapa aberta da Entrega da semana, pulando as aprovadas", async () => {
+    const admin = moldAdmin([occurrence("occ", "2026-09-28")], steps3, [
+      step("trafego", "2026-09-28T12:00:00Z", { status: "aprovado" }),
+      step("feedback", "2026-09-28T13:00:00Z", { status: "aprovado" }),
+      step("conversao", null, { status: "revisao" }),
+    ]);
+    expect(await resolveFlowCommentTarget(admin, mold)).toEqual({ targetId: "conversao", via: "sole_open" });
+  });
+
+  it("com Feedback ainda aberto, o comentário é do Feedback", async () => {
+    const admin = moldAdmin([occurrence("occ", "2026-09-28")], steps3.slice(0, 2), [
+      step("trafego", "2026-09-28T12:00:00Z", { status: "aprovado" }),
+      step("feedback", null, { status: "backlog" }),
+    ]);
+    expect(await flowCommentTargetId(admin, mold)).toBe("feedback");
+  });
+
+  it("sem Entrega aberta, o comentário fica no próprio molde", async () => {
+    const admin = moldAdmin([], [], []);
+    expect(await flowCommentTargetId(admin, mold)).toBe("molde");
+  });
+});
