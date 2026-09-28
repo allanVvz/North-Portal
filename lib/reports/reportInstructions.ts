@@ -43,7 +43,7 @@ export type ReportInstruction =
   /** "Corrija o alcance: total 6311" — o número vence o da Meta no PDF.
    *  "Sendo 8425 da campanha de tráfego pro perfil e 3785 da de mensagem"
    *  corrige também o alcance de cada objetivo. */
-  | { kind: "alcance"; valor: number; porObjetivo?: Partial<Record<CampaignBlock, number>> };
+  | { kind: "alcance"; valor: number | null; porObjetivo?: Partial<Record<CampaignBlock, number>> };
 
 export type ExtractedInstructions = {
   instrucoes: ReportInstruction[];
@@ -234,7 +234,9 @@ export function describeInstructions(extracted: ExtractedInstructions): string[]
     linhas.push(instrucao.kind === "narrativa"
       ? "Troquei a leitura do período pelo texto que você escreveu."
       : instrucao.kind === "alcance"
-        ? `Corrigi o alcance para ${instrucao.valor.toLocaleString("pt-BR")}.`
+        ? instrucao.valor !== null
+          ? `Corrigi o alcance para ${instrucao.valor.toLocaleString("pt-BR")}.`
+          : "Corrigi o alcance por campanha."
         : `Tirei ${ROTULO[instrucao.alvo]}.`);
   }
   for (const pedido of extracted.naoEntendido) {

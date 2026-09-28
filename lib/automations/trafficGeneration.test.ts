@@ -63,7 +63,7 @@ vi.mock("./execute", () => ({
   clonePlanForReport: vi.fn(),
 }));
 vi.mock("./conversionFlow", () => ({ runConversionFlow: vi.fn() }));
-vi.mock("@/lib/flows/advance", () => ({ materializeFirstStep: hooks.materializeFirstStep }));
+vi.mock("@/lib/flows/advance", () => ({ materializeFirstStep: hooks.materializeFirstStep, advanceFlowAfterUpdate: vi.fn() }));
 
 import { handleTrafficRevisionComment, runOneReportAutomation, type AutomationConfigRow } from "./run";
 
@@ -124,9 +124,10 @@ describe("relatório de anúncios — comentário durante a geração", () => {
     expect(db.table("documents")).toHaveLength(1);
     expect(trafficTexts()).toEqual([
       "Cuidado com a verba deste mês",
-      expect.stringContaining("Relatório de anúncios gerado e anexado"),
+      expect.stringContaining("Relatório de anúncios gerado, anexado e aprovado automaticamente"),
     ]);
-    expect(db.task("trafego-1")!.status).toBe("revisao");
+    // Aprovado sozinho (28/09): correções da equipe vão para a conversão.
+    expect(db.task("trafego-1")!.status).toBe("aprovado");
     expect(hooks.advanceFlowMold).toHaveBeenCalledTimes(1);
   });
 
@@ -204,7 +205,7 @@ describe("relatório de anúncios — execução antiga não desfaz ação human
   it("retry depois de um crash no meio (etapa ficou em produção) gera normalmente", async () => {
     seed({ status: "em_producao" });
     expect(await run()).toBe("ran");
-    expect(db.task("trafego-1")!.status).toBe("revisao");
+    expect(db.task("trafego-1")!.status).toBe("aprovado");
   });
 
   it("falha na geração depois de uma pessoa concluir a etapa: a etapa NÃO vira `parada`", async () => {

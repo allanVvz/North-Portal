@@ -37,7 +37,8 @@ import { nextStepNotice, withNextStepNotice } from "./nextStepNotice";
 import { getClientById } from "./serviceIntegrations";
 import { reportPeriodFor, resolveTemplateConfig } from "./reportData";
 import { attributionOf, conversionModeOf } from "@/lib/reports/conversionMode";
-import { describeInstructions, extractReportInstructions, type ExtractedInstructions } from "@/lib/reports/reportInstructions";
+import { describeInstructions, extractReportInstructions, type ExtractedInstructions, type ReportInstruction } from "@/lib/reports/reportInstructions";
+import { interpretComment, describeIntent, type InterpretStep, type TeamCommentIntent } from "@/lib/ai/interpretComment";
 import type { HistoryPoint } from "@/lib/reports/conversionFocus";
 import {
   attachConversionDocument,
@@ -496,7 +497,9 @@ async function generateSalesReport(
   // relatou, sem investimento/ROAS. Não é erro.
   const { campaignPosts = [], prevCampaignPosts = [], adPosts = [], prevAdPosts = [], previews: storedPreviews, trafficFinalView: snapshotFinalView } = traffic.snapshot ?? {};
   const pedidoAlcance = readReportInstructions(occ).instrucoes.find((i) => i.kind === "alcance");
-  const reachCorrection = reachCorrectionOf(conversionCard) ?? (pedidoAlcance?.kind === "alcance" ? pedidoAlcance.valor : null);
+  // O pedido interpretado (guardado na ocorrência) vem primeiro; a leitura
+  // direta dos comentários da Conversão é a reserva.
+  const reachCorrection = (pedidoAlcance?.kind === "alcance" ? pedidoAlcance.valor : null) ?? reachCorrectionOf(conversionCard);
   const trafficFinalView = reachCorrection === null
     ? snapshotFinalView
     : { ...(snapshotFinalView ?? { hideClicks: false, hideImpressions: false }), reach: reachCorrection };
@@ -1078,14 +1081,21 @@ export async function regenerateConversionReport(admin: AdminClient, taskId: str
  * Feedback continua sendo a fonte das métricas; esta etapa só reaproveita o
  * comentário editorial já escrito no relatório para disparar o mesmo fluxo
  * idempotente do cron, sem duplicar documento nem exigir aprovação novamente. */
-export async function handleConversionRevisionComment(admin: AdminClient, taskId: string, visualRequest?: VisualRequest | null): Promise<void> {
+export async function handleConversionRevisionComment(
+  admin: AdminClient,
+  taskId: string,
+  visualRequest?: VisualRequest | null,
+  /** Pedidos já interpretados (`handleReportStepComment`). Ausente = extrai do
+   *  último comentário humano pelas regras, como antes. */
+  pedidosInterpretados?: ExtractedInstructions | null,
+): Promise<void> {
   const card = await getAdminTask(admin, taskId);
   if (!card || card.subtype !== CONVERSION_REPORT_STEP_KEY) return;
   // O que o último comentário humano PEDE ao relatório (trocar a leitura do
   // período, esconder um bloco). Fica na ocorrência porque é ela que atravessa
   // a geração inteira; a etapa guarda o pedido visual, que é outra coisa.
   const ultimo = [...commentsOf(card.payload)].reverse().find((c) => !AUTOMATION_AUTHORS.has(c.author));
-  const pedidos = ultimo ? extractReportInstructions(ultimo.text) : null;
+  const pedidos = pedidosInterpretados !== undefined ? pedidosInterpretados : ultimo ? extractReportInstructions(ultimo.text) : null;
   const { data, error } = await admin.from("task_links")
     .select("parent_id")
     .eq("child_id", taskId)
@@ -1129,7 +1139,17 @@ export async function feedbackMetricApprovalProblem(admin: AdminClient, taskId: 
   return hasMetric ? null : `Não consegui identificar uma métrica no último comentário. ${pedidoDe(tagsOf(config))}`;
 }
 
-export async function recordFeedbackMetricComment(admin: AdminClient, taskId: string): Promise<void> {
+export async function recordFeedbackMetricComment(
+  admin: AdminClient,
+  taskId: string,
+  options: {
+    /** O intérprete achou conteúdo que aprova o Feedback (leitura, pedido,
+     *  aprovação explícita) mesmo sem métrica numérica. */
+    approvable?: boolean;
+    /** Os pedidos já foram gravados na ocorrência pelo intérprete. */
+    instructionsStored?: boolean;
+  } = {},
+): Promise<void> {
   const card = await getAdminTask(admin, taskId);
   if (!card || card.subtype !== FEEDBACK_STEP_KEY) return;
   const { data: linkRows, error: linkError } = await admin.from("task_links")
@@ -1153,7 +1173,7 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
   // regra de `feedbackMetricApprovalProblem`; sem isso o Feedback da Baita
   // (28/09) não aprovava e a conversão nunca saía.
   const hasMetric = Object.values(parsed.valores).some((value) => value !== null) || parsed.linhas.length > 0 || parsed.seguidoresGanho != null;
-  if (!hasMetric) {
+  if (!hasMetric && !options.approvable) {
     const marker = (card.payload as Record<string, unknown> | null)?.feedback_format_warned_for;
     if (marker !== comment.at) {
       // `extractMetrics` acima pode chamar um modelo (segundos): o aviso entra
@@ -1169,7 +1189,7 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
   // O Feedback também carrega pedidos para o relatório de conversão ("Leitura
   // da semana: …", "não incluir número de compras" — Cris e Baita, 28/09). Eles
   // eram lidos só no card de conversão, que ainda nem existe neste momento.
-  const pedidosFeedback = extractReportInstructions(comment.text);
+  const pedidosFeedback = options.instructionsStored ? { instrucoes: [], naoEntendido: [] } : extractReportInstructions(comment.text);
   if (pedidosFeedback.instrucoes.length) {
     await updateTaskPayload(admin, occurrenceId, { patch: { report_instructions: mergeReportInstructions(occurrence, { instrucoes: pedidosFeedback.instrucoes, naoEntendido: [] }) } });
   }
@@ -1241,4 +1261,161 @@ export async function recordFeedbackMetricComment(admin: AdminClient, taskId: st
     }
     await processConversionFeedback(admin, occurrenceId);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Comentário da equipe numa Entrega de relatório — porta única (28/09/2026)
+// ---------------------------------------------------------------------------
+//
+// A especialista trabalha pelo card-pai: escreve em texto livre e o comentário
+// cai na etapa aberta (lib/flows/commentTarget.ts). Daqui em diante o comentário
+// é INTERPRETADO uma vez (lib/ai/interpretComment.ts) e a intenção decide o que
+// acontece:
+//
+//   Feedback aberto   → dado, leitura, correção ou "aprovado" aprovam o Feedback
+//                        e a cascata gera a conversão; conversa solta não aprova
+//                        e recebe uma resposta dizendo o que falta.
+//   Conversão         → correção do último relatório: nova revisão.
+//   Anúncios          → aprovado sozinho; o pedido é anotado para a conversão.
+//
+// Os pedidos (leitura, alcance, o que esconder) ficam na OCORRÊNCIA, que é o que
+// atravessa as três etapas: um pedido feito no Feedback vale para a conversão
+// que ainda nem existe.
+
+/** Pedidos ao relatório, no formato que a geração da conversão consome. */
+export function intentToInstructions(intent: TeamCommentIntent): ExtractedInstructions {
+  const instrucoes: ReportInstruction[] = [];
+  if (intent.narrative) instrucoes.push({ kind: "narrativa", texto: intent.narrative });
+  const porObjetivo = intent.reach.byObjective;
+  if (intent.reach.total !== null || Object.keys(porObjetivo).length) {
+    instrucoes.push(Object.keys(porObjetivo).length
+      ? { kind: "alcance", valor: intent.reach.total, porObjetivo }
+      : { kind: "alcance", valor: intent.reach.total });
+  }
+  for (const alvo of intent.hide) instrucoes.push({ kind: "esconder", alvo });
+  return { instrucoes, naoEntendido: intent.notUnderstood };
+}
+
+/** Dado, leitura, correção ou aprovação — o que faz o Feedback andar. Pedido
+ *  visual sozinho não aprova: é sobre o PDF, não sobre a semana. */
+function approvesFeedback(intent: TeamCommentIntent): boolean {
+  return Object.keys(intent.metrics).length > 0
+    || intent.seguidoresNovos !== null
+    || intent.seguidoresTotal !== null
+    || intent.reach.total !== null
+    || Object.keys(intent.reach.byObjective).length > 0
+    || intent.narrative !== null
+    || intent.hide.length > 0
+    || intent.approval;
+}
+
+type ReportStepContext = { step: TaskRecord; occurrence: TaskRecord; config: AutomationConfigRow };
+
+/** A etapa pertence a uma Entrega de relatório com conversão ativa? */
+export async function reportStepContext(admin: AdminClient, stepId: string): Promise<ReportStepContext | null> {
+  const step = await getAdminTask(admin, stepId);
+  if (!step || ![ADS_REPORT_STEP_KEY, FEEDBACK_STEP_KEY, CONVERSION_REPORT_STEP_KEY].includes(step.subtype ?? "")) return null;
+  const { data: links, error: linkError } = await admin.from("task_links")
+    .select("parent_id").eq("child_id", step.id).eq("relation_kind", "workflow_step").limit(1);
+  if (linkError) throw linkError;
+  const occurrenceId = (links?.[0] as { parent_id?: string } | undefined)?.parent_id;
+  if (!occurrenceId) return null;
+  const occurrence = await getAdminTask(admin, occurrenceId);
+  const moldId = typeof occurrence?.payload?.recurrence_parent_id === "string" ? occurrence.payload.recurrence_parent_id : null;
+  if (!occurrence || !moldId) return null;
+  const { data: configs, error: configError } = await admin.from("automation_configs").select("*")
+    .eq("target_task_id", moldId).eq("automation_key", "relatorio_conversao").eq("active", true).limit(1);
+  if (configError) throw configError;
+  const config = configs?.[0] as AutomationConfigRow | undefined;
+  return config ? { step, occurrence, config } : null;
+}
+
+function stepKindOf(step: TaskRecord): InterpretStep {
+  if (step.subtype === FEEDBACK_STEP_KEY) return "feedback";
+  if (step.subtype === CONVERSION_REPORT_STEP_KEY) return "relatorio_conversao";
+  if (step.subtype === ADS_REPORT_STEP_KEY) return "relatorio_anuncios";
+  return "outro";
+}
+
+/**
+ * Trata o comentário humano `text` gravado na etapa `stepId`. Devolve `false`
+ * quando a etapa não é de uma Entrega de relatório (ou há uma pergunta visual
+ * pendente, que segue o caminho antigo de esclarecimento) — o chamador segue
+ * com os gatilhos genéricos.
+ */
+export async function handleReportStepComment(
+  admin: AdminClient,
+  stepId: string,
+  text: string,
+  commentAt: string | null,
+  deps: { interpret?: typeof interpretComment } = {},
+): Promise<boolean> {
+  const ctx = await reportStepContext(admin, stepId);
+  if (!ctx) return false;
+  const { step, config } = ctx;
+  if ((step.payload as Record<string, unknown> | null)?.visual_request_pending) return false;
+
+  const intent = await (deps.interpret ?? interpretComment)(text, { step: stepKindOf(step), tags: tagsOf(config) });
+  const pedidos = intentToInstructions(intent);
+  let occurrence = ctx.occurrence;
+  if (pedidos.instrucoes.length) {
+    const saved = await updateTaskPayload(admin, occurrence.id, { patch: { report_instructions: mergeReportInstructions(occurrence, pedidos) } });
+    occurrence = saved?.task ?? occurrence;
+  }
+  const echoId = (kind: string) => automationCommentId(kind, step.id, commentAt ?? text.slice(0, 60));
+  const conversion = await linkedCardForStep(admin, occurrence, CONVERSION_REPORT_STEP_KEY);
+
+  // Feedback ainda aberto: o comentário responde "como foi a semana?".
+  if (step.subtype === FEEDBACK_STEP_KEY && !step.completed_at) {
+    if (approvesFeedback(intent)) {
+      await recordFeedbackMetricComment(admin, step.id, { approvable: true, instructionsStored: true });
+      return true;
+    }
+    if (intent.visual) {
+      await updateTaskPayload(admin, step.id, {
+        text: "Anotei o ajuste visual; ele entra quando o relatório de conversão for gerado. Para gerar, me mande os dados da semana (seguidores, vendas…) e a leitura.",
+        commentId: echoId("visual-before-conversion"),
+      });
+      return true;
+    }
+    if (intent.question) return true; // conversa entre pessoas: não é comigo
+    await updateTaskPayload(admin, step.id, {
+      text: `Recebi, mas não encontrei dados da semana neste comentário. ${pedidoDe(tagsOf(config))} Pode mandar também a leitura da semana.`,
+      commentId: echoId("feedback-sem-dados"),
+    });
+    return true;
+  }
+
+  // Conversão (ou Feedback já aprovado, cujo comentário a rota manda para a
+  // Conversão): correção do último relatório.
+  if (conversion) {
+    if (intent.visual && intent.visual.target === "unknown" && !approvesFeedback(intent)) {
+      await requestVisualClarification(admin, conversion.id, { text, commentAt });
+      return true;
+    }
+    if (approvesFeedback(intent) || intent.visual) {
+      const visualRequest = intent.visual && intent.visual.target !== "unknown"
+        ? visualRequestFromText(intent.visual.instruction, commentAt)
+        : null;
+      if (visualRequest) await markVisualClarificationResolved(admin, conversion.id, text, commentAt, visualRequest);
+      await handleConversionRevisionComment(admin, conversion.id, visualRequest, pedidos);
+      return true;
+    }
+    if (intent.question) return true;
+    await updateTaskPayload(admin, conversion.id, {
+      text: "Não identifiquei um pedido de correção neste comentário. Diga o que mudar — por exemplo: \"alcance 12.452\", \"não mostrar compras\" ou \"Leitura da semana: …\".",
+      commentId: echoId("conversao-sem-pedido"),
+    });
+    return true;
+  }
+
+  // Sem conversão ainda (comentário na etapa de anúncios): fica anotado.
+  const entendido = describeIntent(intent);
+  if (entendido.length) {
+    await updateTaskPayload(admin, step.id, {
+      text: `Anotado para o relatório de conversão: ${entendido.join("; ")}.`,
+      commentId: echoId("anotado-para-conversao"),
+    });
+  }
+  return true;
 }

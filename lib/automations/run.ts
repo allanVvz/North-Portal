@@ -383,12 +383,22 @@ export async function runOneReportAutomation(
         // O aviso da próxima etapa vem do workflow versionado da ocorrência, não de
         // uma lista fixa: reordenar as etapas na tela de Etapas muda a frase.
         text: withNextStepNotice(
-          `Relatório de anúncios gerado e anexado: [${fileName}](${url})\n\nComente aqui caso queira algum ajuste neste relatório de anúncios.`,
+          `Relatório de anúncios gerado, anexado e aprovado automaticamente: [${fileName}](${url})\n\nAjustes (alcance, leitura, o que esconder) entram no relatório de conversão — comente no card da automação.`,
           await nextStepNotice(admin, occ, ADS_REPORT_STEP_KEY),
         ),
         commentId: automationCommentId("ads-report", card1.id, report.revision),
       });
-      await transitionTaskStatus(admin, card1.id, { to: "revisao", from: ["em_producao"], extra: { assignee: AUTOMATION_ASSIGNEE } });
+      // O relatório de anúncios é aprovado sozinho (28/09): ele é o retrato da
+      // mídia, não uma peça que a equipe revisa. Toda correção da equipe vai para
+      // o relatório de conversão, que é o relatório corrigido da semana. Aprovar
+      // pela porta única (`approveTask`) dispara a cascata que abre o Feedback —
+      // antes a Entrega esperava um humano aprovar este card, e era uma das três
+      // ações por cliente que a especialista achava demais.
+      const inReview = await transitionTaskStatus(admin, card1.id, { to: "revisao", from: ["em_producao"], extra: { assignee: AUTOMATION_ASSIGNEE } });
+      if (inReview) {
+        const { approveTask } = await import("@/lib/flows/approve");
+        await approveTask(admin, inReview, { from: ["revisao"] });
+      }
       // O molde avança depois de o PDF existir. A próxima Entrega só será
       // materializada quando a Conversão final for aprovada.
       await advanceFlowMold(admin, target, today);

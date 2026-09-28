@@ -7,7 +7,7 @@ import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/
 import { HttpError, taskCommentCreateSchema, taskCommentDeleteSchema, taskCommentEditSchema } from "@/lib/validation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { handleTrafficRevisionComment } from "@/lib/automations/run";
-import { classifyVisualComment, dismissVisualClarification, handleConversionRevisionComment, isConversionDataComment, markVisualClarificationResolved, recordFeedbackMetricComment, requestVisualClarification, requestVisualDetailClarification, visualRequestFromText } from "@/lib/automations/conversionFlow";
+import { classifyVisualComment, dismissVisualClarification, handleConversionRevisionComment, handleReportStepComment, isConversionDataComment, markVisualClarificationResolved, recordFeedbackMetricComment, requestVisualClarification, requestVisualDetailClarification, visualRequestFromText } from "@/lib/automations/conversionFlow";
 import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
@@ -81,6 +81,10 @@ function scheduleCommentAutomation(taskId: string, authorId?: string, text?: str
   after(async () => {
     const admin = createAdminClient();
     try {
+      // Entrega de relatório: o comentário é interpretado uma vez e a intenção
+      // decide tudo (aprovar o Feedback, regerar a conversão, anotar o pedido).
+      // Os gatilhos genéricos abaixo ficam para as demais etapas.
+      if (text && await handleReportStepComment(admin, taskId, text, commentAt ?? null)) return;
       if (text) {
         const task = await getTaskById(taskId);
         const pending = task?.payload?.visual_request_pending as { instruction?: string; sourceCommentAt?: string | null } | undefined;

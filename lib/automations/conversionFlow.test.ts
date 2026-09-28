@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFakeTaskDb, type FakeTaskDb, type Row } from "@/lib/testing/fakeTaskDb";
+import { interpretByRules } from "@/lib/ai/interpretComment";
 
 // O caminho que roda quando o Feedback é concluído: cria o relatório de conversão
 // dentro do request de conclusão. É o trecho mais exposto ao banco real — o status
@@ -10,7 +11,10 @@ vi.setConfig({ testTimeout: 30_000 });
 const hooks = vi.hoisted(() => ({
   render: vi.fn(),
   extract: vi.fn(),
+  /** A cascata de aprovação abre o próprio client de serviço. */
+  admin: null as unknown,
 }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => hooks.admin }));
 
 vi.mock("@/lib/documentFiles", () => ({
   DOCUMENT_BUCKET: "documentos",
@@ -32,7 +36,7 @@ vi.mock("./notify", () => ({
 }));
 vi.mock("./reportLog", () => ({ logReportRun: vi.fn() }));
 
-import { classifyVisualComment, reachCorrectionOf, handleConversionRevisionComment, processConversionFeedback, regenerateConversionReport, requestVisualClarification } from "./conversionFlow";
+import { classifyVisualComment, reachCorrectionOf, handleReportStepComment, handleConversionRevisionComment, processConversionFeedback, regenerateConversionReport, requestVisualClarification } from "./conversionFlow";
 
 const OCC = "occ-1";
 const TRAFEGO = "trafego-1";
@@ -98,6 +102,11 @@ describe("classificação de pedido visual", () => {
 });
 
 function seed(conversao: Partial<Row> = {}) {
+  seedDb(conversao);
+  hooks.admin = db.asAdmin();
+}
+
+function seedDb(conversao: Partial<Row>) {
   db = createFakeTaskDb({
     tasks: [
       // Molde da Entrega de Automação. `report_example` mantém a série de métricas
@@ -315,5 +324,64 @@ describe("regenerateConversionReport — manutenção", () => {
     const at = new Date(String(comentarios[0].at)).getTime();
     expect(at).toBeGreaterThan(new Date("2026-09-22T15:00:00.000Z").getTime());
     expect(at).toBeLessThan(new Date("2026-09-23T00:00:00.000Z").getTime());
+  });
+});
+
+// 28/09: a especialista trabalha pelo card-pai em texto livre. O comentário cai
+// na etapa aberta e é interpretado uma vez; a intenção decide o que acontece.
+describe("comentário da equipe numa Entrega de relatório (handleReportStepComment)", () => {
+  const rules = { interpret: async (text: string, ctx: Parameters<typeof interpretByRules>[1]) => interpretByRules(text, ctx) };
+  const human = async (taskId: string, text: string, id: string) => {
+    await db.rpc("append_task_comment_idempotent", { p_task_id: taskId, p_author_id: "luiza", p_text: text, p_comment_id: id });
+    return db.comments(taskId).at(-1)!.at as string;
+  };
+  const instrucoes = () => ((db.task(OCC)!.payload as Row).report_instructions as { instrucoes: unknown[] } | undefined)?.instrucoes ?? [];
+
+  async function seedFeedbackAberto() {
+    seed();
+    await db.from("tasks").update({ status: "backlog", payload: { comments: [] } }).eq("id", FEEDBACK);
+  }
+
+  it("Feedback aberto + seguidores e leitura: aprova o Feedback e guarda a leitura para a conversão", async () => {
+    await seedFeedbackAberto();
+    hooks.extract.mockResolvedValue({ valores: { vendas: null, agendamentos: null, receita: null, seguidores: null }, linhas: [], note: "parser", seguidoresGanho: 114 });
+    const text = "Incluir crescimento de 114 novo seguidores nos dados do funil\n\nLeitura da semana: Semana com foco em público novo em NH e POA.";
+    const at = await human(FEEDBACK, text, "c-baita-1");
+
+    expect(await handleReportStepComment(db.asAdmin(), FEEDBACK, text, at, rules)).toBe(true);
+
+    expect(db.task(FEEDBACK)!.status).toBe("aprovado");
+    expect(instrucoes()).toContainEqual({ kind: "narrativa", texto: "Semana com foco em público novo em NH e POA." });
+    // A pergunta errada de 28/09 não aparece mais.
+    expect(feedbackTexts().some((t) => t.includes("sobrepondo"))).toBe(false);
+  });
+
+  it("Feedback aberto + conversa solta: não aprova e diz o que falta", async () => {
+    await seedFeedbackAberto();
+    const text = "vou confirmar com o cliente e já volto aqui";
+    const at = await human(FEEDBACK, text, "c-conversa-1");
+
+    await handleReportStepComment(db.asAdmin(), FEEDBACK, text, at, rules);
+
+    expect(db.task(FEEDBACK)!.status).toBe("backlog");
+    expect(feedbackTexts().at(-1)).toContain("não encontrei dados da semana");
+    expect(hooks.render).not.toHaveBeenCalled();
+  });
+
+  it("Conversão já aprovada + correção: guarda os pedidos e gera nova revisão", async () => {
+    seed({ status: "aprovado" });
+    const text = "alcance corrigir para 12.452. Não incluir numero de compras, nem custo por compra.";
+    const at = await human(CONVERSAO, text, "c-cris-1");
+
+    await handleReportStepComment(db.asAdmin(), CONVERSAO, text, at, rules);
+
+    expect(instrucoes()).toEqual(expect.arrayContaining([{ kind: "alcance", valor: 12452 }, { kind: "esconder", alvo: "compras" }]));
+    expect(hooks.render).toHaveBeenCalledTimes(1);
+    expect(db.task(CONVERSAO)!.status).toBe("revisao");
+  });
+
+  it("etapa que não é de Entrega de relatório segue o caminho genérico", async () => {
+    seed();
+    expect(await handleReportStepComment(db.asAdmin(), "nao-existe", "qualquer coisa", null, rules)).toBe(false);
   });
 });

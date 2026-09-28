@@ -20,6 +20,7 @@ const hooks = vi.hoisted(() => ({
   visualResolved: vi.fn(),
   visualDecision: vi.fn((): { kind: string; instruction?: string; question?: string } => ({ kind: "clear", instruction: "" })),
   markParada: vi.fn(),
+  reportStepHook: vi.fn(async () => false),
   afterQueue: [] as Array<() => Promise<void>>,
 }));
 
@@ -60,6 +61,7 @@ vi.mock("@/lib/automations/conversionFlow", () => ({
   requestVisualClarification: hooks.visualClarification,
   markVisualClarificationResolved: hooks.visualResolved,
   dismissVisualClarification: vi.fn(),
+  handleReportStepComment: hooks.reportStepHook,
   isConversionDataComment: (text: string) => /seguidor|vendas?\b/i.test(text) && /\d/.test(text),
   classifyVisualComment: hooks.visualDecision,
   visualRequestFromText: (text: string, sourceCommentAt: string | null = null) => ({
@@ -333,6 +335,16 @@ describe("roteamento ambíguo ou inválido", () => {
     await flushAfter();
     expect(hooks.trafficHook).not.toHaveBeenCalledWith(hooks.db, TRAFEGO, expect.anything());
     expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
+  });
+
+  it("Entrega de relatório: o comentário vai ao intérprete e os gatilhos genéricos não rodam", async () => {
+    hooks.reportStepHook.mockResolvedValueOnce(true);
+    seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
+    await post(CONVERSAO, { text: "alcance 12.452", comment_id: "cid-report-step-01" });
+    await flushAfter();
+    expect(hooks.reportStepHook).toHaveBeenCalledWith(hooks.db, CONVERSAO, "alcance 12.452", expect.anything());
+    expect(hooks.conversionHook).not.toHaveBeenCalled();
+    expect(hooks.visualClarification).not.toHaveBeenCalled();
   });
 
   it("pedido visual ambíguo pergunta o ponto exato e não regenera", async () => {

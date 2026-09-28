@@ -253,7 +253,7 @@ describe("comentário no molde de uma recorrência", () => {
     const tasksQuery = {
       select: () => tasksQuery,
       eq: () => tasksQuery,
-      is: () => Promise.resolve({ data: occurrences, error: null }),
+      not: () => Promise.resolve({ data: occurrences, error: null }),
       in: () => Promise.resolve({ data: steps, error: null }),
     };
     return { from: (table: string) => (table === "task_links" ? linksQuery : tasksQuery) } as unknown as AdminClient;
@@ -284,7 +284,16 @@ describe("comentário no molde de uma recorrência", () => {
     expect(await flowCommentTargetId(admin, mold)).toBe("feedback");
   });
 
-  it("sem Entrega aberta, o comentário fica no próprio molde", async () => {
+  it("tudo aprovado: o comentário é correção do último relatório e vai para a Conversão", async () => {
+    const admin = moldAdmin([occurrence("occ", "2026-09-28")], steps3, [
+      step("trafego", "2026-09-28T12:00:00Z", { status: "aprovado" }),
+      step("feedback", "2026-09-28T13:00:00Z", { status: "aprovado" }),
+      step("conversao", "2026-09-28T14:00:00Z", { status: "aprovado" }),
+    ]);
+    expect(await flowCommentTargetId(admin, mold)).toBe("conversao");
+  });
+
+  it("sem Entrega ativa, o comentário fica no próprio molde", async () => {
     const admin = moldAdmin([], [], []);
     expect(await flowCommentTargetId(admin, mold)).toBe("molde");
   });

@@ -7,8 +7,8 @@
 // (`mergeFamilyComments`), a ESCRITA vai para uma etapa só.
 //
 // Precedência (a primeira que se aplica vence):
-//   0. O card é o MOLDE de uma recorrência com uma Entrega aberta: a regra
-//      inteira é aplicada a essa Entrega (a mais recente), não ao molde.
+//   0. O card é o MOLDE de uma recorrência com Entrega ativa: a regra inteira
+//      é aplicada à Entrega mais recente já ativada, não ao molde.
 //   1. `stageTaskId` explícito — a interface diz qual etapa mostrava como corrente.
 //      Precisa ser uma etapa (`workflow_step`) DESTA entrega; senão 409
 //      COMMENT_STAGE_INVALID. Nunca é escolhido pelo nome textual da etapa. Se a
@@ -100,15 +100,18 @@ async function adminTaskAssigneesOf(admin: AdminClient, stepIds: string[]): Prom
   return byStep;
 }
 
-/** A Entrega ainda aberta mais recente gerada por este molde — a da semana
- * corrente. Só entra quem é Entrega de fluxo: uma ocorrência sem etapas não tem
- * para onde desviar o comentário. */
-async function latestOpenOccurrenceOf(admin: AdminClient, moldId: string): Promise<TaskRecord | null> {
+/** A Entrega mais recente deste molde cujo fluxo já foi ativado — a da semana
+ *  corrente, concluída ou não. Concluída entra: um pedido depois de tudo
+ *  aprovado é uma correção do último relatório, e a regra abaixo manda para a
+ *  última etapa (a Conversão), que reabre. A ocorrência da semana seguinte,
+ *  pré-criada quando a anterior fecha, ainda não tem etapas nem
+ *  `workflow_activated_at`, e fica de fora. */
+async function latestActiveOccurrenceOf(admin: AdminClient, moldId: string): Promise<TaskRecord | null> {
   const { data, error } = await admin
     .from("tasks")
     .select(TASK_COLUMNS)
     .eq("payload->>recurrence_parent_id", moldId)
-    .is("completed_at", null);
+    .not("workflow_activated_at", "is", null);
   if (error) throw error;
   const dayOf = (occ: TaskRecord) => (typeof occ.payload?.occurrence_date === "string" ? occ.payload.occurrence_date : occ.due_date ?? "");
   return (data ?? [])
@@ -158,10 +161,11 @@ export async function resolveFlowCommentTarget(
   // da semana, e nenhum gatilho escuta o que é escrito nele. Em 28/09/2026 três
   // pedidos de correção (Karpinski, Cris, Baita) foram escritos no molde
   // "Relatórios · Automação" e ficaram parados ali em silêncio. O comentário
-  // vai para a Entrega aberta mais recente e, dentro dela, para a etapa aberta
-  // pelas regras abaixo — nunca para uma etapa já aprovada.
+  // vai para a Entrega ativa mais recente e, dentro dela, para a etapa aberta
+  // pelas regras abaixo; com tudo concluído, para a última (a Conversão), que
+  // reabre como correção do último relatório.
   if (task.recurrence_cadence && !recurrenceParentIdOf(task)) {
-    const occurrence = await latestOpenOccurrenceOf(admin, task.id);
+    const occurrence = await latestActiveOccurrenceOf(admin, task.id);
     if (occurrence) {
       return resolveFlowCommentTarget(admin, occurrence, {
         commenterId,

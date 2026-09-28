@@ -63,7 +63,10 @@ async function assertOpenAiModelAvailable(apiKey: string, model: string): Promis
 
 // GPT-5 uses `max_completion_tokens`. The caller parses the JSON-shaped text,
 // keeping this small transport layer independent from a specific workflow.
-async function completeOpenAi(apiKey: string, system: string, user: string, maxTokens: number, model?: string): Promise<string> {
+/** Saída estruturada: a OpenAI garante JSON que obedece ao schema. */
+export type JsonSchemaFormat = { name: string; schema: Record<string, unknown> };
+
+async function completeOpenAi(apiKey: string, system: string, user: string, maxTokens: number, model?: string, jsonSchema?: JsonSchemaFormat): Promise<string> {
   const selectedModel = model?.trim() || process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL;
   await assertOpenAiModelAvailable(apiKey, selectedModel);
   const res = await fetch(OPENAI_URL, {
@@ -79,6 +82,7 @@ async function completeOpenAi(apiKey: string, system: string, user: string, maxT
         { role: "system", content: system },
         { role: "user", content: user },
       ],
+      ...(jsonSchema ? { response_format: { type: "json_schema", json_schema: { name: jsonSchema.name, schema: jsonSchema.schema, strict: true } } } : {}),
     }),
     signal: AbortSignal.timeout(20_000),
   });
@@ -90,13 +94,14 @@ async function completeOpenAi(apiKey: string, system: string, user: string, maxT
   return typeof choice?.message?.content === "string" ? choice.message.content : "";
 }
 
-export async function aiComplete({ system, user, maxTokens = 1024, model }: {
+export async function aiComplete({ system, user, maxTokens = 1024, model, jsonSchema }: {
   system: string;
   user: string;
   maxTokens?: number;
   model?: string;
+  jsonSchema?: JsonSchemaFormat;
 }): Promise<string> {
   const settings = await getAiProviderSettingsService();
   if (!settings?.apiKey) throw new AiNotConfiguredError();
-  return completeOpenAi(settings.apiKey, system, user, maxTokens, model);
+  return completeOpenAi(settings.apiKey, system, user, maxTokens, model, jsonSchema);
 }
