@@ -40,14 +40,18 @@ export type ReportInstruction =
   | { kind: "narrativa"; texto: string }
   /** "Remova o comentário sobre seguidores", "retire o % comparativo". */
   | { kind: "esconder"; alvo: HideTarget }
-  /** "Corrija o alcance: total 6311" — o número vence o da Meta no PDF. */
-  | { kind: "alcance"; valor: number };
+  /** "Corrija o alcance: total 6311" — o número vence o da Meta no PDF.
+   *  "Sendo 8425 da campanha de tráfego pro perfil e 3785 da de mensagem"
+   *  corrige também o alcance de cada objetivo. */
+  | { kind: "alcance"; valor: number; porObjetivo?: Partial<Record<CampaignBlock, number>> };
 
 export type ExtractedInstructions = {
   instrucoes: ReportInstruction[];
   /** Trechos com cara de pedido que nenhuma regra entendeu. */
   naoEntendido: string[];
 };
+
+import type { CampaignBlock } from "@/lib/performanceTemplates";
 
 const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
@@ -70,6 +74,42 @@ const LEITURA = /\bleitura d[aoe] (?:semana|per[ií]odo)\s*:\s*([\s\S]+)/i;
 /** "Corrija o alcance: total 6311", "alcance corrigir para 12.452", "alcance
  *  correto 9307". Mesma leitura de número de `revisionAdjustments`. */
 const ALCANCE = /\balcance\b[^\d.;\n]{0,80}(\d[\d.,]*)/i;
+
+/** "8425 da campanha de tráfego pro perfil", "3785 da campanha de mensagem". */
+const ALCANCE_OBJETIVO = /(\d[\d.,]*)\s*(?:d[ao]s?|n[ao]s?)\s+campanhas?\s+de\s+([^,.;\n\d]{0,40})/gi;
+
+function objetivoDe(trecho: string): CampaignBlock | null {
+  const t = fold(trecho);
+  if (/perfil/.test(t)) return "trafego_perfil";
+  if (/site|pagina/.test(t)) return "trafego_site";
+  if (/mensage|whats|conversa|direct/.test(t)) return "mensagens";
+  if (/engaj/.test(t)) return "engajamento";
+  return null;
+}
+
+function alcancePorObjetivo(texto: string): Partial<Record<CampaignBlock, number>> | null {
+  const out: Partial<Record<CampaignBlock, number>> = {};
+  for (const m of texto.matchAll(ALCANCE_OBJETIVO)) {
+    const bloco = objetivoDe(m[2]);
+    const valor = Number(m[1].replace(/\D/g, ""));
+    if (bloco && Number.isFinite(valor) && valor > 0) out[bloco] = valor;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** Trecho de contexto que NÃO é leitura para o cliente: pedido ao relatório
+ *  ("corrija o alcance…"), reclamação de layout ("está sobrepondo…") ou número
+ *  solto que o PDF já mostra ("seguidores novos: 39"). Em 28/09 era exatamente
+ *  isso que aparecia na "Leitura da semana" da Cris e da Karpinski. */
+export function isReadingNoise(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  const pedidos = extractReportInstructions(t);
+  if (pedidos.instrucoes.some((i) => i.kind !== "narrativa")) return true;
+  if (/\b(?:sobrep\w*|invad\w*|cortad\w*|encost\w*|desalinh\w*)/i.test(t)) return true;
+  // Frase curta dominada por número de conversão: dado, não análise.
+  return DADO_CONVERSAO.test(t) && t.replace(/[\d.,:%+\-]/g, "").trim().split(/\s+/).length <= 14;
+}
 
 /** Frase com número de conversão (seguidores, vendas…) é dado do Feedback, não
  *  pedido ao relatório — "incluir crescimento de 114 seguidores" não é um
@@ -119,7 +159,8 @@ export function extractReportInstructions(comment: string): ExtractedInstruction
   if (alcance) {
     const valor = Number(alcance[1].replace(/\D/g, ""));
     if (Number.isFinite(valor) && valor > 0) {
-      instrucoes.push({ kind: "alcance", valor });
+      const porObjetivo = alcancePorObjetivo(texto);
+      instrucoes.push(porObjetivo ? { kind: "alcance", valor, porObjetivo } : { kind: "alcance", valor });
       // A frase da correção sai do texto: "corrija o alcance…" não é pedido de
       // remoção nem pedido não entendido.
       const fim = texto.slice(alcance.index).search(/[.;\n]\s/);

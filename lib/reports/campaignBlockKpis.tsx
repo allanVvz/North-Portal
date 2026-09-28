@@ -242,6 +242,7 @@ export function CampaignBlocksSection({
   detail,
   footer,
   hideMetrics,
+  overrides,
   deltaPolicy = "always",
   kpiSource = "template",
 }: {
@@ -263,6 +264,9 @@ export function CampaignBlocksSection({
    *  bloco — hoje só o CPM, exclusivo do relatório de anúncios (decisão de
    *  22/09: a conversão nunca mostra CPM). */
   hideMetrics?: readonly MetricRef[];
+  /** Valor informado pela equipe que vence o da Meta num KPI do bloco
+   *  (alcance corrigido por objetivo). Sem delta: o anterior não é comparável. */
+  overrides?: Partial<Record<CampaignBlock, Partial<Record<string, number>>>>;
   /** "always" (padrão, relatório de anúncios: mostra tudo sempre) ou
    *  "positive_only" (relatório de conversão: só ganho > 1%). */
   deltaPolicy?: DeltaPolicy;
@@ -327,7 +331,11 @@ export function CampaignBlocksSection({
               <Text style={S.blockTitle}>{CAMPAIGN_BLOCK_LABEL[block]}</Text>
             </View>
             <View style={S.grid}>
-              {kpisFor(block).map((def) => <KpiCard key={def.label} {...kpiForDef(def, cur, prev, cm, deltaPolicy)} />)}
+              {kpisFor(block).map((def) => {
+                const kpi = kpiForDef(def, cur, prev, cm, deltaPolicy);
+                const informado = def.metric ? overrides?.[block]?.[def.metric] : undefined;
+                return <KpiCard key={def.label} {...(informado != null ? { ...kpi, value: informado, showDelta: false } : kpi)} />;
+              })}
               {extra.map((k) => <KpiCard key={k.label} {...k} />)}
             </View>
           </>

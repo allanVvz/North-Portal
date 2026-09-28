@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeInstructions, extractReportInstructions } from "./reportInstructions";
+import { describeInstructions, extractReportInstructions, isReadingNoise } from "./reportInstructions";
 
 // O comentário real da Luiza no relatório da CRIS, 22/09 19:20 — o que motivou
 // este módulo. Antes ele não virava pedido nenhum.
@@ -111,11 +111,20 @@ describe("pedidos no jeito que a equipe escreve", () => {
 
   it("Karpinski: correção de alcance é entendida, não volta como 'não soube aplicar'", () => {
     const r = extractReportInstructions("Corrija o numero de alcance: total 6311. Sendo 8425 da campanha de trafego pro perfil e 3785 da campanha de mensagem pro whastapp");
-    expect(r).toEqual({ instrucoes: [{ kind: "alcance", valor: 6311 }], naoEntendido: [] });
+    expect(r).toEqual({ instrucoes: [{ kind: "alcance", valor: 6311, porObjetivo: { trafego_perfil: 8425, mensagens: 3785 } }], naoEntendido: [] });
   });
 
   it("Baita: número de seguidores não é pedido não entendido; a leitura entra", () => {
     const r = extractReportInstructions("Incluir crescimento de 114 novo seguidores nos dados do funil e campanhas\n\n\nLeitura da semana: Semana com foco em público novo em NH e POA.");
     expect(r).toEqual({ instrucoes: [{ kind: "narrativa", texto: "Semana com foco em público novo em NH e POA." }], naoEntendido: [] });
+  });
+});
+
+describe("o que não é leitura da semana", () => {
+  it("tira pedido, reclamação de layout e número solto; mantém a análise", () => {
+    expect(isReadingNoise("Seguidores novos:39")).toBe(true);
+    expect(isReadingNoise("Está sobrepondo entre criativos e o título da campanha seguinte")).toBe(true);
+    expect(isReadingNoise("Corrija o numero de alcance: total 6311.")).toBe(true);
+    expect(isReadingNoise("Nesta semana direcionamos a atenção para público engajado. Os criativos de carro novo e sobre PPF performaram bem.")).toBe(false);
   });
 });

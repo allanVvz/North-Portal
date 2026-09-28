@@ -31,7 +31,7 @@ import {
 import { costLadder, focusOf, heroFor, positiveFollowerFallback, resultAnalysis, resultFunnel, supportFigures, type FocusContext, type HistoryPoint } from "./conversionFocus";
 import type { PreviewAsset } from "./creativePreviews";
 import type { ReportContext } from "./conversionReportPlanning";
-import type { HideTarget } from "./reportInstructions";
+import { isReadingNoise, type HideTarget } from "./reportInstructions";
 import { creativeCardView, fullDay, shortDay, type TrafficFinalView } from "./adsReportPdf";
 import {
   AnalysisList, CreativeCards, DataTable, FigureRow, Footer, Headline, HeroFigure,
@@ -85,6 +85,9 @@ export type SalesReportInput = {
    *  seguidores", "retire o % comparativo"). Vem de
    *  lib/reports/reportInstructions.ts, através da ocorrência. */
   hidden?: HideTarget[];
+  /** Alcance corrigido pela equipe por objetivo ("8425 da campanha de tráfego
+   *  pro perfil"), que vence o da Meta nas boxes de cada bloco. */
+  reachByBlock?: Partial<Record<CampaignBlock, number>>;
   /** Entendimento auditável do North IA: contexto, precisão e trade-offs. */
   adaptiveContext?: AdaptiveInterpretation;
   /** Finalized view from the technical ads report. */
@@ -362,10 +365,16 @@ function SalesReportDocument(input: SalesReportInput) {
   if (config.reportKpiPolicy !== "generic") {
     // Só entra quando a equipe efetivamente escreveu uma análise. Contexto
     // interno, autoria e metatexto nunca são expostos ao cliente.
-    const operationalReading = [...new Set((input.adaptiveContext?.context ?? [])
-      .map((item) => item.text.replace(/\s+/g, " ").trim())
-      .filter(Boolean))]
-      .slice(-2);
+    // A leitura que a equipe mandou pronta ("Leitura da semana: …") vence; sem
+    // ela, só entra contexto que é análise — nunca pedido, reclamação de layout
+    // ou número solto (Cris e Karpinski, 28/09).
+    const leituraPedida = (input.reportContext?.narrative ?? []).filter((item) => item.kind === "pedido" && item.text.trim());
+    const operationalReading = leituraPedida.length
+      ? leituraPedida.map((item) => item.text.replace(/\s+/g, " ").trim())
+      : [...new Set((input.adaptiveContext?.context ?? [])
+        .map((item) => item.text.replace(/\s+/g, " ").trim())
+        .filter((text) => text && !isReadingNoise(text)))]
+        .slice(-2);
     const resultItems = [
       cur.vendas !== null ? { label: "Vendas", value: num(cur.vendas), delta: null } : null,
       cur.agendamentos !== null ? { label: "Agendamentos", value: num(cur.agendamentos), delta: null } : null,
@@ -485,6 +494,9 @@ function SalesReportDocument(input: SalesReportInput) {
             // conversão nunca mostra, mesmo quando o template do cliente o declara.
             // "Não incluir número de compras, nem custo por compra" (Cris, 28/09).
             hideMetrics={esconde("compras") ? ["cpm", "compras"] : ["cpm"]}
+            overrides={input.reachByBlock
+              ? Object.fromEntries(Object.entries(input.reachByBlock).map(([block, alcance]) => [block, { alcance }]))
+              : undefined}
             // % opcional: só aparece quando é ganho > 1%. Queda ou variação
             // pequena não vira placeholder — a linha inteira some do card. O
             // relatório de anúncios não usa esta política; continua mostrando
