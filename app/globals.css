@@ -4275,9 +4275,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
      transbordar. O zoom extra é desligado, e por isso as medidas aqui não
      precisam dividir por --tm-scale. */
   .tm-lg { --tm-scale: 1; height: calc((100dvh / var(--ui-scale)) - 40px); max-height: calc((100dvh / var(--ui-scale)) - 40px); }
-  .tm-layout:has(.tm-side) { grid-template-columns: 1fr; }
-  .tm-layout:has(.tm-side) .tm-side, .tm-side { grid-column: 1; grid-row: 2; margin: 4px 30px 20px; }
-  .tm-layout:has(.tm-side) .tm-main { grid-column: 1; grid-row: 1; min-height: auto; }
+  .tm-layout:has(.tm-side) { display: flex; flex-direction: column; }
+  .tm-layout:has(.tm-side) .tm-side, .tm-side { flex: none; min-height: auto; margin: 4px 30px 20px; }
+  .tm-layout:has(.tm-side) .tm-main { flex: none; min-height: 0; }
+  .tm-layout:has(.tm-side) .tm-commentsbox,
+  .tm-layout:has(.tm-side) .tm-comments { flex: none; min-height: 0; max-height: none; }
+  .tm-layout:has(.tm-side) .tm-comments { overflow: visible; }
   .tm-grid { grid-template-columns: repeat(2, 1fr); }
   .tm-typepicker { grid-template-columns: repeat(2, 1fr); }
 }

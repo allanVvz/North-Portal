@@ -63,6 +63,15 @@ test("plano Baita no ciclo North com Edição e Publicação por peça", async (
   await expect(planModal).toBeVisible();
   await expect(planModal.getByText(/Atividades do plano \(13\)/i)).toBeVisible();
   await expect(planModal.locator(".tm-comment-input")).toBeVisible();
+  const verticalFlow = await planModal.evaluate((element) => {
+    const main = element.querySelector(".tm-main")?.getBoundingClientRect();
+    const side = element.querySelector(".tm-side")?.getBoundingClientRect();
+    const composer = element.querySelector(".tm-comment-input")?.getBoundingClientRect();
+    const files = element.querySelector(".task-materials-projection")?.getBoundingClientRect();
+    return { mainBottom: main?.bottom, sideTop: side?.top, composerBottom: composer?.bottom, filesTop: files?.top };
+  });
+  expect(verticalFlow.sideTop).toBeGreaterThanOrEqual(verticalFlow.mainBottom! - 1);
+  if (verticalFlow.filesTop !== undefined) expect(verticalFlow.filesTop).toBeGreaterThanOrEqual(verticalFlow.composerBottom! - 1);
   const widthCheck = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, page: document.documentElement.scrollWidth }));
   expect(widthCheck.page).toBeLessThanOrEqual(widthCheck.viewport);
   await planModal.screenshot({ path: testInfo.outputPath("baita-plan-390.png") });
