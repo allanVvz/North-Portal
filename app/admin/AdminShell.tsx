@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import BrandLockup from "../brand/BrandLockup";
 import UserAvatar from "../avatar/UserAvatar";
 import { CurrentUserProvider, TeamPhotosProvider } from "./CurrentUserContext";
@@ -10,6 +11,11 @@ import type { TeamPhotoIndex } from "../avatar/photoKey";
 import NotificationsList from "./NotificationsList";
 import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
 import type { NotificationRecord } from "@/lib/notificationTypes";
+import type { TaskRecord } from "@/lib/validation";
+
+// O modal do card só carrega quando alguém abre uma notificação: o shell está
+// em toda página e não precisa levar o TaskModal no pacote inicial.
+const CardModalLauncher = dynamic(() => import("./CardModalLauncher"), { ssr: false });
 import { buildLiveKindDefs, setLiveKinds } from "@/lib/taskCatalog/liveKinds";
 import { setVisibleTaskTypes } from "@/lib/taskClassification";
 import { isNavItemActive } from "./navActive";
@@ -247,6 +253,13 @@ export default function AdminShell({
     };
   }, [menuOpen]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  // O que o painel mostra: as NÃO LIDAS no instante em que o sino abriu. Abrir
+  // marca tudo como lido, mas a lista fica parada até fechar — dá para ler e
+  // clicar; na próxima abertura, o que já foi visto não volta (30/09).
+  const [panelItems, setPanelItems] = useState<NotificationRecord[]>([]);
+  const [openCard, setOpenCard] = useState<(TaskRecord & { clientName?: string; clientSlug?: string }) | null>(null);
+  const latestCard = useRef<string | null>(null);
+  const router = useRouter();
   const accountRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const unreadCount = notifications.filter((n) => !n.read_at).length;
@@ -264,6 +277,21 @@ export default function AdminShell({
     refetchNotifications();
   }, [refetchNotifications]);
   useNotificationsRealtime(userId, refetchNotifications);
+
+  // Clicar numa notificação abre o card por cima da tela atual. Só o último
+  // clique vale (latestCard), e o grupo clicado já está lido pela abertura.
+  const openNotifiedCard = useCallback(async (taskId: string) => {
+    latestCard.current = taskId;
+    setNotifOpen(false);
+    try {
+      const res = await fetch(`/api/admin/tasks/${taskId}`);
+      if (!res.ok || latestCard.current !== taskId) return;
+      const task = await res.json() as TaskRecord & { clientName?: string; clientSlug?: string };
+      if (latestCard.current === taskId) setOpenCard(task);
+    } catch {
+      // rede caiu: o clique não abre nada
+    }
+  }, []);
 
   // Aquece o cache de identidade visual de tipos criados pela tela
   // (lib/taskCatalog/liveKinds.ts) uma vez por sessão admin — é daqui que
@@ -379,7 +407,10 @@ export default function AdminShell({
                 <button
                   type="button"
                   className="admin-icon-btn"
-                  onClick={() => setNotifOpen((open) => !open)}
+                  onClick={() => {
+                    if (!notifOpen) setPanelItems(notifications.filter((n) => !n.read_at).slice(0, 12));
+                    setNotifOpen((open) => !open);
+                  }}
                   aria-haspopup="menu"
                   aria-expanded={notifOpen}
                   aria-label="Notificações"
@@ -391,10 +422,10 @@ export default function AdminShell({
 
                 {notifOpen ? (
                   <div className="admin-notif-panel" role="menu">
-                    <p className="admin-notif-head">Notificações</p>
-                    <NotificationsList notifications={notifications} />
+                    <p className="admin-notif-head">Novas{panelItems.length ? <span>{panelItems.length}</span> : null}</p>
+                    <NotificationsList notifications={panelItems} emptyLabel="Nada novo. Tudo o que chegou já foi visto." onOpenTask={openNotifiedCard} />
                     <Link className="admin-notif-all" href="/admin/notificacoes" onClick={() => setNotifOpen(false)}>
-                      Ver todas →
+                      Histórico →
                     </Link>
                   </div>
                 ) : null}
@@ -499,7 +530,19 @@ export default function AdminShell({
 
       <main className="admin-main">
         <CurrentUserProvider user={{ name, email, initials, userId, avatarUrl }}>
-          <TeamPhotosProvider photos={teamPhotos}>{children}</TeamPhotosProvider>
+          <TeamPhotosProvider photos={teamPhotos}>
+            {children}
+            {openCard ? (
+              <CardModalLauncher
+                task={openCard}
+                clientName={openCard.clientName ?? "Outros"}
+                clientSlug={openCard.clientSlug ?? ""}
+                onClose={() => setOpenCard(null)}
+                onSaved={() => { setOpenCard(null); router.refresh(); }}
+                onDeleted={() => { setOpenCard(null); router.refresh(); }}
+              />
+            ) : null}
+          </TeamPhotosProvider>
         </CurrentUserProvider>
       </main>
     </div>

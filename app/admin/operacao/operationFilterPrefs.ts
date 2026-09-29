@@ -17,13 +17,24 @@ function isFilter(value: unknown): value is OperationFilter {
   return VALID_ATTRS.has(row.attr as OperationFilterAttr) && typeof row.value === "string" && typeof row.label === "string";
 }
 
+// O STATUS NUNCA é lembrado (30/09): a tela abre sempre em "tudo menos
+// Concluído", para todo mundo. Antes o conjunto inteiro era gravado, e quem
+// salvou filtros numa versão anterior (sem status, ou com Concluído) seguia
+// vendo concluídos para sempre — o padrão só valia para quem nunca mexeu. Os
+// outros atributos (cliente, tipo, responsável…) continuam lembrados.
+const REMEMBERED = (filter: OperationFilter) => filter.attr !== "status" && filter.attr !== "situacao";
+
+export function withDefaultStatus(stored: readonly OperationFilter[]): OperationFilter[] {
+  return [...DEFAULT_OPERATION_FILTERS, ...stored.filter(REMEMBERED)];
+}
+
 function read(): OperationFilter[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [...DEFAULT_OPERATION_FILTERS];
     const parsed: unknown = JSON.parse(raw);
     // Um formato antigo/estranho volta ao padrão em vez de filtrar errado.
-    return Array.isArray(parsed) && parsed.every(isFilter) ? parsed : [...DEFAULT_OPERATION_FILTERS];
+    return Array.isArray(parsed) && parsed.every(isFilter) ? withDefaultStatus(parsed) : [...DEFAULT_OPERATION_FILTERS];
   } catch {
     return [...DEFAULT_OPERATION_FILTERS];
   }
@@ -41,9 +52,9 @@ export function useOperationFilters() {
       const value = typeof next === "function" ? next(current) : next;
       if (!persist) return value;
       try {
-        // `situacao` vem do link (?situacao=) — é contexto da navegação, não
-        // preferência da pessoa, e não pode ficar grudado para a próxima visita.
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value.filter((filter) => filter.attr !== "situacao")));
+        // `situacao` vem do link (?situacao=) e o status volta ao padrão a cada
+        // visita — nenhum dos dois fica grudado para a próxima.
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value.filter(REMEMBERED)));
       } catch { /* sem localStorage: vale só nesta sessão */ }
       return value;
     });

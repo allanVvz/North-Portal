@@ -17,6 +17,8 @@ describe("peças do Feed", () => {
     task("reels-legado", { subtype: "reels", status: "revisao", due_date: "2026-09-16", payload: { publicado_em: "2026-08-06", ...driveLink("reels-file") }, parents: [{ id: "plano", relation_kind: "structural_member", slot: null, position: 0 }] }),
     task("publicado", { subtype: "publicacao", status: "aprovado", completed_at: "2026-09-10T10:00:00Z", payload: driveLink("pub-file") }),
     task("sem-capa", { subtype: "publicacao" }),
+    // IMAGENS TVs - PROMOÇÕES (b761524f): banner sem fluxo, links nos comentários.
+    task("banner-tv", { subtype: "banner", status: "aprovado", completed_at: "2026-09-03T19:48:58Z", payload: driveLink("tv-file") }),
     task("tarefa-qualquer", { payload: driveLink("x") }),
   ], [workspace], today);
 
@@ -31,7 +33,11 @@ describe("peças do Feed", () => {
   });
 
   it("sem imagem ou sem ser peça, fica fora; os três estados são contados", () => {
-    expect(pieces.map((piece) => piece.id).sort()).toEqual(["entrega", "publicado", "reels-legado"]);
-    expect(pieceCounts(pieces)).toEqual({ concluida: 1, atrasada: 2, producao: 0 });
+    expect(pieces.map((piece) => piece.id).sort()).toEqual(["banner-tv", "entrega", "publicado", "reels-legado"]);
+    expect(pieceCounts(pieces)).toEqual({ concluida: 2, atrasada: 2, producao: 0 });
+  });
+
+  it("todo formato do catálogo é peça: banner entra com o rótulo do catálogo", () => {
+    expect(pieces.find((piece) => piece.id === "banner-tv")).toMatchObject({ format: "Banner", legacy: true, covers: ["tv-file"], state: "concluida" });
   });
 });

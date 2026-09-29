@@ -2199,6 +2199,9 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .admin-notif-item.unread .admin-notif-text { font-weight: 600; }
 .admin-notif-text { font-size: 13.5px; line-height: 1.35; color: var(--a-ink); }
 .admin-notif-time { font-size: 11.5px; color: var(--a-muted); }
+.admin-notif-count { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--a-inset); color: var(--a-sec); font-size: 10.5px; font-weight: 700; }
+.admin-notif-head span { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--a-teal-strong); color: #fff; font-size: 10.5px; }
+.admin-notif-item.clickable { width: 100%; text-align: left; color: inherit; }
 /* Tela cheia da caixa de entrada: as linhas ganham separador, o que num
    dropdown de 8 itens seria ruído mas numa lista de 200 é o que dá ritmo. */
 .notif-screen { padding: 8px; }
@@ -6329,6 +6332,7 @@ a.clients-strip-tile:hover { background: var(--a-inset); }
 .feed-tile.is-grid { border-radius: 2px; }
 .feed-tile.is-reels, .feed-tile.is-vertical { aspect-ratio: 9 / 16; }
 .feed-tile.is-post, .feed-tile.is-carousel { aspect-ratio: 4 / 5; }
+.feed-tile.is-wide { aspect-ratio: 16 / 9; grid-column: 1 / -1; }
 .feed-tile-media { position: absolute; inset: 0; }
 .feed-tile-media img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; transition: transform .25s ease; }
 .feed-tile:hover .feed-tile-media img { transform: scale(1.03); }

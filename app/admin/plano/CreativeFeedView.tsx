@@ -16,6 +16,7 @@ function frameOf(format: string): string {
   const value = format.toLowerCase();
   if (value.includes("reel") || value.includes("stor")) return "vertical";
   if (value.includes("carrossel")) return "carousel";
+  if (value.includes("banner")) return "wide";
   return "post";
 }
 
@@ -76,12 +77,17 @@ export default function CreativeFeedView({ clientName, initialState, onOpen }: {
       // e centralizados), só os Reels (9:16) e o resto. Um reels aparece no
       // Feed e nos Reels — é assim que o Instagram o publica.
       <div className="feed-columns">
-        <FeedColumn title="Feed" hint="como no perfil" frame="grid" pieces={visible} onOpen={onOpen} onFail={fail} />
+        <FeedColumn title="Feed" hint="feed e reels, como no perfil" frame="grid" pieces={visible.filter(isProfilePiece)} onOpen={onOpen} onFail={fail} />
         <FeedColumn title="Reels" hint="9:16" frame="reels" pieces={visible.filter(isReels)} onOpen={onOpen} onFail={fail} />
-        <FeedColumn title="Outros" hint="posts, carrosséis, anúncios" frame="natural" pieces={visible.filter((piece) => !isReels(piece))} onOpen={onOpen} onFail={fail} />
+        <FeedColumn title="Outros" hint="posts, carrosséis, banners, anúncios" frame="natural" pieces={visible.filter((piece) => !isReels(piece))} onOpen={onOpen} onFail={fail} />
       </div>
     ) : <div className="creative-feed-zero">Nenhuma peça com imagem {state ? `em "${PIECE_STATE_LABEL[state].toLowerCase()}"` : ""} {clientName ? `para ${clientName}` : ""}.</div>}
   </section>;
+}
+
+/** O que aparece na grade do perfil: banner (TV, loja) e anúncio não vão para o perfil. */
+export function isProfilePiece(piece: Pick<Piece, "format">): boolean {
+  return !/banner|an[uú]ncio/i.test(piece.format);
 }
 
 /** Reels (e stories): pelo formato, pelo título ou por um final em vídeo. */

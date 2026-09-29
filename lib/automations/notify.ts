@@ -27,6 +27,29 @@
 import type { AdminClient } from "@/lib/automations/taskAccess";
 import type { NotificationType } from "@/lib/notificationTypes";
 
+/** Janela em que o mesmo aviso (card + tipo + texto) não se repete. */
+export const REPEAT_WINDOW_HOURS = 24;
+
+/**
+ * O mesmo aviso já saiu há pouco? (30/09/2026)
+ *
+ * O cron diário e o reprocessamento passam de novo pelos mesmos cards, e cada
+ * passada gerava de novo o mesmo aviso: "Reels Dj Sereno foi concluído" chegou
+ * 72 vezes para a mesma pessoa em uma semana (settleWorkflowDelivery avisa a
+ * cada acerto, mesmo com a Entrega já fechada). Um aviso idêntico dentro da
+ * janela não diz nada novo — fica só o primeiro. Falha na checagem não
+ * bloqueia: na dúvida, avisa.
+ */
+async function alreadyNotified(admin: AdminClient, taskId: string, type: NotificationType, message: string): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - REPEAT_WINDOW_HOURS * 3600_000).toISOString();
+    const { data, error } = await admin.from("notifications").select("id").eq("task_id", taskId).eq("type", type).eq("message", message).gte("created_at", since).limit(1);
+    return !error && (data ?? []).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function notifyFromAutomation(
   admin: AdminClient,
   taskId: string,
@@ -35,6 +58,7 @@ export async function notifyFromAutomation(
   actorId: string | null = null,
 ): Promise<void> {
   try {
+    if (await alreadyNotified(admin, taskId, type, message)) return;
     const { error } = await admin.rpc("notify_task_participants", {
       p_task_id: taskId,
       p_type: type,

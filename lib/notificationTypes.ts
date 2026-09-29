@@ -44,6 +44,9 @@ export type NotificationRecord = {
   message: string;
   read_at: string | null;
   created_at: string;
+  /** Linhas agrupadas nesta (mesmo card e mesmo tipo) — ver lib/notificationGroups.ts. */
+  count?: number;
+  ids?: string[];
 };
 
 export const NOTIFICATION_TYPE_LABEL: Record<NotificationType, string> = {

@@ -84,6 +84,15 @@ export default function NotificationsScreen({ initial }: { initial: Notification
   }
 
   async function openCard(taskId: string) {
+    // Abrir o card é ter visto o aviso: o grupo inteiro daquele card fica lido.
+    const ids = notifications.filter((n) => n.task_id === taskId && !n.read_at).flatMap((n) => n.ids ?? [n.id]);
+    if (ids.length) {
+      const now = new Date().toISOString();
+      setNotifications((rows) => rows.map((r) => (r.task_id === taskId ? { ...r, read_at: r.read_at ?? now } : r)));
+      for (let i = 0; i < ids.length; i += 200) {
+        fetch("/api/admin/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ids.slice(i, i + 200) }) }).catch(() => {});
+      }
+    }
     const res = await fetch(`/api/admin/tasks/${taskId}`);
     if (!res.ok) return;
     setOpenTask((await res.json()) as TaskRecord);

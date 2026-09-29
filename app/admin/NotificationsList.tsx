@@ -46,7 +46,10 @@ export default function NotificationsList({
             </span>
             <span className="admin-notif-body">
               <span className="admin-notif-text">{notif.message}</span>
-              <span className="admin-notif-time">{formatCommentTime(notif.created_at)}</span>
+              <span className="admin-notif-time">
+                {formatCommentTime(notif.created_at)}
+                {(notif.count ?? 1) > 1 ? <b className="admin-notif-count" title="Avisos iguais sobre este card, agrupados">{notif.count}×</b> : null}
+              </span>
             </span>
           </>
         );

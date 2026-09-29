@@ -13,6 +13,7 @@
 
 import { latestFinalCover, type CreativeMaterialWorkspace } from "./cardMaterials";
 import { taskCoverCandidates } from "./taskCover";
+import { subtypeLabel } from "./taskCatalog";
 import { isFlowDelivery, relationKindOf } from "./taskRelations";
 import { isRecurrenceTemplate } from "./recurrenceState";
 import type { TaskRecord } from "./validation";
@@ -36,7 +37,13 @@ export type Piece = {
 
 type PieceTask = TaskRecord & { clientName?: string; clientSlug?: string };
 
-const LEGACY_SUBTYPES = new Set(["publicacao", "reels", "carrossel", "post", "stories", "edicao"]);
+// Subtipos que são peça publicável. Os formatos do catálogo (lib/taskCatalog.ts,
+// "Formatos de publicação") entram TODOS — "banner" faltava aqui e as imagens de
+// TV da Baita (b761524f, subtipo banner) sumiam do Feed. `stories`/`post` ficam
+// pelos cards antigos. Exportado para a rota filtrar com a mesma lista.
+export const PIECE_FORMAT_SUBTYPES = ["reels", "story", "stories", "carrossel", "anuncio", "banner", "post"] as const;
+export const LEGACY_PIECE_SUBTYPES = ["publicacao", "edicao", ...PIECE_FORMAT_SUBTYPES] as const;
+const LEGACY_SUBTYPES = new Set<string>(LEGACY_PIECE_SUBTYPES);
 const DELIVERY_KINDS = /^(criativo|entrega_)/;
 
 function formatOf(task: TaskRecord): string {
@@ -44,8 +51,8 @@ function formatOf(task: TaskRecord): string {
   if (stored) return stored;
   const fromKind = /^entrega_(\w+)/.exec(task.kind)?.[1];
   if (fromKind) return fromKind === "anuncio" ? "Anúncio" : fromKind[0].toUpperCase() + fromKind.slice(1);
-  if (task.subtype && ["reels", "carrossel", "post", "stories"].includes(task.subtype)) return task.subtype[0].toUpperCase() + task.subtype.slice(1);
-  return /(reels?|stories?|carrossel|an[uú]ncio)/i.exec(task.title)?.[0] ?? "";
+  if (task.subtype && (PIECE_FORMAT_SUBTYPES as readonly string[]).includes(task.subtype)) return subtypeLabel(task.subtype);
+  return /(reels?|stories?|carrossel|an[uú]ncio|banner)/i.exec(task.title)?.[0] ?? "";
 }
 
 function stateOf(task: TaskRecord, today: string): PieceState {

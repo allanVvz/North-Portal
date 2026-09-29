@@ -4,7 +4,7 @@ import { requireAdmin } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TASK_COLUMNS } from "@/lib/taskColumns";
 import { asTaskRecord } from "@/lib/automations/taskAccess";
-import { buildPieces, pieceCounts, type PieceState } from "@/lib/pieces";
+import { buildPieces, LEGACY_PIECE_SUBTYPES, pieceCounts, type PieceState } from "@/lib/pieces";
 import type { CreativeMaterialWorkspace } from "@/lib/cardMaterials";
 import { agencyToday } from "@/lib/time/agency";
 
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     // tarefas custava ~7s.
     const taskQuery = admin.from("tasks").select(`${TASK_COLUMNS},${LINKS},clients(name,slug,disabled,is_active)`)
       .is("recurrence_cadence", null)
-      .or("workflow_version_id.not.is.null,kind.eq.criativo,kind.like.entrega_%,subtype.in.(publicacao,reels,carrossel,post,stories,edicao,captacao,roteiro)");
+      .or(`workflow_version_id.not.is.null,kind.eq.criativo,kind.like.entrega_%,subtype.in.(${[...LEGACY_PIECE_SUBTYPES, "captacao", "roteiro"].join(",")})`);
     const [tasksResult, workspacesResult] = await Promise.all([
       taskQuery,
       admin.from("drive_creative_workspaces").select("id,plan_task_id,capture_task_id,creative_task_id,status,assets:drive_assets!drive_assets_workspace_id_fkey(id,drive_file_id,name,mime_type,size_bytes,role,state,web_view_link,created_at),final_versions:drive_final_versions!drive_final_versions_workspace_id_fkey(id,asset_id,version_number,state,promoted_at)"),
