@@ -633,11 +633,15 @@ export default function TaskModal({
   // Entrega sem a automação de pastas (fluxo legado): os arquivos vêm dos
   // links colados nela e nas etapas — lib/deliveryLinks.ts, a mesma leitura
   // da capa e do Feed (30/09).
-  const legacyLinks = useMemo(
-    () => (liveTask && isFlowDelivery(liveTask) && !cardWorkspaces.some((workspace) => workspace.creative_task_id === liveTask.id)
-      ? deliveryDriveLinks(liveTask, flowStepsOf(liveTask.id, clientTasks)) : []),
-    [liveTask, clientTasks, cardWorkspaces],
-  );
+  // Os links colados valem com ou sem a automação de pastas: enquanto a
+  // pasta automática não tiver final nem preview, a caixa mostra o que foi
+  // colado (30/09 — o Carrossel ganhou pastas vazias e os links sumiram da
+  // vista). A Entrega é reconhecida também pelas etapas.
+  const legacyLinks = useMemo(() => {
+    if (!liveTask) return [];
+    const steps = flowStepsOf(liveTask.id, clientTasks);
+    return isFlowDelivery(liveTask) || steps.length ? deliveryDriveLinks(liveTask, steps) : [];
+  }, [liveTask, clientTasks]);
   const activeMedia = activeMaterialTab === "preview" ? materialPreviews : activeMaterialTab === "final" ? materialFinals : [];
   const commentAssets = useMemo(() => new Map(materialWorkspaces.flatMap((workspace) => workspace.assets.map((asset) => [asset.id, { asset, workspace }] as const))), [materialWorkspaces]);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
@@ -2384,10 +2388,11 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {mode === "edit" && legacyLinks.length && !materialTabs.length ? (
+            {mode === "edit" && legacyLinks.length && !materialFinals.length && !materialPreviews.length ? (
               <section className="tm-materials" aria-label="Arquivos do card">
                 <div className="tm-materials-heading">
                   <div><p className="tm-box-label">Arquivos</p><strong>Dos links colados</strong></div>
+                  {filesTaskId ? <button type="button" className="tm-materials-open" onClick={openFiles}>Pastas do Drive ↗</button> : null}
                 </div>
                 <LegacyDriveFiles links={legacyLinks} />
               </section>
