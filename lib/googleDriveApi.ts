@@ -142,6 +142,32 @@ export async function getDriveItemMetadata(fileId: string): Promise<DriveItemMet
   };
 }
 
+/** Todas as pastas (fora da lixeira) que a automação marcou com este papel
+ *  em appProperties (`north_role`) — base da limpeza de sobras (30/09). */
+export async function listDriveFoldersByRole(role: string): Promise<{ id: string; name: string; parents: string[]; createdTime: string | null }[]> {
+  const token = await accessToken();
+  if (!token) return [];
+  const out: { id: string; name: string; parents: string[]; createdTime: string | null }[] = [];
+  let pageToken: string | null = null;
+  for (let page = 0; page < 10; page += 1) {
+    const params = new URLSearchParams({
+      q: `appProperties has { key='north_role' and value='${driveEscaped(role)}' } and trashed = false and mimeType = '${FOLDER_MIME}'`,
+      fields: "nextPageToken,files(id,name,parents,createdTime)",
+      pageSize: "200",
+      supportsAllDrives: "true",
+      includeItemsFromAllDrives: "true",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const res = await fetch(`${DRIVE_FILES}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new HttpError(502, `Falha ao listar pastas da automação (HTTP ${res.status}).`);
+    const data = await res.json() as { nextPageToken?: string; files?: { id: string; name?: string; parents?: string[]; createdTime?: string }[] };
+    out.push(...(data.files ?? []).map((file) => ({ id: file.id, name: file.name ?? "(sem nome)", parents: file.parents ?? [], createdTime: file.createdTime ?? null })));
+    if (!data.nextPageToken) break;
+    pageToken = data.nextPageToken;
+  }
+  return out;
+}
+
 /** Cria ou recupera um item pela chave de reconciliacao em appProperties. */
 export async function findDriveItemByAppProperties(
   parentId: string,

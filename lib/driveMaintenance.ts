@@ -13,11 +13,16 @@
 //   2. cópias vazias de uma diária registrada, sem registro no banco → lixeira
 //      (só se não houver NENHUM arquivo dentro, em nenhum nível);
 //   3. registros de arquivo (drive_assets ativos) cujo arquivo sumiu → `error`
-//      (os que estão na lixeira só entram no relatório).
+//      (os que estão na lixeira só entram no relatório);
+//   4. SOBRAS: pastas-raiz que a automação criou (de criativo ou de diária)
+//      e que nenhum registro usa mais, vazias em todos os níveis → lixeira.
+//      Nasceu de 29/09: gravar o formato de dois cards legados preparou pastas
+//      sozinho, e elas ficaram sobrando quando os cards foram ligados às
+//      pastas que já existiam.
 // Nada é apagado de verdade: lixeira do Drive e estado no banco se desfazem.
 
 import type { createAdminClient } from "./supabase/admin";
-import { addDriveParent, driveOwnRootId, getDriveItemState, listFolderFilesPage, setDriveItemTrashed, type DriveItemState } from "./googleDriveApi";
+import { addDriveParent, driveOwnRootId, getDriveItemState, listDriveFoldersByRole, listFolderFilesPage, setDriveItemTrashed, type DriveItemState } from "./googleDriveApi";
 import { recordedFolderAction } from "./creativeDriveModel";
 
 type Db = ReturnType<typeof createAdminClient>;
@@ -31,10 +36,12 @@ export type FolderCheck = {
   location?: string[];
 };
 export type DuplicateCheck = { id: string; name: string; parentId: string; action: string | null };
+export type LeftoverCheck = { id: string; name: string; role: string; createdTime: string | null; action: string };
 export type DriveMaintenanceReport = {
   apply: boolean;
   folders: FolderCheck[];
   duplicates: DuplicateCheck[];
+  leftovers: LeftoverCheck[];
   assets: { checked: number; missing: number; trashed: number; updated: number; sample: string[] };
   errors: string[];
 };
@@ -68,7 +75,7 @@ async function inBatches<T, R>(items: readonly T[], size: number, run: (item: T)
 }
 
 export async function runDriveMaintenance(db: Db, options: { apply: boolean }): Promise<DriveMaintenanceReport> {
-  const report: DriveMaintenanceReport = { apply: options.apply, folders: [], duplicates: [], assets: { checked: 0, missing: 0, trashed: 0, updated: 0, sample: [] }, errors: [] };
+  const report: DriveMaintenanceReport = { apply: options.apply, folders: [], duplicates: [], leftovers: [], assets: { checked: 0, missing: 0, trashed: 0, updated: 0, sample: [] }, errors: [] };
 
   const [{ data: captures, error: capturesError }, { data: links, error: linksError }] = await Promise.all([
     db.from("drive_capture_workspaces").select("id,client_id,daily_folder_id,script_folder_id,capture_folder_id"),
@@ -123,6 +130,32 @@ export async function runDriveMaintenance(db: Db, options: { apply: boolean }): 
     } catch (error) {
       report.errors.push(`cópias em ${raw}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // 4. Sobras: pasta-raiz da automação que nenhum registro usa, vazia.
+  try {
+    const [{ data: creativeRows, error: creativeError }, { data: captureRows, error: captureRowsError }] = await Promise.all([
+      db.from("drive_creative_workspaces").select("creative_folder_id,final_folder_id,raw_folder_id,preview_folder_id"),
+      db.from("drive_capture_workspaces").select("daily_folder_id,script_folder_id,capture_folder_id"),
+    ]);
+    if (creativeError) throw creativeError;
+    if (captureRowsError) throw captureRowsError;
+    const referenced = new Set<string>(
+      [...(creativeRows ?? []), ...(captureRows ?? [])].flatMap((row) => Object.values(row as Record<string, string | null>)).filter((id): id is string => Boolean(id)),
+    );
+    for (const role of ["creative_root", "daily_root"]) {
+      for (const folder of await listDriveFoldersByRole(role)) {
+        if (referenced.has(folder.id)) continue;
+        if (!(await isEmptyTree(folder.id))) {
+          report.leftovers.push({ id: folder.id, name: folder.name, role, createdTime: folder.createdTime, action: "mantida: tem arquivos" });
+          continue;
+        }
+        if (options.apply) await setDriveItemTrashed(folder.id, true);
+        report.leftovers.push({ id: folder.id, name: folder.name, role, createdTime: folder.createdTime, action: options.apply ? "enviada para a lixeira" : "iria para a lixeira" });
+      }
+    }
+  } catch (error) {
+    report.errors.push(`sobras: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // 3. Registros de arquivos que sumiram.
