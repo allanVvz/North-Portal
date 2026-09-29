@@ -80,7 +80,8 @@ export function buildPieces(tasks: readonly PieceTask[], workspaces: readonly Cr
     const legacy = !task.workflow_version_id && (LEGACY_SUBTYPES.has(task.subtype ?? "") || task.kind === "criativo");
     if (!delivery && !legacy) continue;
 
-    const final = delivery ? latestFinalCover(byCreative.get(task.id) ?? []) : null;
+    const format = formatOf(task);
+    const final = delivery ? latestFinalCover(byCreative.get(task.id) ?? [], { carousel: /carrossel/i.test(format) }) : null;
     // Entrega: os links dela e das etapas, sem o que foi marcado para outra
     // Entrega que divide a mesma etapa, Edição mais recente primeiro
     // (lib/deliveryLinks.ts). Legado sem fluxo: os links do próprio card.
@@ -96,7 +97,7 @@ export function buildPieces(tasks: readonly PieceTask[], workspaces: readonly Cr
       title: task.title,
       clientName: task.clientName ?? "",
       clientSlug: task.clientSlug ?? "",
-      format: formatOf(task),
+      format,
       covers,
       coverSource: final ? "final" : "link",
       isVideo: Boolean(final?.mime_type.startsWith("video/")),

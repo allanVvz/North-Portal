@@ -84,8 +84,11 @@ export function materialCoverCandidates(workspaces: readonly CreativeMaterialWor
 /** A capa de um criativo no Feed: o ÚLTIMO arquivo anexado em `final` (imagem
  *  ou vídeo — a rota de miniatura do Drive devolve o quadro do vídeo). Sem
  *  final, o criativo ainda não tem o que publicar e fica fora do Feed. */
-export function latestFinalCover(workspaces: readonly CreativeMaterialWorkspace[]): CreativeMaterialAsset | null {
-  return workspaces.flatMap((workspace) => workspace.assets)
-    .filter((asset) => asset.role === "final" && asset.state === "active" && /^(image|video)\//.test(asset.mime_type))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))[0] ?? null;
+export function latestFinalCover(workspaces: readonly CreativeMaterialWorkspace[], options: { carousel?: boolean } = {}): CreativeMaterialAsset | null {
+  const finals = workspaces.flatMap((workspace) => workspace.assets)
+    .filter((asset) => asset.role === "final" && asset.state === "active" && /^(image|video)\//.test(asset.mime_type));
+  // Carrossel (30/09): os finais são o CONJUNTO de artes, não versões — a
+  // capa é a primeira arte pela ordem de nome ("01 Capa…").
+  if (options.carousel) return [...finals].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true }))[0] ?? null;
+  return finals.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))[0] ?? null;
 }

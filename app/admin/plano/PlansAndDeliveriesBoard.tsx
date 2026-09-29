@@ -242,9 +242,14 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
     const byCreative = new Map<string, CreativeMaterialWorkspace[]>();
     for (const workspace of materialWorkspaces) byCreative.set(workspace.creative_task_id, [...(byCreative.get(workspace.creative_task_id) ?? []), workspace]);
     const map = new Map<string, string>();
-    for (const [id, list] of byCreative) { const cover = latestFinalCover(list); if (cover) map.set(id, cover.drive_file_id); }
+    for (const [id, list] of byCreative) {
+      const card = orderedDeliveries.find((delivery) => delivery.id === id);
+      const format = typeof card?.payload?.formato === "string" ? card.payload.formato : card?.kind ?? "";
+      const cover = latestFinalCover(list, { carousel: /carrossel/i.test(format) });
+      if (cover) map.set(id, cover.drive_file_id);
+    }
     return map;
-  }, [materialWorkspaces]);
+  }, [materialWorkspaces, orderedDeliveries]);
 
   useEffect(() => {
     const id = searchParams.get("task");
