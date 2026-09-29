@@ -37,7 +37,7 @@ export default async function AdminClientsPage() {
   const novosLeads = leads.filter((lead) => lead.status === "novo").length;
 
   return (
-    <section className="admin-page">
+    <section className="admin-page kb-wide clients-page">
       <header className="admin-head">
         <div>
           <h1 className="admin-title">Clientes</h1>

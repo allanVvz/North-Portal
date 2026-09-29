@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AdminHomeSummary, HomeFocus } from "@/lib/supabase";
@@ -77,17 +77,21 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
   const router = useRouter();
   const insights = useClientInsights();
 
+  // Só o último clique abre: um card lento não pode passar por cima do seguinte.
+  const latestOpen = useRef<string | null>(null);
   const openCard = useCallback(async (item: { id: string; clientName: string; clientSlug: string }) => {
+    latestOpen.current = item.id;
     setOpeningId(item.id);
     try {
       const res = await fetch(`/api/admin/tasks/${item.id}`);
-      if (!res.ok) return;
+      if (!res.ok || latestOpen.current !== item.id) return;
       const task = (await res.json()) as TaskRecord;
+      if (latestOpen.current !== item.id) return;
       setOpenTask({ task, clientName: item.clientName, clientSlug: item.clientSlug });
     } catch {
       // rede caiu — o clique simplesmente não abre nada, sem quebrar a Home
     } finally {
-      setOpeningId(null);
+      if (latestOpen.current === item.id) setOpeningId(null);
     }
   }, []);
 

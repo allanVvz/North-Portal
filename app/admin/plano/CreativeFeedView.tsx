@@ -57,6 +57,8 @@ export default function CreativeFeedView({ clientName, initialState, onOpen }: {
   if (failed) return <div className="creative-feed-zero">Não foi possível carregar as peças agora.</div>;
   if (!pieces) return <div className="creative-feed-zero">Carregando as peças e as capas do Drive…</div>;
 
+  const fail = (id: string) => setBroken((current) => new Set(current).add(id));
+
   return <section className="creative-feed" aria-label="Feed de peças">
     <div className="creative-feed-heading">
       <div className="feed-states" role="group" aria-label="Filtrar por estado">
@@ -70,25 +72,51 @@ export default function CreativeFeedView({ clientName, initialState, onOpen }: {
       {broken.size ? <small>{broken.size} sem miniatura no Drive ficaram fora</small> : null}
     </div>
     {visible.length ? (
-      <div className="creative-feed-grid">
-        {visible.map((piece) => (
-          <article className="creative-feed-card" key={piece.id}>
-            <button type="button" className={`creative-feed-media is-${frameOf(piece.format)}`} onClick={() => onOpen(piece.id)} aria-label={`Abrir ${piece.title}`}>
-              <span className="creative-feed-media-image"><PieceMedia piece={piece} onFail={() => setBroken((current) => new Set(current).add(piece.id))} /></span>
-              <span className="creative-feed-badges">
-                {piece.coverSource === "final" ? <span className="creative-feed-badge is-publish">Final</span> : null}
-                {piece.isVideo ? <span className="creative-feed-badge">▶ vídeo</span> : null}
-                {piece.legacy ? <span className="creative-feed-badge">card antigo</span> : null}
-              </span>
-            </button>
-            <div className="creative-feed-caption">
-              <strong title={piece.title}>{piece.title}</strong>
-              <span className="op-lean-state"><span className={`op-dot tone-${STATE_TONE[piece.state]}`} aria-hidden /><b>{PIECE_STATE_LABEL[piece.state].replace(/s$/, "")}</b>{piece.date ? <em>· {piece.date.slice(8, 10)}/{piece.date.slice(5, 7)}</em> : null}</span>
-              <small>{piece.clientName}{piece.format ? ` · ${piece.format}` : ""}</small>
-            </div>
-          </article>
-        ))}
+      // Três colunas (30/09): o Feed como o perfil mostra (4:5, reels cortados
+      // e centralizados), só os Reels (9:16) e o resto. Um reels aparece no
+      // Feed e nos Reels — é assim que o Instagram o publica.
+      <div className="feed-columns">
+        <FeedColumn title="Feed" hint="como no perfil" frame="grid" pieces={visible} onOpen={onOpen} onFail={fail} />
+        <FeedColumn title="Reels" hint="9:16" frame="reels" pieces={visible.filter(isReels)} onOpen={onOpen} onFail={fail} />
+        <FeedColumn title="Outros" hint="posts, carrosséis, anúncios" frame="natural" pieces={visible.filter((piece) => !isReels(piece))} onOpen={onOpen} onFail={fail} />
       </div>
     ) : <div className="creative-feed-zero">Nenhuma peça com imagem {state ? `em "${PIECE_STATE_LABEL[state].toLowerCase()}"` : ""} {clientName ? `para ${clientName}` : ""}.</div>}
   </section>;
+}
+
+/** Reels (e stories): pelo formato, pelo título ou por um final em vídeo. */
+export function isReels(piece: Pick<Piece, "format" | "title" | "isVideo">): boolean {
+  return /reel|stor/i.test(piece.format) || /\breels?\b/i.test(piece.title) || piece.isVideo;
+}
+
+function FeedColumn({ title, hint, frame, pieces, onOpen, onFail }: {
+  title: string;
+  hint: string;
+  frame: "grid" | "reels" | "natural";
+  pieces: Piece[];
+  onOpen: (taskId: string) => void;
+  onFail: (id: string) => void;
+}) {
+  return (
+    <section className={`feed-column is-${frame}`} aria-label={title}>
+      <header className="feed-column-head"><h3>{title}</h3><span>{pieces.length} · {hint}</span></header>
+      {pieces.length ? (
+        <div className="feed-column-grid">
+          {pieces.map((piece) => (
+            <button type="button" key={piece.id} className={`feed-tile is-${frame === "natural" ? frameOf(piece.format) : frame}`} onClick={() => onOpen(piece.id)} aria-label={`Abrir ${piece.title}`} title={`${piece.title} · ${piece.clientName}`}>
+              <span className="feed-tile-media"><PieceMedia piece={piece} onFail={() => onFail(piece.id)} /></span>
+              <span className="feed-tile-badges">
+                {isReels(piece) ? <span className="creative-feed-badge">▶</span> : null}
+                {piece.legacy ? <span className="creative-feed-badge">antigo</span> : null}
+              </span>
+              <span className="feed-tile-caption">
+                <b><span className={`op-dot tone-${STATE_TONE[piece.state]}`} aria-hidden />{piece.title}</b>
+                <em>{piece.clientName}{piece.date ? ` · ${piece.date.slice(8, 10)}/${piece.date.slice(5, 7)}` : ""}</em>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : <p className="feed-column-empty">Nada aqui neste recorte.</p>}
+    </section>
+  );
 }

@@ -200,13 +200,21 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   useEffect(() => { if (searchParams.get("visao") === "feed") setView("feed"); }, [searchParams]);
   const feedClient = filters.find((filter) => filter.attr === "cliente")?.value ?? null;
   // Peça legada fora de planos e entregas: busca o card pelo id para abrir.
+  // Dois cliques rápidos em peças diferentes: só o último abre (latestOpen).
+  const latestOpen = useRef<string | null>(null);
   const openById = async (id: string) => {
+    latestOpen.current = id;
     const target = [...orderedDeliveries, ...orderedPlans].map((card) => deepLinkTarget(card, id)).find(Boolean);
     if (target) { setEditing(target); return; }
-    const response = await fetch(`/api/admin/tasks/${id}`);
-    if (!response.ok) return;
-    const task = await response.json() as TaskRecord & { clientName?: string; clientSlug?: string };
-    setEditing({ task, clientName: task.clientName ?? "", clientSlug: task.clientSlug ?? "", relatedTasks: [] });
+    try {
+      const response = await fetch(`/api/admin/tasks/${id}`);
+      if (!response.ok || latestOpen.current !== id) return;
+      const task = await response.json() as TaskRecord & { clientName?: string; clientSlug?: string };
+      if (latestOpen.current !== id) return;
+      setEditing({ task, clientName: task.clientName ?? "", clientSlug: task.clientSlug ?? "", relatedTasks: [] });
+    } catch {
+      // rede caiu: o clique não abre nada, sem erro solto no console
+    }
   };
 
   // Os arquivos do Drive servem às capas das duas visões. A leitura (GET) é

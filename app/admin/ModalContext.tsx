@@ -106,13 +106,16 @@ export default function ModalContext({ task, clientName, clientSlug, clientTasks
     const day = holder.payload?.occurrence_date;
     return typeof day === "string" ? day : null;
   })();
-  const [insight, setInsight] = useState<ClientInsight | null>(null);
+  // Guardado com o slug de origem: ao trocar de card (outro cliente), o número
+  // do cliente anterior nunca aparece enquanto o novo carrega.
+  const [loaded, setLoaded] = useState<{ slug: string; insight: ClientInsight | null } | null>(null);
+  const insight = isReport && loaded && loaded.slug === clientSlug ? loaded.insight : null;
   useEffect(() => {
     if (!isReport || !clientSlug) return;
     let active = true;
     fetch(`/api/admin/insights/clients?slug=${encodeURIComponent(clientSlug)}&weeks=4`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
-      .then((data: { insights?: ClientInsight[] } | null) => { if (active) setInsight(data?.insights?.[0] ?? null); })
+      .then((data: { insights?: ClientInsight[] } | null) => { if (active) setLoaded({ slug: clientSlug, insight: data?.insights?.[0] ?? null }); })
       .catch(() => {});
     return () => { active = false; };
   }, [isReport, clientSlug]);
