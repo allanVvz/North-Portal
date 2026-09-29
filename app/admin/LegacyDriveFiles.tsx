@@ -35,7 +35,7 @@ export default function LegacyDriveFiles({ links }: { links: DeliveryLink[] }) {
         if (kind !== "folder") return;
         fetch(`/api/admin/drive/files?folderId=${encodeURIComponent(link.id)}&limit=24`)
           .then((response) => (response.ok ? response.json() : null))
-          .then((data: { files?: DriveFile[] } | null) => { if (active) setFolders((current) => ({ ...current, [link.id]: { id: link.id, source: link.source, files: (data?.files ?? []).filter((file) => file.mimeType !== "application/vnd.google-apps.folder") } })); })
+          .then((data: { files?: DriveFile[] } | null) => { if (active) setFolders((current) => ({ ...current, [link.id]: { id: link.id, source: link.source, files: (data?.files ?? []).filter((file) => file.mimeType !== "application/vnd.google-apps.folder").sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "pt-BR", { numeric: true })) } })); })
           .catch(() => { if (active) setFolders((current) => ({ ...current, [link.id]: { id: link.id, source: link.source, files: [] } })); });
       });
     }
