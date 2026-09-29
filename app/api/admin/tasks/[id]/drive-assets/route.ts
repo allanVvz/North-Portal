@@ -6,6 +6,7 @@ import {
   completeCreativeUpload,
   getCreativeDriveWorkspace,
   linkRawAsset,
+  demoteCreativeAsset,
   moveCreativeAssetToRaw,
   promoteCreativeAsset,
   resolveCreativeDriveContext,
@@ -29,6 +30,7 @@ const bodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("unlink_raw"), assetId: z.string().uuid() }),
   z.object({ action: z.literal("move_to_raw"), assetId: z.string().uuid() }),
   z.object({ action: z.literal("promote"), assetId: z.string().uuid() }),
+  z.object({ action: z.literal("demote_final"), assetId: z.string().uuid() }),
   z.object({ action: z.literal("trash_final"), versionId: z.string().uuid() }),
   z.object({ action: z.literal("restore_final"), versionId: z.string().uuid() }),
 ]);
@@ -104,6 +106,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         }
         return NextResponse.json(promoted);
       }
+      case "demote_final":
+        return NextResponse.json(await demoteCreativeAsset(db, id, input.assetId));
       case "trash_final":
         await setFinalVersionTrashed(db, id, input.versionId, true);
         return NextResponse.json({ ok: true });

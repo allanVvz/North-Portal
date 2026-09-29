@@ -519,6 +519,32 @@ export async function moveCreativeAssetToRaw(db: Db, creativeTaskId: string, ass
   return { ...asset, role: "raw" };
 }
 
+/**
+ * Um final volta para Preview (30/09): tira da pasta das peças prontas (Def
+ * ou raiz) e registra como preview. Serve para arrumar o que foi posto como
+ * final e era só uma versão de trabalho — "Não é Todo Mundo" tinha #2, #3 e
+ * #4 como finais, e só o #4 era o final.
+ */
+export async function demoteCreativeAsset(db: Db, creativeTaskId: string, assetId: string) {
+  const workspace = await readyWorkspace(db, creativeTaskId);
+  const { data: asset, error } = await db.from("drive_assets").select("*")
+    .eq("workspace_id", workspace.id).eq("id", assetId).eq("state", "active").maybeSingle();
+  failDb(error);
+  if (!asset || asset.role !== "final") throw new HttpError(400, "Só um final pode voltar para Preview.");
+  const file = await getDriveItemMetadata(asset.drive_file_id);
+  if (!file) throw new HttpError(404, "Arquivo nao encontrado no Drive.");
+  const home = workspace.final_folder_id || workspace.creative_folder_id!;
+  if (file.parents?.includes(home)) await moveDriveItemBetweenFolders(file.id, home, workspace.preview_folder_id!);
+  else if (!file.parents?.includes(workspace.preview_folder_id!)) throw new HttpError(409, "O arquivo nao esta nas pastas deste Criativo.");
+  const { error: registerError } = await db.rpc("register_drive_folder_asset", {
+    p_workspace_id: workspace.id, p_drive_file_id: file.id, p_name: file.name,
+    p_mime_type: file.mimeType, p_size_bytes: file.size, p_web_view_link: file.webViewLink,
+    p_role: "preview", p_source_created_at: asset.created_at,
+  });
+  failDb(registerError);
+  return { ...asset, role: "preview" };
+}
+
 export async function promoteCreativeAsset(db: Db, userId: string, creativeTaskId: string, assetId: string) {
   const workspace = await readyWorkspace(db, creativeTaskId);
   const { data: asset, error: assetError } = await db.from("drive_assets").select("*")
