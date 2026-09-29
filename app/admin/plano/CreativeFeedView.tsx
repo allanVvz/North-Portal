@@ -1,93 +1,94 @@
 "use client";
 
-import { useState } from "react";
-import { latestFinalCover, type CreativeMaterialAsset, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
-import { currentFlowStepOf } from "@/lib/flows/currentStep";
-import type { FlowDelivery } from "@/lib/supabase";
-import { operationState, parentOperationItem } from "../operacao/operationItems";
+import { useEffect, useMemo, useState } from "react";
+import type { Piece, PieceState } from "@/lib/pieces";
 
-// O Feed mostra o que já tem o que publicar (29/09): criativos com arquivo em
-// `final`, e a capa é o ÚLTIMO final anexado. Antes a capa caía para previews
-// e links soltos do card, e o Feed misturava peça pronta com peça sem nada —
-// uma parede de placeholders. Sem migração: a regra usa os arquivos que o Drive
-// já registra (drive_assets).
+// O Feed de peças (29/09): entregas com arquivo final no Drive E cards legados
+// com link do Drive (ex.: um card de Reels antigo, sem fluxo de etapas). Só
+// entra o que tem imagem; a peça cuja miniatura não carrega sai da grade e é
+// contada. Filtros por estado (concluída, atrasada, em produção) e cliente.
+// Dados: /api/admin/pieces (lib/pieces.ts).
 
-function formatOf(card: FlowDelivery): string {
-  const stored = typeof card.payload?.formato === "string" ? card.payload.formato.trim() : "";
-  return stored || (/(reels?|stories?|carrossel|horizontal)/i.exec(card.title)?.[0] ?? "");
-}
+export const PIECE_STATE_LABEL: Record<PieceState, string> = { concluida: "Concluídas", atrasada: "Atrasadas", producao: "Em produção" };
+const STATE_TONE: Record<PieceState, string> = { concluida: "done", atrasada: "late", producao: "ok" };
 
 function frameOf(format: string): string {
   const value = format.toLowerCase();
-  if (value.includes("reel") || value.includes("stor") || value.includes("vertical")) return "vertical";
-  if (value.includes("horizontal") || value.includes("banner")) return "wide";
+  if (value.includes("reel") || value.includes("stor")) return "vertical";
   if (value.includes("carrossel")) return "carousel";
   return "post";
 }
 
-const isPublishing = (card: FlowDelivery) => currentFlowStepOf(card.activities)?.subtype === "publicacao";
-
-function FeedCard({ card, cover, today, onOpen }: { card: FlowDelivery; cover: CreativeMaterialAsset; today: string; onOpen: (card: FlowDelivery) => void }) {
-  const [ratio, setRatio] = useState<number | null>(null);
-  const [broken, setBroken] = useState(false);
-  const format = formatOf(card);
-  const state = operationState(parentOperationItem(card), today);
-  const video = cover.mime_type.startsWith("video/");
-  return <article className="creative-feed-card">
-    <button type="button" className={`creative-feed-media is-${frameOf(format)}`} style={ratio ? { aspectRatio: String(ratio) } : undefined} onClick={() => onOpen(card)} aria-label={`Abrir ${card.title}`}>
-      {broken ? <span className="creative-feed-empty-media" aria-hidden="true">Miniatura indisponível</span> : (
-        <span className="creative-feed-media-image">
-          {/* eslint-disable-next-line @next/next/no-img-element -- rota autenticada de miniatura do Drive */}
-          <img src={`/api/admin/drive/thumbnail/${cover.drive_file_id}`} alt={`Capa de ${card.title}`} loading="lazy" decoding="async"
-            onError={() => setBroken(true)}
-            onLoad={(event) => { const { naturalWidth, naturalHeight } = event.currentTarget; if (naturalWidth && naturalHeight) setRatio(naturalWidth / naturalHeight); }} />
-        </span>
-      )}
-      <span className="creative-feed-badges">
-        {isPublishing(card) ? <span className="creative-feed-badge is-publish">Publicação</span> : null}
-        {video ? <span className="creative-feed-badge">▶ vídeo</span> : null}
-      </span>
-    </button>
-    <div className="creative-feed-caption">
-      <strong title={card.title}>{card.title}</strong>
-      <span className="op-lean-state"><span className={`op-dot tone-${state.tone}`} aria-hidden /><b>{state.stage}</b>{state.detail ? <em>· {state.detail}</em> : null}</span>
-      <small>{card.clientName}{format ? ` · ${format}` : ""} · final de {new Date(cover.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}</small>
-    </div>
-  </article>;
+function PieceMedia({ piece, onFail }: { piece: Piece; onFail: () => void }) {
+  const [attempt, setAttempt] = useState(0);
+  const current = piece.covers[attempt];
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- rota autenticada de miniatura do Drive
+    <img key={current} src={`/api/admin/drive/thumbnail/${current}`} alt={`Capa de ${piece.title}`} loading="lazy" decoding="async"
+      onError={() => { if (attempt + 1 < piece.covers.length) setAttempt(attempt + 1); else onFail(); }} />
+  );
 }
 
-export default function CreativeFeedView({
-  deliveries, workspaces, loading, error, today, onOpen,
-}: {
-  deliveries: FlowDelivery[];
-  workspaces: CreativeMaterialWorkspace[];
-  loading: boolean;
-  error: boolean;
-  today: string;
-  onOpen: (card: FlowDelivery) => void;
+export default function CreativeFeedView({ clientName, initialState, onOpen }: {
+  /** Recorte de cliente vindo da barra de filtros. */
+  clientName: string | null;
+  initialState?: PieceState | null;
+  onOpen: (taskId: string) => void;
 }) {
-  const byCreative = new Map<string, CreativeMaterialWorkspace[]>();
-  for (const workspace of workspaces) byCreative.set(workspace.creative_task_id, [...(byCreative.get(workspace.creative_task_id) ?? []), workspace]);
+  const [pieces, setPieces] = useState<Piece[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [state, setState] = useState<PieceState | null>(initialState ?? null);
+  const [broken, setBroken] = useState<Set<string>>(new Set());
+  useEffect(() => setState(initialState ?? null), [initialState]);
 
-  const withCover = deliveries
-    .map((card) => ({ card, cover: latestFinalCover(byCreative.get(card.id) ?? []) }))
-    .filter((row): row is { card: FlowDelivery; cover: CreativeMaterialAsset } => row.cover !== null)
-    // Em Publicação primeiro; depois o final mais recente.
-    .sort((a, b) => Number(isPublishing(b.card)) - Number(isPublishing(a.card)) || b.cover.created_at.localeCompare(a.cover.created_at));
-  const withoutCover = deliveries.length - withCover.length;
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/pieces", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data: { pieces: Piece[] }) => { if (active) setPieces(data.pieces); })
+      .catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, []);
 
-  return <section className="creative-feed" aria-label="Feed de criativos" aria-busy={loading}>
+  const scoped = useMemo(() => (pieces ?? []).filter((piece) => !broken.has(piece.id) && (!clientName || piece.clientName === clientName)), [pieces, broken, clientName]);
+  const visible = state ? scoped.filter((piece) => piece.state === state) : scoped;
+  const count = (value: PieceState) => scoped.filter((piece) => piece.state === value).length;
+
+  if (failed) return <div className="creative-feed-zero">Não foi possível carregar as peças agora.</div>;
+  if (!pieces) return <div className="creative-feed-zero">Carregando as peças e as capas do Drive…</div>;
+
+  return <section className="creative-feed" aria-label="Feed de peças">
     <div className="creative-feed-heading">
-      <span><b>{withCover.length}</b> {withCover.length === 1 ? "criativo com arquivo final" : "criativos com arquivo final"}</span>
-      {withoutCover > 0 ? <small>{withoutCover} ainda sem final ficam fora</small> : null}
-      {loading ? <small>Atualizando capas…</small> : error ? <small>Capas do Drive podem estar desatualizadas</small> : null}
-    </div>
-    {withCover.length ? (
-      <div className="creative-feed-grid">
-        {withCover.map(({ card, cover }) => <FeedCard key={card.id} card={card} cover={cover} today={today} onOpen={onOpen} />)}
+      <div className="feed-states" role="group" aria-label="Filtrar por estado">
+        <button type="button" aria-pressed={state === null} className={state === null ? "on" : ""} onClick={() => setState(null)}>Todas <b>{scoped.length}</b></button>
+        {(Object.keys(PIECE_STATE_LABEL) as PieceState[]).map((value) => (
+          <button type="button" key={value} aria-pressed={state === value} className={state === value ? "on" : ""} onClick={() => setState(value)}>
+            <span className={`op-dot tone-${STATE_TONE[value]}`} aria-hidden />{PIECE_STATE_LABEL[value]} <b>{count(value)}</b>
+          </button>
+        ))}
       </div>
-    ) : (
-      <div className="creative-feed-zero">{loading ? "Buscando os arquivos finais no Drive…" : "Nenhum criativo com arquivo final ainda. A capa aparece quando o final é enviado na pasta do criativo."}</div>
-    )}
+      {broken.size ? <small>{broken.size} sem miniatura no Drive ficaram fora</small> : null}
+    </div>
+    {visible.length ? (
+      <div className="creative-feed-grid">
+        {visible.map((piece) => (
+          <article className="creative-feed-card" key={piece.id}>
+            <button type="button" className={`creative-feed-media is-${frameOf(piece.format)}`} onClick={() => onOpen(piece.id)} aria-label={`Abrir ${piece.title}`}>
+              <span className="creative-feed-media-image"><PieceMedia piece={piece} onFail={() => setBroken((current) => new Set(current).add(piece.id))} /></span>
+              <span className="creative-feed-badges">
+                {piece.coverSource === "final" ? <span className="creative-feed-badge is-publish">Final</span> : null}
+                {piece.isVideo ? <span className="creative-feed-badge">▶ vídeo</span> : null}
+                {piece.legacy ? <span className="creative-feed-badge">card antigo</span> : null}
+              </span>
+            </button>
+            <div className="creative-feed-caption">
+              <strong title={piece.title}>{piece.title}</strong>
+              <span className="op-lean-state"><span className={`op-dot tone-${STATE_TONE[piece.state]}`} aria-hidden /><b>{PIECE_STATE_LABEL[piece.state].replace(/s$/, "")}</b>{piece.date ? <em>· {piece.date.slice(8, 10)}/{piece.date.slice(5, 7)}</em> : null}</span>
+              <small>{piece.clientName}{piece.format ? ` · ${piece.format}` : ""}</small>
+            </div>
+          </article>
+        ))}
+      </div>
+    ) : <div className="creative-feed-zero">Nenhuma peça com imagem {state ? `em "${PIECE_STATE_LABEL[state].toLowerCase()}"` : ""} {clientName ? `para ${clientName}` : ""}.</div>}
   </section>;
 }

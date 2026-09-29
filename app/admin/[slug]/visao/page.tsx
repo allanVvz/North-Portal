@@ -7,6 +7,7 @@ import { taskProgress } from "@/lib/taskCatalog";
 import { listTaskTypes } from "@/lib/taskTypes";
 import InstagramPanel from "./InstagramPanel";
 import ClientOverview from "./ClientOverview";
+import ClientInsightsPanel from "./ClientInsightsPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,7 @@ export default async function ClientVisaoPage({ params }: { params: Promise<{ sl
     }));
 
   return (
-    <section className="admin-page">
+    <section className="admin-page kb-wide client-visao">
       <header className="admin-head">
         <div>
           <p className="admin-crumb">
@@ -72,6 +73,8 @@ export default async function ClientVisaoPage({ params }: { params: Promise<{ sl
           </Link>
         </div>
       </header>
+
+      <ClientInsightsPanel slug={detail.slug} clientName={detail.name} />
 
       <ClientOverview
         detail={detail}

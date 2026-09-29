@@ -17,6 +17,9 @@ import NotificationsList from "../NotificationsList";
 import NewTaskButton from "../NewTaskButton";
 import WeekCalendar from "./WeekCalendar";
 import ClientPulse from "./ClientPulse";
+import AgencyMedia from "./AgencyMedia";
+import FeedShortcut from "./FeedShortcut";
+import { useClientInsights } from "./useInsights";
 import { dueWording } from "../operacao/operationItems";
 import { operacaoHref } from "../operacao/operacaoLinks";
 
@@ -72,6 +75,7 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
   const [openTask, setOpenTask] = useState<{ task: TaskRecord; clientName: string; clientSlug: string } | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const router = useRouter();
+  const insights = useClientInsights();
 
   const openCard = useCallback(async (item: { id: string; clientName: string; clientSlug: string }) => {
     setOpeningId(item.id);
@@ -159,6 +163,8 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
           </Link>
         ))}
       </nav>
+
+      <AgencyMedia insights={insights} />
 
       <div className="home-board">
         <div className="admin-card home-resolve">
@@ -249,6 +255,7 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
         </div>
 
         <div className="home-stack">
+          <FeedShortcut />
           <div className="admin-card">
             <div className="home-card-head">
               <p className="admin-card-title">Esta semana na agência · {summary.weekAheadCount}</p>
@@ -298,7 +305,7 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
       </div>
 
       {/* O pulso é contexto da agência, não tarefa sua: fecha a página. */}
-      <ClientPulse today={todayIso} onOpen={(item) => void openCard(item)} />
+      <ClientPulse today={todayIso} insights={insights} onOpen={(item) => void openCard(item)} />
 
       <p className="home-updated">Atualizado às {new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} · recarregue a página para atualizar os números.</p>
 

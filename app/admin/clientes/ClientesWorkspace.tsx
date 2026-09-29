@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import ClientsTable, { type ClientRow } from "../ClientsTable";
+import ClientCards from "./ClientCards";
 import LeadsScreen from "./LeadsScreen";
 import { useClientesPrefs } from "./leadsPrefs";
 import type { LeadRecord } from "@/lib/supabase";
@@ -22,6 +24,8 @@ export default function ClientesWorkspace({
 }) {
   const { section, view, setSection, setView } = useClientesPrefs();
   const novos = leads.filter((lead) => lead.status === "novo").length;
+  // Painel (dados de operação e relatórios) ou Cadastro (a grade de sempre).
+  const [clientView, setClientView] = useState<"painel" | "cadastro">("painel");
 
   return (
     <>
@@ -35,9 +39,15 @@ export default function ClientesWorkspace({
       </nav>
 
       {section === "clientes" ? (
-        clients.length
-          ? <ClientsTable clients={clients} />
-          : <p className="admin-empty">Nenhum cliente ainda. Crie o primeiro.</p>
+        clients.length ? (
+          <>
+            <div className="kb-viewtabs leads-viewtabs" role="group" aria-label="Visualização dos clientes">
+              <button type="button" className={clientView === "painel" ? "on" : ""} onClick={() => setClientView("painel")}>Painel</button>
+              <button type="button" className={clientView === "cadastro" ? "on" : ""} onClick={() => setClientView("cadastro")}>Cadastro</button>
+            </div>
+            {clientView === "painel" ? <ClientCards clients={clients} /> : <ClientsTable clients={clients} />}
+          </>
+        ) : <p className="admin-empty">Nenhum cliente ainda. Crie o primeiro.</p>
       ) : (
         <>
           <div className="kb-viewtabs leads-viewtabs" role="group" aria-label="Visualização dos leads">

@@ -1871,7 +1871,7 @@ export default function TaskModal({
         )}
 
         {mode === "edit" && liveTask ? (
-          <ModalContext task={liveTask} clientName={draftClientName} clientTasks={clientTasks} today={agencyToday()} onOpen={onOpenRelatedTask ? (target) => void openRelatedTask(target) : undefined} />
+          <ModalContext task={liveTask} clientName={draftClientName} clientSlug={draft.clientSlug || slug} clientTasks={clientTasks} today={agencyToday()} onOpen={onOpenRelatedTask ? (target) => void openRelatedTask(target) : undefined} />
         ) : null}
         {error ? <p className="tm-error-banner" role="alert">{error}</p> : null}
         <div className="tm-layout">

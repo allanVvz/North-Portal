@@ -67,6 +67,15 @@ export function usePerformanceWorkspace({ clients, canEdit }: { clients: ClientL
 
   // ---- Composite filter (Template/Cliente/Categoria/Rede/Objetivo/Campanha/Conjunto) ----
   const [filters, setFilters] = useState<PerfActiveFilter[]>([]);
+  // Links de Clientes e da página do cliente: ?cliente=slug abre a Performance
+  // já recortada naquele cliente (29/09). Lido depois do mount, como as prefs.
+  useEffect(() => {
+    const slug = new URLSearchParams(window.location.search).get("cliente");
+    const client = slug ? clients.find((entry) => entry.slug === slug) : null;
+    if (client) setFilters((current) => [...current.filter((filter) => filter.attr !== "cliente"), { attr: "cliente", value: client.slug, label: client.name }]);
+  // Só na chegada à tela.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const clientFilterValue = useMemo(() => filters.find((f) => f.attr === "cliente")?.value ?? "", [filters]);
   const category = useMemo<PerfCategory>(() => (filters.find((f) => f.attr === "categoria")?.value as PerfCategory) ?? "ads", [filters]);
   const platformFilterValue = useMemo(() => (filters.find((f) => f.attr === "rede")?.value as MetaPlatform | undefined) ?? "", [filters]);

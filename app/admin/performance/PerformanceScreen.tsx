@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState } from "react";
 import AcquisitionDashboard from "./AcquisitionDashboard";
 import PerformanceBoard from "./PerformanceBoard";
@@ -42,6 +44,9 @@ export default function PerformanceScreen({
         <button className={view === "acquisition" ? "on" : ""} onClick={() => setView("acquisition")}>Aquisição</button>
         <button className={view === "dashboard" ? "on" : ""} onClick={() => setView("dashboard")}>Analytics</button>
         <button className={view === "cards" ? "on" : ""} onClick={() => setView("cards")}>Cards publicados</button>
+        {workspace.clientFilterValue ? (
+          <Link className="admin-btn ghost perf-client-link" href={`/admin/${workspace.clientFilterValue}/visao`}>Ver cliente →</Link>
+        ) : null}
       </div>
       {showPerformanceSurface ? (
         <div className="perf-dash">

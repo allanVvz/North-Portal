@@ -15,6 +15,7 @@ import { useOperationFilterBar } from "../operacao/useOperationFilterBar";
 import { operationMatchesFilters, operationState, parentOperationItem, progressSegments, type OperationFilterAttr } from "../operacao/operationItems";
 import { latestFinalCover } from "@/lib/cardMaterials";
 import CreativeFeedView from "./CreativeFeedView";
+import type { PieceState } from "@/lib/pieces";
 import StrategicPlanDeliveriesView from "./StrategicPlanDeliveriesView";
 import { hydratePlanDeliveries } from "./strategicTree";
 import { isRecurrenceTemplate } from "@/lib/recurrenceState";
@@ -168,8 +169,6 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   const [view, setView] = useState<View>("lista");
   const [query, setQuery] = useState("");
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
-  const [coversLoading, setCoversLoading] = useState(false);
-  const [coversError, setCoversError] = useState(false);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<EditingTarget | null>(null);
   // A URL representa o modal aberto. Depois de atender esse deep link, guardar
@@ -196,8 +195,19 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   const clientDeliveries = useMemo(() => orderedDeliveries.filter(passes), [orderedDeliveries, filters, today]);
   const visiblePlans = useMemo(() => clientPlans.filter((card) => matches(card, query)), [clientPlans, query]);
   const visibleDeliveries = useMemo(() => clientDeliveries.filter((card) => matches(card, query)), [clientDeliveries, query]);
-  const feedDeliveries = useMemo(() => visibleDeliveries.filter((card) => card.workflow_version_id && !card.subtype &&
-    (card.kind === "criativo" || typeof card.payload?.daily_piece_key === "string")), [visibleDeliveries]);
+  // Link da Home: ?visao=feed&estado=atrasada abre o Feed já filtrado.
+  const feedState = searchParams.get("estado") as PieceState | null;
+  useEffect(() => { if (searchParams.get("visao") === "feed") setView("feed"); }, [searchParams]);
+  const feedClient = filters.find((filter) => filter.attr === "cliente")?.value ?? null;
+  // Peça legada fora de planos e entregas: busca o card pelo id para abrir.
+  const openById = async (id: string) => {
+    const target = [...orderedDeliveries, ...orderedPlans].map((card) => deepLinkTarget(card, id)).find(Boolean);
+    if (target) { setEditing(target); return; }
+    const response = await fetch(`/api/admin/tasks/${id}`);
+    if (!response.ok) return;
+    const task = await response.json() as TaskRecord & { clientName?: string; clientSlug?: string };
+    setEditing({ task, clientName: task.clientName ?? "", clientSlug: task.clientSlug ?? "", relatedTasks: [] });
+  };
 
   // Os arquivos do Drive servem às capas das duas visões. A leitura (GET) é
   // barata e roda uma vez; a sincronização com o Drive (POST) é pesada e só
@@ -213,14 +223,10 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
       if (active && data.workspaces) setMaterialWorkspaces(data.workspaces);
       return Boolean(data.workspaces);
     };
-    setCoversLoading(true);
-    setCoversError(false);
     void (async () => {
       await read("GET").catch(() => false);
-      if (!active) return;
-      if (view !== "feed") { setCoversLoading(false); return; }
-      const synced = await read("POST").catch(() => false);
-      if (active) { setCoversError(!synced); setCoversLoading(false); }
+      // Entrar no Feed sincroniza os arquivos com o Drive (pesado, só aqui).
+      if (active && view === "feed") await read("POST").catch(() => false);
     })();
     return () => { active = false; };
   }, [view]);
@@ -267,7 +273,7 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
       <ParentColumn title="Planos" cards={visiblePlans} empty={query ? "Nenhum Plano para essa busca." : "Nenhum Plano ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} covers={covers} />
       <ParentColumn title="Entregas" cards={visibleDeliveries} empty={query ? "Nenhuma Entrega para essa busca." : "Nenhuma Entrega ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} covers={covers} />
     </div> : view === "estrategica" ? <StrategicPlanDeliveriesView plans={clientPlans} deliveries={clientDeliveries} query={query} onOpenPlan={open} onOpenPlanActivity={openChild} onOpenDelivery={open} onOpenStep={openChild} />
-      : <CreativeFeedView deliveries={feedDeliveries} workspaces={materialWorkspaces} loading={coversLoading} error={coversError} today={today} onOpen={open} />}
+      : <CreativeFeedView clientName={feedClient} initialState={feedState} onOpen={(id) => void openById(id)} />}
     {editing ? <CardModalLauncher task={editing.task} clientName={editing.clientName} clientSlug={editing.clientSlug} initialRelatedTasks={editing.relatedTasks} parentTask={editing.parentTask} onClose={() => { setEditing(null); router.refresh(); }} onSaved={() => { setEditing(null); router.refresh(); }} onDeleted={() => { setEditing(null); router.refresh(); }} onChanged={() => router.refresh()} /> : null}
   </div>;
 }

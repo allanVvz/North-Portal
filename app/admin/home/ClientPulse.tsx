@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { RecurringTask } from "@/lib/supabase";
 import { normalizeOperationItems, operationState, type OperationItem, type OperationState, type OperationTask } from "../operacao/operationItems";
+import type { ClientInsight } from "@/lib/insights/clientInsights";
 
 // Pulso por cliente (29/09): a pergunta "como está cada cliente?" respondida
 // com os MESMOS itens e o MESMO estado único da Operação — cada trabalho uma
@@ -13,6 +14,7 @@ import { normalizeOperationItems, operationState, type OperationItem, type Opera
 
 type Row = {
   client: string;
+  slug: string;
   total: number;
   late: number;
   warn: number;
@@ -22,8 +24,9 @@ type Row = {
 
 const RANK: Record<OperationState["tone"], number> = { late: 0, warn: 1, ok: 2, idle: 3, done: 4 };
 
-export default function ClientPulse({ today, onOpen }: {
+export default function ClientPulse({ today, insights, onOpen }: {
   today: string;
+  insights?: ClientInsight[] | null;
   onOpen: (item: { id: string; clientName: string; clientSlug: string }) => void;
 }) {
   const [items, setItems] = useState<OperationItem[] | null>(null);
@@ -49,7 +52,7 @@ export default function ClientPulse({ today, onOpen }: {
       const state = operationState(item, today);
       if (state.tone === "done") continue; // concluído não pesa no pulso
       const name = item.clientName && item.clientName !== "—" && item.clientName !== "Outros" ? item.clientName : "Sem cliente";
-      const row = byClient.get(name) ?? { client: name, total: 0, late: 0, warn: 0, ok: 0, worst: null };
+      const row = byClient.get(name) ?? { client: name, slug: item.clientSlug, total: 0, late: 0, warn: 0, ok: 0, worst: null };
       row.total += 1;
       if (state.tone === "late") row.late += 1;
       else if (state.tone === "warn") row.warn += 1;
@@ -60,6 +63,8 @@ export default function ClientPulse({ today, onOpen }: {
     return [...byClient.values()].sort((a, b) => b.late - a.late || b.warn - a.warn || a.client.localeCompare(b.client, "pt-BR"));
   }, [items, today]);
 
+  // Seguidores ganhos na última semana informada, vindos do Feedback.
+  const gainOf = (slug: string) => insights?.find((client) => client.slug === slug)?.followers.filter((week) => week.gain !== null).at(-1)?.gain ?? null;
   const late = rows.reduce((sum, row) => sum + row.late, 0);
   const calm = rows.filter((row) => row.late === 0 && row.warn === 0).length;
 
@@ -79,8 +84,8 @@ export default function ClientPulse({ today, onOpen }: {
           {rows.map((row) => (
             <li key={row.client} className="home-pulse-row">
               <span className="home-pulse-client">
-                <strong>{row.client}</strong>
-                <em>{row.total} {row.total === 1 ? "item" : "itens"}{row.late ? ` · ${row.late} atrasado${row.late === 1 ? "" : "s"}` : ""}{row.warn ? ` · ${row.warn} em atenção` : ""}</em>
+                {row.slug ? <Link href={`/admin/${row.slug}/visao`}><strong>{row.client}</strong></Link> : <strong>{row.client}</strong>}
+                <em>{row.total} {row.total === 1 ? "item" : "itens"}{row.late ? ` · ${row.late} atrasado${row.late === 1 ? "" : "s"}` : ""}{row.warn ? ` · ${row.warn} em atenção` : ""}{gainOf(row.slug) ? ` · +${gainOf(row.slug)} seguidores` : ""}</em>
               </span>
               <span className="home-pulse-bar" aria-label={`${row.ok} de ${row.total} em dia`}>
                 <i className="ok" style={{ flexGrow: row.ok }} />
