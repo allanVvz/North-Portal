@@ -263,3 +263,96 @@ export function factualRoutineEvents(routines: readonly RecurringTask[]): Routin
   }
   return events.sort((a, b) => a.date.localeCompare(b.date) || a.routine.title.localeCompare(b.routine.title, "pt-BR"));
 }
+
+// ---------------------------------------------------------------------------
+// Estado único (28/09/2026)
+// ---------------------------------------------------------------------------
+//
+// O card falava três idiomas de estado ao mesmo tempo: o status do quadro
+// (Entrada, Revisão…), a situação de prazo (No prazo, Atrasada…) e o
+// vocabulário da rotina (Ativa, Ciclo concluído, Histórico). Às vezes eles se
+// contradiziam. Agora o card mostra UMA linha: a fase em que o trabalho está e,
+// ao lado, o que o prazo diz sobre ela.
+//
+//   tarefa   → "Revisão · 2 dias atrasado"
+//   entrega  → a etapa corrente: "Feedback · vence qua"
+//   plano    → "Em produção · vence 31/08"
+//   rotina   → "Em dia · próxima em 12/10"
+
+export type StateTone = "late" | "warn" | "ok" | "done" | "idle";
+export type OperationState = { tone: StateTone; stage: string; detail: string };
+
+const STAGE_LABEL: Record<TaskStatus, string> = {
+  backlog: "Entrada", em_producao: "Em produção", revisao: "Revisão",
+  aprovacao: "Aprovação", aprovado: "Concluído", parada: "Parada",
+};
+const WEEKDAY = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+
+function dayDiff(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
+}
+function shortDay(iso: string): string {
+  const [, month, day] = iso.slice(0, 10).split("-");
+  return `${day}/${month}`;
+}
+
+/** O que o prazo diz: "vence hoje", "vence qua", "vence 12/10", "3 dias atrasado". */
+export function dueWording(due: string | null | undefined, today: string): { text: string; tone: StateTone } {
+  if (!due) return { text: "sem prazo", tone: "idle" };
+  const diff = dayDiff(today, due.slice(0, 10));
+  if (diff < 0) return { text: `${-diff} ${diff === -1 ? "dia" : "dias"} atrasado`, tone: "late" };
+  if (diff === 0) return { text: "vence hoje", tone: "warn" };
+  if (diff === 1) return { text: "vence amanhã", tone: "warn" };
+  if (diff <= 6) return { text: `vence ${WEEKDAY[new Date(`${due.slice(0, 10)}T12:00:00Z`).getUTCDay()]}`, tone: diff <= 2 ? "warn" : "ok" };
+  return { text: `vence ${shortDay(due)}`, tone: "ok" };
+}
+
+function stepName(step: TaskRecord): string {
+  const label = classifyTask(step.kind, step.subtype).subtypeLabel;
+  return label || step.title.split("—").at(-1)?.trim() || step.title;
+}
+
+export function operationState(item: OperationItem, today: string): OperationState {
+  const task = item.task;
+  if (item.level === "rotina") {
+    const routine = task as RecurringTask;
+    const next = routine.next_due_date;
+    const state = recurringState(routine, today);
+    if (state === "historico") return { tone: "done", stage: "Rotina encerrada", detail: "" };
+    if (state === "parada") return { tone: "warn", stage: "Parada", detail: "" };
+    if (state === "sem_agenda" || !next) return { tone: "idle", stage: "Sem agenda", detail: "" };
+    if (state === "atrasada") return { tone: "late", stage: "Atrasada", detail: dueWording(next, today).text };
+    if (state === "concluida") return { tone: "done", stage: "Feito nesta vez", detail: `próxima em ${shortDay(next)}` };
+    return { tone: "ok", stage: "Em dia", detail: `próxima em ${shortDay(next)}` };
+  }
+  if (task.completed_at || operationStatusOf(item) === "aprovado") return { tone: "done", stage: "Concluído", detail: "" };
+  if (item.level === "entrega") {
+    const current = currentFlowStepOf(item.members);
+    if (current) {
+      const due = dueWording(current.due_date, today);
+      const phase = current.status === "parada" ? "parada" : current.status === "revisao" ? "em revisão" : current.status === "aprovacao" ? "com o cliente" : "";
+      return { tone: current.status === "parada" ? "warn" : due.tone, stage: stepName(current), detail: [phase, due.text].filter(Boolean).join(" · ") };
+    }
+  }
+  const status = operationStatusOf(item);
+  if (status === "parada") return { tone: "warn", stage: "Parada", detail: dueWording(task.due_date, today).text };
+  const due = dueWording(item.level === "plano" ? task.end_date ?? task.due_date : task.due_date, today);
+  return { tone: due.tone, stage: STAGE_LABEL[status], detail: due.text };
+}
+
+/** Segmentos de progresso de um pai: um por etapa ou item. */
+export function progressSegments(item: OperationItem): ("done" | "now" | "todo")[] {
+  if (item.level === "entrega") {
+    const total = Math.max(item.task.workflow_version?.workflow_version_steps.length ?? 0, item.members.length);
+    const current = currentFlowStepOf(item.members);
+    return Array.from({ length: total }, (_, index) => {
+      const step = item.members[index];
+      if (step && (step.completed_at || step.status === "aprovado")) return "done";
+      return step && current && step.id === current.id ? "now" : "todo";
+    });
+  }
+  if (item.level === "plano") {
+    return item.members.map((member) => (member.completed_at || member.status === "aprovado" ? "done" : "todo"));
+  }
+  return [];
+}

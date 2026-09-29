@@ -28,7 +28,7 @@ const PRAZO_BUCKETS = [
   { key: "semana", label: "Esta semana" },
   { key: "mes", label: "Este mês" },
   { key: "depois", label: "Depois" },
-  { key: "concluidas", label: "Ciclo concluído" },
+  { key: "concluidas", label: "Feito nesta vez" },
   { key: "sem_agenda", label: SEM_AGENDA },
 ] as const;
 

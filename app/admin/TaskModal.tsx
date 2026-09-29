@@ -1910,7 +1910,7 @@ export default function TaskModal({
                   (bug real até 2026-09-2x: limpar aqui soltava todos de uma
                   vez — ver setTaskPlanLink). */}
               {!kd.isPlan && !(mode === "new" && effectiveScope === "routine") ? (
-                <Cell icon="◆" label="Plano de Ação" hidden={!visible("plan_link")}>
+                <Cell icon="◆" label="Plano" hidden={!visible("plan_link")}>
                   <select value={draft.plan_id} onChange={(e) => set("plan_id", e.target.value)}>
                     <option value="">— Sem plano —</option>
                     {planCandidates
@@ -2023,13 +2023,13 @@ export default function TaskModal({
                 cima, etapas abaixo, quando os dois existem no mesmo card. O
                 stepper editável e o 🔗 ficam do lado da entrega. */}
             <CardParentBox
-              label="Faz parte de"
+              label="Pertence a"
               items={belongsToBoxes}
               canOpen={Boolean(onOpenRelatedTask) && !busy}
               onOpen={(parent) => void openRelatedTask(parent)}
             />
             <CardParentBox
-              label="Relacionado a"
+              label="Veja também"
               items={referenceBoxes}
               canOpen={Boolean(onOpenRelatedTask) && !busy}
               onOpen={(parent) => void openRelatedTask(parent)}
@@ -2039,7 +2039,7 @@ export default function TaskModal({
                 combinação de flags aqui. */}
             {pendingParentBox ? (
               <div className="tm-box tm-parentbox">
-                <p className="tm-box-label">Faz parte de</p>
+                <p className="tm-box-label">Pertence a</p>
                 <p className="admin-sub" style={{ margin: 0 }}>Carregando relação…</p>
               </div>
             ) : null}
@@ -2099,12 +2099,12 @@ export default function TaskModal({
                   </p>
                   {isRecurringParent && liveTask ? (
                     recurrenceStopped(liveTask.status) ? (
-                      <span className="tm-cycles-stopped" title="Mova o card para fora de Aprovado/Parada para retomar">Recorrência encerrada</span>
+                      <span className="tm-cycles-stopped" title="Mova o card para fora de Aprovado/Parada para retomar">Rotina encerrada</span>
                     ) : (
                       <div className="tm-cycles-action">
                         {liveTask.due_date ? <span>Próxima entrega <b>{formatShortDate(liveTask.due_date)}</b></span> : null}
                         <button type="button" className={`admin-btn primary tm-btn-${tone} rec-complete`} onClick={() => void completeCycle()} disabled={busy || !liveTask.due_date}>
-                          ✓ Concluir ciclo
+                          ✓ Marcar como feita
                         </button>
                       </div>
                     )

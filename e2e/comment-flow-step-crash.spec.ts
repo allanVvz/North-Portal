@@ -90,7 +90,7 @@ test.describe("Comentar numa etapa de fluxo não pode derrubar a árvore (P0-A)"
 
     // Antes de comentar, a caixa já está lá — é o "antes" contra o qual
     // comparamos depois do comentário.
-    const parentBox = modal.locator(".tm-box.tm-parentbox", { hasText: "Faz parte de" });
+    const parentBox = modal.locator(".tm-box.tm-parentbox", { hasText: "Pertence a" });
     await expect(parentBox).toBeVisible({ timeout: 20_000 });
     await expect(parentBox).toContainText(deliveryTitle);
 
@@ -118,7 +118,7 @@ test.describe("Comentar numa etapa de fluxo não pode derrubar a árvore (P0-A)"
     await page.reload();
     const modalAfterReload = page.locator(".tm");
     await expect(modalAfterReload).toBeVisible({ timeout: 20_000 });
-    const parentBoxAfterReload = modalAfterReload.locator(".tm-box.tm-parentbox", { hasText: "Faz parte de" });
+    const parentBoxAfterReload = modalAfterReload.locator(".tm-box.tm-parentbox", { hasText: "Pertence a" });
     await expect(parentBoxAfterReload).toBeVisible({ timeout: 20_000 });
     await expect(parentBoxAfterReload).toContainText(deliveryTitle);
   });

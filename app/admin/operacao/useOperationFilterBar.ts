@@ -30,7 +30,7 @@ const FILTER_ATTRS: AttrDef[] = [
   { key: "responsavel", label: "Responsável", icon: "◑" },
 ];
 export const SITUATION_LABEL: Record<string, string> = {
-  ativa: "Ativa", sem_agenda: "Sem agenda", concluida: "Concluída", historico: "Histórico",
+  ativa: "Ativa", sem_agenda: "Sem agenda", concluida: "Concluída", historico: "Encerrada",
   no_prazo: "No prazo", atrasada: "Atrasada", parada: "Parada",
 };
 export const CADENCE_LABEL: Record<string, string> = { semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal" };

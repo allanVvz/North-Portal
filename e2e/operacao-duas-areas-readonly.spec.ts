@@ -34,12 +34,12 @@ test.describe("Operação simplificada em duas áreas (somente leitura)", () => 
 
     const routineCards = page.locator(".op-card.is-routine");
     const ordinaryCards = page.locator(".op-card:not(.is-routine)");
-    const completeButtons = page.getByRole("button", { name: /Concluir ciclo/ });
+    const completeButtons = page.getByRole("button", { name: /Marcar esta vez de .* como feita|Marcar como feita/ });
     for (const button of await completeButtons.all()) {
       await expect(button.locator("xpath=ancestor::article[contains(@class, 'is-routine')]")).toHaveCount(1);
     }
     if (await ordinaryCards.count()) {
-      await expect(ordinaryCards.first().getByRole("button", { name: /Concluir ciclo/ })).toHaveCount(0);
+      await expect(ordinaryCards.first().getByRole("button", { name: /Marcar esta vez de .* como feita|Marcar como feita/ })).toHaveCount(0);
     }
   });
 

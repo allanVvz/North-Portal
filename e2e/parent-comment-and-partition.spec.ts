@@ -256,7 +256,7 @@ test.describe("A caixa de família particiona Plano + Etapas quando a entrega é
     const modal = page.locator(".tm");
     await expect(modal).toBeVisible({ timeout: 20_000 });
 
-    const planBox = modal.locator(".tm-box.tm-parentbox", { hasText: "Faz parte de" });
+    const planBox = modal.locator(".tm-box.tm-parentbox", { hasText: "Pertence a" });
     const stepsBox = modal.locator(".tm-box.tm-planmembers", { hasText: "Etapas" });
 
     // Hoje só a segunda aparece: `planParentId` é computado com `!isDelivery`,

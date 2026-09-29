@@ -9,15 +9,13 @@ import NewTaskButton from "../NewTaskButton";
 import TaskKindIcon from "../TaskKindIcon";
 import SortMenu from "../SortMenu";
 import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, visibleColumnsFor } from "../kanbanShared";
-import { formatPeriod, formatShortDate, relativeDue } from "../taskDates";
+import { formatShortDate, relativeDue } from "../taskDates";
 import { agencyToday, RECURRING_STATE_LABEL, type RecurringState } from "../recurringState";
 import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "../calendarUtils";
 import { DEADLINE_LABEL, type DeadlineState } from "../deadlineState";
-import { formatRelativeAge } from "@/lib/comments";
-import { kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
+import { kindDef, taskProgress } from "@/lib/taskCatalog";
 import { classifyTask, taskClassificationLabel } from "@/lib/taskClassification";
-import { childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
-import { currentFlowStepOf } from "@/lib/flows/currentStep";
+import { childrenByParent, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
 import { taskMatchesQuery } from "@/lib/taskSearch";
 import type { RecurringTask } from "@/lib/supabase";
 import type { TaskRecord, TaskStatus } from "@/lib/validation";
@@ -29,13 +27,12 @@ import OperationSearchBar from "./OperationSearchBar";
 import { CADENCE_LABEL, SEM_RESPONSAVEL, useOperationFilterBar } from "./useOperationFilterBar";
 import {
   factualDateOf, factualRoutineEvents, itemTypeLabels, levelLabel, normalizeOperationItems, operationMatchesFilters,
-  operationSituation, operationStatusOf, type OperationItem, type OperationTask,
+  operationSituation, operationState, operationStatusOf, progressSegments, type OperationItem, type OperationTask, type StateTone,
 } from "./operationItems";
 
 type View = "quadro" | "lista" | "calendario";
 type GroupBy = "responsavel" | "cliente" | "prazo" | "kanban";
 type Selected = { task: TaskRecord; clientName: string; clientSlug: string; related?: TaskRecord[]; parent?: TaskRecord };
-type FlowBadge = { step: number; total: number; delivery: string };
 
 const GROUPS: { key: GroupBy; label: string }[] = [
   { key: "responsavel", label: "Responsável" }, { key: "cliente", label: "Clientes" },
@@ -59,23 +56,6 @@ function cardState(item: OperationItem, today: string): { tone: DeadlineState; l
   return { tone, label: RECURRING_STATE_LABEL[state] ?? state };
 }
 
-/** O que o pai resume numa linha: onde a Entrega está ("2/3 · Feedback ·
- *  Revisão") ou quanto do Plano já foi feito ("3 de 5 concluídas"). */
-function parentSummary(item: OperationItem): string {
-  if (item.level === "entrega") {
-    const total = item.task.workflow_version?.workflow_version_steps.length || item.members.length;
-    const current = currentFlowStepOf(item.members);
-    if (!current) return total ? `${total} etapas` : "";
-    const index = item.members.findIndex((step) => step.id === current.id) + 1;
-    return `${index}/${total} · ${subtypeLabel(current.subtype) || current.title} · ${STATUS_LABEL[current.status]}`;
-  }
-  if (item.level === "plano") {
-    const done = item.members.filter((member) => member.completed_at).length;
-    return item.members.length ? `${done} de ${item.members.length} concluídas` : "Sem atividades";
-  }
-  return "";
-}
-
 function initialOf(value: string) { return value.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "—"; }
 
 function payloadStr(task: TaskRecord, key: string): string {
@@ -83,85 +63,61 @@ function payloadStr(task: TaskRecord, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDragStart, onDragEnd, visible, flowBadge, progress, showStage }: {
+const TONE_CLASS: Record<StateTone, DeadlineState> = { late: "atrasada", warn: "parada", ok: "no_prazo", done: "concluida", idle: "no_prazo" };
+
+/** Card em três linhas fixas (28/09): o que é, em que pé está, de quem é.
+ *  Tipo, subtipo, formato, prioridade e progresso em % só aparecem quando a
+ *  pessoa os liga em Atributos; o padrão é o card enxuto. */
+function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDragStart, onDragEnd, visible, progress }: {
   item: OperationItem; today: string; onOpen: () => void; onComplete?: () => void; draggable: boolean; dragging: boolean;
-  onDragStart: (event: React.DragEvent) => void; onDragEnd: () => void; visible: (key: string) => boolean;
-  flowBadge: FlowBadge | null; progress: number; showStage: boolean;
+  onDragStart: (event: React.DragEvent) => void; onDragEnd: () => void; visible: (key: string) => boolean; progress: number;
 }) {
   const task = item.task;
   const routine = item.routine ? task as RecurringTask : null;
-  const due = itemDue(item);
-  const { tone, label } = cardState(item, today);
-  const dueRelative = tone === "concluida" ? null : relativeDue(due, today);
-  const period = formatPeriod(task.start_date, task.end_date);
-  const formato = visible("formato") && classifyTask(task.kind, task.subtype).baseType !== "entrega" ? payloadStr(task, "formato") : "";
-  const plataforma = visible("plataforma") ? payloadStr(task, "plataforma") : "";
+  const state = operationState(item, today);
+  const segments = progressSegments(item);
   const comments = commentsOf(task).length;
-  const showKind = visible("kind");
-  // Numa etapa de fluxo o selo "2/4 · Captação" já diz o subtipo.
-  const showSubtype = !flowBadge && visible("subtype") && Boolean(task.subtype);
+  const classification = classifyTask(task.kind, task.subtype);
+  const extras = [
+    visible("kind") ? classification.baseLabel : "",
+    visible("subtype") && classification.subtypeLabel ? classification.subtypeLabel : "",
+    visible("formato") ? payloadStr(task, "formato") : "",
+    visible("plataforma") ? payloadStr(task, "plataforma") : "",
+    visible("priority") ? `Prioridade ${PRIORITY_LABEL[task.priority].toLowerCase()}` : "",
+    visible("progress") ? `${progress}%` : "",
+    visible("client_visible") && task.client_visible ? "Visível ao cliente" : "",
+  ].filter(Boolean);
+  const kindMark = item.level === "rotina" ? `↻ ${CADENCE_LABEL[routine?.cadence ?? ""]?.toLowerCase() ?? "rotina"}`
+    : item.level === "plano" ? "◆ Plano" : item.level === "entrega" ? "▣ Entrega" : "";
   return (
     <article
-      className={`kb-card op-card is-${tone}${routine ? " is-routine" : ""}${item.level === "plano" || item.level === "entrega" ? ` is-${item.level}` : ""}${dragging ? " dragging" : ""}`}
+      className={`kb-card op-card op-card-lean is-${TONE_CLASS[state.tone]} tone-${state.tone}${routine ? " is-routine" : ""}${item.level === "plano" || item.level === "entrega" ? ` is-${item.level}` : ""}${dragging ? " dragging" : ""}`}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
-      <button type="button" className="op-card-open" onClick={onOpen} aria-label={`Abrir ${routine ? "rotina" : "tarefa"} ${task.title}`}>
-        <span className="kb-card-statusline">
-          <span className={`kb-situacao s-${tone}`}>{label}</span>
-          {/* O status do molde ("Entrada") não diz nada sobre a rotina — o ciclo
-              dela já está na pílula de situação. Só a tarefa mostra a etapa. */}
-          {showStage && !routine ? <span className="kb-card-stage">{STATUS_LABEL[operationStatusOf(item)]}</span> : null}
-          <span className="kb-card-marks">
-            {visible("client_visible") && task.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
-            {visible("plan_link") && parentIdsOf(task).length ? <span className="kb-plan-link" title="Possui relação estrutural ou de fluxo">◆</span> : null}
-            {routine ? <span className="op-routine-mark" title={`Rotina ${CADENCE_LABEL[routine.cadence]?.toLowerCase() ?? ""}`}>↻ {CADENCE_LABEL[routine.cadence] ?? "Rotina"}</span> : null}
-            {item.level === "plano" || item.level === "entrega" ? <span className={`op-level-mark is-${item.level}`}>{item.level === "plano" ? "◆" : "▣"} {levelLabel(item.level)}</span> : null}
-          </span>
+      <button type="button" className="op-card-open" onClick={onOpen} aria-label={`Abrir ${task.title}`}>
+        <span className="op-lean-title">{task.title}</span>
+        <span className="op-lean-state">
+          <span className={`op-dot tone-${state.tone}`} aria-hidden />
+          <b>{state.stage}</b>
+          {state.detail ? <em>· {state.detail}</em> : null}
         </span>
-        <span className="kb-card-titleline"><TaskKindIcon kind={task.kind} subtype={task.subtype} format={task.payload?.formato} /><span className="kb-card-title op-card-title">{task.title}</span></span>
-        {parentSummary(item) ? <span className="op-card-parentline">{parentSummary(item)}</span> : null}
-        {flowBadge || showKind || showSubtype || formato || plataforma ? (
-          <span className="kb-card-meta">
-            {flowBadge ? (
-              <span className="kb-card-pill kb-flow-step" title={`Etapa ${flowBadge.step} de ${flowBadge.total} · ${flowBadge.delivery}`}>
-                {flowBadge.step}/{flowBadge.total} · {subtypeLabel(task.subtype) || "Etapa"}
-              </span>
-            ) : null}
-            {showKind ? <span className="kb-card-pill">{classifyTask(task.kind, task.subtype).baseLabel}</span> : null}
-            {showSubtype ? <span className="kb-card-pill">{classifyTask(task.kind, task.subtype).subtypeLabel}</span> : null}
-            {formato ? <span className="kb-card-pill">{formato}</span> : null}
-            {plataforma ? <span className="kb-card-pill">{plataforma}</span> : null}
+        {segments.length ? (
+          <span className="op-lean-steps" aria-label={`${segments.filter((segment) => segment === "done").length} de ${segments.length} concluídas`}>
+            {segments.map((segment, index) => <i key={index} className={segment} />)}
           </span>
         ) : null}
-        <span className="kb-card-facts">
-          <span className="kb-card-due" title={routine ? "Próxima execução" : "Data de entrega"}>◷ {formatShortDate(due)}{dueRelative ? ` · ${dueRelative}` : ""}</span>
-          {visible("assignee") ? (
-            task.assignee
-              ? <span className="kb-assignee" title={`Responsável: ${task.assignee}`}>● {task.assignee}</span>
-              : <span className="kb-assignee is-empty">● {SEM_RESPONSAVEL}</span>
-          ) : null}
-          <span className="kb-card-client" title="Cliente">{item.clientName}</span>
+        <span className="op-lean-meta">
+          <span>{item.clientName}</span>
+          <span className={task.assignee ? "" : "is-empty"}>{task.assignee || SEM_RESPONSAVEL}</span>
+          {kindMark ? <span className={`op-lean-kind is-${item.level}`}>{kindMark}</span> : null}
+          {comments > 0 ? <span title="Comentários">💬 {comments}</span> : null}
         </span>
-        {period ? <span className="kb-card-periodrow"><span className="kb-card-period">▦ {period}</span></span> : null}
-        {visible("progress") ? (
-          <span className="kb-card-progress">
-            <span className="kb-card-progress-track"><span className="kb-card-progress-fill" style={{ width: `${progress}%` }} /></span>
-            <span>{progress}%</span>
-          </span>
-        ) : null}
-        <span className="kb-card-foot">
-          <span />
-          <span className="kb-card-foot-right">
-            <span className="kb-updated" title="Última atualização">{formatRelativeAge(task.updated_at)}</span>
-            {comments > 0 ? <span className="kb-comments" title="Comentários no card">💬 {comments}</span> : null}
-            {visible("priority") ? <span className={`kb-prio p-${task.priority}`}>{PRIORITY_LABEL[task.priority]}</span> : null}
-          </span>
-        </span>
+        {extras.length ? <span className="op-lean-extras">{extras.map((extra) => <span key={extra}>{extra}</span>)}</span> : null}
       </button>
       {routine?.active && onComplete ? (
-        <button type="button" className="op-cycle-btn" onClick={onComplete} title="Concluir ciclo" aria-label={`Concluir ciclo de ${task.title}`}>✓</button>
+        <button type="button" className="op-cycle-btn" onClick={onComplete} title="Marcar esta vez como feita" aria-label={`Marcar esta vez de ${task.title} como feita`}>✓</button>
       ) : null}
     </article>
   );
@@ -240,17 +196,6 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
       ? taskProgress(task, membersByPlan.get(task.id) ?? [], membersByPlan)
       : taskProgress(task);
   }, [membersByPlan]);
-  const flowBadges = useMemo(() => {
-    const badges = new Map<string, FlowBadge>();
-    for (const delivery of tasks) {
-      if (!isFlowDelivery(delivery)) continue;
-      const steps = flowStepsOf(delivery.id, tasks);
-      const total = delivery.workflow_version?.workflow_version_steps.length || steps.length;
-      steps.forEach((step, index) => badges.set(step.id, { step: index + 1, total, delivery: delivery.title }));
-    }
-    return badges;
-  }, [tasks]);
-
   const routineFilterOn = filters.some((filter) => filter.attr === "tipo" && filter.value === "rotina");
   const overdueFilterOn = filters.some((filter) => filter.attr === "situacao" && filter.value === "atrasada");
 
@@ -435,9 +380,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
                       onDragStart={(event) => { setDragId(item.id); event.dataTransfer.effectAllowed = "move"; }}
                       onDragEnd={() => { setDragId(null); setDropKey(null); }}
                       visible={visible}
-                      flowBadge={visible("flow_step") ? flowBadges.get(item.id) ?? null : null}
                       progress={visible("progress") ? progressOf(item) : 0}
-                      showStage={groupBy !== "kanban"}
                     />
                   ))}
                   {group.items.length === 0 ? <p className="kb-empty">{groupBy === "prazo" ? "Nada aqui" : "Arraste um card aqui"}</p> : null}
@@ -456,7 +399,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
               <span className="op-list-headaction">Ação</span>
             </div>
             {filtered.map((item) => {
-              const { tone, label } = cardState(item, today);
+              const { tone } = cardState(item, today);
               const due = itemDue(item);
               const dueRelative = tone === "concluida" ? null : relativeDue(due, today);
               return (
@@ -464,7 +407,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
                   <button className="rec-list-row" type="button" onClick={() => open(item)}>
                     <span className="rec-list-title">
                       <TaskKindIcon kind={item.task.kind} subtype={item.task.subtype} />
-                      <span><strong title={item.task.title}>{item.task.title}</strong><small><span className={`kb-situacao s-${tone}`}>{label}</span>{item.level !== "tarefa" ? ` ${item.level === "rotina" ? "↻" : item.level === "plano" ? "◆" : "▣"} ${levelLabel(item.level)}` : ""}{parentSummary(item) ? ` · ${parentSummary(item)}` : ""}</small></span>
+                      <span><strong title={item.task.title}>{item.task.title}</strong><small className="op-lean-state"><span className={`op-dot tone-${operationState(item, today).tone}`} aria-hidden /><b>{operationState(item, today).stage}</b>{operationState(item, today).detail ? <em>· {operationState(item, today).detail}</em> : null}{item.level !== "tarefa" ? <em>· {item.level === "rotina" ? "↻" : item.level === "plano" ? "◆" : "▣"} {levelLabel(item.level)}</em> : null}</small></span>
                     </span>
                     <span>{item.clientName}</span>
                     <span>{taskClassificationLabel(item.task.kind, item.task.subtype)}</span>
@@ -474,7 +417,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
                     <span className={item.task.assignee ? "" : "kb-assignee is-empty"}>{item.task.assignee || SEM_RESPONSAVEL}</span>
                   </button>
                   {item.routine && (item.task as RecurringTask).active
-                    ? <button type="button" className="rec-list-complete" onClick={() => void complete(item)}>✓ Concluir ciclo</button>
+                    ? <button type="button" className="rec-list-complete" onClick={() => void complete(item)}>✓ Marcar como feita</button>
                     : <button type="button" className="rec-list-complete is-quiet" onClick={() => open(item)}>Abrir</button>}
                 </div>
               );

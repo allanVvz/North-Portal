@@ -49,7 +49,7 @@ export const ATTR_DEFS: AttrDef[] = [
   { key: "flow_step", label: "Etapa do workflow", scope: "Tarefa", kinds: ["operacional"], kind: "Seleção" },
   { key: "status", label: "Status", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "priority", label: "Prioridade", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
-  { key: "plan_link", label: "Plano de Ação", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
+  { key: "plan_link", label: "Plano", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "progress", label: "Progresso", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
   { key: "client_visible", label: "Visível ao cliente", scope: "Todos", kinds: "base", kind: "Seleção", defaultOn: false },
 ];

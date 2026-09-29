@@ -53,7 +53,7 @@ test("TaskModal mostra reference como contexto, fora do progresso", async ({ pag
     await login(page);
     await page.goto(`/admin/operacao?task=${childId}`);
     await expect(page.locator(".tm")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Relacionado a", { exact: true })).toBeVisible();
+    await expect(page.getByText("Veja também", { exact: true })).toBeVisible();
     const modal = page.locator(".tm");
     await expect(modal.getByText(`${PREFIX} contexto`, { exact: true })).toBeVisible();
     await expect(modal.getByText("Referência · fora do progresso", { exact: true })).toBeVisible();

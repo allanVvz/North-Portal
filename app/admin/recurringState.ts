@@ -27,8 +27,8 @@ export const RECURRING_STATE_LABEL: Record<RecurringState, string> = {
   parada: "Parada",
   atrasada: "Atrasada",
   ativa: "Ativa",
-  concluida: "Ciclo concluído",
-  historico: "Histórico",
+  concluida: "Feito nesta vez",
+  historico: "Encerrada",
   sem_agenda: "Sem agenda",
 };
 

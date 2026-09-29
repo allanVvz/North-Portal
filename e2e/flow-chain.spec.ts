@@ -219,7 +219,7 @@ test.describe("Corrente de etapas — ligar um card pela interface", () => {
 
     // Uma etapa compartilhada preserva TODAS as relações ascendentes, sem
     // inventar uma corrente principal nem revelar os irmãos de nenhuma delas.
-    const parentBoxes = modal.locator(".tm-box.tm-parentbox", { hasText: "Faz parte de" });
+    const parentBoxes = modal.locator(".tm-box.tm-parentbox", { hasText: "Pertence a" });
     await expect(parentBoxes).toHaveCount(2, { timeout: 20_000 });
     await expect(parentBoxes.filter({ hasText: deliveryTitle })).toBeVisible();
     await expect(parentBoxes.filter({ hasText: sharedDeliveryTitle })).toBeVisible();

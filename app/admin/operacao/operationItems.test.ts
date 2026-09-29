@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_OPERATION_FILTERS, compatibleSubtypes, factualDateOf, factualRoutineEvents, normalizeOperationItems, operationMatchesFilters, operationStatusOf } from "./operationItems";
+import { DEFAULT_OPERATION_FILTERS, compatibleSubtypes, factualDateOf, factualRoutineEvents, normalizeOperationItems, operationMatchesFilters, operationState, operationStatusOf, dueWording, progressSegments } from "./operationItems";
 
 const base = {
   client_id: null, kind: "operacional", subtype: null, title: "Card", description: null,
@@ -133,6 +133,43 @@ describe("operation collection", () => {
       ], []);
       expect(operationStatusOf(items.find((item) => item.id === "aberta")!)).toBe("revisao");
       expect(items.filter((item) => operationMatchesFilters(item, DEFAULT_OPERATION_FILTERS, "2026-09-28")).map((item) => item.id)).toEqual(["aberta"]);
+    });
+  });
+
+  // 28/09: um estado só por card — fase + o que o prazo diz.
+  describe("estado único", () => {
+    const today = "2026-09-28"; // segunda
+    it("prazo em palavras", () => {
+      expect(dueWording("2026-09-26", today)).toEqual({ text: "2 dias atrasado", tone: "late" });
+      expect(dueWording("2026-09-28", today)).toEqual({ text: "vence hoje", tone: "warn" });
+      expect(dueWording("2026-09-30", today)).toEqual({ text: "vence qua", tone: "warn" });
+      expect(dueWording("2026-10-12", today)).toEqual({ text: "vence 12/10", tone: "ok" });
+      expect(dueWording(null, today)).toEqual({ text: "sem prazo", tone: "idle" });
+    });
+
+    it("tarefa: fase do quadro + prazo", () => {
+      const [item] = normalizeOperationItems([task("t", { status: "revisao", due_date: "2026-09-26" })], []);
+      expect(operationState(item, today)).toEqual({ tone: "late", stage: "Revisão", detail: "2 dias atrasado" });
+    });
+
+    it("entrega: a etapa corrente é o estado, e os segmentos mostram o caminho", () => {
+      const step = (id: string, position: number, extra: Record<string, unknown>) =>
+        task(id, { parents: [{ id: "e", relation_kind: "workflow_step", slot: `s${position}`, position }], ...extra });
+      const [item] = normalizeOperationItems([
+        task("e", { kind: "criativo", workflow_version_id: "wv" }),
+        step("a", 10, { subtype: "relatorio_anuncios", title: "Relatórios — Relatório de anúncios", status: "aprovado", completed_at: "2026-09-28T11:00:00Z" }),
+        step("f", 20, { subtype: "feedback", title: "Relatórios — Feedback", status: "backlog", due_date: "2026-09-30" }),
+      ], []);
+      expect(operationState(item, today)).toMatchObject({ tone: "warn", detail: "vence qua" });
+      expect(progressSegments(item)).toEqual(["done", "now"]);
+    });
+
+    it("rotina: em dia com a próxima data; encerrada quando o molde acabou", () => {
+      const [viva] = normalizeOperationItems([], [routine("r", [], { next_due_date: "2026-10-12" })]);
+      (viva.task as any).next_due_date = "2026-10-12";
+      expect(operationState(viva, today)).toEqual({ tone: "ok", stage: "Em dia", detail: "próxima em 12/10" });
+      const [encerrada] = normalizeOperationItems([], [routine("x", [], { template_status: "aprovado", status: "aprovado" })]);
+      expect(operationState(encerrada, today).stage).toBe("Rotina encerrada");
     });
   });
 });
