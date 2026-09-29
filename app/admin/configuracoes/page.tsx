@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isGoogleDriveConfigured } from "@/lib/googleDriveApi";
 import SettingsPanel from "./SettingsPanel";
+import ScreenHeader from "../ScreenHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +28,7 @@ export default async function ConfiguracoesPage() {
     .filter((link) => link.raw_folder_id && link.uploads_folder_id).map((link) => link.client_id));
   return (
     <section className="admin-page">
-      <header className="admin-head">
-        <div>
-          <h1 className="admin-title">Configurações</h1>
-        </div>
-      </header>
+      <ScreenHeader title="Configurações" lede="Agência, equipe, integrações e modelos." />
       <SettingsPanel
         legalDocs={legalDocs}
         agency={agency}

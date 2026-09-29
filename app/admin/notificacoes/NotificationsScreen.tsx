@@ -8,6 +8,7 @@ import { useNotificationsRealtime } from "@/lib/useNotificationsRealtime";
 import { useCurrentAdminUser } from "../CurrentUserContext";
 import CardModalLauncher from "../CardModalLauncher";
 import NotificationsList from "../NotificationsList";
+import ScreenHeader from "../ScreenHeader";
 
 // Caixa de entrada inteira. O sino no AdminShell e o painel da Home mostram os
 // primeiros itens; aqui é a lista completa, com filtro por tipo e "marcar
@@ -100,19 +101,11 @@ export default function NotificationsScreen({ initial }: { initial: Notification
 
   return (
     <section className="admin-page">
-      <header className="admin-head">
-        <div>
-          <h1 className="admin-title">Notificações</h1>
-          <p className="admin-sub">
-            {unread.length > 0 ? `${unread.length} não lidas` : "Tudo lido por aqui."}
-          </p>
-        </div>
-        <div className="admin-head-actions">
-          <button type="button" className="admin-btn" onClick={markAllRead} disabled={busy || unread.length === 0}>
-            Marcar todas como lidas
-          </button>
-        </div>
-      </header>
+      <ScreenHeader
+        title="Notificações"
+        lede={unread.length > 0 ? `${unread.length} ${unread.length === 1 ? "grupo não lido" : "grupos não lidos"}. Avisos repetidos sobre o mesmo card aparecem juntos.` : "Tudo lido por aqui."}
+        actions={<button type="button" className="admin-btn" onClick={markAllRead} disabled={busy || unread.length === 0}>Marcar todas como lidas</button>}
+      />
 
       <nav className="clients-section-tabs" aria-label="Filtrar notificações">
         <button type="button" className={filter === "nao_lidas" ? "on" : ""} onClick={() => setFilter("nao_lidas")}>

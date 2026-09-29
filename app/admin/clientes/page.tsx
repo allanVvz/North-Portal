@@ -34,21 +34,10 @@ export default async function AdminClientsPage() {
   });
 
   const needingAttention = clients.filter((c) => (c.attention ?? []).length > 0).length;
-  const novosLeads = leads.filter((lead) => lead.status === "novo").length;
 
   return (
     <section className="admin-page kb-wide clients-page">
-      <header className="admin-head">
-        <div>
-          <h1 className="admin-title">Clientes</h1>
-          <p className="admin-sub">
-            {clients.filter((c) => !c.disabled).length} clientes no sistema
-            {needingAttention > 0 ? ` · ${needingAttention} precisam de atenção` : ""}
-            {novosLeads > 0 ? ` · ${novosLeads} lead${novosLeads === 1 ? "" : "s"} sem triagem` : ""}.
-          </p>
-        </div>
-      </header>
-      <ClientesWorkspace clients={clients} leads={leads} />
+      <ClientesWorkspace clients={clients} leads={leads} needingAttention={needingAttention} />
     </section>
   );
 }

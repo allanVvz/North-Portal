@@ -2,6 +2,7 @@ import { listAllBriefings, listClients, listDocuments, listNorthTrilhas } from "
 import { clientStageFor } from "../clientPipeline";
 import type { ClientRow } from "../ClientsTable";
 import InformacoesWorkspace from "./InformacoesWorkspace";
+import ScreenHeader from "../ScreenHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +22,7 @@ export default async function DocumentosPage() {
 
   return (
     <section className="admin-page">
-      <header className="admin-head">
-        <div>
-          <p className="admin-kicker">Dados</p>
-          <h1 className="admin-title">Informações</h1>
-        </div>
-      </header>
+      <ScreenHeader title="Informações" lede="Briefings, documentos e trilhas de cada cliente." />
 
       <InformacoesWorkspace
         documents={documents}

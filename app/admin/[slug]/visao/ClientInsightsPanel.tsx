@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TrendChart from "../../performance/charts/TrendChart";
 import Sparkline from "../../home/Sparkline";
 import { compact, delta, money, useClientInsights } from "../../home/useInsights";
 import { operacaoHref } from "../../operacao/operacaoLinks";
 import type { Piece } from "@/lib/pieces";
+import InsightsRail from "../../insights/InsightsRail";
+import { buildInsightCandidates } from "../../insights/insightCandidates";
+import { useOperationData } from "../../operacao/useOperationItems";
+import { agencyToday } from "../../recurringState";
 
 // O cliente em números (29/09): o que os relatórios semanais e as automações
 // já sabem, na ordem da história — a semana, a tendência, a conversão que a
@@ -35,6 +39,12 @@ export default function ClientInsightsPanel({ slug, clientName }: { slug: string
   }, [slug]);
 
   const client = insights?.[0] ?? null;
+  const ops = useOperationData();
+  const today = useMemo(() => agencyToday(), []);
+  const candidates = useMemo(
+    () => (ops && insights && pieces ? buildInsightCandidates("cliente", { items: ops.items, tasks: ops.tasks, today, insights, pieces, client: { slug, name: clientName } }) : null),
+    [ops, insights, pieces, today, slug, clientName],
+  );
   const media = client?.media ?? [];
   const last = media.at(-1) ?? null;
   const prev = media.at(-2) ?? null;
@@ -46,10 +56,11 @@ export default function ClientInsightsPanel({ slug, clientName }: { slug: string
 
   return (
     <div className="client-insights">
+      <InsightsRail screen="cliente" candidates={candidates} />
       <div className="client-links">
         <Link className="admin-btn ghost" href={operacaoHref({ cliente: clientName, agrupar: "prazo" })}>Operação do cliente →</Link>
         <Link className="admin-btn ghost" href={`/admin/operacao?area=planos-entregas&visao=feed`}>Feed →</Link>
-        <Link className="admin-btn ghost" href={`/admin/performance?cliente=${encodeURIComponent(slug)}`}>Performance →</Link>
+        <Link className="admin-btn ghost" href={`/admin/performance?cliente=${encodeURIComponent(slug)}`}>Investimento e mídia na Performance →</Link>
       </div>
 
       {!insights ? <div className="admin-card"><p className="admin-hint">Carregando os números dos relatórios…</p></div> : !last ? (
@@ -64,9 +75,8 @@ export default function ClientInsightsPanel({ slug, clientName }: { slug: string
             {lastReport ? <a className="admin-btn ghost" href={lastReport.url} target="_blank" rel="noreferrer">PDF da semana ↗</a> : null}
           </div>
           <div className="agency-media-tiles">
-            <div className="agency-tile"><span className="agency-tile-label">Investimento</span><strong>{money(last.spend)}</strong><span className="agency-tile-foot"><Change current={last.spend} previous={prev?.spend} /><Sparkline values={media.map((week) => week.spend)} label="Investimento por semana" /></span></div>
             <div className="agency-tile"><span className="agency-tile-label">Alcance</span><strong>{compact(last.reach)}</strong><span className="agency-tile-foot"><Change current={last.reach} previous={prev?.reach} /><Sparkline values={media.map((week) => week.reach)} label="Alcance por semana" /></span></div>
-            <div className="agency-tile"><span className="agency-tile-label">{last.outcomeLabel}</span><strong>{compact(last.outcomeValue)}</strong><span className="agency-tile-foot"><em>{last.outcomeCost !== null ? `${money(last.outcomeCost)} cada` : "—"}</em><Sparkline values={media.map((week) => week.outcomeValue)} label={`${last.outcomeLabel} por semana`} /></span></div>
+            <div className="agency-tile"><span className="agency-tile-label">{last.outcomeLabel}</span><strong>{compact(last.outcomeValue)}</strong><span className="agency-tile-foot"><Change current={last.outcomeValue} previous={prev?.outcomeValue} /><Sparkline values={media.map((week) => week.outcomeValue)} label={`${last.outcomeLabel} por semana`} /></span></div>
             <div className="agency-tile"><span className="agency-tile-label">Seguidores</span><strong>{lastGain?.gain !== null && lastGain?.gain !== undefined ? `+${compact(lastGain.gain)}` : compact(lastTotal?.total)}</strong><span className="agency-tile-foot"><em>{lastTotal?.total ? `${compact(lastTotal.total)} no perfil` : "informados no Feedback"}</em><Sparkline values={followers.map((week) => week.total)} label="Seguidores no perfil por semana" /></span></div>
           </div>
         </div>
@@ -75,8 +85,8 @@ export default function ClientInsightsPanel({ slug, clientName }: { slug: string
       {media.length >= 2 ? (
         <div className="client-charts">
           <div className="admin-card">
-            <p className="admin-card-title">Investimento e resultados por semana</p>
-            <TrendChart data={media.map((week) => ({ date: week.periodTo, investimento: week.spend ?? 0, resultados: week.outcomeValue ?? 0 }))} series={[{ key: "investimento", label: "Investimento", money: true }, { key: "resultados", label: "Resultados" }]} />
+            <p className="admin-card-title">{last?.outcomeLabel ?? "Resultados"} por semana</p>
+            <TrendChart data={media.map((week) => ({ date: week.periodTo, resultados: week.outcomeValue ?? 0 }))} series={[{ key: "resultados", label: last?.outcomeLabel ?? "Resultados" }]} />
           </div>
           <div className="admin-card">
             <p className="admin-card-title">Alcance por semana</p>

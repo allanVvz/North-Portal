@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
-import type { RecurringTask } from "@/lib/supabase";
-import { normalizeOperationItems, operationState, type OperationItem, type OperationState, type OperationTask } from "../operacao/operationItems";
+import { operationState, type OperationItem, type OperationState } from "../operacao/operationItems";
+import { useOperationData } from "../operacao/useOperationItems";
 import type { ClientInsight } from "@/lib/insights/clientInsights";
 
 // Pulso por cliente (29/09): a pergunta "como está cada cliente?" respondida
@@ -29,21 +29,10 @@ export default function ClientPulse({ today, insights, onOpen }: {
   insights?: ClientInsight[] | null;
   onOpen: (item: { id: string; clientName: string; clientSlug: string }) => void;
 }) {
-  const [items, setItems] = useState<OperationItem[] | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([fetch("/api/admin/tasks", { cache: "no-store" }), fetch("/api/admin/routines", { cache: "no-store" })])
-      .then(async ([tasks, routines]) => {
-        if (!tasks.ok) throw new Error();
-        const taskData = await tasks.json() as { tasks?: OperationTask[] };
-        const routineData = routines.ok ? await routines.json() as { tasks?: RecurringTask[] } : { tasks: [] };
-        if (active) setItems(normalizeOperationItems(taskData.tasks ?? [], routineData.tasks ?? []));
-      })
-      .catch(() => { if (active) setFailed(true); });
-    return () => { active = false; };
-  }, []);
+  // Mesma leitura do cabeçalho e dos insights da Home (useOperationData).
+  const data = useOperationData();
+  const items: OperationItem[] | null = data?.items ?? null;
+  const failed = false;
 
   const rows = useMemo<Row[]>(() => {
     if (!items) return [];

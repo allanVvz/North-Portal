@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AdminHomeSummary, HomeFocus } from "@/lib/supabase";
@@ -17,11 +17,15 @@ import NotificationsList from "../NotificationsList";
 import NewTaskButton from "../NewTaskButton";
 import WeekCalendar from "./WeekCalendar";
 import ClientPulse from "./ClientPulse";
-import AgencyMedia from "./AgencyMedia";
 import FeedShortcut from "./FeedShortcut";
 import { useClientInsights } from "./useInsights";
 import { dueWording } from "../operacao/operationItems";
 import { operacaoHref } from "../operacao/operacaoLinks";
+import { useOperationData } from "../operacao/useOperationItems";
+import ScreenHeader from "../ScreenHeader";
+import InsightsRail from "../insights/InsightsRail";
+import { buildInsightCandidates, countFor } from "../insights/insightCandidates";
+import type { Piece } from "@/lib/pieces";
 
 // A Home é um painel OPERACIONAL pessoal (dashboard-designer): quem abre é uma
 // pessoa da equipe, todo dia, e a decisão que ela toma aqui é "o que eu resolvo
@@ -59,6 +63,12 @@ function shortDate(iso: string): { day: string; month: string } {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+function isoDaysAgo(today: string, days: number): string {
+  const date = new Date(`${today}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
 /** "a, b e c" */
 function joinPt(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
@@ -85,9 +95,9 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
     try {
       const res = await fetch(`/api/admin/tasks/${item.id}`);
       if (!res.ok || latestOpen.current !== item.id) return;
-      const task = (await res.json()) as TaskRecord;
+      const task = (await res.json()) as TaskRecord & { clientName?: string; clientSlug?: string };
       if (latestOpen.current !== item.id) return;
-      setOpenTask({ task, clientName: item.clientName, clientSlug: item.clientSlug });
+      setOpenTask({ task, clientName: item.clientName || task.clientName || "", clientSlug: item.clientSlug || task.clientSlug || "" });
     } catch {
       // rede caiu — o clique simplesmente não abre nada, sem quebrar a Home
     } finally {
@@ -138,37 +148,57 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
     { key: "agencia", value: summary.overdueTasks, label: `${summary.overdueTasks} atrasadas na agência`, sub: "de toda a equipe, por responsável", href: operacaoHref({ situacao: "atrasada", agrupar: "responsavel" }), filter: "Atrasada · por responsável", tone: "late" },
   ];
 
+  // Os números da Home cobrem os ÚLTIMOS 7 DIAS da agência (30/09): o que saiu,
+  // o que está atrasado agora e o que vence na semana. Investimento e mídia
+  // ficam na Performance; o que fazer com cada número vem nos insights.
+  const ops = useOperationData();
+  const [latePieces, setLatePieces] = useState<Piece[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/pieces?estado=atrasada&limit=50", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { pieces?: Piece[] } | null) => { if (active) setLatePieces(data?.pieces ?? []); })
+      .catch(() => { if (active) setLatePieces([]); });
+    return () => { active = false; };
+  }, []);
+  const doneWeek = ops ? ops.tasks.filter((task) => task.completed_at && task.completed_at.slice(0, 10) > isoDaysAgo(todayIso, 7)).length : null;
+  const lateNow = ops ? countFor(ops.items, { situacao: "atrasada" }, todayIso) : null;
+  const candidates = useMemo(
+    () => (ops && insights && latePieces ? buildInsightCandidates("home", { items: ops.items, tasks: ops.tasks, today: todayIso, insights, pieces: latePieces }) : null),
+    [ops, insights, latePieces, todayIso],
+  );
+  const todo = actions.filter((action) => action.key !== "agencia" && action.value > 0);
+
   const resolveRows = focus.attention.slice(0, RESOLVE_LIMIT);
   const hiddenResolve = needsAction - resolveRows.length;
 
   return (
     <section className="admin-page kb-wide home-page home-v2">
-      <header className="home-hero-v2">
-        <div>
-          <p className="home-eyebrow-v2">{new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })} · {greeting()}{firstName ? `, ${firstName}` : ""}</p>
-          <h1 className="serif home-question">O que eu preciso fazer hoje?</h1>
-          <p className="home-answer">{headline}</p>
-        </div>
-        <div className="admin-head-actions">
-          <NewTaskButton />
-        </div>
-      </header>
+      <ScreenHeader
+        crumbs={[{ label: `${new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })} · ${greeting()}${firstName ? `, ${firstName}` : ""}` }]}
+        title="O que eu preciso fazer hoje?"
+        lede={headline}
+        period="últimos 7 dias"
+        kpis={[
+          { label: "concluídos", value: doneWeek ?? "…", href: operacaoHref({ status: ["aprovado"], agrupar: "prazo" }), tone: "ok" },
+          { label: "atrasados agora", value: lateNow ?? "…", href: operacaoHref({ situacao: "atrasada", agrupar: "responsavel" }), tone: lateNow ? "late" : undefined },
+          { label: "vencem na semana", value: summary.weekAheadCount, href: operacaoHref({ agrupar: "prazo" }) },
+        ]}
+        actions={<NewTaskButton />}
+      />
 
-      <nav className="home-actions" aria-label="O que fazer agora">
-        {actions.map((action) => (
-          <Link key={action.key} href={action.href} className={`home-action tone-${action.tone}${action.value ? "" : " is-zero"}`}>
-            <span className="home-action-top">
-              <strong className="home-action-value">{action.value}</strong>
-              <span className="home-action-go" aria-hidden>→</span>
-            </span>
-            <span className="home-action-label">{action.value ? action.label : action.label.replace(/\d+ /, "0 ")}</span>
-            <span className="home-action-sub">{action.sub}</span>
-            <span className="home-action-filter">{action.href.startsWith("#") ? action.filter : `Abre a Operação · ${action.filter}`}</span>
-          </Link>
-        ))}
-      </nav>
+      {todo.length ? (
+        <nav className="home-todo" aria-label="O que fazer agora">
+          <span className="home-todo-label">Com você</span>
+          {todo.map((action) => (
+            <Link key={action.key} href={action.href} className={`home-todo-item tone-${action.tone}`} title={action.href.startsWith("#") ? action.sub : `Abre a Operação · ${action.filter}`}>
+              {action.label} <span aria-hidden>→</span>
+            </Link>
+          ))}
+        </nav>
+      ) : null}
 
-      <AgencyMedia insights={insights} />
+      <InsightsRail screen="home" candidates={candidates} />
 
       <div className="home-board">
         <div className="admin-card home-resolve">
@@ -301,7 +331,7 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
                 <Link className="admin-btn ghost" href="/admin/notificacoes">Todas →</Link>
               </div>
               <div className="home-notifs">
-                <NotificationsList notifications={notifications.filter((n) => !n.read_at).slice(0, 5)} />
+                <NotificationsList notifications={notifications.filter((n) => !n.read_at).slice(0, 5)} onOpenTask={(id) => void openCard({ id, clientName: "", clientSlug: "" })} />
               </div>
             </div>
           ) : null}

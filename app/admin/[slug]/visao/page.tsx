@@ -8,6 +8,7 @@ import { listTaskTypes } from "@/lib/taskTypes";
 import InstagramPanel from "./InstagramPanel";
 import ClientOverview from "./ClientOverview";
 import ClientInsightsPanel from "./ClientInsightsPanel";
+import ScreenHeader from "../../ScreenHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ export default async function ClientVisaoPage({ params }: { params: Promise<{ sl
   const plans = allPlans
     .filter((p) => p.clientSlug === slug)
     .map((p) => ({ id: p.id, title: p.title, progress: p.progress, activities: p.activities.length, status: p.status }));
+  const openCount = tasks.filter((t) => t.kind !== "checkpoint_comercial" && t.status !== "aprovado" && !t.completed_at).length;
   const openTasks = tasks
     .filter((t) => t.kind !== "checkpoint_comercial" && t.status !== "aprovado")
     .slice(0, 6)
@@ -54,25 +56,15 @@ export default async function ClientVisaoPage({ params }: { params: Promise<{ sl
 
   return (
     <section className="admin-page kb-wide client-visao">
-      <header className="admin-head">
-        <div>
-          <p className="admin-crumb">
-            <Link href="/admin/clientes" className="admin-btn ghost" style={{ padding: 0 }}>
-              Clientes
-            </Link>{" "}
-            › {detail.name}
-          </p>
-          <h1 className="serif admin-title">{detail.name}</h1>
-        </div>
-        <div className="admin-head-actions">
-          <Link href={`/${detail.slug}`} target="_blank" className="admin-btn ghost">
-            Portal ↗
-          </Link>
-          <Link href={`/admin/${detail.slug}`} className="admin-btn primary">
-            Editar cliente
-          </Link>
-        </div>
-      </header>
+      <ScreenHeader
+        crumbs={[{ label: "Clientes", href: "/admin/clientes" }, { label: detail.name }]}
+        title={detail.name}
+        lede={`${openCount} ${openCount === 1 ? "trabalho aberto" : "trabalhos abertos"} · ${plans.length} ${plans.length === 1 ? "plano" : "planos"} · checkpoints ${checkpoints.filter((c) => c.done).length}/${checkpoints.length}.`}
+        actions={<>
+          <Link href={`/${detail.slug}`} target="_blank" className="admin-btn ghost">Portal ↗</Link>
+          <Link href={`/admin/${detail.slug}`} className="admin-btn primary">Editar cliente</Link>
+        </>}
+      />
 
       <ClientInsightsPanel slug={detail.slug} clientName={detail.name} />
 
