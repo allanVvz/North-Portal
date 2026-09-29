@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captureWorkspaceKey, creativeDriveAppProperties, selectCreativeMaterialUrl } from "./creativeDriveModel";
+import { captureWorkspaceKey, creativeDriveAppProperties, recordedFolderAction, selectCreativeMaterialUrl } from "./creativeDriveModel";
 
 const identity = {
   clientId: "client",
@@ -48,5 +48,22 @@ describe("client creative material", () => {
   it("cai apenas para o Preview individual, nunca para EDICAO", () => {
     expect(selectCreativeMaterialUrl(assets.filter((asset) => asset.role !== "final"), [])).toBe("https://drive/preview-new");
     expect(selectCreativeMaterialUrl([], [])).toBeNull();
+  });
+});
+
+describe("pasta registrada reencontrada", () => {
+  const folder = { state: "ok" as const, name: "Bruto - diaria de gravacao (16-09-2026)", mimeType: "application/vnd.google-apps.folder" };
+  it("no lugar certo (ou no lugar antigo aceito), usa", () => {
+    expect(recordedFolderAction({ ...folder, parents: ["serie"] }, "serie", "raw")).toEqual({ action: "use" });
+    expect(recordedFolderAction({ ...folder, parents: ["raw"] }, "serie", "raw")).toEqual({ action: "use" });
+  });
+  it("sem pai (removida por quem não é dono), devolve à pasta do cliente", () => {
+    expect(recordedFolderAction({ ...folder, parents: [] }, "serie", "raw")).toEqual({ action: "reattach", parentId: "raw" });
+    expect(recordedFolderAction({ ...folder, parents: [] }, "diaria")).toEqual({ action: "reattach", parentId: "diaria" });
+  });
+  it("movida para outro lugar, na lixeira ou apagada: para e explica", () => {
+    expect(recordedFolderAction({ ...folder, parents: ["outra"] }, "serie", "raw")).toMatchObject({ action: "fail", status: 409, message: expect.stringContaining("foi movida") });
+    expect(recordedFolderAction({ ...folder, state: "trashed", parents: ["raw"] }, "serie", "raw")).toMatchObject({ action: "fail", message: expect.stringContaining("lixeira") });
+    expect(recordedFolderAction({ ...folder, state: "missing", parents: [] }, "serie", "raw")).toMatchObject({ action: "fail", status: 502 });
   });
 });

@@ -285,6 +285,42 @@ export async function setDriveItemTrashed(fileId: string, trashed: boolean): Pro
   if (!res.ok) throw new HttpError(502, `Falha ao atualizar item no Drive: ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
 
+export type DriveItemState = {
+  /** ok = existe e está fora da lixeira; trashed = na lixeira; missing = apagado ou sem acesso da conta. */
+  state: "ok" | "trashed" | "missing";
+  id: string;
+  name: string | null;
+  mimeType: string | null;
+  parents: string[];
+};
+
+/** Diferente de getDriveItemMetadata, distingue lixeira de sumiço (30/09). */
+export async function getDriveItemState(fileId: string): Promise<DriveItemState> {
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const params = new URLSearchParams({ fields: "id,name,mimeType,parents,trashed", supportsAllDrives: "true" });
+  const res = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 404 || res.status === 403) return { state: "missing", id: fileId, name: null, mimeType: null, parents: [] };
+  if (!res.ok) throw new HttpError(502, `Falha ao ler item no Drive (HTTP ${res.status}).`);
+  const file = await res.json() as { id: string; name?: string; mimeType?: string; parents?: string[]; trashed?: boolean };
+  return { state: file.trashed ? "trashed" : "ok", id: file.id, name: file.name ?? null, mimeType: file.mimeType ?? null, parents: file.parents ?? [] };
+}
+
+/**
+ * Devolve um item à pasta esperada SEM tirá-lo de onde mais estiver (30/09).
+ * É o reparo de uma pasta que alguém "removeu" no Drive: quem não é dono só
+ * desfaz o vínculo com a pasta pai, e o conteúdo some da vista da equipe.
+ */
+export async function addDriveParent(fileId: string, parentId: string): Promise<void> {
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
+  const params = new URLSearchParams({ addParents: parentId, fields: "id,parents", supportsAllDrives: "true" });
+  const res = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${params}`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new HttpError(502, `Falha ao devolver a pasta ao lugar no Drive (HTTP ${res.status} ${(await res.text()).slice(0, 160)}).`);
+  const moved = await res.json() as { parents?: string[] };
+  if (!moved.parents?.includes(parentId)) throw new HttpError(502, "O Drive nao confirmou a pasta de volta ao lugar.");
+}
+
 /** Move only a direct child of the expected folder; retries are harmless. */
 export async function moveDriveItemBetweenFolders(fileId: string, fromFolderId: string, toFolderId: string, allowShortcut = false): Promise<void> {
   const file = await getDriveItemMetadata(fileId);

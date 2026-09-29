@@ -1,10 +1,12 @@
 import { createAdminClient } from "./supabase/admin";
 import { HttpError } from "./validation";
 import {
+  addDriveParent,
   createDriveResumableUpload,
   createDriveShortcut,
   ensureDriveFolder,
   getDriveItemMetadata,
+  getDriveItemState,
   listFolderFiles,
   listFolderFilesPage,
   moveDriveItemBetweenFolders,
@@ -12,7 +14,7 @@ import {
   setDriveItemTrashed,
   type DriveItemMetadata,
 } from "./googleDriveApi";
-import { creativeDriveAppProperties } from "./creativeDriveModel";
+import { creativeDriveAppProperties, recordedFolderAction } from "./creativeDriveModel";
 import { BAITA_DRIVE_PLAN_ID } from "./cardMaterials";
 import { isCreativeDeliveryKind } from "./canonicalDeliveryFormats";
 import { ensureDailySeries, type DailySeries } from "./automations/dailySeries";
@@ -238,13 +240,12 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
     // before searching by tags; legacy runs created duplicate same-name folders.
     async function recordedFolder(id: string | null, parentId: string, legacyParentId?: string): Promise<{ id: string } | null> {
       if (!id) return null;
-      const file = await getDriveItemMetadata(id);
-      if (!file) throw new HttpError(502, "Uma pasta registrada esta inacessivel no Google Drive.");
-      if (file.mimeType !== "application/vnd.google-apps.folder" ||
-          !file.parents?.some((parent) => parent === parentId || parent === legacyParentId)) {
-        throw new HttpError(409, "Uma pasta registrada nao pertence a pasta esperada.");
-      }
-      return { id: file.id };
+      // Pasta "removida" por quem não é dono volta ao lugar em vez de travar
+      // a diária (16 e 23/09 da Baita, 30/09) — ver recordedFolderAction.
+      const decision = recordedFolderAction(await getDriveItemState(id), parentId, legacyParentId);
+      if (decision.action === "fail") throw new HttpError(decision.status, decision.message);
+      if (decision.action === "reattach") await addDriveParent(id, decision.parentId);
+      return { id };
     }
     let daily: { id: string } | null = null;
     let script: { id: string } | null = null;
