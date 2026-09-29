@@ -112,7 +112,7 @@ function FeedColumn({ title, hint, frame, pieces, onOpen, onFail }: {
             <button type="button" key={piece.id} className={`feed-tile is-${frame === "natural" ? frameOf(piece.format) : frame}`} onClick={() => onOpen(piece.id)} aria-label={`Abrir ${piece.title}`} title={`${piece.title} · ${piece.clientName}`}>
               <span className="feed-tile-media"><PieceMedia piece={piece} onFail={() => onFail(piece.id)} /></span>
               <span className="feed-tile-badges">
-                {isReels(piece) ? <span className="creative-feed-badge">▶</span> : null}
+                {isReels(piece) ? <span className="creative-feed-badge">▶</span> : /carrossel/i.test(piece.format) ? <span className="creative-feed-badge" title="Carrossel">▦</span> : null}
                 {piece.legacy ? <span className="creative-feed-badge">antigo</span> : null}
               </span>
               <span className="feed-tile-caption">

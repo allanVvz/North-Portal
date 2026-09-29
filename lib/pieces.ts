@@ -13,6 +13,7 @@
 
 import { latestFinalCover, type CreativeMaterialWorkspace } from "./cardMaterials";
 import { taskCoverCandidates } from "./taskCover";
+import { deliveryDriveLinks } from "./deliveryLinks";
 import { subtypeLabel } from "./taskCatalog";
 import { isFlowDelivery, relationKindOf } from "./taskRelations";
 import { isRecurrenceTemplate } from "./recurrenceState";
@@ -80,7 +81,12 @@ export function buildPieces(tasks: readonly PieceTask[], workspaces: readonly Cr
     if (!delivery && !legacy) continue;
 
     const final = delivery ? latestFinalCover(byCreative.get(task.id) ?? []) : null;
-    const linked = [task, ...(delivery ? stepsOf.get(task.id) ?? [] : [])].flatMap((card) => taskCoverCandidates(card).map((cover) => cover.fileId));
+    // Entrega: os links dela e das etapas, sem o que foi marcado para outra
+    // Entrega que divide a mesma etapa, Edição mais recente primeiro
+    // (lib/deliveryLinks.ts). Legado sem fluxo: os links do próprio card.
+    const linked = delivery
+      ? deliveryDriveLinks(task, stepsOf.get(task.id) ?? []).filter((link) => link.kind === "file").map((link) => link.id).slice(0, 8)
+      : taskCoverCandidates(task).map((cover) => cover.fileId);
     const covers = [...new Set([...(final ? [final.drive_file_id] : []), ...linked])];
     if (!covers.length) continue; // só peça com imagem entra no Feed
 

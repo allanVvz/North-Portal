@@ -2850,6 +2850,16 @@ function isMissingRpc(error: { code?: string } | null): boolean {
  * de rede, clique duplo — não grava outro comentário: `inserted` volta `false` e
  * quem chama pula os efeitos colaterais (notificação, @menção, gatilhos).
  */
+/** Marca (ou desmarca, com null) a Entrega de origem de um comentário numa
+ *  etapa compartilhada — ver a migration 20260930090000. Devolve o card
+ *  relido, ou null se o comentário não foi achado. */
+export async function tagCommentOrigin(taskId: string, commentKey: string, forTaskId: string | null): Promise<TaskRecord | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("tag_task_comment_origin", { p_task_id: taskId, p_comment_key: commentKey, p_for_task_id: forTaskId });
+  if (error) fail(error);
+  return data ? getTaskById(taskId) : null;
+}
+
 export async function appendTaskComment(
   taskId: string,
   authorId: string,

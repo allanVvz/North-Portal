@@ -1,6 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { apiError } from "@/lib/api";
-import { appendTaskComment, deleteTaskComment, editTaskComment, getProfileName, getTaskById, listTeamMembers, mentionsName } from "@/lib/supabase";
+import { appendTaskComment, deleteTaskComment, editTaskComment, getProfileName, getTaskById, listTeamMembers, mentionsName, tagCommentOrigin } from "@/lib/supabase";
 import { commentsOf } from "@/lib/comments";
 import { requireAdmin } from "@/lib/supabase/auth";
 import { notifyProfiles, notifyTaskParticipants, taskCommentedMessage } from "@/lib/notifications";
@@ -159,10 +159,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const targetId = parent
       ? (await resolveFlowCommentTarget(createAdminClient(), parent, { commenterId: session.userId, stageTaskId, planNote })).targetId
       : id;
-    const { task, inserted } = await appendTaskComment(targetId, session.userId, text, commentId ?? null, assetIds);
+    const appended = await appendTaskComment(targetId, session.userId, text, commentId ?? null, assetIds);
+    let task = appended.task;
     // Reenvio do mesmo comentário (retry, clique duplo): já foi gravado e já
     // disparou seus efeitos — não notifica, não menciona e não regenera de novo.
-    if (!inserted) return NextResponse.json(task);
+    if (!appended.inserted) return NextResponse.json(task);
+    // Escrito na Entrega e gravado numa etapa: a etapa pode ser COMPARTILHADA
+    // por outras Entregas (Reels e Carrossel do mesmo evento dividem a
+    // Edição). Marca de qual Entrega veio, para capa e arquivos de cada uma
+    // não se misturarem (30/09). Best-effort: o comentário já está gravado.
+    if (parent && targetId !== id) {
+      const key = commentId ?? commentsOf(task.payload).slice().reverse().find((comment) => comment.author_id === session.userId && comment.text === text)?.at;
+      if (key) task = (await tagCommentOrigin(targetId, key, id).catch(() => null)) ?? task;
+    }
     // As notificações leem o id EFETIVO (a etapa), não o da URL.
     const authorName = (await getProfileName(session.userId)) ?? session.email ?? "Alguém";
     await notifyTaskParticipants(targetId, "task_commented", taskCommentedMessage(task.title, authorName));

@@ -47,6 +47,9 @@ vi.mock("@/lib/supabase", async () => {
     getTaskById: async (id: string) => hooks.db.task(id) ?? null,
     listTeamMembers: async () => [],
     mentionsName: () => false,
+    // A marca de origem (Entrega) numa etapa compartilhada é best-effort e tem
+    // teste próprio no banco; aqui só não pode quebrar o fluxo.
+    tagCommentOrigin: async () => null,
   };
 });
 vi.mock("@/lib/notifications", () => ({

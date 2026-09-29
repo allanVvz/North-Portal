@@ -52,6 +52,8 @@ import BackArrowIcon from "./BackArrowIcon";
 import ModalContext from "./ModalContext";
 import CommentActionsMenu from "./CommentActionsMenu";
 import CreativeDriveWorkspace from "./CreativeDriveWorkspace";
+import LegacyDriveFiles from "./LegacyDriveFiles";
+import { deliveryDriveLinks } from "@/lib/deliveryLinks";
 
 type Draft = {
   title: string;
@@ -397,7 +399,9 @@ export default function TaskModal({
   }, [mode, reloadMaterials]);
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
-  const [editingComment, setEditingComment] = useState<{ index: number; at: string; text: string } | null>(null);
+  // `taskId`: o card onde o comentário está gravado — pode ser uma etapa ou
+  // atividade da família, não o card aberto (30/09).
+  const [editingComment, setEditingComment] = useState<{ taskId: string; index: number; at: string; text: string } | null>(null);
   // Documents attachable to a comment — pdf/other files, not Trilhas HTML
   // decks. Lazily fetched once per edit session (small, agency-wide list;
   // same "all documents" endpoint Informações uses).
@@ -416,7 +420,7 @@ export default function TaskModal({
       .finally(() => { if (!cancelled) setDocsReady(true); });
     return () => { cancelled = true; };
   }, [mode]);
-  const { name: currentUserName } = useCurrentAdminUser();
+  const { name: currentUserName, userId: currentUserId } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const statusBusyRef = useRef(false);
@@ -626,6 +630,14 @@ export default function TaskModal({
     : cardWorkspaces[0]?.creative_task_id ?? creativeCandidates[0]?.id ?? null;
   const filesTab = liveTask?.subtype === "captacao" ? "raw" as const : filesTaskId === liveTask?.id ? "classified" as const : materialFinals.length ? "final" as const : "classified" as const;
   const openFiles = () => { if (filesTaskId) setDriveOpen({ taskId: filesTaskId, tab: filesTab }); };
+  // Entrega sem a automação de pastas (fluxo legado): os arquivos vêm dos
+  // links colados nela e nas etapas — lib/deliveryLinks.ts, a mesma leitura
+  // da capa e do Feed (30/09).
+  const legacyLinks = useMemo(
+    () => (liveTask && isFlowDelivery(liveTask) && !cardWorkspaces.some((workspace) => workspace.creative_task_id === liveTask.id)
+      ? deliveryDriveLinks(liveTask, flowStepsOf(liveTask.id, clientTasks)) : []),
+    [liveTask, clientTasks, cardWorkspaces],
+  );
   const activeMedia = activeMaterialTab === "preview" ? materialPreviews : activeMaterialTab === "final" ? materialFinals : [];
   const commentAssets = useMemo(() => new Map(materialWorkspaces.flatMap((workspace) => workspace.assets.map((asset) => [asset.id, { asset, workspace }] as const))), [materialWorkspaces]);
   const [previewDoc, setPreviewDoc] = useState<AdminDocument | null>(null);
@@ -920,7 +932,10 @@ export default function TaskModal({
   // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
   // renderizada no primeiro caso; `chainDelivery` já traz sua versão persistida.
   const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
-  const deliveryClassificationLocked = Boolean(chainDelivery && chainSteps.some((step) => step.status !== "backlog"));
+  // Trocar o formato de uma Entrega em andamento fica travado — mas o
+  // `criativo` legado não TEM formato: escolher "Carrossel" nele é dizer o que
+  // ele é, não reclassificar (30/09, "Evento Baita 10/10 — Carrossel").
+  const deliveryClassificationLocked = Boolean(chainDelivery && liveTask?.kind !== "criativo" && chainSteps.some((step) => step.status !== "backlog"));
 
   // As caixas "Faz parte de": uma linha enxuta por card pai (entrega, plano,
   // molde de recorrência), só para navegar. Um card pode ter mais de uma ao
@@ -1432,34 +1447,36 @@ export default function TaskModal({
 
   async function saveCommentEdit() {
     if (!liveTask || !editingComment) return;
-    const { index, at, text } = editingComment;
+    const { taskId, index, at, text } = editingComment;
     if (!text.trim()) return;
     try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
+      const res = await fetch(`/api/admin/tasks/${taskId}/comments`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ index, at, text: text.trim() }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
       const updated = await res.json() as TaskRecord;
       setEditingComment(null);
-      setLiveTask(updated); onTaskPatched?.(updated);
+      if (updated.id === liveTask.id) setLiveTask(updated);
+      onTaskPatched?.(updated);
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : "Não foi possível editar o comentário.");
     }
   }
 
-  async function removeComment(index: number, at: string) {
+  async function removeComment(taskId: string, index: number, at: string) {
     if (!liveTask) return;
     if (!window.confirm("Excluir este comentário? Não dá para desfazer.")) return;
     try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
+      const res = await fetch(`/api/admin/tasks/${taskId}/comments`, {
         method: "DELETE", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ index, at }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
       const updated = await res.json() as TaskRecord;
-      if (editingComment?.index === index) setEditingComment(null);
-      setLiveTask(updated); onTaskPatched?.(updated);
+      if (editingComment?.taskId === taskId && editingComment.index === index) setEditingComment(null);
+      if (updated.id === liveTask.id) setLiveTask(updated);
+      onTaskPatched?.(updated);
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : "Não foi possível excluir o comentário.");
     }
@@ -2361,7 +2378,14 @@ export default function TaskModal({
               </div>
             ) : null}
 
-            {mode === "edit" && (materialTabs.length > 0 || filesTaskId) ? (
+            {mode === "edit" && legacyLinks.length && !materialTabs.length ? (
+              <section className="tm-materials" aria-label="Arquivos do card">
+                <div className="tm-materials-heading">
+                  <div><p className="tm-box-label">Arquivos</p><strong>Dos links colados</strong></div>
+                </div>
+                <LegacyDriveFiles links={legacyLinks} />
+              </section>
+            ) : mode === "edit" && (materialTabs.length > 0 || filesTaskId) ? (
               <section className="tm-materials" aria-label="Arquivos do card">
                 <div className="tm-materials-heading">
                   <div><p className="tm-box-label">Arquivos</p><strong>Desta execução</strong></div>
@@ -2395,13 +2419,18 @@ export default function TaskModal({
                 <div className="tm-comments">
                   {comments.slice().reverse().map((c, i) => {
                     // A thread pode misturar comentários de vários cards da
-                    // família (plano + atividades, entrega + etapas). Só os do
-                    // card aberto são editáveis, e o índice que o servidor
-                    // conhece é o do `payload.comments` DESSE card — casado por
-                    // `at` (único por card).
+                    // família (plano + atividades, entrega + etapas). Os do
+                    // card aberto são editáveis; os gravados em outro card da
+                    // família, só por quem os escreveu (30/09 — na Entrega o
+                    // comentário cai na etapa, e o autor ficava sem como
+                    // apagar o próprio link). O índice que o servidor conhece
+                    // é o do `payload.comments` do card de ORIGEM, casado por
+                    // `at` + texto.
                     const own = c.taskId === liveTask?.id;
-                    const storedIndex = own ? ownComments.findIndex((o) => o.at === c.at && o.text === c.text) : -1;
-                    const editing = own && editingComment?.index === storedIndex;
+                    const originCard = own ? liveTask : clientTasks.find((card) => card.id === c.taskId) ?? null;
+                    const mine = own || Boolean(c.author_id && c.author_id === currentUserId);
+                    const storedIndex = originCard && mine ? (own ? ownComments : commentsOf(originCard)).findIndex((o) => o.at === c.at && o.text === c.text) : -1;
+                    const editing = editingComment?.taskId === c.taskId && editingComment.index === storedIndex;
                     // Papel de quem comentou NO CARD ONDE O COMENTÁRIO CAIU —
                     // não no card aberto agora. Recalculado a cada render, a
                     // partir do estado atual (nunca congelado no comentário).
@@ -2426,10 +2455,10 @@ export default function TaskModal({
                             {destinationLabel ? <small className="tm-comment-origin" title="Onde este comentário foi gravado">→ {destinationLabel}</small> : null}
                             <small>{formatCommentTime(c.at)}</small>
                             {c.edited_at ? <small className="tm-comment-edited">editado</small> : null}
-                            {own && storedIndex >= 0 ? (
+                            {storedIndex >= 0 ? (
                               <CommentActionsMenu
-                                onEdit={() => setEditingComment({ index: storedIndex, at: c.at, text: c.text })}
-                                onDelete={() => void removeComment(storedIndex, c.at)}
+                                onEdit={() => setEditingComment({ taskId: c.taskId, index: storedIndex, at: c.at, text: c.text })}
+                                onDelete={() => void removeComment(c.taskId, storedIndex, c.at)}
                               />
                             ) : null}
                           </div>

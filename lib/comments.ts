@@ -22,6 +22,9 @@ export type TaskComment = {
    *  — ver app/avatar/README.md. */
   author_id?: string;
   text: string;
+  /** Numa etapa compartilhada por várias Entregas: de qual delas o comentário
+   *  veio (30/09). Capa e arquivos de uma Entrega ignoram o marcado para outra. */
+  for_task_id?: string;
   at: string;
   edited_at?: string;
   asset_ids?: string[];
