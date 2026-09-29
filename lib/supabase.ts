@@ -4,7 +4,7 @@ import { AUTOMATION_DEFINITIONS, isAutomationKey } from "./automationCatalog";
 import { dailyConfigSchema, type DailyConfig } from "./validation";
 import { getDriveItemMetadata, isGoogleDriveConfigured } from "./googleDriveApi";
 import { parseGoogleDriveUrl } from "./googleDrive";
-import { CANONICAL_DELIVERY_FORMATS, canonicalFormatKey } from "./canonicalDeliveryFormats";
+import { canonicalFormatKey } from "./canonicalDeliveryFormats";
 import { normalizeDeliveryPayload } from "./taskClassification";
 import {
   currentRecurringExecutionFields,
@@ -2373,16 +2373,6 @@ async function patchWithCanonicalClassification(
   if (!kindChanged && !subtypeChanged) return rawPatch;
 
   const lockedMessage = "Tipo e subtipo ficam bloqueados depois que a Entrega sai de Entrada.";
-  // Exceção (30/09): o `criativo` legado não tem formato. Dar a ele um formato
-  // de Entrega (Carrossel, Reels…) em andamento é dizer o que ele é — e só
-  // isso muda: tipo e task_type. Versão de fluxo, ativação e etapas ficam
-  // como estão (a troca normal reinicia o fluxo, o que desmontaria a Entrega).
-  if (current.kind === "criativo" && kindChanged && typeof rawPatch.kind === "string" && CANONICAL_DELIVERY_FORMATS.some((format) => format.key === rawPatch.kind)
-      && (current.workflow_activated_at || current.workflow_version_id)) {
-    const type = findType(await listTaskTypes(await createClient()), rawPatch.kind);
-    if (!type || type.behavior !== "entrega") throw new HttpError(409, "A classificação escolhida não existe mais.");
-    return { ...rawPatch, subtype: null, task_type_id: type.id };
-  }
   if (current.workflow_activated_at) throw new HttpError(409, lockedMessage);
   const workflowParentIds = (current.parents ?? [])
     .filter((parent) => parent.relation_kind === "workflow_step")

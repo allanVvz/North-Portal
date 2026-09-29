@@ -510,7 +510,7 @@ export default function TaskModal({
       description: draft.description.trim() || null,
       client_visible: planoVisibilityOn ? draft.client_visible : false,
       slug: draft.clientSlug || null,
-      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null, ...(draft.subtype === "edicao" ? { reviewer_ids: revisaoOff ? [] : draft.reviewer_ids } : {}) },
+      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) || draft.kind === "criativo" ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null, ...(draft.subtype === "edicao" ? { reviewer_ids: revisaoOff ? [] : draft.reviewer_ids } : {}) },
     };
   }, [draft, effectiveApproverId, effectiveReviewerId, isDelivery, isRecurringParent, kd.isPlan, chainDelivery?.id, liveTask?.id, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
   const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
@@ -932,10 +932,12 @@ export default function TaskModal({
   // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
   // renderizada no primeiro caso; `chainDelivery` já traz sua versão persistida.
   const chainSteps = chainDelivery ? flowStepsOf(chainDelivery.id, clientTasks) : [];
-  // Trocar o formato de uma Entrega em andamento fica travado — mas o
-  // `criativo` legado não TEM formato: escolher "Carrossel" nele é dizer o que
-  // ele é, não reclassificar (30/09, "Evento Baita 10/10 — Carrossel").
-  const deliveryClassificationLocked = Boolean(chainDelivery && liveTask?.kind !== "criativo" && chainSteps.some((step) => step.status !== "backlog"));
+  const deliveryClassificationLocked = Boolean(chainDelivery && chainSteps.some((step) => step.status !== "backlog"));
+  // O `criativo` legado não TEM formato, e com as etapas em andamento o tipo
+  // não pode mudar (o banco garante). Escolher "Carrossel" nele grava o
+  // FORMATO do card — que Feed, capa e esta tela já leem — sem tocar no tipo
+  // nem no fluxo (30/09, "Evento Baita 10/10 — Carrossel").
+  const legacyFormatMode = deliveryClassificationLocked && liveTask?.kind === "criativo" && draft.kind === "criativo";
 
   // As caixas "Faz parte de": uma linha enxuta por card pai (entrega, plano,
   // molde de recorrência), só para navegar. Um card pode ter mais de uma ao
@@ -1594,7 +1596,7 @@ export default function TaskModal({
     payload.statusTone = draft.statusTone;
     payload.barTone = draft.barTone;
     const strOrDelete = (key: string, value: string) => { if (value.trim()) payload[key] = value.trim(); else delete payload[key]; };
-    if (!isCreativeDeliveryKind(draft.kind)) strOrDelete("formato", draft.formato);
+    if (!isCreativeDeliveryKind(draft.kind) || draft.kind === "criativo") strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
     if (draft.subtype === "edicao") payload.reviewer_ids = revisaoOff ? [] : draft.reviewer_ids;
@@ -1834,15 +1836,19 @@ export default function TaskModal({
                     <span className="tm-head-sep">·</span>
                     <HeadDropdown
                       className="tm-headpick-subtype"
-                      trigger={<span className="tm-headpick-label">Subtipo: {classification.subtypeLabel ?? "—"}</span>}
+                      trigger={<span className="tm-headpick-label">Subtipo: {legacyFormatMode && draft.formato.trim() ? draft.formato.trim() : classification.subtypeLabel ?? "—"}</span>}
                     >
                       {baseType === "tarefa" ? <button type="button" className={`tm-headpick-option ${!draft.subtype ? "on" : ""}`} onClick={() => pickVisibleSubtype("")} disabled={deliveryClassificationLocked}>— Sem subtipo —</button> : null}
-                      {subtypeOptions.map((sub) => (
+                      {legacyFormatMode ? subtypeOptions.filter((sub) => sub.key !== "criativo").map((sub) => (
+                        <button type="button" key={sub.key} className={`tm-headpick-option ${draft.formato.trim().toLocaleLowerCase("pt-BR") === sub.label.toLocaleLowerCase("pt-BR") ? "on" : ""}`} onClick={() => set("formato", sub.label)}>
+                          {sub.label}
+                        </button>
+                      )) : subtypeOptions.map((sub) => (
                         <button type="button" key={sub.key} className={`tm-headpick-option ${classification.subtypeKey === sub.key ? "on" : ""}`} onClick={() => pickVisibleSubtype(sub.key)} disabled={deliveryClassificationLocked || ("creatable" in sub && !sub.creatable && sub.key !== draft.kind)}>
                           {sub.label}
                         </button>
                       ))}
-                      {baseType === "entrega" && !subtypeOptions.some((sub) => sub.key === draft.kind) ? <button type="button" className="tm-headpick-option on" disabled>{classification.subtypeLabel}</button> : null}
+                      {baseType === "entrega" && !legacyFormatMode && !subtypeOptions.some((sub) => sub.key === draft.kind) ? <button type="button" className="tm-headpick-option on" disabled>{classification.subtypeLabel}</button> : null}
                     </HeadDropdown>
                   </>
                 ) : null}
