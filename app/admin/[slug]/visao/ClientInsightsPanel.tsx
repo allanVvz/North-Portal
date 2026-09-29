@@ -11,6 +11,7 @@ import InsightsRail from "../../insights/InsightsRail";
 import { buildInsightCandidates } from "../../insights/insightCandidates";
 import { useOperationData } from "../../operacao/useOperationItems";
 import { agencyToday } from "../../recurringState";
+import { PieceMedia } from "../../plano/CreativeFeedView";
 
 // O cliente em números (29/09): o que os relatórios semanais e as automações
 // já sabem, na ordem da história — a semana, a tendência, a conversão que a
@@ -124,8 +125,7 @@ export default function ClientInsightsPanel({ slug, clientName }: { slug: string
           <div className="client-pieces">
             {visiblePieces.map((piece) => (
               <figure key={piece.id} className="client-piece">
-                {/* eslint-disable-next-line @next/next/no-img-element -- rota autenticada de miniatura do Drive */}
-                <img src={`/api/admin/drive/thumbnail/${piece.covers[0]}`} alt={`Capa de ${piece.title}`} loading="lazy" decoding="async" onError={() => setBroken((current) => new Set(current).add(piece.id))} />
+                <PieceMedia piece={piece} onFail={() => setBroken((current) => new Set(current).add(piece.id))} />
                 <figcaption><span className={`op-dot tone-${piece.state === "concluida" ? "done" : piece.state === "atrasada" ? "late" : "ok"}`} aria-hidden />{piece.title}</figcaption>
               </figure>
             ))}

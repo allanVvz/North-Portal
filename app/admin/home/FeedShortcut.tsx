@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Piece, PieceState } from "@/lib/pieces";
+import { PieceMedia } from "../plano/CreativeFeedView";
 
 // Atalho do Feed (29/09): o global das peças com imagem — quantas concluídas,
 // atrasadas e em produção — e as capas mais recentes. Cada estado abre o Feed
@@ -45,8 +46,7 @@ export default function FeedShortcut() {
       <div className="feed-shortcut-strip">
         {covers.map((piece) => (
           <Link key={piece.id} href={feedHref(piece.state)} className="feed-shortcut-thumb" title={`${piece.title} · ${piece.clientName}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element -- rota autenticada de miniatura do Drive */}
-            <img src={`/api/admin/drive/thumbnail/${piece.covers[0]}`} alt="" loading="lazy" decoding="async" onError={() => setHidden((current) => new Set(current).add(piece.id))} />
+            <PieceMedia piece={piece} onFail={() => setHidden((current) => new Set(current).add(piece.id))} />
             <span className={`op-dot tone-${STATES.find((state) => state.key === piece.state)?.tone}`} aria-hidden />
           </Link>
         ))}

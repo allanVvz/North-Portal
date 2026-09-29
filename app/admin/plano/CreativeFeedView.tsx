@@ -20,13 +20,37 @@ function frameOf(format: string): string {
   return "post";
 }
 
-function PieceMedia({ piece, onFail }: { piece: Piece; onFail: () => void }) {
+/**
+ * Tenta as capas em ordem. Link que não rende miniatura pode ser PASTA colada
+ * (entrega legada: "Feed" com as artes do carrossel) — antes de desistir dele,
+ * abre a pasta pela conta do app e tenta as imagens de dentro, em ordem de
+ * nome ("01 Capa…" primeiro). Cada pasta é aberta uma vez (30/09).
+ */
+export function PieceMedia({ piece, onFail }: { piece: Piece; onFail: () => void }) {
+  const [queue, setQueue] = useState<string[]>(piece.covers);
   const [attempt, setAttempt] = useState(0);
-  const current = piece.covers[attempt];
+  const [opened] = useState(() => new Set<string>());
+  const current = queue[attempt];
+  const next = () => { if (attempt + 1 < queue.length) setAttempt(attempt + 1); else onFail(); };
+  const failed = () => {
+    if (!current || opened.has(current)) return next();
+    opened.add(current);
+    fetch(`/api/admin/drive/files?folderId=${encodeURIComponent(current)}&limit=12`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { files?: { id: string; name?: string; mimeType?: string }[] } | null) => {
+        const images = (data?.files ?? []).filter((file) => file.mimeType?.startsWith("image/") || file.mimeType?.startsWith("video/"))
+          .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "pt-BR", { numeric: true })).map((file) => file.id);
+        if (!images.length) return next();
+        images.forEach((id) => opened.add(id));
+        setQueue((items) => [...items.slice(0, attempt + 1), ...images, ...items.slice(attempt + 1)]);
+        setAttempt(attempt + 1);
+      })
+      .catch(next);
+  };
+  if (!current) return null;
   return (
     // eslint-disable-next-line @next/next/no-img-element -- rota autenticada de miniatura do Drive
-    <img key={current} src={`/api/admin/drive/thumbnail/${current}`} alt={`Capa de ${piece.title}`} loading="lazy" decoding="async"
-      onError={() => { if (attempt + 1 < piece.covers.length) setAttempt(attempt + 1); else onFail(); }} />
+    <img key={current} src={`/api/admin/drive/thumbnail/${current}`} alt={`Capa de ${piece.title}`} loading="lazy" decoding="async" onError={failed} />
   );
 }
 

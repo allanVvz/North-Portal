@@ -11,6 +11,7 @@ import Sparkline from "../home/Sparkline";
 import { compact, delta, money } from "../home/useInsights";
 import { operationState, type OperationItem } from "../operacao/operationItems";
 import { operacaoHref } from "../operacao/operacaoLinks";
+import { PieceMedia } from "../plano/CreativeFeedView";
 
 // Painel de clientes (29/09; largura total e sem investimento em 30/09): um
 // card por cliente contando, de cima para baixo, como ele está — saúde da
@@ -164,8 +165,7 @@ function ClientCard({ client, today, loadingOps, health: h, insight, loadingInsi
         <section className="client-card-pieces" aria-label="Peças">
           <div className="client-card-thumbs">
             {pieces.slice(0, 6).map((piece) => (
-              // eslint-disable-next-line @next/next/no-img-element -- rota autenticada de miniatura do Drive
-              <img key={piece.id} src={`/api/admin/drive/thumbnail/${piece.covers[0]}`} alt="" title={piece.title} loading="lazy" decoding="async" onError={() => onBroken(piece.id)} />
+              <PieceMedia key={piece.id} piece={piece} onFail={() => onBroken(piece.id)} />
             ))}
           </div>
           <p>{(Object.keys(PIECE_WORD) as PieceState[]).filter((state) => pieceCount(state) > 0).map((state) => (
