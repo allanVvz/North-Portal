@@ -256,3 +256,11 @@ describe("áudio vai para os brutos, e a correção de 25/09 devolve os finais",
     expect(registers().some(([, params]) => params.p_role === "preview")).toBe(false);
   });
 });
+
+describe("entrega de várias peças (carrossel, story)", () => {
+  it("as peças prontas moram na Def; sem Def, na raiz do criativo como sempre", async () => {
+    const { finalFolderOf } = await import("./creativeDriveSync");
+    expect(finalFolderOf({ creative_folder_id: "raiz", final_folder_id: "def" })).toBe("def");
+    expect(finalFolderOf({ creative_folder_id: "raiz", final_folder_id: null })).toBe("raiz");
+  });
+});

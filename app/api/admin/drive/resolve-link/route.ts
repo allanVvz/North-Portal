@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     if (taskError) throw taskError;
     if (!task?.client_id) throw new HttpError(404, "Card não encontrado.");
     const { data: workspaces, error: workspacesError } = await db.from("drive_creative_workspaces")
-      .select("id,client_id,plan_task_id,capture_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,capture_workspace:drive_capture_workspaces(script_folder_id,capture_folder_id,daily_folder_id)")
+      .select("id,client_id,plan_task_id,capture_task_id,creative_task_id,stage_task_id,creative_folder_id,final_folder_id,multi_final,raw_folder_id,preview_folder_id,capture_workspace:drive_capture_workspaces(script_folder_id,capture_folder_id,daily_folder_id)")
       .eq("client_id", task.client_id).eq("status", "ready");
     if (workspacesError) throw workspacesError;
     const canonicalPlans = new Map<string, { client_id: string | null; payload: Record<string, unknown> | null }>();
@@ -58,7 +58,7 @@ export async function GET(request: Request) {
         return NextResponse.json({ resolved: true, taskId: workspace.creative_task_id, tab: "raw" });
       }
       if (link.id === workspace.raw_folder_id || link.id === workspace.preview_folder_id ||
-          link.id === workspace.creative_folder_id) {
+          link.id === workspace.creative_folder_id || link.id === workspace.final_folder_id) {
         const tab = link.id === workspace.raw_folder_id ? "classified"
           : link.id === workspace.preview_folder_id ? "preview" : "final";
         return NextResponse.json({ resolved: true, taskId: workspace.creative_task_id, tab });

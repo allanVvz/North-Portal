@@ -63,6 +63,10 @@ export type CreativeDriveWorkspace = {
   creative_task_id: string;
   stage_task_id: string | null;
   creative_folder_id: string | null;
+  /** Def: pasta das peças prontas nas entregas de várias peças (30/09). */
+  final_folder_id: string | null;
+  /** Carrossel, story: todas as peças da Def são atuais, nenhuma substitui outra. */
+  multi_final: boolean;
   raw_folder_id: string | null;
   preview_folder_id: string | null;
   capture_workspace: {
@@ -181,7 +185,7 @@ export function creativeFolderNames(context: Pick<CreativeDriveContext, "clientN
   const base = [context.clientName, context.formatName, context.creativeTitle]
     .filter((part): part is string => Boolean(part?.trim()))
     .map((part) => part.trim().replace(/\s+/g, " ")).join(" · ");
-  return { root: base, raw: `${base} · Raw`, preview: `${base} · Preview` };
+  return { root: base, raw: `${base} · Raw`, preview: `${base} · Preview`, def: `${base} · Def` };
 }
 
 export async function canManageCreativeAssets(db: Db, userId: string, level: string | null, context: CreativeDriveContext): Promise<boolean> {
@@ -193,6 +197,12 @@ export async function canManageCreativeAssets(db: Db, userId: string, level: str
   return Boolean(data?.length);
 }
 
+/** Carrossel e story são entregas de várias peças (30/09): as peças prontas
+ *  vão para uma pasta Def, irmã de Raw e Preview, e todas valem juntas. */
+export function isMultiItemFormat(format: string | null | undefined): boolean {
+  return /carrossel|stor/i.test(format ?? "");
+}
+
 /**
  * Pastas CONECTADAS (30/09): a Entrega usa pastas que já existiam no Drive
  * (ligadas à mão, `connected_folders`). A preparação só confere que as três
@@ -201,11 +211,11 @@ export async function canManageCreativeAssets(db: Db, userId: string, level: str
  */
 async function checkConnectedWorkspace(db: Db, creativeTaskId: string): Promise<CreativeDriveWorkspace | null> {
   const { data: row, error } = await db.from("drive_creative_workspaces")
-    .select("id,connected_folders,creative_folder_id,preview_folder_id,raw_folder_id")
+    .select("id,connected_folders,creative_folder_id,final_folder_id,preview_folder_id,raw_folder_id")
     .eq("creative_task_id", creativeTaskId).maybeSingle();
   failDb(error);
   if (!row?.connected_folders) return null;
-  const ids = [row.creative_folder_id, row.preview_folder_id, row.raw_folder_id];
+  const ids = [row.creative_folder_id, row.preview_folder_id, row.raw_folder_id, ...(row.final_folder_id ? [row.final_folder_id] : [])];
   const states = await Promise.all(ids.map((id) => (id ? getDriveItemState(id) : Promise.resolve(null))));
   const problem = states.some((state) => !state) ? "Uma das pastas conectadas não foi informada."
     : states.find((state) => state!.state !== "ok" || state!.mimeType !== "application/vnd.google-apps.folder")
@@ -301,10 +311,18 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
       name: names.raw, parentId: creative.id,
       appProperties: creativeDriveAppProperties(context, "raw_folder"),
     });
+    // Várias peças (carrossel, story): as prontas vão para a Def, irmã de Raw
+    // e Preview; entrega de um arquivo segue com o final na raiz.
+    const multi = isMultiItemFormat(context.formatName);
+    const def = multi ? await recordedFolder(creativeWorkspace.final_folder_id, creative.id) ?? await ensureDriveFolder({
+      name: names.def, parentId: creative.id,
+      appProperties: creativeDriveAppProperties(context, "final_folder"),
+    }) : null;
     await Promise.all([
       renameDriveFolder(creative.id, links.uploads_folder_id, names.root),
       renameDriveFolder(preview.id, creative.id, names.preview),
       renameDriveFolder(raw.id, creative.id, names.raw),
+      ...(def ? [renameDriveFolder(def.id, creative.id, names.def)] : []),
     ]);
     const { data: oldLinks, error: oldLinksError } = await db.from("drive_raw_asset_links")
       .select("shortcut_drive_file_id").eq("workspace_id", creativeWorkspace.id).not("shortcut_drive_file_id", "is", null);
@@ -329,6 +347,7 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
     }
     const { error: creativeUpdateError } = await db.from("drive_creative_workspaces").update({
       creative_folder_id: creative.id, raw_folder_id: raw.id, preview_folder_id: preview.id,
+      final_folder_id: def?.id ?? null, multi_final: multi,
       status: "ready", last_error: null, provisioned_at: now,
       provision_attempts: (creativeWorkspace.provision_attempts ?? 0) + 1,
     }).eq("id", creativeWorkspace.id);
@@ -486,7 +505,7 @@ export async function moveCreativeAssetToRaw(db: Db, creativeTaskId: string, ass
   if (!asset) throw new HttpError(404, "Arquivo do Criativo nao encontrado.");
   const file = await getDriveItemMetadata(asset.drive_file_id);
   if (!file) throw new HttpError(404, "Arquivo nao encontrado no Drive.");
-  const from = [workspace.creative_folder_id, workspace.preview_folder_id]
+  const from = [workspace.final_folder_id, workspace.creative_folder_id, workspace.preview_folder_id].filter(Boolean)
     .find((folderId) => file.parents?.includes(folderId!));
   if (!from && !file.parents?.includes(workspace.raw_folder_id!)) {
     throw new HttpError(409, "O arquivo nao esta na raiz ou no Preview deste Criativo.");
@@ -511,11 +530,12 @@ export async function promoteCreativeAsset(db: Db, userId: string, creativeTaskI
   failDb(existingVersionError);
   if (existingVersion && asset.role === "final") return existingVersion;
   const file = await getDriveItemMetadata(asset.drive_file_id);
-  if (!file?.parents?.some((parent) => parent === workspace.preview_folder_id || parent === workspace.creative_folder_id)) {
+  const home = workspace.final_folder_id || workspace.creative_folder_id!;
+  if (!file?.parents?.some((parent) => parent === workspace.preview_folder_id || parent === home)) {
     throw new HttpError(409, "O arquivo ja nao esta no Preview deste Criativo.");
   }
   if (file.parents.includes(workspace.preview_folder_id!)) {
-    await moveDriveItemBetweenFolders(file.id, workspace.preview_folder_id!, workspace.creative_folder_id!);
+    await moveDriveItemBetweenFolders(file.id, workspace.preview_folder_id!, home);
   }
   const { error: registerError } = await db.rpc("register_drive_folder_asset", {
     p_workspace_id: workspace.id, p_drive_file_id: file.id, p_name: file.name,
@@ -542,7 +562,8 @@ export async function setFinalVersionTrashed(db: Db, creativeTaskId: string, ver
   if (asset.role === "preview") throw new HttpError(409, "Este arquivo voltou ao Preview; gerencie-o na aba Previews.");
   await setDriveItemTrashed(asset.drive_file_id, trashed);
   const now = new Date().toISOString();
-  if (!trashed) {
+  // Restaurar uma peça de carrossel/story não rebaixa as outras: todas valem juntas.
+  if (!trashed && !workspace.multi_final) {
     const { error: supersedeError } = await db.from("drive_final_versions").update({ state: "superseded" })
       .eq("workspace_id", workspace.id).eq("state", "current").neq("id", versionId);
     failDb(supersedeError);

@@ -15,7 +15,7 @@ type Db = ReturnType<typeof createAdminClient>;
 // remain in their own workspaces; parents receive references only.
 async function materialIndex(db: Db, syncWarnings: string[] = []) {
     const [workspaceResult, captureResult] = await Promise.all([db.from("drive_creative_workspaces")
-      .select("id,plan_task_id,capture_task_id,creative_task_id,status,assets:drive_assets!drive_assets_workspace_id_fkey(id,drive_file_id,name,mime_type,size_bytes,role,state,web_view_link,created_at),raw_links:drive_raw_asset_links!drive_raw_asset_links_workspace_id_fkey(asset_id),final_versions:drive_final_versions!drive_final_versions_workspace_id_fkey(id,asset_id,version_number,state,promoted_at)")
+      .select("id,plan_task_id,capture_task_id,creative_task_id,status,multi_final,assets:drive_assets!drive_assets_workspace_id_fkey(id,drive_file_id,name,mime_type,size_bytes,role,state,web_view_link,created_at),raw_links:drive_raw_asset_links!drive_raw_asset_links_workspace_id_fkey(asset_id),final_versions:drive_final_versions!drive_final_versions_workspace_id_fkey(id,asset_id,version_number,state,promoted_at)")
       , db.from("drive_capture_workspaces")
       .select("capture_task_id,script_folder_id,capture_folder_id")
       ]);
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as { taskId?: unknown };
     const taskId = typeof body.taskId === "string" && /^[0-9a-f-]{36}$/i.test(body.taskId) ? body.taskId : null;
     const { data: folders, error } = await db.from("drive_creative_workspaces")
-      .select("id,plan_task_id,routine_task_id,capture_task_id,capture_workspace_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
+      .select("id,plan_task_id,routine_task_id,capture_task_id,capture_workspace_id,creative_task_id,stage_task_id,creative_folder_id,final_folder_id,multi_final,raw_folder_id,preview_folder_id,status,last_error")
       .eq("status", "ready");
     if (error) throw error;
     const relevant = (folders ?? []).filter((folder) => !taskId || [

@@ -24,6 +24,8 @@ export type CreativeMaterialWorkspace = {
   creative_task_id: string;
   creative_title?: string | null;
   status: string;
+  /** Carrossel, story: todas as peças finais valem juntas (30/09). */
+  multi_final?: boolean;
   available_raw_count?: number | null;
   available_raw_limited?: boolean;
   assets: CreativeMaterialAsset[];
@@ -89,6 +91,6 @@ export function latestFinalCover(workspaces: readonly CreativeMaterialWorkspace[
     .filter((asset) => asset.role === "final" && asset.state === "active" && /^(image|video)\//.test(asset.mime_type));
   // Carrossel (30/09): os finais são o CONJUNTO de artes, não versões — a
   // capa é a primeira arte pela ordem de nome ("01 Capa…").
-  if (options.carousel) return [...finals].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true }))[0] ?? null;
+  if (options.carousel || workspaces.some((workspace) => workspace.multi_final)) return [...finals].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true }))[0] ?? null;
   return finals.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))[0] ?? null;
 }

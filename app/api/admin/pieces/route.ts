@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       .or(`workflow_version_id.not.is.null,kind.eq.criativo,kind.like.entrega_%,subtype.in.(${[...LEGACY_PIECE_SUBTYPES, "captacao", "roteiro"].join(",")})`);
     const [tasksResult, workspacesResult] = await Promise.all([
       taskQuery,
-      admin.from("drive_creative_workspaces").select("id,plan_task_id,capture_task_id,creative_task_id,status,assets:drive_assets!drive_assets_workspace_id_fkey(id,drive_file_id,name,mime_type,size_bytes,role,state,web_view_link,created_at),final_versions:drive_final_versions!drive_final_versions_workspace_id_fkey(id,asset_id,version_number,state,promoted_at)"),
+      admin.from("drive_creative_workspaces").select("id,plan_task_id,capture_task_id,creative_task_id,status,multi_final,assets:drive_assets!drive_assets_workspace_id_fkey(id,drive_file_id,name,mime_type,size_bytes,role,state,web_view_link,created_at),final_versions:drive_final_versions!drive_final_versions_workspace_id_fkey(id,asset_id,version_number,state,promoted_at)"),
     ]);
     if (tasksResult.error) throw tasksResult.error;
     if (workspacesResult.error) throw workspacesResult.error;

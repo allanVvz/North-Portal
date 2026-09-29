@@ -12,6 +12,8 @@ type WorkspaceFolders = {
   creative_task_id: string;
   stage_task_id: string | null;
   creative_folder_id: string | null;
+  /** Pasta das peças prontas (Def) — carrossel, story. Nula: a raiz do criativo. */
+  final_folder_id?: string | null;
   raw_folder_id: string | null;
   preview_folder_id: string | null;
   status: string;
@@ -21,6 +23,12 @@ type WorkspaceFolders = {
 const FOLDER = "application/vnd.google-apps.folder";
 const SHORTCUT = "application/vnd.google-apps.shortcut";
 const MOVE_PENDING = "final_move_pending:";
+
+/** Onde ficam as peças prontas: a Def (entrega de várias peças) ou a raiz do
+ *  criativo (entrega de um arquivo, como sempre foi) — 30/09. */
+export function finalFolderOf(workspace: Pick<WorkspaceFolders, "final_folder_id" | "creative_folder_id">): string | null {
+  return workspace.final_folder_id || workspace.creative_folder_id;
+}
 /** Correção pontual (25/09): os arquivos em Preview deste criativo eram finais
  *  rebaixados por erro. Marcado no banco; a próxima sincronização — que é
  *  quem tem credencial do Drive — devolve cada um para a Home, e o áudio para
@@ -50,7 +58,7 @@ export async function directFiles(folderId: string): Promise<DriveFile[]> {
 
 /** Devolve se o arquivo foi registrado (false = saiu da pasta no meio da leitura). */
 async function registerFile(db: Db, workspace: WorkspaceFolders, file: DriveFile, role: "raw" | "preview" | "final"): Promise<boolean> {
-  const parentId = role === "final" ? workspace.creative_folder_id : role === "raw" ? workspace.raw_folder_id : workspace.preview_folder_id;
+  const parentId = role === "final" ? finalFolderOf(workspace) : role === "raw" ? workspace.raw_folder_id : workspace.preview_folder_id;
   if (!parentId) throw new HttpError(409, "Pasta do Criativo incompleta.");
   const verified = await getDriveItemMetadata(file.id);
   // A pessoa pode mover o arquivo no Drive entre a listagem e a leitura.
@@ -86,7 +94,7 @@ async function restorePreviewToHome(db: Db, workspace: WorkspaceFolders): Promis
       if (await moveAudioToRaw(db, workspace, file, workspace.preview_folder_id!)) audio.push(file);
       continue;
     }
-    await moveDriveItemBetweenFolders(file.id, workspace.preview_folder_id!, workspace.creative_folder_id!);
+    await moveDriveItemBetweenFolders(file.id, workspace.preview_folder_id!, finalFolderOf(workspace)!);
     await registerFile(db, workspace, file, "final");
   }
   const { error } = await db.from("drive_creative_workspaces").update({ last_error: null }).eq("id", workspace.id);
@@ -98,11 +106,12 @@ async function restorePreviewToHome(db: Db, workspace: WorkspaceFolders): Promis
  *  North Ai no card do criativo — "sempre que isso ocorrer" (25/09): quem abre
  *  o card precisa saber por que a aba Finais esvaziou. Devolve os nomes. */
 async function moveRootFinalsToPreview(db: Db, workspace: WorkspaceFolders): Promise<string[]> {
-  if (!workspace.creative_folder_id || !workspace.preview_folder_id) return [];
-  const files = await directFiles(workspace.creative_folder_id);
+  const home = finalFolderOf(workspace);
+  if (!home || !workspace.preview_folder_id) return [];
+  const files = await directFiles(home);
   const moved: DriveFile[] = [];
   for (const file of files) {
-    await moveDriveItemBetweenFolders(file.id, workspace.creative_folder_id, workspace.preview_folder_id);
+    await moveDriveItemBetweenFolders(file.id, home, workspace.preview_folder_id);
     await registerFile(db, workspace, file, "preview");
     moved.push(file);
   }
@@ -136,15 +145,16 @@ async function effectiveStageStatus(db: Db, workspace: WorkspaceFolders): Promis
  *  Revisão" (lib/flows/homeArrival.ts). Um final que tinha voltado para Preview
  *  e foi posto na Home de novo conta como chegada: é uma entrega nova. */
 export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolders): Promise<{ newHomeFiles: DriveFile[]; audioToRaw: DriveFile[] }> {
+  const home = finalFolderOf(workspace);
   if (workspace.status !== "ready"
-    || !workspace.creative_folder_id || !workspace.preview_folder_id || !isGoogleDriveConfigured()) return { newHomeFiles: [], audioToRaw: [] };
+    || !home || !workspace.preview_folder_id || !isGoogleDriveConfigured()) return { newHomeFiles: [], audioToRaw: [] };
   // Correção pontual primeiro: os restaurados entram como finais já conhecidos
   // (a lista `known` abaixo é lida depois) e não viram "arquivo novo".
   const audioToRaw: DriveFile[] = [];
   if (workspace.last_error === RESTORE_FINALS_PENDING) audioToRaw.push(...await restorePreviewToHome(db, workspace));
   if (workspace.last_error?.startsWith(MOVE_PENDING)) {
     if (await effectiveStageStatus(db, workspace) === "em_producao") {
-      const pendingRoot = await directFiles(workspace.creative_folder_id);
+      const pendingRoot = await directFiles(home);
       pendingRoot.sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? "") || a.id.localeCompare(b.id));
       for (const file of pendingRoot) await registerFile(db, workspace, file, "final");
       await moveRootFinalsToPreview(db, workspace);
@@ -153,14 +163,14 @@ export async function syncCreativeDriveFolders(db: Db, workspace: WorkspaceFolde
     }
   }
   const [root, previews, known] = await Promise.all([
-    directFiles(workspace.creative_folder_id), directFiles(workspace.preview_folder_id), activeFinalFileIds(db, workspace.id),
+    directFiles(home), directFiles(workspace.preview_folder_id), activeFinalFileIds(db, workspace.id),
   ]);
   // The Drive creation time is the order in which several new finals arrived.
   root.sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? "") || a.id.localeCompare(b.id));
   const newHomeFiles: DriveFile[] = [];
   for (const file of root) {
     if (isAudio(file) && workspace.raw_folder_id) {
-      if (await moveAudioToRaw(db, workspace, file, workspace.creative_folder_id)) audioToRaw.push(file);
+      if (await moveAudioToRaw(db, workspace, file, home)) audioToRaw.push(file);
       continue;
     }
     if (await registerFile(db, workspace, file, "final") && !known.has(file.id)) newHomeFiles.push(file);
@@ -197,7 +207,7 @@ async function activeFinalFileIds(db: Db, workspaceId: string): Promise<Set<stri
 export async function returnEditFinalsToPreview(db: Db, editTaskId: string, creativeTaskIds: readonly string[]): Promise<{ moved: number; errors: string[] }> {
   if (!creativeTaskIds.length) return { moved: 0, errors: [] };
   const { data, error } = await db.from("drive_creative_workspaces")
-    .select("id,plan_task_id,creative_task_id,stage_task_id,creative_folder_id,raw_folder_id,preview_folder_id,status,last_error")
+    .select("id,plan_task_id,creative_task_id,stage_task_id,creative_folder_id,final_folder_id,raw_folder_id,preview_folder_id,status,last_error")
     .eq("stage_task_id", editTaskId).eq("status", "ready")
     .in("creative_task_id", [...creativeTaskIds]);
   if (error) throw new HttpError(500, error.message);
