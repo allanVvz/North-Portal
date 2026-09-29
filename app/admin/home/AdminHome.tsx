@@ -16,6 +16,8 @@ import { useCurrentAdminUser } from "../CurrentUserContext";
 import NotificationsList from "../NotificationsList";
 import NewTaskButton from "../NewTaskButton";
 import WeekCalendar from "./WeekCalendar";
+import ClientPulse from "./ClientPulse";
+import { dueWording } from "../operacao/operationItems";
 
 // A Home é um painel OPERACIONAL pessoal (dashboard-designer): quem abre é uma
 // pessoa da equipe, todo dia, e a decisão que ela toma aqui é "o que eu resolvo
@@ -188,23 +190,22 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
         <div className="admin-card home-resolve">
           <div className="home-card-head">
             <p className="admin-card-title">
-              {needsAction ? `${plural(needsAction, "tarefa sua pede", "tarefas suas pedem")} ação` : "Nenhuma tarefa sua atrasada ou parada"}
+              {needsAction ? `Resolver primeiro · ${plural(needsAction, "tarefa sua", "tarefas suas")}` : "Nada seu atrasado ou parado"}
             </p>
             {needsAction ? <Link className="admin-btn ghost" href="/admin/operacao?situacao=atrasada">Ver no quadro →</Link> : null}
           </div>
           {resolveRows.length ? (
             <ul className="home-focus-list">
               {resolveRows.map((t) => {
-                const rel = relativeDue(t.dueDate, todayIso);
                 return (
                   <li key={t.id}>
                     <button type="button" className={`home-focus-row is-${t.situation}`} onClick={() => void openCard(t)} disabled={openingId === t.id}>
-                      <span className={`kb-situacao s-${t.situation}`}>{t.situation === "parada" ? "Parada" : "Atrasada"}</span>
+                      <span className={`op-dot tone-${t.situation === "parada" ? "warn" : "late"}`} aria-hidden />
                       <span className="home-focus-main">
                         <strong>{t.title}</strong>
                         <em>
-                          {t.clientName} · {STATUS_LABEL[t.status]}
-                          {t.dueDate ? ` · ${t.situation === "atrasada" && rel ? `venceu ${rel}` : formatShortDate(t.dueDate)}` : ""}
+                          {t.clientName} · {t.situation === "parada" ? "Parada" : STATUS_LABEL[t.status]}
+                          {t.dueDate ? ` · ${t.situation === "atrasada" ? dueWording(t.dueDate, todayIso).text : formatShortDate(t.dueDate)}` : ""}
                         </em>
                       </span>
                     </button>
@@ -261,10 +262,10 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
                   return (
                     <li key={r.id}>
                       <button type="button" className={`home-focus-row ${r.overdue ? "is-atrasada" : ""}`} onClick={() => void openCard(r)} disabled={openingId === r.id}>
-                        <span className={`kb-situacao ${r.overdue ? "s-atrasada" : "s-no_prazo"}`}>{r.overdue ? "Atrasada" : `↻ ${CADENCE_LABEL[r.cadence] ?? r.cadence}`}</span>
+                        <span className={`op-dot tone-${r.overdue ? "late" : "ok"}`} aria-hidden />
                         <span className="home-focus-main">
                           <strong>{r.title}</strong>
-                          <em>{r.clientName} · {formatShortDate(r.nextDue)}{rel ? ` · ${rel}` : ""}</em>
+                          <em>{r.clientName} · ↻ {(CADENCE_LABEL[r.cadence] ?? r.cadence).toLowerCase()} · {r.overdue ? dueWording(r.nextDue, todayIso).text : `próxima ${formatShortDate(r.nextDue)}${rel ? ` (${rel})` : ""}`}</em>
                         </span>
                       </button>
                     </li>
@@ -275,6 +276,8 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
           ) : null}
         </div>
       </div>
+
+      <ClientPulse today={todayIso} onOpen={(item) => void openCard(item)} />
 
       <div className="home-cols">
         {/* O calendário precisa da largura toda; a lista cabe numa coluna, mas

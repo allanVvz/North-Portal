@@ -5,10 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import CardModalLauncher from "../CardModalLauncher";
 import NewTaskButton from "../NewTaskButton";
 import SortMenu from "../SortMenu";
-import TaskKindIcon from "../TaskKindIcon";
-import { DEADLINE_LABEL, deadlineStateOf } from "../deadlineState";
-import { STATUS_LABEL } from "../kanbanShared";
-import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { sortItems } from "../taskSort";
 import { useSortPref } from "../taskSortPrefs";
 import { agencyToday } from "../recurringState";
@@ -16,7 +12,8 @@ import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
 import { subtypeLabel } from "@/lib/taskCatalog";
 import OperationSearchBar from "../operacao/OperationSearchBar";
 import { useOperationFilterBar } from "../operacao/useOperationFilterBar";
-import { operationMatchesFilters, parentOperationItem, type OperationFilterAttr } from "../operacao/operationItems";
+import { operationMatchesFilters, operationState, parentOperationItem, progressSegments, type OperationFilterAttr } from "../operacao/operationItems";
+import { latestFinalCover } from "@/lib/cardMaterials";
 import CreativeFeedView from "./CreativeFeedView";
 import StrategicPlanDeliveriesView from "./StrategicPlanDeliveriesView";
 import { hydratePlanDeliveries } from "./strategicTree";
@@ -58,6 +55,15 @@ function deepLinkTarget(parent: ParentCard, id: string): EditingTarget | null {
   return null;
 }
 
+/** A vez de uma entrega que nasce de rotina: seis "Relatórios · Automação"
+ *  iguais só se distinguem pela semana. */
+function weekOf(card: ParentCard): string {
+  const day = typeof card.payload?.occurrence_date === "string" ? card.payload.occurrence_date : "";
+  if (!/^\d{4}-\d{2}-\d{2}/.test(day) || !card.payload?.recurrence_parent_id) return "";
+  const [, month, date] = day.slice(0, 10).split("-");
+  return `semana de ${date}/${month}`;
+}
+
 function ParentColumn({
   title,
   cards,
@@ -67,6 +73,7 @@ function ParentColumn({
   onOpen,
   onOpenChild,
   today,
+  covers,
 }: {
   title: "Planos" | "Entregas";
   cards: ParentCard[];
@@ -76,35 +83,73 @@ function ParentColumn({
   onOpen: (card: ParentCard) => void;
   onOpenChild: (card: ParentCard, childId: string) => void;
   today: string;
+  covers: Map<string, string>;
 }) {
+  const states = cards.map((card) => operationState(parentOperationItem(card), today));
+  const late = states.filter((state) => state.tone === "late").length;
+  const attention = states.filter((state) => state.tone === "warn").length;
+  // O resumo conta a história antes da lista: quantos, quantos pedem ação.
+  const summary = [
+    `${cards.length} ${title === "Planos" ? (cards.length === 1 ? "plano" : "planos") : (cards.length === 1 ? "entrega" : "entregas")}`,
+    late ? `${late} ${late === 1 ? "atrasado" : "atrasados"}` : "",
+    attention ? `${attention} pedem atenção` : "",
+  ].filter(Boolean).join(" · ");
   return (
     <section className="parent-column" aria-labelledby={`parent-column-${title.toLowerCase()}`}>
-      <header className="parent-column-head"><h2 id={`parent-column-${title.toLowerCase()}`}>{title}</h2><span>{cards.length}</span></header>
+      <header className="parent-column-head">
+        <h2 id={`parent-column-${title.toLowerCase()}`}>{title}</h2>
+        <span className="parent-column-summary">{summary}</span>
+      </header>
       {cards.length === 0 ? <p className="admin-empty parent-column-empty">{empty}</p> : (
-        <div className="plan-acc">
-          {cards.map((card) => {
+        <div className="pd-list">
+          {cards.map((card, index) => {
             const open = openIds.has(card.id);
-            const state = card.completed_at ? "concluida" : deadlineStateOf(card, today);
-            const current = card.workflow_version_id ? currentFlowStepOf(card.activities) : null;
+            const item = parentOperationItem(card);
+            const state = states[index];
+            const segments = progressSegments(item);
+            const cover = covers.get(card.id);
+            const done = segments.filter((segment) => segment === "done").length;
             return (
-              <article className={`plan-acc-item is-${state} ${open ? "open" : ""}`} key={card.id}>
-                <div className="plan-acc-head">
-                  <button type="button" className="plan-acc-caret-btn" onClick={() => onToggle(card.id)} aria-label={open ? "Recolher" : "Expandir"}>
-                    <span className={`plan-acc-caret ${open ? "on" : ""}`}>▸</span>
+              <article className={`pd-card tone-${state.tone}${open ? " open" : ""}`} key={card.id}>
+                <div className="pd-card-head">
+                  <button type="button" className="pd-card-main" onClick={() => onOpen(card)}>
+                    {cover ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- rota autenticada de miniatura do Drive
+                      <img className="pd-cover" src={`/api/admin/drive/thumbnail/${cover}`} alt="" loading="lazy" decoding="async" />
+                    ) : null}
+                    <span className="pd-card-text">
+                      <span className="op-lean-title">{card.title}{weekOf(card) ? <span className="pd-when">{weekOf(card)}</span> : null}</span>
+                      <span className="op-lean-state"><span className={`op-dot tone-${state.tone}`} aria-hidden /><b>{state.stage}</b>{state.detail ? <em>· {state.detail}</em> : null}</span>
+                      {segments.length ? <span className="op-lean-steps" aria-label={`${done} de ${segments.length} concluídas`}>{segments.map((segment, at) => <i key={at} className={segment} />)}</span> : null}
+                      <span className="op-lean-meta">
+                        <span>{card.clientName}</span>
+                        <span className={card.assignee ? "" : "is-empty"}>{card.assignee || "Sem responsável"}</span>
+                        {segments.length ? <span>{done}/{segments.length} {title === "Planos" ? "feitos" : "etapas"}</span> : null}
+                      </span>
+                    </span>
                   </button>
-                  <button type="button" className="plan-acc-title" onClick={() => onOpen(card)}>
-                    <span className="plan-acc-tags"><span className="parent-kind-badge">{title === "Planos" ? "Plano" : "Entrega"}</span><span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span></span>
-                    <span className="plan-card-titleline"><TaskKindIcon kind={card.kind} /><strong>{card.title}</strong></span>
-                    <em>{card.clientName}{current ? ` · ${subtypeLabel(current.subtype) || current.title} · ${STATUS_LABEL[current.status]}` : ""}</em>
-                    {card.description ? <span className="plan-acc-description">{card.description}</span> : null}
+                  <button type="button" className="pd-card-toggle" onClick={() => onToggle(card.id)} aria-expanded={open} aria-label={open ? "Recolher itens" : "Ver itens"}>
+                    <span aria-hidden>{open ? "–" : "+"}</span>
                   </button>
-                  <span className="plan-acc-progress"><span className="plan-acc-bar"><span className="plan-acc-fill" style={{ width: `${card.progress}%` }} /></span><b>{card.progress}%</b></span>
                 </div>
-                {open ? <div className="plan-acc-body">
-                  {card.activities.length ? <ul className="plan-acc-list">{card.activities.map((activity) => (
-                    <li key={activity.id}><button type="button" className="plan-acc-actrow" onClick={() => onOpenChild(card, activity.id)}><TaskKindIcon kind={activity.kind} subtype={activity.subtype} /><span className="plan-acc-actitle">{subtypeLabel(activity.subtype) || activity.title}</span><span className="plan-acc-status">{STATUS_LABEL[activity.status]}</span></button></li>
-                  ))}</ul> : <p className="admin-sub">Nenhum card vinculado ainda.</p>}
-                </div> : null}
+                {open ? (
+                  card.activities.length ? (
+                    <ul className="pd-children">
+                      {card.activities.map((activity) => {
+                        const child = operationState({ id: activity.id, task: activity, clientName: card.clientName, clientSlug: card.clientSlug, routine: false, level: "tarefa", members: [] }, today);
+                        return (
+                          <li key={activity.id}>
+                            <button type="button" onClick={() => onOpenChild(card, activity.id)}>
+                              <span className={`op-dot tone-${child.tone}`} aria-hidden />
+                              <span className="pd-child-title">{subtypeLabel(activity.subtype) || activity.title}</span>
+                              <span className="pd-child-state">{child.stage}{child.detail ? ` · ${child.detail}` : ""}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : <p className="admin-sub pd-children-empty">Nenhum item vinculado ainda.</p>
+                ) : null}
               </article>
             );
           })}
@@ -154,8 +199,10 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   const feedDeliveries = useMemo(() => visibleDeliveries.filter((card) => card.workflow_version_id && !card.subtype &&
     (card.kind === "criativo" || typeof card.payload?.daily_piece_key === "string")), [visibleDeliveries]);
 
+  // Os arquivos do Drive servem às capas das duas visões. A leitura (GET) é
+  // barata e roda uma vez; a sincronização com o Drive (POST) é pesada e só
+  // roda quando alguém abre o Feed.
   useEffect(() => {
-    if (view !== "feed") return;
     let active = true;
     const read = async (method: "GET" | "POST") => {
       const response = await fetch("/api/admin/drive/baita/materials", method === "POST"
@@ -171,11 +218,19 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
     void (async () => {
       await read("GET").catch(() => false);
       if (!active) return;
+      if (view !== "feed") { setCoversLoading(false); return; }
       const synced = await read("POST").catch(() => false);
       if (active) { setCoversError(!synced); setCoversLoading(false); }
     })();
     return () => { active = false; };
   }, [view]);
+  const covers = useMemo(() => {
+    const byCreative = new Map<string, CreativeMaterialWorkspace[]>();
+    for (const workspace of materialWorkspaces) byCreative.set(workspace.creative_task_id, [...(byCreative.get(workspace.creative_task_id) ?? []), workspace]);
+    const map = new Map<string, string>();
+    for (const [id, list] of byCreative) { const cover = latestFinalCover(list); if (cover) map.set(id, cover.drive_file_id); }
+    return map;
+  }, [materialWorkspaces]);
 
   useEffect(() => {
     const id = searchParams.get("task");
@@ -209,10 +264,10 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
       <SortMenu sort={sort} onChange={setSort} />
     </div>
     {view === "lista" ? <div className="parent-columns">
-      <ParentColumn title="Planos" cards={visiblePlans} empty={query ? "Nenhum Plano para essa busca." : "Nenhum Plano ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} />
-      <ParentColumn title="Entregas" cards={visibleDeliveries} empty={query ? "Nenhuma Entrega para essa busca." : "Nenhuma Entrega ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} />
+      <ParentColumn title="Planos" cards={visiblePlans} empty={query ? "Nenhum Plano para essa busca." : "Nenhum Plano ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} covers={covers} />
+      <ParentColumn title="Entregas" cards={visibleDeliveries} empty={query ? "Nenhuma Entrega para essa busca." : "Nenhuma Entrega ainda."} openIds={openIds} onToggle={toggle} onOpen={open} onOpenChild={openChild} today={today} covers={covers} />
     </div> : view === "estrategica" ? <StrategicPlanDeliveriesView plans={clientPlans} deliveries={clientDeliveries} query={query} onOpenPlan={open} onOpenPlanActivity={openChild} onOpenDelivery={open} onOpenStep={openChild} />
-      : <CreativeFeedView deliveries={feedDeliveries} workspaces={materialWorkspaces} loading={coversLoading} error={coversError} onOpen={open} />}
+      : <CreativeFeedView deliveries={feedDeliveries} workspaces={materialWorkspaces} loading={coversLoading} error={coversError} today={today} onOpen={open} />}
     {editing ? <CardModalLauncher task={editing.task} clientName={editing.clientName} clientSlug={editing.clientSlug} initialRelatedTasks={editing.relatedTasks} parentTask={editing.parentTask} onClose={() => { setEditing(null); router.refresh(); }} onSaved={() => { setEditing(null); router.refresh(); }} onDeleted={() => { setEditing(null); router.refresh(); }} onChanged={() => router.refresh()} /> : null}
   </div>;
 }

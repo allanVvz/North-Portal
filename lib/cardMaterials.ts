@@ -80,3 +80,12 @@ export function materialCoverCandidates(workspaces: readonly CreativeMaterialWor
     return true;
   }).map((asset) => ({ fileId: asset.drive_file_id, source: "comments" as const }));
 }
+
+/** A capa de um criativo no Feed: o ÚLTIMO arquivo anexado em `final` (imagem
+ *  ou vídeo — a rota de miniatura do Drive devolve o quadro do vídeo). Sem
+ *  final, o criativo ainda não tem o que publicar e fica fora do Feed. */
+export function latestFinalCover(workspaces: readonly CreativeMaterialWorkspace[]): CreativeMaterialAsset | null {
+  return workspaces.flatMap((workspace) => workspace.assets)
+    .filter((asset) => asset.role === "final" && asset.state === "active" && /^(image|video)\//.test(asset.mime_type))
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))[0] ?? null;
+}

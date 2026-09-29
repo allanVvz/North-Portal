@@ -5432,6 +5432,52 @@ input.admin-chipnew { width: 160px; flex: 0 0 auto; padding: 6px 11px; border-ra
 .home-resolve .home-focus-row { align-items: center; }
 @media (max-width: 980px) { .home-main { grid-template-columns: 1fr; } .home-kpis.home-kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
+/* ---- Home como painel operacional (29/09) -----------------------------------
+   A história de cima para baixo: a frase do dia, quatro números seus, o que
+   resolver primeiro, o pulso de cada cliente, a semana. Números em Fraunces,
+   bordas discretas; cor só onde há atraso ou atenção. */
+.home-page .home-kpi { gap: 6px; padding: 16px 18px; border-color: var(--a-border-soft); box-shadow: none; }
+.home-page .home-kpi-value { font-family: Fraunces, Georgia, serif; font-size: 34px; font-weight: 500; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.home-page .home-focus-row { display: flex; align-items: center; gap: 10px; }
+.home-page .home-focus-row .op-dot { margin-top: 1px; }
+.home-pulse { margin-bottom: 16px; }
+.home-pulse .home-card-head { align-items: flex-start; }
+.home-pulse-lede { margin: 4px 0 0; color: var(--a-muted); font-size: 12.5px; }
+.home-pulse-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.home-pulse-row {
+  display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(90px, .8fr) minmax(0, 1.6fr); align-items: center; gap: 16px;
+  padding: 10px 0; border-top: 1px solid var(--a-border-soft);
+}
+.home-pulse-row:first-child { border-top: 0; padding-top: 2px; }
+.home-pulse-client { display: grid; gap: 2px; min-width: 0; }
+.home-pulse-client strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--a-ink); font-size: 13.5px; }
+.home-pulse-client em { font-style: normal; color: var(--a-muted); font-size: 11.5px; }
+.home-pulse-bar { display: flex; gap: 2px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--a-surface2); }
+.home-pulse-bar i { display: block; flex-basis: 0; }
+.home-pulse-bar i.ok { background: var(--a-teal); }
+.home-pulse-bar i.warn { background: var(--a-warn); }
+.home-pulse-bar i.late { background: var(--a-danger); }
+.home-pulse-worst {
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px; border: 0; border-radius: 8px;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.home-pulse-worst:hover { background: var(--a-hover); }
+.home-pulse-worst:focus-visible { outline: 2px solid var(--a-teal); outline-offset: 1px; }
+.home-pulse-worst-text { display: grid; min-width: 0; }
+.home-pulse-worst-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--a-ink); font-size: 12.5px; font-weight: 600; }
+.home-pulse-worst-text em { font-style: normal; color: var(--a-muted); font-size: 11.5px; }
+.home-pulse-calm { padding: 6px 8px; color: var(--a-teal-text); font-size: 12px; font-weight: 600; }
+@media (max-width: 720px) {
+  .home-pulse-row { grid-template-columns: minmax(0, 1fr) 90px; gap: 6px 12px; }
+  .home-pulse-worst, .home-pulse-calm { grid-column: 1 / -1; padding-left: 0; }
+}
+@media (max-width: 520px) {
+  .home-kpis.home-kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .home-page .home-kpi { padding: 12px 14px; }
+  .home-page .home-kpi-value { font-size: 28px; }
+  .home-page .admin-head { flex-wrap: wrap; gap: 12px; }
+}
+
 /* Atalho de atrasadas dentro da caixa de busca da Operação. */
 .kb-searchbar-quick { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 3px 4px 3px 9px; border: 1px solid var(--a-border); border-radius: 999px; background: var(--a-surface); color: var(--a-sec); font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer; white-space: nowrap; }
 .kb-searchbar-quick b { min-width: 18px; padding: 1px 6px; border-radius: 999px; background: var(--a-surface2); color: var(--a-sec); font-size: 10.5px; text-align: center; }
@@ -5781,6 +5827,64 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .creative-feed-caption small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--a-muted); font-size: 11px; }
 .creative-feed-format { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; border-radius: 999px; background: var(--a-inset); color: var(--a-sec); padding: 3px 7px; font-size: 10px; }
 .creative-feed-zero { padding: 54px 20px; border: 1px dashed var(--a-border); border-radius: 16px; color: var(--a-muted); text-align: center; }
+/* ---- Planos e Entregas, enxuto (29/09) ----------------------------------------
+   Resumo por coluna antes da lista; cada pai em três linhas (título, estado
+   único, segmentos) e o meta. A faixa segue o tom do estado. */
+.op-page .parent-column-head { align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.parent-column-head .parent-column-summary { display: inline; min-width: 0; height: auto; padding: 0; border-radius: 0; background: none; color: var(--a-muted); font-size: 12px; font-weight: 500; }
+.pd-list { display: grid; gap: 8px; }
+.pd-card {
+  --pd-stripe: transparent;
+  border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface);
+  box-shadow: inset 3px 0 0 var(--pd-stripe), var(--a-shadow-sm); overflow: hidden;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.pd-card.tone-late { --pd-stripe: var(--a-danger); }
+.pd-card.tone-warn { --pd-stripe: var(--a-warn); }
+.pd-card.tone-done { --pd-stripe: var(--a-teal); }
+.pd-card:hover { border-color: var(--a-border-strong); }
+.pd-card-head { display: flex; align-items: stretch; }
+.pd-card-main {
+  flex: 1; min-width: 0; display: flex; gap: 12px; align-items: flex-start; padding: 12px 8px 12px 16px;
+  border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.pd-card-main:focus-visible, .pd-card-toggle:focus-visible, .pd-children button:focus-visible { outline: 2px solid var(--a-teal); outline-offset: -2px; }
+.pd-card-text { min-width: 0; flex: 1; display: grid; gap: 7px; }
+.pd-cover { flex: 0 0 auto; width: 52px; height: 64px; border-radius: 8px; object-fit: cover; background: var(--a-inset); }
+.pd-card-toggle {
+  flex: 0 0 44px; border: 0; border-left: 1px solid var(--a-border-soft); background: transparent; color: var(--a-muted);
+  font: 600 18px/1 var(--a-font, inherit); cursor: pointer;
+}
+.pd-card-toggle:hover { background: var(--a-hover); color: var(--a-ink); }
+.pd-children { list-style: none; margin: 0; padding: 4px 8px 8px; border-top: 1px solid var(--a-border-soft); display: grid; gap: 2px; }
+.pd-children button {
+  width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.pd-children button:hover { background: var(--a-hover); }
+.pd-child-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--a-ink); font-weight: 600; }
+.pd-child-state { color: var(--a-muted); font-size: 11.5px; white-space: nowrap; }
+.pd-children-empty { padding: 8px 16px 12px; margin: 0; }
+@container parent-column (max-width: 380px) {
+  .pd-child-state { display: none; }
+  .pd-cover { width: 40px; height: 50px; }
+}
+
+/* Feed: capa = último arquivo final; legenda conta estado, cliente e formato. */
+.creative-feed-heading { justify-content: flex-start; flex-wrap: wrap; gap: 4px 14px; color: var(--a-sec); font-size: 12.5px; font-weight: 500; }
+.creative-feed-heading b { color: var(--a-ink); font-weight: 700; }
+.creative-feed-badges { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; }
+.creative-feed-badge { padding: 3px 8px; border-radius: 999px; background: rgba(12, 44, 44, .72); color: #f4f6f2; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; }
+.creative-feed-badge.is-publish { background: var(--a-teal-strong); }
+.creative-feed-caption { display: grid; gap: 5px; align-items: start; }
+.creative-feed-caption .op-lean-state { font-size: 12px; }
+.creative-feed-empty-media { font-size: 11px; }
+/* Grade em vez de colunas: com poucos itens as colunas do CSS empilhavam
+   tudo à esquerda e deixavam meia tela vazia. */
+.creative-feed-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; columns: auto; align-items: start; }
+.creative-feed-grid .creative-feed-card { display: block; margin: 0; }
+.pd-when { margin-left: 6px; color: var(--a-muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
+
 @container pd-board (max-width: 720px) { .creative-feed-grid { columns: 2 170px; } }
 @container pd-board (max-width: 420px) { .creative-feed-grid { columns: 1; } }
 
