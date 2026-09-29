@@ -17,7 +17,7 @@
 // Nada é apagado de verdade: lixeira do Drive e estado no banco se desfazem.
 
 import type { createAdminClient } from "./supabase/admin";
-import { addDriveParent, getDriveItemState, listFolderFilesPage, setDriveItemTrashed, type DriveItemState } from "./googleDriveApi";
+import { addDriveParent, driveOwnRootId, getDriveItemState, listFolderFilesPage, setDriveItemTrashed, type DriveItemState } from "./googleDriveApi";
 import { recordedFolderAction } from "./creativeDriveModel";
 
 type Db = ReturnType<typeof createAdminClient>;
@@ -154,7 +154,7 @@ export async function runDriveMaintenance(db: Db, options: { apply: boolean }): 
 }
 
 async function checkFolder(report: DriveMaintenanceReport, apply: boolean, workspaceId: string, role: FolderCheck["role"], item: DriveItemState, parentId: string, legacyParentId?: string) {
-  const decision = recordedFolderAction(item, parentId, legacyParentId);
+  const decision = recordedFolderAction(item, parentId, legacyParentId, await driveOwnRootId());
   if (decision.action === "use") {
     report.folders.push({ workspaceId, role, id: item.id, name: item.name, status: "no lugar", action: null });
     return;
@@ -163,8 +163,9 @@ async function checkFolder(report: DriveMaintenanceReport, apply: boolean, works
     report.folders.push({ workspaceId, role, id: item.id, name: item.name, status: decision.message, action: "precisa de uma pessoa", location: await pathOf(item) });
     return;
   }
-  if (apply) await addDriveParent(item.id, decision.parentId);
-  report.folders.push({ workspaceId, role, id: item.id, name: item.name, status: "sem pasta pai (removida por quem não é dono)", action: apply ? `devolvida para ${decision.parentId}` : `voltaria para ${decision.parentId}` });
+  if (apply) await addDriveParent(item.id, decision.parentId, decision.removeParentId);
+  const status = decision.removeParentId ? "no Meu Drive da conta do app (removida por quem não é dono)" : "sem pasta pai (removida por quem não é dono)";
+  report.folders.push({ workspaceId, role, id: item.id, name: item.name, status, action: apply ? `devolvida para ${decision.parentId}` : `voltaria para ${decision.parentId}` });
 }
 
 /** "Pasta avó / pasta mãe" até 4 níveis, para dizer onde uma pasta foi parar. */

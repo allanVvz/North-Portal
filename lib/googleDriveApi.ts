@@ -306,15 +306,26 @@ export async function getDriveItemState(fileId: string): Promise<DriveItemState>
   return { state: file.trashed ? "trashed" : "ok", id: file.id, name: file.name ?? null, mimeType: file.mimeType ?? null, parents: file.parents ?? [] };
 }
 
+let cachedRootId: string | null = null;
+
+/** Id do "Meu Drive" da conta de serviço — para onde volta o que alguém "remove". */
+export async function driveOwnRootId(): Promise<string | null> {
+  if (cachedRootId) return cachedRootId;
+  const root = await getDriveItemState("root");
+  cachedRootId = root.state === "ok" ? root.id : null;
+  return cachedRootId;
+}
+
 /**
- * Devolve um item à pasta esperada SEM tirá-lo de onde mais estiver (30/09).
- * É o reparo de uma pasta que alguém "removeu" no Drive: quem não é dono só
- * desfaz o vínculo com a pasta pai, e o conteúdo some da vista da equipe.
+ * Devolve um item à pasta esperada (30/09). Só tira de `removeParentId` — a
+ * raiz da conta, para onde o Drive manda o que alguém que não é dono "remove".
+ * Sem `removeParentId`, só acrescenta o pai (item órfão).
  */
-export async function addDriveParent(fileId: string, parentId: string): Promise<void> {
+export async function addDriveParent(fileId: string, parentId: string, removeParentId?: string): Promise<void> {
   const token = await accessToken();
   if (!token) throw new HttpError(503, "A integracao com Google Drive nao esta configurada.");
   const params = new URLSearchParams({ addParents: parentId, fields: "id,parents", supportsAllDrives: "true" });
+  if (removeParentId) params.set("removeParents", removeParentId);
   const res = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}?${params}`, { method: "PATCH", headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new HttpError(502, `Falha ao devolver a pasta ao lugar no Drive (HTTP ${res.status} ${(await res.text()).slice(0, 160)}).`);
   const moved = await res.json() as { parents?: string[] };

@@ -61,6 +61,9 @@ describe("pasta registrada reencontrada", () => {
     expect(recordedFolderAction({ ...folder, parents: [] }, "serie", "raw")).toEqual({ action: "reattach", parentId: "raw" });
     expect(recordedFolderAction({ ...folder, parents: [] }, "diaria")).toEqual({ action: "reattach", parentId: "diaria" });
   });
+  it("na raiz da conta do app (o Drive devolve ao dono o que alguém 'remove'), volta ao lugar saindo da raiz", () => {
+    expect(recordedFolderAction({ ...folder, parents: ["raiz-app"] }, "serie", "raw", "raiz-app")).toEqual({ action: "reattach", parentId: "raw", removeParentId: "raiz-app" });
+  });
   it("movida para outro lugar, na lixeira ou apagada: para e explica", () => {
     expect(recordedFolderAction({ ...folder, parents: ["outra"] }, "serie", "raw")).toMatchObject({ action: "fail", status: 409, message: expect.stringContaining("foi movida") });
     expect(recordedFolderAction({ ...folder, state: "trashed", parents: ["raw"] }, "serie", "raw")).toMatchObject({ action: "fail", message: expect.stringContaining("lixeira") });

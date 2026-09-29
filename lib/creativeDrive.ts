@@ -3,6 +3,7 @@ import { HttpError } from "./validation";
 import {
   addDriveParent,
   createDriveResumableUpload,
+  driveOwnRootId,
   createDriveShortcut,
   ensureDriveFolder,
   getDriveItemMetadata,
@@ -242,9 +243,9 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
       if (!id) return null;
       // Pasta "removida" por quem não é dono volta ao lugar em vez de travar
       // a diária (16 e 23/09 da Baita, 30/09) — ver recordedFolderAction.
-      const decision = recordedFolderAction(await getDriveItemState(id), parentId, legacyParentId);
+      const decision = recordedFolderAction(await getDriveItemState(id), parentId, legacyParentId, await driveOwnRootId());
       if (decision.action === "fail") throw new HttpError(decision.status, decision.message);
-      if (decision.action === "reattach") await addDriveParent(id, decision.parentId);
+      if (decision.action === "reattach") await addDriveParent(id, decision.parentId, decision.removeParentId);
       return { id };
     }
     let daily: { id: string } | null = null;

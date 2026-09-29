@@ -38,8 +38,9 @@ export function selectCreativeMaterialUrl(assets: MaterialAsset[], _versions: Ma
 
 /**
  * O que fazer com uma pasta registrada que a preparação reencontra (30/09):
- * usá-la, devolvê-la ao lugar (ficou sem pai porque alguém que não é dono a
- * "removeu" — o Drive só desfaz o vínculo), ou parar com uma explicação.
+ * usá-la, devolvê-la ao lugar, ou parar com uma explicação. "Fora do lugar"
+ * por acidente é ficar sem pai ou na raiz da conta do app — é o que o Drive
+ * faz quando alguém que não é dono a "remove" (diárias de 16 e 23/09).
  * Com outro pai não se mexe: no "Meu Drive" um item tem um pai só, e ele foi
  * movido de propósito.
  */
@@ -47,11 +48,14 @@ export function recordedFolderAction(
   item: { state: "ok" | "trashed" | "missing"; name: string | null; mimeType: string | null; parents: readonly string[] },
   parentId: string,
   legacyParentId?: string,
-): { action: "use" } | { action: "reattach"; parentId: string } | { action: "fail"; status: number; message: string } {
+  /** "Meu Drive" da conta do app: é para lá que o Drive devolve o que alguém que não é dono "remove". */
+  ownerRootId?: string | null,
+): { action: "use" } | { action: "reattach"; parentId: string; removeParentId?: string } | { action: "fail"; status: number; message: string } {
   if (item.state === "missing") return { action: "fail", status: 502, message: "Uma pasta registrada foi apagada ou perdeu o acesso no Google Drive." };
   if (item.state === "trashed") return { action: "fail", status: 409, message: `A pasta "${item.name ?? "registrada"}" está na lixeira do Drive. Restaure-a para continuar.` };
   if (item.mimeType !== "application/vnd.google-apps.folder") return { action: "fail", status: 409, message: "Um item registrado como pasta deixou de ser pasta no Drive." };
   if (item.parents.some((parent) => parent === parentId || parent === legacyParentId)) return { action: "use" };
   if (!item.parents.length) return { action: "reattach", parentId: legacyParentId ?? parentId };
+  if (ownerRootId && item.parents.every((parent) => parent === ownerRootId)) return { action: "reattach", parentId: legacyParentId ?? parentId, removeParentId: ownerRootId };
   return { action: "fail", status: 409, message: `A pasta "${item.name ?? "registrada"}" foi movida para outro lugar no Drive. Volte-a para a pasta do cliente para continuar.` };
 }
