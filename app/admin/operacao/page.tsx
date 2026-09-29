@@ -6,6 +6,7 @@ import {
   listRecurringTasks,
   recurringTasksStorageAvailable,
 } from "@/lib/supabase";
+import { withAutomationFeeds } from "@/lib/automations/routineFeeds";
 import OperacaoWorkspace from "./OperacaoWorkspace";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function OperacaoPage() {
       clients={clients.map((c) => ({ slug: c.slug, name: c.name, disabled: c.disabled }))}
       plans={plans}
       deliveries={deliveries}
-      recurringTasks={recurringTasks}
+      recurringTasks={await withAutomationFeeds(recurringTasks)}
       assignees={assignees}
       recurringStorageAvailable={recurringStorageAvailable}
     />

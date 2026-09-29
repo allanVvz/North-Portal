@@ -14,7 +14,9 @@ import { useSortPref } from "../taskSortPrefs";
 import { agencyToday } from "../recurringState";
 import { normalizeSearchText, taskSearchText } from "@/lib/taskSearch";
 import { subtypeLabel } from "@/lib/taskCatalog";
-import PlanSearchBar from "./PlanSearchBar";
+import OperationSearchBar from "../operacao/OperationSearchBar";
+import { useOperationFilterBar } from "../operacao/useOperationFilterBar";
+import { operationMatchesFilters, parentOperationItem, type OperationFilterAttr } from "../operacao/operationItems";
 import CreativeFeedView from "./CreativeFeedView";
 import StrategicPlanDeliveriesView from "./StrategicPlanDeliveriesView";
 import { hydratePlanDeliveries } from "./strategicTree";
@@ -112,12 +114,14 @@ function ParentColumn({
   );
 }
 
+// Frequência é atributo de rotina; aqui só há planos e entregas.
+const PARENT_ATTRS: OperationFilterAttr[] = ["status", "situacao", "tipo", "subtipo", "cliente", "prioridade", "responsavel"];
+
 export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: ActionPlan[]; deliveries: FlowDelivery[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [view, setView] = useState<View>("lista");
   const [query, setQuery] = useState("");
-  const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
   const [coversLoading, setCoversLoading] = useState(false);
   const [coversError, setCoversError] = useState(false);
@@ -138,8 +142,13 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
   }));
   const orderedPlans = useMemo(() => sorted(hydratedPlans), [hydratedPlans, sort]);
   const orderedDeliveries = useMemo(() => sorted(visibleDeliveriesSource), [visibleDeliveriesSource, sort]);
-  const clientPlans = useMemo(() => orderedPlans.filter((card) => !selectedClient || card.clientName === selectedClient), [orderedPlans, selectedClient]);
-  const clientDeliveries = useMemo(() => orderedDeliveries.filter((card) => !selectedClient || card.clientName === selectedClient), [orderedDeliveries, selectedClient]);
+  // A mesma caixa de busca + filtros da aba Tarefas e Rotinas, com o mesmo
+  // padrão: concluídos ficam fora até alguém pedir para vê-los.
+  const allItems = useMemo(() => all.map(parentOperationItem), [all]);
+  const { filters, barProps } = useOperationFilterBar(allItems, today, PARENT_ATTRS);
+  const passes = (card: ParentCard) => operationMatchesFilters(parentOperationItem(card), filters, today);
+  const clientPlans = useMemo(() => orderedPlans.filter(passes), [orderedPlans, filters, today]);
+  const clientDeliveries = useMemo(() => orderedDeliveries.filter(passes), [orderedDeliveries, filters, today]);
   const visiblePlans = useMemo(() => clientPlans.filter((card) => matches(card, query)), [clientPlans, query]);
   const visibleDeliveries = useMemo(() => clientDeliveries.filter((card) => matches(card, query)), [clientDeliveries, query]);
   const feedDeliveries = useMemo(() => visibleDeliveries.filter((card) => card.workflow_version_id && !card.subtype &&
@@ -194,7 +203,7 @@ export default function PlansAndDeliveriesBoard({ plans, deliveries }: { plans: 
         <button type="button" className={view === "estrategica" ? "on" : ""} onClick={() => setView("estrategica")}>Estratégica</button>
         <button type="button" className={view === "feed" ? "on" : ""} onClick={() => setView("feed")}>Feed</button>
       </div>
-      <PlanSearchBar q={query} onQChange={setQuery} plans={all} selectedClient={selectedClient} onClientChange={setSelectedClient} placeholder={view === "feed" ? "Buscar Criativo ou etapa…" : "Buscar por Plano, Entrega ou etapa…"} />
+      <OperationSearchBar q={query} onQChange={setQuery} placeholder={view === "feed" ? "Buscar Criativo ou etapa…" : "Buscar por Plano, Entrega ou etapa…"} {...barProps} />
       <div className="kb-spacer" />
       <NewTaskButton label="+ Tarefa" className="admin-btn primary kb-newtask-btn" />
       <SortMenu sort={sort} onChange={setSort} />

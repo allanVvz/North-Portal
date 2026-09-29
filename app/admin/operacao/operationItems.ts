@@ -1,17 +1,28 @@
 import { classifyTask } from "@/lib/taskClassification";
-import { belongsToTaskScreen, isDeferredTask, recurrenceParentIdOf } from "@/lib/taskRelations";
+import { childrenByParent, flowStepsOf, isDeferredTask, isFlowDelivery, parentIdsOf, recurrenceParentIdOf, visibleOnTaskBoard } from "@/lib/taskRelations";
+import { isRecurrenceTemplate } from "@/lib/recurrenceState";
+import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import type { RecurringTask } from "@/lib/supabase";
-import type { TaskRecord } from "@/lib/validation";
+import type { TaskRecord, TaskStatus } from "@/lib/validation";
 import { deadlineStateOf } from "../deadlineState";
 import { recurringState } from "../recurringState";
 
 export type OperationTask = TaskRecord & { clientName?: string; clientSlug?: string };
+
+/** Nível de importância de um card na Operação: rotina > plano > entrega >
+ *  tarefa. Um trabalho aparece UMA vez, pelo nível mais alto a que pertence. */
+export type OperationLevel = "rotina" | "plano" | "entrega" | "tarefa";
+
 export type OperationItem = {
   id: string;
   task: OperationTask | RecurringTask;
   clientName: string;
   clientSlug: string;
   routine: boolean;
+  level: OperationLevel;
+  /** O que o card representa: execuções da rotina, membros do plano, etapas
+   *  da entrega. Vazio numa tarefa. */
+  members: TaskRecord[];
 };
 
 export type OperationFilterAttr = "status" | "tipo" | "subtipo" | "situacao" | "cliente" | "frequencia" | "prioridade" | "responsavel";
@@ -33,41 +44,128 @@ export const DEFAULT_OPERATION_FILTERS: readonly OperationFilter[] = [
   { attr: "status", value: "parada", label: "Parada" },
 ];
 
+const isPlan = (task: Pick<TaskRecord, "kind">) => task.kind === "plano_acao";
+
 /**
- * The daily surface has exactly two identities: an ordinary executable card,
- * or a recurrence template.  Executions are evidence inside their template;
- * they must never leak back as a second top-level card.
+ * A Operação mostra cada trabalho UMA vez, pelo nível mais importante a que ele
+ * pertence: rotina > plano > entrega > tarefa (28/09/2026).
+ *
+ * Antes a mesma coisa aparecia várias vezes. O relatório semanal de um cliente
+ * surgia como rotina (o molde), como três etapas soltas em Tarefas e ainda como
+ * Entrega na outra aba; um membro de plano aparecia solto e dentro do plano.
+ * Agora:
+ *   - rotina: sempre aparece; suas execuções (e tudo abaixo delas) somem;
+ *   - plano: aparece se não pertence a uma rotina; seus membros somem;
+ *   - entrega: aparece se não pertence a rotina nem a plano; suas etapas somem;
+ *   - tarefa: aparece só quando não tem pai nenhum.
+ * Um pai que não veio na lista (outro cliente, oculto) não esconde o filho:
+ * esconder por um pai invisível faria o trabalho sumir da tela.
  */
 export function normalizeOperationItems(tasks: readonly OperationTask[], routines: readonly RecurringTask[]): OperationItem[] {
-  const seen = new Set<string>();
-  const templateIds = new Set(routines.map((routine) => routine.id));
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const routineIds = new Set(routines.map((routine) => routine.id));
   const executionIds = new Set(routines.flatMap((routine) => routine.executions.map((execution) => execution.id)));
-  const output: OperationItem[] = [];
+  const children = childrenByParent(tasks);
   for (const task of tasks) {
-    // Some legacy tasks still have plan_id for an Action Plan. An execution is
-    // identified by its recurrence payload (or by the children returned with
-    // a visible routine), never by plan_id alone.
-    if (!belongsToTaskScreen(task) || recurrenceParentIdOf(task) || templateIds.has(task.plan_id ?? "") || executionIds.has(task.id)) continue;
-    if (seen.has(task.id)) continue;
-    seen.add(task.id);
-    output.push({ id: task.id, task, clientName: task.clientName ?? "Outros", clientSlug: task.clientSlug ?? "", routine: false });
+    // Membro de plano legado: só `plan_id`, sem elo.
+    if (!task.plan_id || parentIdsOf(task).includes(task.plan_id)) continue;
+    children.set(task.plan_id, [...(children.get(task.plan_id) ?? []), task]);
   }
-  for (const task of routines) {
-    if (seen.has(task.id)) continue;
-    seen.add(task.id);
-    output.push({ id: task.id, task, clientName: task.clientName, clientSlug: task.clientSlug, routine: true });
+
+  const parentsOf = (task: TaskRecord): string[] => {
+    const ids = [...parentIdsOf(task)];
+    if (task.plan_id) ids.push(task.plan_id);
+    const recurrenceParent = recurrenceParentIdOf(task);
+    if (recurrenceParent) ids.push(recurrenceParent);
+    return ids;
+  };
+  /** Algum ancestor visível representa este card? */
+  const represented = (task: TaskRecord, seen = new Set<string>()): boolean => {
+    if (executionIds.has(task.id)) return true;
+    for (const parentId of parentsOf(task)) {
+      if (seen.has(parentId)) continue;
+      seen.add(parentId);
+      if (routineIds.has(parentId)) return true;
+      const parent = byId.get(parentId);
+      if (!parent) continue;
+      if (isPlan(parent) || isFlowDelivery(parent)) return true;
+      if (represented(parent, seen)) return true;
+    }
+    return false;
+  };
+
+  const output: OperationItem[] = [];
+  const seen = new Set<string>();
+  const push = (item: OperationItem) => { if (!seen.has(item.id)) { seen.add(item.id); output.push(item); } };
+
+  for (const task of tasks) {
+    if (!visibleOnTaskBoard(task) || isRecurrenceTemplate(task) || routineIds.has(task.id) || represented(task)) continue;
+    const level: OperationLevel = isPlan(task) ? "plano" : isFlowDelivery(task) ? "entrega" : "tarefa";
+    const members = level === "entrega" ? flowStepsOf(task.id, tasks) : level === "plano" ? children.get(task.id) ?? [] : [];
+    push({ id: task.id, task, clientName: task.clientName ?? "Outros", clientSlug: task.clientSlug ?? "", routine: false, level, members });
+  }
+  for (const routine of routines) {
+    // Molde de anúncios de uma automação de relatório: a rotina da Entrega o
+    // representa (lib/automations/routineFeeds.ts).
+    const representedBy = (routine as { represented_by?: string | null }).represented_by;
+    if (representedBy && routineIds.has(representedBy)) continue;
+    push({ id: routine.id, task: routine, clientName: routine.clientName, clientSlug: routine.clientSlug, routine: true, level: "rotina", members: routine.executions });
   }
   return output;
 }
 
-export function itemTypeTags(item: OperationItem): string[] {
-  const base = classifyTask(item.task.kind, item.task.subtype).baseType;
-  return item.routine ? [base, "rotina"] : [base];
+/** Plano ou entrega vindo da aba Planos e Entregas (já hidratado com os filhos). */
+export function parentOperationItem(card: TaskRecord & { clientName: string; clientSlug: string; activities: TaskRecord[] }): OperationItem {
+  return {
+    id: card.id, task: card, clientName: card.clientName, clientSlug: card.clientSlug, routine: false,
+    level: isPlan(card) ? "plano" : "entrega", members: card.activities,
+  };
 }
 
-export function itemTypeLabels(item: OperationItem): string[] {
-  return [classifyTask(item.task.kind, item.task.subtype).baseLabel, ...(item.routine ? ["Rotina"] : [])];
+/**
+ * O status que a Operação usa para filtrar e agrupar — o do TRABALHO, não o
+ * carimbo do card:
+ *   - tarefa: o próprio status;
+ *   - entrega: a etapa corrente (o card pai só guarda o último carimbo da cascata);
+ *   - plano: aprovado só quando concluído;
+ *   - rotina: aprovada só quando ENCERRADA (molde aprovado). Antes valia o status
+ *     projetado da última execução: aprovar a execução da semana tirava da tela
+ *     uma rotina ativa, com próximo ciclo marcado. Sem execução aberta, a rotina
+ *     está esperando o próximo ciclo — Entrada.
+ */
+export function operationStatusOf(item: OperationItem): TaskStatus {
+  const task = item.task;
+  if (item.level === "tarefa") return task.status;
+  if (item.level === "entrega") {
+    if (task.completed_at) return "aprovado";
+    return currentFlowStepOf(item.members)?.status ?? task.status;
+  }
+  if (item.level === "plano") {
+    if (task.completed_at) return "aprovado";
+    return task.status === "aprovado" ? "em_producao" : task.status;
+  }
+  const template = (task as RecurringTask).template_status ?? task.status;
+  if (template === "aprovado") return "aprovado";
+  if (template === "parada") return "parada";
+  const open = item.members.filter((execution) => !execution.completed_at && execution.status !== "aprovado" && !isDeferredTask(execution));
+  const current = [...open].sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? "")).at(-1);
+  return current?.status ?? "backlog";
 }
+
+export function itemTypeTags(item: OperationItem): string[] {
+  const base = classifyTask(item.task.kind, item.task.subtype).baseType;
+  const tags = new Set<string>([base]);
+  if (item.level !== "tarefa") tags.add(item.level);
+  return [...tags];
+}
+
+const LEVEL_LABEL: Record<OperationLevel, string> = { rotina: "Rotina", plano: "Plano", entrega: "Entrega", tarefa: "Tarefa" };
+
+export function itemTypeLabels(item: OperationItem): string[] {
+  return [...new Set([classifyTask(item.task.kind, item.task.subtype).baseLabel, ...(item.level !== "tarefa" ? [LEVEL_LABEL[item.level]] : [])])];
+}
+
+export function levelLabel(level: OperationLevel): string { return LEVEL_LABEL[level]; }
 
 export function compatibleSubtypes(items: readonly OperationItem[], selectedTypes: readonly string[]): string[] {
   return [...new Set(items
@@ -86,6 +184,18 @@ export function operationSituation(item: OperationItem, today: string): string {
     const routine = item.task as RecurringTask;
     return recurringState(routine, today);
   }
+  if (item.task.completed_at) return "concluida";
+  // Entrega: a situação é a da etapa corrente. Plano: parada/atrasada se algum
+  // membro aberto estiver assim. Mesma regra do acordeão de Planos e Entregas.
+  if (item.level === "entrega") {
+    const current = currentFlowStepOf(item.members);
+    if (current) return deadlineStateOf(current, today);
+  }
+  if (item.level === "plano") {
+    const states = item.members.filter((member) => !member.completed_at).map((member) => deadlineStateOf(member, today));
+    if (states.includes("parada")) return "parada";
+    if (states.includes("atrasada")) return "atrasada";
+  }
   return deadlineStateOf(item.task, today);
 }
 
@@ -96,7 +206,7 @@ export function operationSituation(item: OperationItem, today: string): string {
  * closed routine, hidden by the default filter like any finished card. */
 export function operationMatchesFilters(item: OperationItem, filters: readonly OperationFilter[], today: string): boolean {
   const statuses = filters.filter((filter) => filter.attr === "status").map((filter) => filter.value);
-  if (statuses.length && !statuses.includes(item.task.status)) return false;
+  if (statuses.length && !statuses.includes(operationStatusOf(item))) return false;
   return filters.every((filter) => {
     if (filter.attr === "status") return true;
     if (filter.attr === "tipo") return itemTypeTags(item).includes(filter.value);

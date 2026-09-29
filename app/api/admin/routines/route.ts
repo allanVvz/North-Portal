@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { listRecurringTasks } from "@/lib/supabase";
 import { requireAdmin } from "@/lib/supabase/auth";
+import { withAutomationFeeds } from "@/lib/automations/routineFeeds";
 
 // GET /api/admin/routines — as demandas recorrentes ativas, para o calendário do
 // quadro de Tarefas (ATA 14/09: "essas tarefas são guia, devem estar no
@@ -10,7 +11,8 @@ import { requireAdmin } from "@/lib/supabase/auth";
 export async function GET() {
   try {
     await requireAdmin();
-    const routines = await listRecurringTasks();
+    // Os dois moldes de uma automação de relatório viram uma rotina só.
+    const routines = await withAutomationFeeds(await listRecurringTasks());
     // The client needs the actual child records to render a factual calendar.
     // Do not remove inactive templates: historical routines remain inspectable.
     return NextResponse.json({ tasks: routines });

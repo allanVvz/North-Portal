@@ -8,29 +8,28 @@ import HScrollRail from "../HScrollRail";
 import NewTaskButton from "../NewTaskButton";
 import TaskKindIcon from "../TaskKindIcon";
 import SortMenu from "../SortMenu";
-import { COLUMNS, PRIORITY_LABEL, STATUS_LABEL, commentsOf, visibleColumnsFor } from "../kanbanShared";
+import { PRIORITY_LABEL, STATUS_LABEL, commentsOf, visibleColumnsFor } from "../kanbanShared";
 import { formatPeriod, formatShortDate, relativeDue } from "../taskDates";
 import { agencyToday, RECURRING_STATE_LABEL, type RecurringState } from "../recurringState";
 import { calendarMonthCells, calendarMonthTitle, isoCalendarDate } from "../calendarUtils";
-import { deadlineStateOf, DEADLINE_LABEL, type DeadlineState } from "../deadlineState";
+import { DEADLINE_LABEL, type DeadlineState } from "../deadlineState";
 import { formatRelativeAge } from "@/lib/comments";
 import { kindDef, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
-import { TASK_BASE_TYPES, classifyTask, taskClassificationLabel } from "@/lib/taskClassification";
+import { classifyTask, taskClassificationLabel } from "@/lib/taskClassification";
 import { childrenByParent, flowStepsOf, isFlowDelivery, parentIdsOf } from "@/lib/taskRelations";
+import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { taskMatchesQuery } from "@/lib/taskSearch";
 import type { RecurringTask } from "@/lib/supabase";
 import type { TaskRecord, TaskStatus } from "@/lib/validation";
-import type { TaskTypeDef } from "@/lib/taskTypes";
 import { sortItems } from "../taskSort";
 import { useSortPref, type SortScope } from "../taskSortPrefs";
 import { recurrenceCycleOf, recurrenceRevisionOf } from "@/lib/recurrenceState";
 import { useAttrVisibility } from "../kanbanAttrs";
-import OperationSearchBar, { type AttrDef, type AttrOption } from "./OperationSearchBar";
-import { useOperationFilters } from "./operationFilterPrefs";
+import OperationSearchBar from "./OperationSearchBar";
+import { CADENCE_LABEL, SEM_RESPONSAVEL, useOperationFilterBar } from "./useOperationFilterBar";
 import {
-  DEFAULT_OPERATION_FILTERS, MULTI_VALUE_ATTRS, compatibleSubtypes, factualDateOf, factualRoutineEvents, itemTypeLabels,
-  itemTypeTags, normalizeOperationItems, operationMatchesFilters, operationSituation, type OperationFilter,
-  type OperationFilterAttr, type OperationItem, type OperationTask,
+  factualDateOf, factualRoutineEvents, itemTypeLabels, levelLabel, normalizeOperationItems, operationMatchesFilters,
+  operationSituation, operationStatusOf, type OperationItem, type OperationTask,
 } from "./operationItems";
 
 type View = "quadro" | "lista" | "calendario";
@@ -42,24 +41,6 @@ const GROUPS: { key: GroupBy; label: string }[] = [
   { key: "responsavel", label: "Responsável" }, { key: "cliente", label: "Clientes" },
   { key: "prazo", label: "Prazo" }, { key: "kanban", label: "Kanban" },
 ];
-// Mesmos glifos do KanbanSearchBar, para o mesmo atributo não ter dois ícones.
-const FILTER_ATTRS: AttrDef[] = [
-  { key: "status", label: "Status", icon: "◧" },
-  { key: "situacao", label: "Situação", icon: "◉" },
-  { key: "tipo", label: "Tipo", icon: "▣" },
-  { key: "subtipo", label: "Subtipo", icon: "▢" },
-  { key: "cliente", label: "Cliente", icon: "◔" },
-  { key: "frequencia", label: "Frequência", icon: "↻" },
-  { key: "prioridade", label: "Prioridade", icon: "⚑" },
-  { key: "responsavel", label: "Responsável", icon: "◑" },
-];
-const SITUATION_LABEL: Record<string, string> = {
-  ativa: "Ativa", sem_agenda: "Sem agenda", concluida: "Concluída", historico: "Histórico",
-  no_prazo: "No prazo", atrasada: "Atrasada", parada: "Parada",
-};
-const CADENCE_LABEL: Record<string, string> = { semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal" };
-const SEM_RESPONSAVEL = "Sem responsável";
-
 function itemDue(item: OperationItem): string | null {
   return item.routine ? (item.task as RecurringTask).next_due_date : item.task.due_date;
 }
@@ -70,7 +51,7 @@ function itemDue(item: OperationItem): string | null {
  * da pílula continua o da rotina ("Ativa", "Ciclo concluído"). */
 function cardState(item: OperationItem, today: string): { tone: DeadlineState; label: string } {
   if (!item.routine) {
-    const state = deadlineStateOf(item.task, today);
+    const state = operationSituation(item, today) as DeadlineState;
     return { tone: state, label: DEADLINE_LABEL[state] };
   }
   const state = operationSituation(item, today) as RecurringState;
@@ -78,17 +59,28 @@ function cardState(item: OperationItem, today: string): { tone: DeadlineState; l
   return { tone, label: RECURRING_STATE_LABEL[state] ?? state };
 }
 
+/** O que o pai resume numa linha: onde a Entrega está ("2/3 · Feedback ·
+ *  Revisão") ou quanto do Plano já foi feito ("3 de 5 concluídas"). */
+function parentSummary(item: OperationItem): string {
+  if (item.level === "entrega") {
+    const total = item.task.workflow_version?.workflow_version_steps.length || item.members.length;
+    const current = currentFlowStepOf(item.members);
+    if (!current) return total ? `${total} etapas` : "";
+    const index = item.members.findIndex((step) => step.id === current.id) + 1;
+    return `${index}/${total} · ${subtypeLabel(current.subtype) || current.title} · ${STATUS_LABEL[current.status]}`;
+  }
+  if (item.level === "plano") {
+    const done = item.members.filter((member) => member.completed_at).length;
+    return item.members.length ? `${done} de ${item.members.length} concluídas` : "Sem atividades";
+  }
+  return "";
+}
+
 function initialOf(value: string) { return value.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "—"; }
 
 function payloadStr(task: TaskRecord, key: string): string {
   const value = (task.payload ?? {})[key];
   return typeof value === "string" ? value : "";
-}
-
-function sameFilters(a: readonly OperationFilter[], b: readonly OperationFilter[]): boolean {
-  const key = (filter: OperationFilter) => `${filter.attr}:${filter.value}`;
-  const left = new Set(a.map(key));
-  return left.size === new Set(b.map(key)).size && b.every((filter) => left.has(key(filter)));
 }
 
 function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDragStart, onDragEnd, visible, flowBadge, progress, showStage }: {
@@ -110,7 +102,7 @@ function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDra
   const showSubtype = !flowBadge && visible("subtype") && Boolean(task.subtype);
   return (
     <article
-      className={`kb-card op-card is-${tone}${routine ? " is-routine" : ""}${dragging ? " dragging" : ""}`}
+      className={`kb-card op-card is-${tone}${routine ? " is-routine" : ""}${item.level === "plano" || item.level === "entrega" ? ` is-${item.level}` : ""}${dragging ? " dragging" : ""}`}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -120,14 +112,16 @@ function BoardCard({ item, today, onOpen, onComplete, draggable, dragging, onDra
           <span className={`kb-situacao s-${tone}`}>{label}</span>
           {/* O status do molde ("Entrada") não diz nada sobre a rotina — o ciclo
               dela já está na pílula de situação. Só a tarefa mostra a etapa. */}
-          {showStage && !routine ? <span className="kb-card-stage">{STATUS_LABEL[task.status]}</span> : null}
+          {showStage && !routine ? <span className="kb-card-stage">{STATUS_LABEL[operationStatusOf(item)]}</span> : null}
           <span className="kb-card-marks">
             {visible("client_visible") && task.client_visible ? <span className="kb-eye" title="Visível ao cliente">◉</span> : null}
             {visible("plan_link") && parentIdsOf(task).length ? <span className="kb-plan-link" title="Possui relação estrutural ou de fluxo">◆</span> : null}
             {routine ? <span className="op-routine-mark" title={`Rotina ${CADENCE_LABEL[routine.cadence]?.toLowerCase() ?? ""}`}>↻ {CADENCE_LABEL[routine.cadence] ?? "Rotina"}</span> : null}
+            {item.level === "plano" || item.level === "entrega" ? <span className={`op-level-mark is-${item.level}`}>{item.level === "plano" ? "◆" : "▣"} {levelLabel(item.level)}</span> : null}
           </span>
         </span>
         <span className="kb-card-titleline"><TaskKindIcon kind={task.kind} subtype={task.subtype} format={task.payload?.formato} /><span className="kb-card-title op-card-title">{task.title}</span></span>
+        {parentSummary(item) ? <span className="op-card-parentline">{parentSummary(item)}</span> : null}
         {flowBadge || showKind || showSubtype || formato || plataforma ? (
           <span className="kb-card-meta">
             {flowBadge ? (
@@ -183,12 +177,10 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
   const [tasks, setTasks] = useState<OperationTask[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [routines, setRoutines] = useState(initialRoutines);
-  const [catalogTypes, setCatalogTypes] = useState<TaskTypeDef[]>([]);
   const [flowSummary, setFlowSummary] = useState({ anyRevisaoAdmin: false, anyAprovacaoAdmin: false });
   const [view, setView] = useState<View>("quadro");
   const [groupBy, setGroupBy] = useState<GroupBy>("responsavel");
   const [query, setQuery] = useState("");
-  const { filters, setFilters, resetFilters } = useOperationFilters();
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -214,22 +206,11 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
     } catch { setError("Não foi possível carregar tarefas e rotinas."); } finally { setLoaded(true); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { fetch("/api/admin/task-types").then((response) => response.ok ? response.json() : null).then((data: { types?: TaskTypeDef[] } | null) => setCatalogTypes(data?.types ?? [])).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/admin/settings/flow-flags-summary").then((response) => response.ok ? response.json() : null).then((data) => data && setFlowSummary(data)).catch(() => {}); }, []);
   useEffect(() => setRoutines(initialRoutines), [initialRoutines]);
 
   const allItems = useMemo(() => normalizeOperationItems(tasks, routines), [tasks, routines]);
-  useEffect(() => {
-    const situacao = searchParams.get("situacao");
-    setFilters((current) => {
-      const withoutSituation = current.filter((filter) => filter.attr !== "situacao");
-      return situacao && SITUATION_LABEL[situacao]
-        ? [...withoutSituation, { attr: "situacao", value: situacao, label: SITUATION_LABEL[situacao] }]
-        : withoutSituation;
-    });
-  // setFilters is a fresh closure each render but always writes the same state.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  const { filters, setFilters, resetFilters, pruneSubtypes, isDefault: isDefaultFilters, barProps } = useOperationFilterBar(allItems, today);
   const filtered = useMemo(() => sortItems(allItems.filter((item) => operationMatchesFilters(item, filters, today) && taskMatchesQuery(item.task, query, { clientName: item.clientName, extra: itemTypeLabels(item) })), sort.key, sort.dir, (item) => ({
     title: item.task.title, updatedAt: item.task.updated_at, dueDate: itemDue(item), completedAt: item.task.completed_at, position: item.task.position,
   })), [allItems, filters, today, query, sort]);
@@ -270,61 +251,6 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
     return badges;
   }, [tasks]);
 
-  const selectedTypes = useMemo(() => filters.filter((filter) => filter.attr === "tipo").map((filter) => filter.value), [filters]);
-  const optionsFor = useCallback((attr: OperationFilterAttr): AttrOption[] => {
-    if (attr === "status") return COLUMNS.map((column) => ({ value: column.status, label: column.label }));
-    if (attr === "situacao") {
-      return [...new Set(allItems.map((item) => operationSituation(item, today)))].map((value) => ({ value, label: SITUATION_LABEL[value] ?? value }));
-    }
-    if (attr === "tipo") {
-      const entries: [string, string][] = [
-        ...TASK_BASE_TYPES.map((type): [string, string] => [type.key, type.label]),
-        ...allItems.flatMap(itemTypeTags).map((value): [string, string] => [value, value === "rotina" ? "Rotina" : TASK_BASE_TYPES.find((type) => type.key === value)?.label ?? "Checkpoint"]),
-        ["rotina", "Rotina"],
-      ];
-      return [...new Map(entries).entries()].map(([value, label]) => ({ value, label }));
-    }
-    if (attr === "subtipo") {
-      const catalog = [
-        ...(selectedTypes.includes("tarefa") ? catalogTypes.find((type) => type.key === "operacional")?.subtypes.map((subtype) => ({ value: subtype.key, label: subtype.label })) ?? [] : []),
-        ...(selectedTypes.includes("entrega") ? catalogTypes.filter((type) => type.behavior === "entrega").map((type) => ({ value: type.key, label: type.label })) : []),
-      ];
-      const present = compatibleSubtypes(allItems, selectedTypes).map((value) => ({ value, label: allItems.map((item) => classifyTask(item.task.kind, item.task.subtype)).find((classification) => classification.subtypeKey === value)?.subtypeLabel ?? subtypeLabel(value) }));
-      return [...new Map([...catalog, ...present].map((option) => [option.value, option])).values()];
-    }
-    if (attr === "cliente") return [...new Set(allItems.map((item) => item.clientName))].sort().map((value) => ({ value, label: value }));
-    if (attr === "frequencia") return ["semanal", "quinzenal", "mensal"].map((value) => ({ value, label: CADENCE_LABEL[value] }));
-    if (attr === "prioridade") return Object.entries(PRIORITY_LABEL).map(([value, label]) => ({ value, label }));
-    const names = [...new Set(allItems.flatMap((item) => (item.task.assignee ?? "").split(",").map((name) => name.trim()).filter(Boolean)))].sort();
-    return names.concat(allItems.some((item) => !item.task.assignee) ? [SEM_RESPONSAVEL] : []).map((value) => ({ value, label: value }));
-  }, [allItems, selectedTypes, today, catalogTypes]);
-  const attrs = FILTER_ATTRS.filter((attr) => attr.key !== "subtipo" || selectedTypes.length > 0);
-
-  // Subtipo só vale enquanto for compatível com os Tipos escolhidos; mudar ou
-  // tirar um Tipo poda o Subtipo que deixou de existir naquela interseção.
-  const pruneSubtypes = useCallback((next: OperationFilter[]) => {
-    const types = next.filter((filter) => filter.attr === "tipo").map((filter) => filter.value);
-    if (!types.length) return next.filter((filter) => filter.attr !== "subtipo");
-    const valid = new Set([
-      ...compatibleSubtypes(allItems, types),
-      ...(types.includes("tarefa") ? catalogTypes.find((type) => type.key === "operacional")?.subtypes.map((subtype) => subtype.key) ?? [] : []),
-      ...(types.includes("entrega") ? catalogTypes.filter((type) => type.behavior === "entrega").map((type) => type.key) : []),
-    ]);
-    return next.filter((filter) => filter.attr !== "subtipo" || valid.has(filter.value));
-  }, [allItems, catalogTypes]);
-  function toggleFilter(attr: OperationFilterAttr, option: AttrOption) {
-    setFilters((current) => {
-      const has = current.some((filter) => filter.attr === attr && filter.value === option.value);
-      const next = MULTI_VALUE_ATTRS.includes(attr)
-        ? has ? current.filter((filter) => !(filter.attr === attr && filter.value === option.value)) : [...current, { attr, value: option.value, label: option.label }]
-        : has ? current.filter((filter) => filter.attr !== attr) : [...current.filter((filter) => filter.attr !== attr), { attr, value: option.value, label: option.label }];
-      return pruneSubtypes(next);
-    });
-  }
-  function removeAttr(attr: OperationFilterAttr) {
-    setFilters((current) => pruneSubtypes(current.filter((filter) => filter.attr !== attr)));
-  }
-  const isDefaultFilters = sameFilters(filters, DEFAULT_OPERATION_FILTERS);
   const routineFilterOn = filters.some((filter) => filter.attr === "tipo" && filter.value === "rotina");
   const overdueFilterOn = filters.some((filter) => filter.attr === "situacao" && filter.value === "atrasada");
 
@@ -343,7 +269,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
     } else if (groupBy === "kanban") {
       const executableTasks = allItems.filter((item) => !item.routine).map((item) => item.task);
       visibleColumnsFor(executableTasks, flowSummary.anyRevisaoAdmin, flowSummary.anyAprovacaoAdmin).forEach((column) => map.set(column.status, []));
-      filtered.forEach((item) => put(item.task.status, item));
+      filtered.forEach((item) => put(operationStatusOf(item), item));
     } else {
       ["Atrasadas", "Esta semana", "Depois", "Sem agenda"].forEach((label) => map.set(label, []));
       filtered.forEach((item) => {
@@ -355,7 +281,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
     return [...map.entries()].map(([key, items]) => ({ key, label: groupBy === "kanban" ? STATUS_LABEL[key as TaskStatus] : key, items }));
   }, [filtered, groupBy, clients, assignees, today, allItems, flowSummary]);
 
-  function open(item: OperationItem) { setSelected({ task: item.task, clientName: item.clientName, clientSlug: item.clientSlug, related: item.routine ? (item.task as RecurringTask).executions : undefined }); }
+  function open(item: OperationItem) { setSelected({ task: item.task, clientName: item.clientName, clientSlug: item.clientSlug, related: item.level === "tarefa" ? undefined : item.members }); }
   useEffect(() => {
     const id = searchParams.get("task"); if (!loaded || !id || handledDeepLink.current === id) return;
     const routine = routines.find((row) => row.id === id || row.executions.some((execution) => execution.id === id));
@@ -363,11 +289,15 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
       handledDeepLink.current = id;
       const execution = routine.executions.find((row) => row.id === id);
       if (execution) setSelected({ task: execution, clientName: routine.clientName, clientSlug: routine.clientSlug, related: routine.executions, parent: routine });
-      else open({ id: routine.id, task: routine, clientName: routine.clientName, clientSlug: routine.clientSlug, routine: true });
+      else open({ id: routine.id, task: routine, clientName: routine.clientName, clientSlug: routine.clientSlug, routine: true, level: "rotina", members: routine.executions });
       return;
     }
     const item = allItems.find((row) => row.id === id);
-    if (item) { handledDeepLink.current = id; open(item); }
+    if (item) { handledDeepLink.current = id; open(item); return; }
+    // Link para uma etapa ou um membro: abre dentro do pai que a representa.
+    const holder = allItems.find((row) => row.members.some((member) => member.id === id));
+    const member = holder?.members.find((row) => row.id === id);
+    if (holder && member) { handledDeepLink.current = id; setSelected({ task: member, clientName: holder.clientName, clientSlug: holder.clientSlug, related: holder.members, parent: holder.task }); }
   // Deep links intentionally stay in the URL: changing area must preserve task.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, routines, allItems, loaded]);
@@ -385,10 +315,10 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
   function onDrop(column: string) {
     const item = filtered.find((row) => row.id === dragId); setDragId(null); setDropKey(null); if (!item) return;
     if (groupBy === "prazo") return;
-    if (item.routine && !["responsavel", "cliente"].includes(groupBy)) return;
+    if (item.level !== "tarefa" && !["responsavel", "cliente"].includes(groupBy)) return;
     if (groupBy === "responsavel") void patch(item, { assignee: column === SEM_RESPONSAVEL ? null : column, assignee_profile_ids: [] });
     if (groupBy === "cliente") { const client = clients.find((entry) => entry.name === column); if (client) void patch(item, { slug: client.slug }); }
-    if (groupBy === "kanban" && !item.routine) void patch(item, { status: column });
+    if (groupBy === "kanban" && item.level === "tarefa") void patch(item, { status: column });
   }
   const events = useMemo(() => factualRoutineEvents(routines), [routines]);
   const eventsByDay = useMemo(() => {
@@ -444,15 +374,8 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
         <OperationSearchBar
           q={query}
           onQChange={setQuery}
-          placeholder="Buscar tarefas e rotinas…"
-          filters={filters}
-          attrs={attrs}
-          optionsFor={optionsFor}
-          onToggle={toggleFilter}
-          onRemoveAttr={removeAttr}
-          onRemoveLast={() => { const last = filters.at(-1); if (last) removeAttr(last.attr); }}
-          onReset={resetFilters}
-          isDefault={isDefaultFilters}
+          placeholder="Buscar tarefas, rotinas, planos e entregas…"
+          {...barProps}
         />
         {view === "quadro" ? (
           <div className="kb-modetoggle" aria-label="Agrupar quadro">
@@ -507,7 +430,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
                       today={today}
                       onOpen={() => open(item)}
                       onComplete={item.routine ? () => void complete(item) : undefined}
-                      draggable={groupBy !== "prazo" && (!item.routine || groupBy === "responsavel" || groupBy === "cliente")}
+                      draggable={groupBy !== "prazo" && (item.level === "tarefa" || groupBy === "responsavel" || groupBy === "cliente")}
                       dragging={dragId === item.id}
                       onDragStart={(event) => { setDragId(item.id); event.dataTransfer.effectAllowed = "move"; }}
                       onDragEnd={() => { setDragId(null); setDropKey(null); }}
@@ -541,7 +464,7 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
                   <button className="rec-list-row" type="button" onClick={() => open(item)}>
                     <span className="rec-list-title">
                       <TaskKindIcon kind={item.task.kind} subtype={item.task.subtype} />
-                      <span><strong title={item.task.title}>{item.task.title}</strong><small><span className={`kb-situacao s-${tone}`}>{label}</span>{item.routine ? " ↻ Rotina" : ""}</small></span>
+                      <span><strong title={item.task.title}>{item.task.title}</strong><small><span className={`kb-situacao s-${tone}`}>{label}</span>{item.level !== "tarefa" ? ` ${item.level === "rotina" ? "↻" : item.level === "plano" ? "◆" : "▣"} ${levelLabel(item.level)}` : ""}{parentSummary(item) ? ` · ${parentSummary(item)}` : ""}</small></span>
                     </span>
                     <span>{item.clientName}</span>
                     <span>{taskClassificationLabel(item.task.kind, item.task.subtype)}</span>

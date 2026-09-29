@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_OPERATION_FILTERS, compatibleSubtypes, factualDateOf, factualRoutineEvents, normalizeOperationItems, operationMatchesFilters } from "./operationItems";
+import { DEFAULT_OPERATION_FILTERS, compatibleSubtypes, factualDateOf, factualRoutineEvents, normalizeOperationItems, operationMatchesFilters, operationStatusOf } from "./operationItems";
 
 const base = {
   client_id: null, kind: "operacional", subtype: null, title: "Card", description: null,
@@ -24,7 +24,7 @@ describe("operation collection", () => {
     expect(items.map((item) => item.id)).toEqual(["ordinary", "routine"]);
   });
 
-  it("keeps an ordinary task linked to an action plan", () => {
+  it("keeps a plan member whose plan is not on the screen", () => {
     const planMember = task("plan-member", { plan_id: "action-plan", payload: {} });
     expect(normalizeOperationItems([planMember], []).map((item) => item.id)).toEqual(["plan-member"]);
   });
@@ -77,5 +77,62 @@ describe("operation collection", () => {
   it("falls back from occurrence date to due date without projecting cadence", () => {
     expect(factualDateOf(task("occurrence", { payload: { occurrence_date: "2026-09-17" }, due_date: "2026-09-20" }))).toBe("2026-09-17");
     expect(factualDateOf(task("due", { due_date: "2026-09-20" }))).toBe("2026-09-20");
+  });
+
+  // 28/09: cada trabalho aparece uma vez, pelo nível mais alto (rotina > plano > entrega > tarefa).
+  describe("um card por trabalho", () => {
+    const step = (id: string, delivery: string, position: number, extra: Record<string, unknown> = {}) =>
+      task(id, { parents: [{ id: delivery, relation_kind: "workflow_step", slot: `s${position}`, position }], ...extra });
+    const delivery = (id: string, extra: Record<string, unknown> = {}) => task(id, { kind: "criativo", workflow_version_id: "wv", ...extra });
+
+    it("entrega aparece; suas etapas não", () => {
+      const items = normalizeOperationItems([delivery("entrega"), step("e1", "entrega", 10), step("e2", "entrega", 20)], []);
+      expect(items.map((item) => [item.id, item.level])).toEqual([["entrega", "entrega"]]);
+      expect(items[0].members.map((member) => member.id)).toEqual(["e1", "e2"]);
+    });
+
+    it("plano aparece; membros (por elo ou plan_id) e a entrega dentro dele não", () => {
+      const plan = task("plano", { kind: "plano_acao" });
+      const member = task("membro", { parents: [{ id: "plano", relation_kind: "structural_member", slot: null, position: 0 }] });
+      const legacy = task("legado", { plan_id: "plano" });
+      const inner = delivery("entrega-do-plano", { parents: [{ id: "plano", relation_kind: "structural_member", slot: null, position: 1 }] });
+      const innerStep = step("etapa", "entrega-do-plano", 10);
+      const items = normalizeOperationItems([plan, member, legacy, inner, innerStep], []);
+      expect(items.map((item) => item.id)).toEqual(["plano"]);
+    });
+
+    it("a entrega da semana de uma rotina não se repete: a rotina a representa", () => {
+      const occurrence = delivery("entrega-semana", { payload: { recurrence_parent_id: "molde" } });
+      const items = normalizeOperationItems([occurrence, step("anuncios", "entrega-semana", 10)], [routine("molde", [occurrence])]);
+      expect(items.map((item) => [item.id, item.level])).toEqual([["molde", "rotina"]]);
+    });
+  });
+
+  describe("status efetivo (o filtro padrão esconde só o que acabou)", () => {
+    it("rotina ativa continua visível quando a execução mais recente foi aprovada", () => {
+      const done = task("semana-passada", { status: "aprovado", completed_at: "2026-09-22T10:00:00Z", payload: { recurrence_parent_id: "r" } });
+      // O status projetado vinha da última execução: "aprovado" tirava a rotina da tela.
+      const items = normalizeOperationItems([], [routine("r", [done], { status: "aprovado", template_status: "backlog" })]);
+      expect(operationStatusOf(items[0])).toBe("backlog");
+      expect(items.filter((item) => operationMatchesFilters(item, DEFAULT_OPERATION_FILTERS, "2026-09-28")).map((item) => item.id)).toEqual(["r"]);
+    });
+
+    it("rotina encerrada (molde aprovado) sai", () => {
+      const items = normalizeOperationItems([], [routine("r", [], { template_status: "aprovado" })]);
+      expect(items.filter((item) => operationMatchesFilters(item, DEFAULT_OPERATION_FILTERS, "2026-09-28"))).toEqual([]);
+    });
+
+    it("entrega usa o status da etapa corrente; concluída sai do padrão", () => {
+      const step = (id: string, parent: string, position: number, extra: Record<string, unknown> = {}) =>
+        task(id, { parents: [{ id: parent, relation_kind: "workflow_step", slot: `s${position}`, position }], ...extra });
+      const aberta = task("aberta", { kind: "criativo", workflow_version_id: "wv", status: "backlog" });
+      const fechada = task("fechada", { kind: "criativo", workflow_version_id: "wv", status: "aprovado", completed_at: "2026-09-28T10:00:00Z" });
+      const items = normalizeOperationItems([
+        aberta, step("a1", "aberta", 10, { status: "aprovado", completed_at: "2026-09-28T09:00:00Z" }), step("a2", "aberta", 20, { status: "revisao" }),
+        fechada,
+      ], []);
+      expect(operationStatusOf(items.find((item) => item.id === "aberta")!)).toBe("revisao");
+      expect(items.filter((item) => operationMatchesFilters(item, DEFAULT_OPERATION_FILTERS, "2026-09-28")).map((item) => item.id)).toEqual(["aberta"]);
+    });
   });
 });

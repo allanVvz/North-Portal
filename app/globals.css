@@ -5620,6 +5620,10 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
   transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 .op-card.is-routine { --op-stripe: var(--a-teal); }
+/* Plano e Entrega são pais que resumem trabalho (28/09): faixa própria, que
+   atrasada/parada (declaradas depois) continuam vencendo. */
+.op-card.is-plano { --op-stripe: var(--a-purple-text); }
+.op-card.is-entrega { --op-stripe: var(--a-blue-text); }
 .op-card.is-atrasada { --op-stripe: var(--a-danger); }
 .op-card.is-parada { --op-stripe: var(--a-warn); }
 .kb-card.op-card:hover { border-color: var(--a-teal); box-shadow: inset 4px 0 0 var(--op-stripe), 0 8px 20px rgba(12,44,44,.10); transform: translateY(-1px); }
@@ -5653,6 +5657,11 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .op-cycle-btn:hover { background: var(--a-teal-strong); border-color: var(--a-teal-strong); color: var(--a-inverse); }
 .op-cycle-btn:focus-visible { outline: 2px solid var(--a-teal); outline-offset: 2px; }
 .op-routine-mark { white-space: nowrap; }
+.op-level-mark { font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.op-level-mark.is-plano { color: var(--a-purple-text); }
+.op-level-mark.is-entrega { color: var(--a-blue-text); }
+/* A linha que diz onde o pai está: "2/3 · Feedback · Revisão", "3 de 5 concluídas". */
+.op-card-parentline { display: block; margin: -2px 0 8px; color: var(--a-muted); font-size: 12px; font-weight: 600; line-height: 1.35; }
 
 /* ---- Lista ------------------------------------------------------------------
    Cabeçalho e linhas no MESMO par de grades (7 colunas + Ação): antes o
