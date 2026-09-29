@@ -24,7 +24,11 @@ test("plano Baita no ciclo North com Edição e Publicação por peça", async (
   expect(plan.client_id).not.toBe(cycle.client_id);
   expect(plan.plan_id).toBeNull();
   expect(cycle.plan_id).toBe(MOLD);
-  expect(plan.parents).toEqual(expect.arrayContaining([expect.objectContaining({ id: CYCLE, relation_kind: "structural_member" })]));
+  expect(plan.parents).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: CYCLE, relation_kind: "structural_member" })]));
+  const linkedResponse = await page.request.get(`/api/admin/tasks/${MOLD}/routine-executions`);
+  expect(linkedResponse.ok()).toBeTruthy();
+  const { links } = await linkedResponse.json() as { links: Array<{ cycle_id: string; occurrence_date: string; task_id: string }> };
+  expect(links).toEqual(expect.arrayContaining([expect.objectContaining({ cycle_id: CYCLE, occurrence_date: "2026-09-16", task_id: PLAN })]));
   for (const id of [...REELS, ...ADS]) {
     const delivery = byId.get(id)!;
     expect(delivery).toBeTruthy();
@@ -35,9 +39,10 @@ test("plano Baita no ciclo North com Edição e Publicação por peça", async (
     ]));
     expect(byId.get(String(delivery.payload.prepared_publication_task_id))?.subtype).toBe("publicacao");
   }
-  await page.goto(`/admin/kanban?task=${CYCLE}`);
+  await page.goto(`/admin/kanban?task=${MOLD}`);
   const modal = page.locator(".tm");
-  await expect(modal.locator(".tm-title-input")).toHaveValue(/PLANO SEMANAL - ALLAN/, { timeout: 30_000 });
+  await expect(modal.locator(".tm-title-input")).toHaveValue(/REUNIÃO ROTINA - ALLAN/, { timeout: 30_000 });
+  await expect(modal.getByText(/Reunião 16 de set/i)).toBeVisible();
   await expect(modal.getByText("PLANO DE CONTEÚDO - SETEMBRO /OUTUBRO").first()).toBeVisible();
-  await expect(modal.getByLabel("Destino do comentário")).toBeVisible();
+  await expect(modal.getByLabel("Desvincular PLANO DE CONTEÚDO - SETEMBRO /OUTUBRO desta reunião")).toBeVisible();
 });

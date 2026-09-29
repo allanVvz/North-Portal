@@ -6346,3 +6346,10 @@ a.clients-strip-tile:hover { background: var(--a-inset); }
 .tm-received-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--a-muted); }
 .tm-received a { color: var(--a-teal-text); font-weight: 600; text-decoration: none; }
 .tm-received a:hover { text-decoration: underline; }
+
+.pac-link-row select { min-height: 30px; max-width: 190px; padding: 4px 6px; border: 1px solid var(--a-border); border-radius: 6px; background: var(--a-surface); color: var(--a-ink); font: inherit; font-size: 11px; }
+.tm-routine-meeting { display: grid; gap: 5px; padding: 8px 0; border-top: 1px solid var(--a-border); }
+.tm-routine-meeting-date { margin: 0 0 3px; color: var(--a-sec); font-size: 12px; font-weight: 700; }
+.tm-routine-linked { display: flex; align-items: center; position: relative; border: 1px solid var(--a-border); border-radius: 8px; }
+.tm-routine-linked .tm-member-open { min-width: 0; flex: 1; }
+.tm-routine-linked .tm-member-title small { display: block; color: var(--a-sec); font-size: 11px; font-weight: 400; }

@@ -92,6 +92,14 @@ export type TaskCreationScope = "task" | "plan" | "routine";
  *  Ex.: o "+" embaixo de uma coluna do quadro abre o modal já com aquele status. */
 export type TaskCreationPrefill = { clientSlug?: string; kind?: string; status?: TaskStatus; assignee?: string };
 
+type RoutineExecutionLink = {
+  id: string;
+  cycle_id: string;
+  occurrence_date: string;
+  task_id: string;
+  task: TaskRecord | null;
+};
+
 type PendingMember =
   | { key: string; kind: "existing"; taskId: string; title: string }
   // `taskKind` e não `kind`: `kind` já é o discriminante desta união ("existing"
@@ -851,16 +859,16 @@ export default function TaskModal({
   // com o que trabalhar. Busca o quadro cross-client inteiro (mesma fonte do
   // filtro "Todos", `listAllTasks`) uma vez, só quando este card é
   // efetivamente um Plano da North.
-  const [crossClientPool, setCrossClientPool] = useState<TaskRecord[]>([]);
+  const [crossClientPool, setCrossClientPool] = useState<(TaskRecord & { clientName?: string })[]>([]);
   useEffect(() => {
-    if (!canCrossClientPlan) { setCrossClientPool([]); return; }
+    if (!canCrossClientPlan && !isRecurringParent) { setCrossClientPool([]); return; }
     let cancelled = false;
     fetch("/api/admin/tasks")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { tasks: TaskRecord[] } | null) => { if (!cancelled && data?.tasks) setCrossClientPool(data.tasks); })
+      .then((data: { tasks: (TaskRecord & { clientName?: string })[] } | null) => { if (!cancelled && data?.tasks) setCrossClientPool(data.tasks); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [canCrossClientPlan]);
+  }, [canCrossClientPlan, isRecurringParent]);
   const linkCandidatePool = useMemo(() => {
     if (!canCrossClientPlan || !crossClientPool.length) return clientTasks;
     const merged = new Map(clientTasks.map((t) => [t.id, t]));
@@ -885,8 +893,29 @@ export default function TaskModal({
   // só ordena o mesmo tipo primeiro, não trava — pedido explícito: precisa
   // aceitar vincular uma Entrega).
   const recurrenceLinkCandidates = liveTask && isRecurringParent
-    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id && t.kind === liveTask.kind)
+    ? crossClientPool.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) !== liveTask.id)
     : [];
+  const [routineLinks, setRoutineLinks] = useState<RoutineExecutionLink[]>([]);
+  useEffect(() => {
+    if (!isRecurringParent || !liveTask) { setRoutineLinks([]); return; }
+    let cancelled = false;
+    fetch(`/api/admin/tasks/${liveTask.id}/routine-executions`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data: { links?: RoutineExecutionLink[] } | null) => { if (!cancelled) setRoutineLinks(data?.links ?? []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isRecurringParent, liveTask?.id]);
+  const meetings = planMembers.map((card) => ({
+    id: card.id, title: card.title,
+    date: String(card.payload?.occurrence_date || card.due_date || "").slice(0, 10),
+  })).filter((meeting) => /^\d{4}-\d{2}-\d{2}$/.test(meeting.date))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const routineGroups = isRecurringParent ? [...new Set([...meetings.map((meeting) => meeting.date), ...routineLinks.map((link) => link.occurrence_date)])]
+    .sort((a, b) => b.localeCompare(a)).map((date) => ({
+      date,
+      native: planMembers.filter((card) => String(card.payload?.occurrence_date || card.due_date || "").slice(0, 10) === date),
+      linked: routineLinks.filter((link) => link.occurrence_date === date),
+    })) : [];
   // As etapas são lidas para o próprio card Entrega e para compor o resumo
   // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
   // renderizada no primeiro caso; `chainDelivery` já traz sua versão persistida.
@@ -1131,15 +1160,26 @@ export default function TaskModal({
     }
   }
 
-  async function linkRecurrenceExecutionAtDate(taskId: string, occurrenceDate: string) {
+  async function linkRoutineExecution(taskId: string, cycleId: string) {
     if (!liveTask) return;
     setBusy(true); setError("");
     try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}/recurrence-executions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "link", child_id: taskId, occurrence_date: occurrenceDate }) });
-      const body = await res.json().catch(() => null) as (TaskRecord & { error?: string }) | null;
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/routine-executions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task_id: taskId, cycle_id: cycleId }) });
+      const body = await res.json().catch(() => null) as { link?: RoutineExecutionLink; error?: string } | null;
       if (!res.ok) throw new Error(body?.error ?? "Não foi possível vincular esta execução.");
-      onTaskPatched?.(body as TaskRecord);
+      if (body?.link) setRoutineLinks((current) => [...current, body.link!]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível vincular esta execução."); } finally { setBusy(false); }
+  }
+
+  async function unlinkRoutineExecution(linkId: string) {
+    if (!liveTask) return;
+    setBusy(true); setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/routine-executions?link_id=${encodeURIComponent(linkId)}`, { method: "DELETE" });
+      const body = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(body?.error ?? "Não foi possível desvincular esta execução.");
+      setRoutineLinks((current) => current.filter((link) => link.id !== linkId));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível desvincular esta execução."); } finally { setBusy(false); }
   }
 
   async function createRecurrenceExecutions(dates: string[], title: string) {
@@ -2096,7 +2136,7 @@ export default function TaskModal({
               <div className={`tm-box tm-planmembers${isRecurringParent ? " tm-cycles" : ""}`}>
                 <div className="tm-box-head">
                   <p className="tm-box-label">
-                    {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
+                    {isRecurringParent ? "Execuções por reunião" : "Atividades do plano"} ({liveTask ? planMembers.length + (isRecurringParent ? routineLinks.length : 0) : pendingMembers.length})
                     {!isRecurringParent && liveTask && planMembers.length ? (
                       <span className="tm-box-label-sub"> · {effectiveParentMembers.filter((m) => m.status === "aprovado").length} concluídas</span>
                     ) : null}
@@ -2117,7 +2157,33 @@ export default function TaskModal({
                 <p className="tm-relation-hint">{isRecurringParent ? "Crie uma execução ou vincule um card existente escolhendo a data." : "Crie um card novo ou vincule um existente. Ele aparecerá aqui e poderá ser aberto para organizar suas etapas."}</p>
                 <div className="tm-member-list">
                   {liveTask ? (
-                    planMembers.map((m) => (
+                    isRecurringParent ? routineGroups.map((group) => <div className="tm-routine-meeting" key={group.date}>
+                      <p className="tm-routine-meeting-date">Reunião {formatShortDate(group.date)} · {group.native.length + group.linked.length} {group.native.length + group.linked.length === 1 ? "execução" : "execuções"}</p>
+                      {group.native.map((m) => <StepRow
+                        key={m.id} card={m} label={m.title} team={adminReviewers} busy={busy || statusBusy}
+                        canOpen={Boolean(onOpenRelatedTask)} onOpen={() => void openRelatedTask(m)}
+                        onUnlink={() => void unlinkMember(m.id, liveTask.id)} unlinkTitle={`Remover ligação com ${m.title}`}
+                        lockDateWhenDone editableFields={isFlowDelivery(m) ? "status_details" : kindDef(m.kind).isPlan ? "none" : "all"}
+                        onPatch={patchRelatedCard} onComment={commentRelatedCard}
+                      />)}
+                      {group.linked.map((link) => {
+                        const card = crossClientPool.find((item) => item.id === link.task_id) ?? link.task;
+                        if (!card) return null;
+                        const members = kindDef(card.kind).isPlan ? actionPlanMembersOf(card.id, crossClientPool)
+                          : isFlowDelivery(card) ? flowStepsOf(card.id, crossClientPool) : [];
+                        const progress = taskProgress(card, members, childrenByParent(crossClientPool));
+                        const client = crossClientPool.find((item) => item.id === link.task_id)?.clientName
+                          ?? clients.find((item) => item.slug === "north")?.name ?? "Cliente";
+                        return <div className="tm-routine-linked" key={link.id}>
+                          <button type="button" className="tm-member-open" disabled={!onOpenRelatedTask || busy} onClick={() => void openRelatedTask(card)}>
+                            <TaskKindIcon kind={card.kind} subtype={card.subtype} size="sm" />
+                            <span className="tm-member-title">{card.title}<small>{client} · {kindLabel(card.kind)}{card.subtype ? ` / ${subtypeLabel(card.subtype)}` : ""} · {progress}%</small></span>
+                            <span className="tm-member-arrow" aria-hidden>↗</span>
+                          </button>
+                          <button type="button" className="tm-member-unlink" title={`Desvincular ${card.title} desta reunião`} aria-label={`Desvincular ${card.title} desta reunião`} disabled={busy} onClick={() => void unlinkRoutineExecution(link.id)}>✕</button>
+                        </div>;
+                      })}
+                    </div>) : planMembers.map((m) => (
                       <StepRow
                         key={m.id}
                         card={m}
@@ -2152,7 +2218,7 @@ export default function TaskModal({
                       </div>
                     ))
                   )}
-                  {(liveTask ? planMembers.length : pendingMembers.length) === 0 ? (
+                  {(liveTask ? planMembers.length + (isRecurringParent ? routineLinks.length : 0) : pendingMembers.length) === 0 ? (
                     <p className="admin-sub" style={{ margin: 0 }}>
                       {isRecurringParent ? "Conclua o ciclo atual para criar a próxima execução." : "Nenhuma atividade vinculada ainda."}
                     </p>
@@ -2171,9 +2237,10 @@ export default function TaskModal({
                   !recurrenceStopped(liveTask.status) ? (
                     <RecurrenceExecutionCombobox
                       candidates={recurrenceLinkCandidates}
+                      meetings={meetings}
                       templateKind={liveTask.kind}
                       busy={busy}
-                      onLink={(c, date) => void linkRecurrenceExecutionAtDate(c.id, date)}
+                      onLink={(c, meetingId) => void linkRoutineExecution(c.id, meetingId)}
                       onCreate={(dates, title) => void createRecurrenceExecutions(dates, title)}
                     />
                   ) : null
