@@ -313,8 +313,10 @@ export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: st
     });
     // Várias peças (carrossel, story): as prontas vão para a Def, irmã de Raw
     // e Preview; entrega de um arquivo segue com o final na raiz.
-    const multi = isMultiItemFormat(context.formatName);
-    const def = multi ? await recordedFolder(creativeWorkspace.final_folder_id, creative.id) ?? await ensureDriveFolder({
+    // Ligado à mão (ex.: "Promoções da Semana", 3 vídeos de promo) fica ligado:
+    // a preparação só liga pelo formato, nunca desliga.
+    const multi = isMultiItemFormat(context.formatName) || Boolean(creativeWorkspace.multi_final);
+    const def = isMultiItemFormat(context.formatName) || creativeWorkspace.final_folder_id ? await recordedFolder(creativeWorkspace.final_folder_id, creative.id) ?? await ensureDriveFolder({
       name: names.def, parentId: creative.id,
       appProperties: creativeDriveAppProperties(context, "final_folder"),
     }) : null;
