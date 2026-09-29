@@ -41,3 +41,13 @@ describe("peças do Feed", () => {
     expect(pieces.find((piece) => piece.id === "banner-tv")).toMatchObject({ format: "Banner", legacy: true, covers: ["tv-file"], state: "concluida" });
   });
 });
+
+describe("colunas do Feed", async () => {
+  const { isProfilePiece, isReels } = await import("@/app/admin/plano/CreativeFeedView");
+  const piece = (format: string, title = "x", isVideo = false) => ({ format, title, isVideo });
+  it("carrossel e post só no Feed; reels no Feed e em Reels; banner, anúncio e story só em Outros", () => {
+    expect([isProfilePiece(piece("Carrossel")), isReels(piece("Carrossel"))]).toEqual([true, false]);
+    expect([isProfilePiece(piece("Reels")), isReels(piece("Reels"))]).toEqual([true, true]);
+    for (const format of ["Banner", "Anúncio", "Story"]) expect([isProfilePiece(piece(format)), isReels(piece(format, "x", true))]).toEqual([false, false]);
+  });
+});

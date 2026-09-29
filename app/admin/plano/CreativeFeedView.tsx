@@ -101,22 +101,29 @@ export default function CreativeFeedView({ clientName, initialState, onOpen }: {
       // e centralizados), só os Reels (9:16) e o resto. Um reels aparece no
       // Feed e nos Reels — é assim que o Instagram o publica.
       <div className="feed-columns">
-        <FeedColumn title="Feed" hint="feed e reels, como no perfil" frame="grid" pieces={visible.filter(isProfilePiece)} onOpen={onOpen} onFail={fail} />
+        <FeedColumn title="Feed" hint="posts, carrosséis e reels, como no perfil" frame="grid" pieces={visible.filter(isProfilePiece)} onOpen={onOpen} onFail={fail} />
         <FeedColumn title="Reels" hint="9:16" frame="reels" pieces={visible.filter(isReels)} onOpen={onOpen} onFail={fail} />
-        <FeedColumn title="Outros" hint="posts, carrosséis, banners, anúncios" frame="natural" pieces={visible.filter((piece) => !isReels(piece))} onOpen={onOpen} onFail={fail} />
+        <FeedColumn title="Outros" hint="fora do perfil: banners, anúncios, stories" frame="natural" pieces={visible.filter((piece) => !isProfilePiece(piece))} onOpen={onOpen} onFail={fail} />
       </div>
     ) : <div className="creative-feed-zero">Nenhuma peça com imagem {state ? `em "${PIECE_STATE_LABEL[state].toLowerCase()}"` : ""} {clientName ? `para ${clientName}` : ""}.</div>}
   </section>;
 }
 
-/** O que aparece na grade do perfil: banner (TV, loja) e anúncio não vão para o perfil. */
+/**
+ * O que aparece na grade do perfil: posts, carrosséis e reels. Banner (TV,
+ * loja), anúncio e story não vão para o perfil — são a coluna Outros. Cada
+ * peça fica numa coluna só, fora o reels, que está no perfil E na coluna
+ * Reels (30/09: o Carrossel aparecia em Feed e em Outros).
+ */
 export function isProfilePiece(piece: Pick<Piece, "format">): boolean {
-  return !/banner|an[uú]ncio/i.test(piece.format);
+  return !/banner|an[uú]ncio|stor/i.test(piece.format);
 }
 
-/** Reels (e stories): pelo formato, pelo título ou por um final em vídeo. */
+/** Reels: peça do perfil, pelo formato, pelo título ou por um final em vídeo
+ *  (story e anúncio em vídeo não são reels). */
 export function isReels(piece: Pick<Piece, "format" | "title" | "isVideo">): boolean {
-  return /reel|stor/i.test(piece.format) || /\breels?\b/i.test(piece.title) || piece.isVideo;
+  if (!isProfilePiece(piece)) return false;
+  return /reel/i.test(piece.format) || /\breels?\b/i.test(piece.title) || piece.isVideo;
 }
 
 function FeedColumn({ title, hint, frame, pieces, onOpen, onFail }: {

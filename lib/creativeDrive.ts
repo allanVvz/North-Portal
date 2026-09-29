@@ -193,8 +193,36 @@ export async function canManageCreativeAssets(db: Db, userId: string, level: str
   return Boolean(data?.length);
 }
 
+/**
+ * Pastas CONECTADAS (30/09): a Entrega usa pastas que já existiam no Drive
+ * (ligadas à mão, `connected_folders`). A preparação só confere que as três
+ * existem — nunca cria, move nem renomeia pasta de outra pessoa. Devolve null
+ * quando o workspace não é conectado (segue a preparação normal).
+ */
+async function checkConnectedWorkspace(db: Db, creativeTaskId: string): Promise<CreativeDriveWorkspace | null> {
+  const { data: row, error } = await db.from("drive_creative_workspaces")
+    .select("id,connected_folders,creative_folder_id,preview_folder_id,raw_folder_id")
+    .eq("creative_task_id", creativeTaskId).maybeSingle();
+  failDb(error);
+  if (!row?.connected_folders) return null;
+  const ids = [row.creative_folder_id, row.preview_folder_id, row.raw_folder_id];
+  const states = await Promise.all(ids.map((id) => (id ? getDriveItemState(id) : Promise.resolve(null))));
+  const problem = states.some((state) => !state) ? "Uma das pastas conectadas não foi informada."
+    : states.find((state) => state!.state !== "ok" || state!.mimeType !== "application/vnd.google-apps.folder")
+      ? `A pasta conectada "${states.find((state) => state!.state !== "ok" || state!.mimeType !== "application/vnd.google-apps.folder")!.name ?? "?"}" não está acessível no Drive.`
+      : null;
+  const { error: updateError } = await db.from("drive_creative_workspaces").update(problem
+    ? { status: "error", last_error: problem }
+    : { status: "ready", last_error: null, provisioned_at: new Date().toISOString() }).eq("id", row.id);
+  failDb(updateError);
+  if (problem) throw new HttpError(409, problem);
+  return getCreativeDriveWorkspace(db, creativeTaskId) as Promise<CreativeDriveWorkspace>;
+}
+
 export async function provisionCreativeDriveWorkspace(db: Db, creativeTaskId: string, preparedSeries?: DailySeries): Promise<CreativeDriveWorkspace> {
   const context = await resolveCreativeDriveContext(db, creativeTaskId);
+  const connected = await checkConnectedWorkspace(db, creativeTaskId);
+  if (connected) return connected;
   // resolveCreativeDriveContext has already checked the configured client and
   // exact structural Plan. Workspaces are still keyed by that execution Plan.
 
