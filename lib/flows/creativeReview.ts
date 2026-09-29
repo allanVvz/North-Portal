@@ -1,4 +1,3 @@
-import { aiComplete } from "@/lib/ai/complete";
 import { returnEditFinalsToPreview } from "@/lib/creativeDriveSync";
 import { getAdminTask, type AdminClient } from "@/lib/automations/taskAccess";
 import { transitionTaskStatus } from "@/lib/automations/taskWrites";
@@ -6,32 +5,23 @@ import { approveTask } from "./approve";
 import { reviewerIdsOf } from "./stepRole";
 export type FeedbackDecision = "aprovar" | "ajustes" | "revisao";
 
-async function reviewDecision(text: string): Promise<FeedbackDecision> {
-  const normalized = text.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (/^(aprovar|aprovado|aprovada|ok|aprovado!)\s*[.!]?$/.test(normalized)) return "aprovar";
-  if (/^(ajustes|ajustar|devolver|corrigir)\s*[.!]?$/.test(normalized)) return "ajustes";
-  try {
-    const answer = await aiComplete({
-      system: "Classifique a decisão de uma revisora de Edição criativa. Responda apenas aprovar, ajustes ou revisao. Aprovar exige aprovação explícita. Ajustes exige pedido de mudança. Na dúvida, revisao.",
-      user: text, maxTokens: 20,
-    });
-    const value = answer.trim().toLowerCase();
-    return value === "aprovar" || value === "ajustes" ? value : "revisao";
-  } catch { return "revisao"; }
-}
-
-/** Uma decisão atua somente na Edição que recebeu o comentário. */
-export async function handleCreativeReviewComment(
+/**
+ * A decisão de quem revisa um card em Revisão (30/09). Só por BOTÃO: Aprovar
+ * ou Solicitar revisão ("ajustes"). Comentário livre não decide mais nada —
+ * antes a IA lia o texto da Edição e podia aprovar ou devolver sozinha. Vale
+ * para qualquer card em Revisão em que o autor é revisor, não só Edição.
+ */
+export async function handleReviewDecision(
   admin: AdminClient,
   taskId: string,
   authorId: string,
-  text: string,
   decision: FeedbackDecision | null,
 ): Promise<boolean> {
+  if (decision !== "aprovar" && decision !== "ajustes") return false;
   const task = await getAdminTask(admin, taskId);
-  if (!task || task.subtype !== "edicao" || task.status !== "revisao") return false;
+  if (!task || task.status !== "revisao") return false;
   if (!reviewerIdsOf(task).includes(authorId)) return false;
-  const result = decision ?? await reviewDecision(text);
+  const result = decision;
   if (result === "aprovar") {
     await approveTask(admin, task, { actorId: authorId, from: ["revisao"] });
   } else if (result === "ajustes") {
@@ -44,7 +34,7 @@ export async function handleCreativeReviewComment(
       if (ids.length) {
         const { error: notificationError } = await admin.from("notifications").insert(ids.map((profileId) => ({
           profile_id: profileId, task_id: task.id, type: "task_status_changed",
-          message: `Ajustes solicitados em "${task.title}". A Edição voltou para Em produção.`,
+          message: `Revisão solicitada em "${task.title}". O card voltou para Em produção.`,
         })));
         if (notificationError) console.error("creative review notification failed", notificationError);
       }
@@ -52,7 +42,8 @@ export async function handleCreativeReviewComment(
         .select("parent_id").eq("child_id", task.id).eq("relation_kind", "workflow_step");
       if (linksError) throw linksError;
       const creativeIds = ((links ?? []) as { parent_id: string }[]).map((link) => link.parent_id);
-      if (creativeIds.length) {
+      // Só a Edição tem finais no Drive para voltar a Preview.
+      if (creativeIds.length && task.subtype === "edicao") {
         try { await returnEditFinalsToPreview(admin, task.id, creativeIds); }
         catch (error) { console.error("creative review Drive sync failed", error); }
       }

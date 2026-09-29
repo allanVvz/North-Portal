@@ -12,7 +12,7 @@ import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY } from "@/lib/automationWorkflow";
-import { handleCreativeReviewComment, type FeedbackDecision } from "@/lib/flows/creativeReview";
+import { handleReviewDecision, type FeedbackDecision } from "@/lib/flows/creativeReview";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
 export const runtime = "nodejs";
@@ -78,51 +78,78 @@ async function conversionSiblingFor(admin: ReturnType<typeof createAdminClient>,
   return null;
 }
 
+/** Resposta a uma pergunta da North AI sobre um ajuste visual já pedido (a
+ *  "onde está sobrepondo?"). Devolve se tratou o comentário. */
+async function handleVisualFollowUp(admin: ReturnType<typeof createAdminClient>, taskId: string, text: string, commentAt?: string | null): Promise<boolean> {
+  const task = await getTaskById(taskId);
+  const pending = task?.payload?.visual_request_pending as { instruction?: string; sourceCommentAt?: string | null } | undefined;
+  const stage = task?.payload?.visual_clarification_stage;
+  // Número de conversão (seguidores, vendas…) é Feedback: encerra uma
+  // pergunta visual pendente em vez de ser somado a ela. Sem isso a Cris
+  // (28/09) recebeu "onde está sobrepondo?" de novo a cada número enviado.
+  const conversionData = isConversionDataComment(text);
+  if (pending && conversionData) await dismissVisualClarification(admin, taskId);
+  if (!conversionData && pending && stage === "target" && /funil|tabela|primeira p[áa]gina|leitura do per[íi]odo|an[úu]ncio|m[íi]dia/i.test(text) && !/largo|largura|sobrepos|padding|espa[çc]amento|fonte|texto|invad/i.test(text)) {
+    await requestVisualDetailClarification(admin, taskId, { text: `${pending.instruction ?? ""} ${text}`, commentAt });
+    return true;
+  }
+  const visual = conversionData
+    ? { kind: "none" as const }
+    : pending && stage === "detail"
+      ? { kind: "clear" as const, instruction: `${pending.instruction ?? ""} ${text}` }
+      : pending
+        ? classifyVisualComment(`${pending.instruction ?? ""} ${text}`)
+        : classifyVisualComment(text);
+  if (visual.kind === "ambiguous") {
+    await requestVisualClarification(admin, taskId, { text, commentAt });
+    return true;
+  }
+  if (visual.kind === "clear") {
+    const request = visualRequestFromText(`${pending?.instruction ?? ""} ${text}`.trim(), pending?.sourceCommentAt ?? commentAt);
+    await markVisualClarificationResolved(admin, taskId, text, commentAt, request);
+    const conversionTaskId = await conversionSiblingFor(admin, taskId);
+    if (conversionTaskId && request.target !== "ads") {
+      await handleConversionRevisionComment(admin, conversionTaskId, request);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * O que um comentário faz depois de gravado (30/09).
+ *
+ * Decisão só por BOTÃO. Comentário livre não altera nada, com duas exceções
+ * que já são automáticas por natureza:
+ *   - o Feedback aberto recebe os dados da semana e se aprova sozinho;
+ *   - a resposta a uma pergunta da North AI sobre um ajuste já pedido.
+ * Aprovar: aprova o card em Revisão (se o autor é revisor).
+ * Solicitar revisão ("ajustes"): relatórios seguem o caminho de sempre
+ * (interpretar o pedido e regerar); os demais cards voltam para Em produção.
+ */
 function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string, commentAt?: string | null, decision?: FeedbackDecision | null) {
   after(async () => {
     const admin = createAdminClient();
     try {
-      // Entrega de relatório: o comentário é interpretado uma vez e a intenção
-      // decide tudo (aprovar o Feedback, regerar a conversão, anotar o pedido).
-      // Os gatilhos genéricos abaixo ficam para as demais etapas.
-      if (text && await handleReportStepComment(admin, taskId, text, commentAt ?? null)) return;
-      if (text && authorId) {
-        if (await handleCreativeReviewComment(admin, taskId, authorId, text, decision ?? null)) return;
-      }
-      if (text) {
+      const chosen = decision === "aprovar" || decision === "ajustes" ? decision : null;
+      if (!chosen) {
+        if (!text) return;
         const task = await getTaskById(taskId);
-        const pending = task?.payload?.visual_request_pending as { instruction?: string; sourceCommentAt?: string | null } | undefined;
-        const stage = task?.payload?.visual_clarification_stage;
-        // Número de conversão (seguidores, vendas…) é Feedback: encerra uma
-        // pergunta visual pendente em vez de ser somado a ela. Sem isso a Cris
-        // (28/09) recebeu "onde está sobrepondo?" de novo a cada número enviado.
-        const conversionData = isConversionDataComment(text);
-        if (pending && conversionData) await dismissVisualClarification(admin, taskId);
-        if (!conversionData && pending && stage === "target" && /funil|tabela|primeira p[áa]gina|leitura do per[íi]odo|an[úu]ncio|m[íi]dia/i.test(text) && !/largo|largura|sobrepos|padding|espa[çc]amento|fonte|texto|invad/i.test(text)) {
-          await requestVisualDetailClarification(admin, taskId, { text: `${pending.instruction ?? ""} ${text}`, commentAt });
+        if (task?.subtype === "feedback" && !task.completed_at) {
+          if (!(await handleReportStepComment(admin, taskId, text, commentAt ?? null))) await recordFeedbackMetricComment(admin, taskId);
           return;
         }
-        const visual = conversionData
-          ? { kind: "none" as const }
-          : pending && stage === "detail"
-            ? { kind: "clear" as const, instruction: `${pending.instruction ?? ""} ${text}` }
-            : pending
-              ? classifyVisualComment(`${pending.instruction ?? ""} ${text}`)
-              : classifyVisualComment(text);
-        if (visual.kind === "ambiguous") {
-          await requestVisualClarification(admin, taskId, { text, commentAt });
-          return;
-        }
-        if (visual.kind === "clear") {
-          const request = visualRequestFromText(`${pending?.instruction ?? ""} ${text}`.trim(), pending?.sourceCommentAt ?? commentAt);
-          await markVisualClarificationResolved(admin, taskId, text, commentAt, request);
-          const conversionTaskId = await conversionSiblingFor(admin, taskId);
-          if (conversionTaskId && request.target !== "ads") {
-            await handleConversionRevisionComment(admin, conversionTaskId, request);
-            return;
-          }
-        }
+        if (task?.payload?.visual_request_pending) await handleVisualFollowUp(admin, taskId, text, commentAt);
+        return;
       }
+      if (chosen === "aprovar") {
+        if (authorId) await handleReviewDecision(admin, taskId, authorId, "aprovar");
+        return;
+      }
+      // Solicitar revisão.
+      if (text && await handleReportStepComment(admin, taskId, text, commentAt ?? null)) return;
+      if (authorId && await handleReviewDecision(admin, taskId, authorId, "ajustes")) return;
+      if (text && await handleVisualFollowUp(admin, taskId, text, commentAt)) return;
       const mediaTaskId = text && authorId && isMediaCorrection(text)
         ? await trafficSiblingFor(admin, taskId, authorId)
         : null;

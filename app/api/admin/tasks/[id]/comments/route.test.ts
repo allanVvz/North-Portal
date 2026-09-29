@@ -156,7 +156,7 @@ describe("comentário na etapa de tráfego da Entrega", () => {
   beforeEach(() => seed([{ id: TRAFEGO, title: "Tráfego", status: "revisao" }]));
 
   it("stage_task_id explícito: grava na tarefa filha de tráfego e em mais nenhum lugar", async () => {
-    const result = await post(ENTREGA, { text: "está aprovado", comment_id: "cid-00000001", stage_task_id: TRAFEGO });
+    const result = await post(ENTREGA, { text: "está aprovado", comment_id: "cid-00000001", stage_task_id: TRAFEGO, feedback_decision: "ajustes" });
 
     expect(result.status).toBe(200);
     expect(result.body.id).toBe(TRAFEGO);
@@ -182,7 +182,7 @@ describe("comentário na etapa de tráfego da Entrega", () => {
   });
 
   it("retry com o mesmo comment_id: um comentário só e os efeitos não se repetem", async () => {
-    const body = { text: "está aprovado", comment_id: "cid-00000002", stage_task_id: TRAFEGO };
+    const body = { text: "está aprovado", comment_id: "cid-00000002", stage_task_id: TRAFEGO, feedback_decision: "ajustes" };
     await post(ENTREGA, body);
     const retry = await post(ENTREGA, body);
 
@@ -196,7 +196,7 @@ describe("comentário na etapa de tráfego da Entrega", () => {
   });
 
   it("clique duplo (duas requisições simultâneas com o mesmo id): um comentário só", async () => {
-    const body = { text: "está aprovado", comment_id: "cid-00000003", stage_task_id: TRAFEGO };
+    const body = { text: "está aprovado", comment_id: "cid-00000003", stage_task_id: TRAFEGO, feedback_decision: "ajustes" };
     const [first, second] = await Promise.all([post(ENTREGA, body), post(ENTREGA, body)]);
 
     expect([first.status, second.status]).toEqual([200, 200]);
@@ -215,7 +215,7 @@ describe("comentário na etapa de tráfego da Entrega", () => {
   it("falha num gatilho não vira 500 nem perde o comentário: a etapa é parada com aviso", async () => {
     hooks.trafficHook.mockRejectedValueOnce(new Error("Windsor fora do ar"));
 
-    const result = await post(ENTREGA, { text: "troque a capa", comment_id: "cid-00000006", stage_task_id: TRAFEGO });
+    const result = await post(ENTREGA, { text: "troque a capa", comment_id: "cid-00000006", stage_task_id: TRAFEGO, feedback_decision: "ajustes" });
 
     expect(result.status).toBe(200);
     expect(commentsOn(TRAFEGO)).toEqual(["troque a capa"]);
@@ -317,9 +317,9 @@ describe("roteamento ambíguo ou inválido", () => {
     expect(commentsOn(TRAFEGO)).toEqual(["direto na etapa"]);
   });
 
-  it("comentário direto na conversão dispara a regeneração idempotente", async () => {
+  it("Solicitar revisão direto na conversão dispara a regeneração idempotente", async () => {
     seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
-    const result = await post(CONVERSAO, { text: "gere outro relatório", comment_id: "cid-conversion-01" });
+    const result = await post(CONVERSAO, { text: "gere outro relatório", comment_id: "cid-conversion-01", feedback_decision: "ajustes" });
     expect(result.body.id).toBe(CONVERSAO);
     await flushAfter();
     expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO, expect.objectContaining({ instruction: "gere outro relatório" }));
@@ -334,16 +334,16 @@ describe("roteamento ambíguo ou inválido", () => {
       { id: FEEDBACK, title: "Feedback", status: "aprovado" },
       { id: CONVERSAO, title: "Conversão", status: "revisao" },
     ]);
-    await post(CONVERSAO, { text: "Corrija o numero de alcance: total 6311", comment_id: "cid-alcance-01" });
+    await post(CONVERSAO, { text: "Corrija o numero de alcance: total 6311", comment_id: "cid-alcance-01", feedback_decision: "ajustes" });
     await flushAfter();
     expect(hooks.trafficHook).not.toHaveBeenCalledWith(hooks.db, TRAFEGO, expect.anything());
     expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
   });
 
-  it("Entrega de relatório: o comentário vai ao intérprete e os gatilhos genéricos não rodam", async () => {
+  it("Entrega de relatório: o pedido de revisão vai ao intérprete e os gatilhos genéricos não rodam", async () => {
     hooks.reportStepHook.mockResolvedValueOnce(true);
     seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
-    await post(CONVERSAO, { text: "alcance 12.452", comment_id: "cid-report-step-01" });
+    await post(CONVERSAO, { text: "alcance 12.452", comment_id: "cid-report-step-01", feedback_decision: "ajustes" });
     await flushAfter();
     expect(hooks.reportStepHook).toHaveBeenCalledWith(hooks.db, CONVERSAO, "alcance 12.452", expect.anything());
     expect(hooks.conversionHook).not.toHaveBeenCalled();
@@ -353,25 +353,39 @@ describe("roteamento ambíguo ou inválido", () => {
   it("pedido visual ambíguo pergunta o ponto exato e não regenera", async () => {
     hooks.visualDecision.mockReturnValue({ kind: "ambiguous", question: "onde exatamente está sobrepondo?" });
     seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
-    const result = await post(CONVERSAO, { text: "o pdf está feio", comment_id: "cid-visual-ambiguous" });
+    const result = await post(CONVERSAO, { text: "o pdf está feio", comment_id: "cid-visual-ambiguous", feedback_decision: "ajustes" });
     expect(result.status).toBe(200);
     await flushAfter();
     expect(hooks.visualClarification).toHaveBeenCalledWith(hooks.db, CONVERSAO, expect.objectContaining({ text: "o pdf está feio" }));
     expect(hooks.conversionHook).not.toHaveBeenCalled();
   });
 
-  it("edição e exclusão também reprocessam o card de conversão", async () => {
+  it("comentário livre (sem botão) não dispara nada: nem regeneração, nem relatório, nem tráfego", async () => {
+    seed([
+      { id: TRAFEGO, title: "Tráfego", status: "revisao" },
+      { id: CONVERSAO, title: "Conversão", status: "revisao" },
+    ]);
+    await post(CONVERSAO, { text: "gere outro relatório", comment_id: "cid-free-01" });
+    await post(TRAFEGO, { text: "está aprovado", comment_id: "cid-free-02" });
+    await flushAfter();
+    expect(hooks.reportStepHook).not.toHaveBeenCalled();
+    expect(hooks.conversionHook).not.toHaveBeenCalled();
+    expect(hooks.trafficHook).not.toHaveBeenCalled();
+    expect(hooks.visualClarification).not.toHaveBeenCalled();
+    expect(commentsOn(CONVERSAO)).toEqual(["gere outro relatório"]);
+  });
+
+  it("editar ou excluir um comentário não reprocessa nada (30/09: decisão só por botão)", async () => {
     seed([{ id: CONVERSAO, title: "Conversão", status: "revisao" }]);
 
     const edited = await patchComment(CONVERSAO, { index: 0, at: "2026-09-18T10:00:00.000Z", text: "Vendas: 4" });
     expect(edited.status).toBe(200);
     await flushAfter();
-    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
+    expect(hooks.conversionHook).not.toHaveBeenCalled();
 
-    hooks.conversionHook.mockClear();
     const removed = await deleteComment(CONVERSAO, { index: 0, at: "2026-09-18T10:00:00.000Z" });
     expect(removed.status).toBe(200);
     await flushAfter();
-    expect(hooks.conversionHook).toHaveBeenCalledWith(hooks.db, CONVERSAO);
+    expect(hooks.conversionHook).not.toHaveBeenCalled();
   });
 });

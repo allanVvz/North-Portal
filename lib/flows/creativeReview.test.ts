@@ -9,7 +9,7 @@ vi.mock("@/lib/automations/taskWrites", () => ({ transitionTaskStatus: mocks.tra
 vi.mock("./approve", () => ({ approveTask: mocks.approveTask }));
 vi.mock("@/lib/creativeDriveSync", () => ({ returnEditFinalsToPreview: mocks.returnEditFinalsToPreview }));
 
-import { handleCreativeReviewComment } from "./creativeReview";
+import { handleReviewDecision } from "./creativeReview";
 
 const edit = {
   id: "edit-a", title: "Peça A — Edição", subtype: "edicao", status: "revisao",
@@ -29,7 +29,7 @@ const db = {
 };
 const notifications: unknown[] = [];
 
-describe("revisão de Edição individual", () => {
+describe("decisão de revisão por botão", () => {
   beforeEach(() => {
     vi.clearAllMocks(); notifications.length = 0;
     mocks.getAdminTask.mockResolvedValue(edit);
@@ -37,13 +37,13 @@ describe("revisão de Edição individual", () => {
   });
 
   it("Luiza pode aprovar a peça e disparar a cascata", async () => {
-    expect(await handleCreativeReviewComment(db as never, edit.id, "luiza", "Aprovado", "aprovar")).toBe(true);
+    expect(await handleReviewDecision(db as never, edit.id, "luiza", "aprovar")).toBe(true);
     expect(mocks.approveTask).toHaveBeenCalledWith(db, edit, { actorId: "luiza", from: ["revisao"] });
     expect(mocks.transitionTaskStatus).not.toHaveBeenCalled();
   });
 
   it("Cintia devolve só esta Edição e avisa seu responsável", async () => {
-    expect(await handleCreativeReviewComment(db as never, edit.id, "cintia", "Ajustar corte", "ajustes")).toBe(true);
+    expect(await handleReviewDecision(db as never, edit.id, "cintia", "ajustes")).toBe(true);
     expect(mocks.transitionTaskStatus).toHaveBeenCalledWith(db, edit.id, { from: ["revisao"], to: "em_producao" });
     expect(notifications).toEqual([[expect.objectContaining({ profile_id: "editor", task_id: edit.id })]]);
     expect(mocks.returnEditFinalsToPreview).toHaveBeenCalledWith(db, edit.id, ["piece-a"]);
@@ -51,7 +51,30 @@ describe("revisão de Edição individual", () => {
   });
 
   it("outro perfil não decide a revisão", async () => {
-    expect(await handleCreativeReviewComment(db as never, edit.id, "outro", "Aprovado", "aprovar")).toBe(false);
+    expect(await handleReviewDecision(db as never, edit.id, "outro", "aprovar")).toBe(false);
+    expect(mocks.approveTask).not.toHaveBeenCalled();
+  });
+
+  it("sem decisão (comentário livre) não muda nada — nem lê o card", async () => {
+    expect(await handleReviewDecision(db as never, edit.id, "luiza", null)).toBe(false);
+    expect(await handleReviewDecision(db as never, edit.id, "luiza", "revisao")).toBe(false);
+    expect(mocks.getAdminTask).not.toHaveBeenCalled();
+    expect(mocks.approveTask).not.toHaveBeenCalled();
+    expect(mocks.transitionTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it("vale para qualquer card em Revisão; só a Edição devolve finais ao Preview", async () => {
+    const roteiro = { ...edit, id: "roteiro-a", subtype: "roteiro" };
+    mocks.getAdminTask.mockResolvedValue(roteiro);
+    mocks.transitionTaskStatus.mockResolvedValue({ ...roteiro, status: "em_producao" });
+    expect(await handleReviewDecision(db as never, roteiro.id, "cintia", "ajustes")).toBe(true);
+    expect(mocks.transitionTaskStatus).toHaveBeenCalledWith(db, roteiro.id, { from: ["revisao"], to: "em_producao" });
+    expect(mocks.returnEditFinalsToPreview).not.toHaveBeenCalled();
+  });
+
+  it("card fora de Revisão não é decidido", async () => {
+    mocks.getAdminTask.mockResolvedValue({ ...edit, status: "em_producao" });
+    expect(await handleReviewDecision(db as never, edit.id, "luiza", "aprovar")).toBe(false);
     expect(mocks.approveTask).not.toHaveBeenCalled();
   });
 });

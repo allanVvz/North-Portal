@@ -27,6 +27,19 @@ export function reviewerIdsOf(step: { reviewer_id: string | null; payload?: Reco
   return [...new Set([...ids, ...(step.reviewer_id ? [step.reviewer_id] : [])])];
 }
 
+/**
+ * Quem move um card para Revisão à mão vira revisor dele (30/09): os botões
+ * Aprovar / Solicitar revisão aparecem para essa pessoa. Devolve a nova lista
+ * de `payload.reviewer_ids`, ou null quando nada muda (já é revisora). O
+ * `reviewer_id` principal não é tocado — mexer nele recalcularia a
+ * auto-revisão (lib/flows/reviewSkip.ts).
+ */
+export function reviewerIdsAfterManualReview(step: { reviewer_id: string | null; payload?: Record<string, unknown> }, userId: string | null | undefined): string[] | null {
+  if (!userId || reviewerIdsOf(step).includes(userId)) return null;
+  const configured = Array.isArray(step.payload?.reviewer_ids) ? step.payload.reviewer_ids.filter((id): id is string => typeof id === "string") : [];
+  return [...configured, userId];
+}
+
 export function stepRoleOf(
   step: Pick<TaskRecord, "reviewer_id" | "subtype"> & { payload?: TaskRecord["payload"] },
   assigneeIds: ReadonlySet<string>,

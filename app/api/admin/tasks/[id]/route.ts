@@ -22,6 +22,7 @@ import { findType, listTaskTypes, type TaskBehavior } from "@/lib/taskTypes";
 import { canonicalDeliveryFormat, normalizeDeliveryPayload } from "@/lib/taskClassification";
 import { notifyProfiles, notifyTaskParticipants } from "@/lib/notifications";
 import { notifiableChange } from "@/lib/notifiableChange";
+import { reviewerIdsAfterManualReview } from "@/lib/flows/stepRole";
 import { HttpError, taskPatchSchema, type TaskRecord } from "@/lib/validation";
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -97,7 +98,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID invalido.");
-    const { slug, assignee_profile_ids, payload_patch, ...patch } = taskPatchSchema.parse(await request.json());
+    const { slug, assignee_profile_ids, payload_patch: requestedPayloadPatch, ...patch } = taskPatchSchema.parse(await request.json());
+    let payload_patch = requestedPayloadPatch;
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
@@ -169,6 +171,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         patch.approver_id = null;
         patch.requires_approval = false;
       }
+    }
+
+    // Quem move o card para Revisão à mão vira revisor dele (30/09) — é para
+    // essa pessoa que aparecem Aprovar / Solicitar revisão. Automações não
+    // passam por aqui.
+    if (patch.status === "revisao" && current.status !== "revisao") {
+      const reviewers = reviewerIdsAfterManualReview(current, session.userId);
+      if (reviewers) payload_patch = { ...(payload_patch ?? {}), reviewer_ids: reviewers };
     }
 
     // Auto-revisão (lib/flows/reviewSkip.ts): um revisor que é o ÚNICO

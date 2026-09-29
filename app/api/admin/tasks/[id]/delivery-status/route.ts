@@ -4,7 +4,8 @@ import { apiError } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/supabase/auth";
-import { getClientFlowFlags, getTaskById, listRelatedTasks, updateTaskGroup } from "@/lib/supabase";
+import { getClientFlowFlags, getTaskById, listRelatedTasks, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
+import { reviewerIdsAfterManualReview } from "@/lib/flows/stepRole";
 import { advanceDeliveryForStep, nextFlowStepCardOf } from "@/lib/flows/advance";
 import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { deliveryParentIdsOf, flowStepsOf, isFlowDelivery, stageInDelivery } from "@/lib/taskRelations";
@@ -74,6 +75,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     } else if (storedStage.status !== input.status) {
       const saved = await updateTaskGroup(stage.id, storedStage, { status: input.status }, session.userId);
       if (input.status === "aprovado") next = await nextFlowStepCardOf(createAdminClient(), saved);
+    }
+    // Quem põe a etapa em Revisão à mão vira revisor dela (30/09).
+    if (input.status === "revisao" && stage.status !== "revisao") {
+      const reviewers = reviewerIdsAfterManualReview(storedStage, session.userId);
+      if (reviewers) await updateTaskPayloadPatch(stage.id, { reviewer_ids: reviewers });
     }
     if (storedStage.subtype === "edicao" && stage.status === "revisao" && input.status === "em_producao") {
       try {
