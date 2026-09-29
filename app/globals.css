@@ -4200,6 +4200,30 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-comment-input input:focus, .tdp-comment-input input:focus,
 .tm-comment-input textarea:focus, .tdp-comment-input textarea:focus { outline: none; }
 .tm-comment-input button, .tdp-comment-input button { border-radius: 10px; flex-shrink: 0; }
+.tm-comment-destination, .tdp-comment-target { flex-basis: 100%; color: var(--a-muted); font-size: 12px; line-height: 1.35; padding: 2px 2px 4px; }
+.tm-comment-destination b { color: var(--a-ink); }
+.tm-comment-context-warning { flex: 1 0 100%; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 10px; border-radius: 9px; background: var(--a-gold-soft); color: var(--a-gold-text); font-size: 12px; }
+.tm-comment-context-warning .admin-btn { min-height: 36px; }
+.task-review-actions { display: grid; gap: 10px; margin: 0 0 12px; padding: 12px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface); }
+.task-review-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.task-review-form { display: grid; gap: 8px; }
+.task-review-form label { display: grid; gap: 6px; color: var(--a-sec); font-size: 12px; }
+.task-review-form textarea { width: 100%; resize: vertical; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-inset); color: var(--a-ink); padding: 9px 10px; font: inherit; }
+.task-review-form > div { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.task-review-form [role="alert"] { margin: 0; color: var(--a-red-text, #a33); font-size: 12px; }
+.tm-activity-kind { border: 1px solid var(--a-border); border-radius: 999px; padding: 1px 6px; color: var(--a-muted); font-size: 10px; font-weight: 600; }
+.tm-comment.is-event { background: color-mix(in srgb, var(--a-inset) 72%, transparent); border-radius: 10px; padding: 8px; }
+.tm-comment-input:has(.tm-comment-destination) { flex-wrap: wrap; }
+.tdp-comment-input { flex-wrap: wrap; }
+.tm-ai-role-toggle, .tdp-ai-role label { display: inline-flex; align-items: center; gap: 8px; color: var(--a-ink); font-size: 13px; }
+.tm-ai-role-toggle input, .tdp-ai-role input { accent-color: var(--a-teal); }
+.tm-ai-role-hint, .tdp-ai-role small { display: block; color: var(--a-muted); font-size: 11px; margin-top: 5px; }
+.task-materials-projection { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface); }
+.task-materials-projection .tm-box-label { margin: 0; }
+.task-materials-projection-list { display: grid; gap: 6px; }
+.task-materials-projection-item { display: grid; grid-template-columns: 24px minmax(0,1fr) 18px; align-items: center; gap: 8px; width: 100%; min-height: 44px; text-align: left; border: 1px solid var(--a-border); border-radius: 9px; background: var(--a-inset); color: var(--a-ink); padding: 7px 9px; cursor: pointer; }
+.task-materials-projection-item b, .task-materials-projection-item small { display: block; min-width: 0; overflow-wrap: anywhere; }
+.task-materials-projection-item small { margin-top: 2px; color: var(--a-muted); font-size: 11px; }
 
 /* Prevent the modal's own grid content from ever forcing a horizontal
    scrollbar — grid/flex items default to min-width:auto, which stops them
@@ -4267,8 +4291,12 @@ textarea.answer, .answer-field textarea, textarea.feedback {
   .tm-typepicker { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
   .tm-box { margin-left: 16px; margin-right: 16px; }
   .tm-side { margin-left: 16px; margin-right: 16px; }
+  .tm-layout:has(.tm-side) .tm-side { margin-bottom: 64px; }
   .tm-stepper { padding-left: 16px; padding-right: 16px; flex-wrap: wrap; row-gap: 10px; }
   .kb-modal-actions { padding-left: 16px; padding-right: 16px; }
+  .tm-comment-input, .tdp-comment-input { align-items: stretch; }
+  .tm-comment-input > .admin-btn, .tdp-comment-input > .admin-btn { min-height: 42px; }
+  .task-review-buttons > .admin-btn, .task-review-form > div > .admin-btn { flex: 1 1 140px; min-height: 42px; }
 }
 
 @media (max-width: 900px) {

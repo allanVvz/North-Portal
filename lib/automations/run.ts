@@ -27,7 +27,7 @@ import { prepareDailyCycle } from "./dailyCycle";
 import { runConversionFlow } from "./conversionFlow";
 import { detachSupersededReportDocuments, nextTrafficRevision, recordTrafficReport, trafficReportFileName, type TrafficReportRow } from "./reportEntities";
 import { logReportRun } from "./reportLog";
-import { materializeFirstStep } from "@/lib/flows/advance";
+import { advanceFlowAfterUpdate, materializeFirstStep } from "@/lib/flows/advance";
 import { flowStepTaskId } from "@/lib/flows/ids";
 import { recurrenceStopped } from "@/lib/recurrenceState";
 import { recurrenceOccursOn, recurrenceRuleOf } from "@/lib/recurrence";
@@ -222,6 +222,11 @@ async function fillReportCard(
   // nome fixo com upsert:false falhava e marcava o card `parada` (A2).
   const revision = await nextTrafficRevision(admin, actingTask.id);
   const fileName = trafficReportFileName(period.to, revision);
+  const { data: originalDocs, error: originalDocsError } = await admin.from("documents")
+    .select("id").eq("source_task_id", actingTask.id).eq("doc_type", "relatorio").eq("doc_date", period.to)
+    .order("version_number", { ascending: true, nullsFirst: true }).order("created_at", { ascending: true }).limit(1);
+  if (originalDocsError) throw originalDocsError;
+  const sourceDocumentId = (originalDocs?.[0] as { id?: string } | undefined)?.id ?? null;
   const path = documentStoragePath(client.slug, fileName);
   const { error: uploadError } = await admin.storage.from(DOCUMENT_BUCKET).upload(path, pdfBuffer, {
     contentType: "application/pdf",
@@ -233,6 +238,9 @@ async function fillReportCard(
   const { data: docRows, error: docError } = await admin.from("documents").insert({
     client_id: clientId,
     task_id: actingTask.id,
+    source_task_id: actingTask.id,
+    source_document_id: sourceDocumentId,
+    version_number: revision,
     name: fileName,
     doc_type: "relatorio",
     status: "publicado",
@@ -383,21 +391,29 @@ export async function runOneReportAutomation(
         // O aviso da próxima etapa vem do workflow versionado da ocorrência, não de
         // uma lista fixa: reordenar as etapas na tela de Etapas muda a frase.
         text: withNextStepNotice(
-          `Relatório de anúncios gerado, anexado e aprovado automaticamente: [${fileName}](${url})\n\nAjustes (alcance, leitura, o que esconder) entram no relatório de conversão — comente no card da automação.`,
+          `Relatório de anúncios gerado e pronto para revisão: [${fileName}](${url})\n\nAjustes (alcance, leitura, o que esconder) entram no relatório de conversão — registre-os no card da automação.`,
           await nextStepNotice(admin, occ, ADS_REPORT_STEP_KEY),
         ),
         commentId: automationCommentId("ads-report", card1.id, report.revision),
       });
-      // O relatório de anúncios é aprovado sozinho (28/09): ele é o retrato da
-      // mídia, não uma peça que a equipe revisa. Toda correção da equipe vai para
-      // o relatório de conversão, que é o relatório corrigido da semana. Aprovar
-      // pela porta única (`approveTask`) dispara a cascata que abre o Feedback —
-      // antes a Entrega esperava um humano aprovar este card, e era uma das três
-      // ações por cliente que a especialista achava demais.
+      // A conclusão automática usa os papéis estruturados North AI. Com revisor
+      // humano, a automação notifica a pessoa e aguarda a decisão explícita.
       const inReview = await transitionTaskStatus(admin, card1.id, { to: "revisao", from: ["em_producao"], extra: { assignee: AUTOMATION_ASSIGNEE } });
-      if (inReview) {
-        const { approveTask } = await import("@/lib/flows/approve");
-        await approveTask(admin, inReview, { from: ["revisao"] });
+      if (inReview?.north_ai_responsible && inReview.north_ai_reviewer && !inReview.reviewer_id
+          && !(Array.isArray(inReview.payload?.reviewer_ids) && inReview.payload.reviewer_ids.length)) {
+        const { data: decision, error: decisionError } = await admin.rpc("decide_task_review", {
+          p_task_id: inReview.id,
+          p_actor_id: null,
+          p_decision: "approve",
+          p_justification: null,
+          p_expected_status: "revisao",
+          p_request_id: crypto.randomUUID(),
+          p_delivery_id: null,
+          p_actor_kind: "north_ai",
+        });
+        if (decisionError) throw decisionError;
+        const decidedTask = (decision as { task?: TaskRecord } | null)?.task;
+        if (decidedTask) await advanceFlowAfterUpdate(inReview, decidedTask, null);
       }
       // O molde avança depois de o PDF existir. A próxima Entrega só será
       // materializada quando a Conversão final for aprovada.

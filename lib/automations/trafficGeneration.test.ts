@@ -124,10 +124,10 @@ describe("relatório de anúncios — comentário durante a geração", () => {
     expect(db.table("documents")).toHaveLength(1);
     expect(trafficTexts()).toEqual([
       "Cuidado com a verba deste mês",
-      expect.stringContaining("Relatório de anúncios gerado, anexado e aprovado automaticamente"),
+      expect.stringContaining("Relatório de anúncios gerado e pronto para revisão"),
     ]);
-    // Aprovado sozinho (28/09): correções da equipe vão para a conversão.
-    expect(db.task("trafego-1")!.status).toBe("aprovado");
+    // Sem os dois papéis estruturados North AI, a automação aguarda revisão.
+    expect(db.task("trafego-1")!.status).toBe("revisao");
     expect(hooks.advanceFlowMold).toHaveBeenCalledTimes(1);
   });
 
@@ -142,17 +142,17 @@ describe("relatório de anúncios — comentário durante a geração", () => {
 });
 
 describe("relatório de anúncios — execução antiga não desfaz ação humana", () => {
-  it("uma pessoa concluiu a etapa durante a geração: o status não é rebaixado, o relatório e o comentário ficam", async () => {
+  it("uma pessoa move a etapa para revisão durante a geração: o status não é rebaixado", async () => {
     duringGeneration = async () => {
       await human("trafego-1", "Primeiro relatório está correto", "human-0002");
-      await approve("trafego-1");
+      await db.from("tasks").update({ status: "revisao", reviewer_id: "u1" }).eq("id", "trafego-1");
     };
 
     const outcome = await run();
 
     expect(outcome).toBe("ran");
-    expect(db.task("trafego-1")!.status).toBe("aprovado");
-    expect(db.task("trafego-1")!.completed_at).toBeTruthy();
+    expect(db.task("trafego-1")!.status).toBe("revisao");
+    expect(db.task("trafego-1")!.completed_at).toBeFalsy();
     expect(trafficTexts()[0]).toBe("Primeiro relatório está correto");
     expect(trafficTexts()).toHaveLength(2);
     expect(db.table("traffic_reports")).toHaveLength(1);
@@ -202,10 +202,10 @@ describe("relatório de anúncios — execução antiga não desfaz ação human
     expect(db.task("trafego-1")!.status).toBe("aprovado");
   });
 
-  it("retry depois de um crash no meio (etapa ficou em produção) gera normalmente", async () => {
+  it("retry depois de um crash no meio (etapa ficou em produção) gera e aguarda revisão", async () => {
     seed({ status: "em_producao" });
     expect(await run()).toBe("ran");
-    expect(db.task("trafego-1")!.status).toBe("aprovado");
+    expect(db.task("trafego-1")!.status).toBe("revisao");
   });
 
   it("falha na geração depois de uma pessoa concluir a etapa: a etapa NÃO vira `parada`", async () => {

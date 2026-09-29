@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useParams } from "next/navigation";
 import CommentText from "@/app/CommentText";
 import { commentsOf, extractLatestLink, formatCommentTime } from "@/lib/comments";
+import type { ConversationItem } from "@/lib/cardConversation";
 import { ACCESS_PLATFORMS, type ClientTask, type CredentialSummary, type DocumentRecord, type NorthTrilha, type PortalPayload, type PortalPrefs } from "@/lib/validation";
 import { fileTypeLabel, formatFileSize } from "@/lib/documentFiles";
 import DocumentFilePreview from "@/app/DocumentFilePreview";
@@ -148,6 +149,7 @@ export default function ClientPortalPaged() {
   const slug = params.slug;
 
   const [payload, setPayload] = useState<PortalPayload | null>(null);
+  const [conversationByTaskId, setConversationByTaskId] = useState<Record<string, ConversationItem[]>>({});
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [chip, setChip] = useState<SaveChip>("");
   const [pageError, setPageError] = useState("");
@@ -260,9 +262,23 @@ export default function ClientPortalPaged() {
         }
         return res.json() as Promise<PortalPayload>;
       })
-      .then((data) => {
-        if (!data) { loaded.current = true; return; }
-        setPayload(data);
+    .then((data) => {
+      if (!data) { loaded.current = true; return; }
+      setPayload(data);
+      const conversationTaskIds = [...new Set([
+        ...data.pendingApprovals.map((task) => task.id),
+        ...data.resolvedApprovals.map((task) => task.id),
+        ...data.checkpoints.map((task) => task.id),
+      ])];
+      setConversationByTaskId({});
+      if (conversationTaskIds.length) {
+        void fetch(`/api/client/${slug}/tasks/conversations`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskIds: conversationTaskIds }), cache: "no-store",
+        }).then(async (response) => response.ok ? response.json() as Promise<{ itemsByTaskId?: Record<string, ConversationItem[]> }> : null)
+          .then((result) => { if (result?.itemsByTaskId) setConversationByTaskId(result.itemsByTaskId); })
+          .catch(() => {});
+      }
         updateHiddenPagesForClient(data.flowFlags);
         setAnswers(data.briefing.answers ?? {});
         setChip(data.briefing.submitted ? "Concluido" : "");
@@ -420,7 +436,7 @@ export default function ClientPortalPaged() {
   }
 
   const ctx: PageCtx = {
-    content, links, name, slug, briefingDone, manualDone, goTo, payload, onManualFinish,
+    content, links, name, slug, briefingDone, manualDone, goTo, payload, onManualFinish, conversations: conversationByTaskId,
     hasDocuments, documentsRead, onDocumentRead,
     credentials, accessDone, onCredentialSave,
   };
@@ -514,6 +530,7 @@ type PageCtx = {
   manualDone: boolean;
   goTo: (p: PageId) => void;
   payload: PortalPayload | null;
+  conversations: Record<string, ConversationItem[]>;
   onManualFinish: () => void;
   // Real Documentos read-tracking, driving the "Ler documentos" Jornada item.
   hasDocuments: boolean;
@@ -1438,7 +1455,11 @@ function EntregasPage(props: {
           {sorted.map((t) => {
             const yourTurn = canActOn(t);
             const canAct = yourTurn && !busyId;
-            const comments = commentsOf(t.payload);
+            const projected = ctx.conversations[t.id];
+            const comments = projected
+              ? projected.filter((item) => item.kind === "comment").map((item) => ({ author: item.author ?? "North", author_id: item.authorId ?? undefined, text: item.text ?? "", at: item.at }))
+              : commentsOf(t.payload);
+            const materials = projected?.filter((item) => item.kind === "file") ?? [];
             const materialLink = isCreativeDeliveryKind(t.kind)
               ? t.creative_drive_material_url ?? null
               : extractLatestLink(comments);
@@ -1469,6 +1490,16 @@ function EntregasPage(props: {
                           <b>{c.author}</b> <small>{formatCommentTime(c.at)}</small>: <CommentText text={c.text} />
                         </p>
                       ))}
+                    </div>
+                  ) : null}
+                  {materials.length > 0 ? (
+                    <div className="np-approval-materials" aria-label="Arquivos desta entrega">
+                      {materials.map((item) => {
+                        const file = item.file ?? {};
+                        const href = typeof file.file_url === "string" ? file.file_url : typeof file.web_view_link === "string" ? file.web_view_link : null;
+                        const label = String(file.name ?? file.original_file_name ?? "Arquivo da entrega");
+                        return href ? <a className="np-link" key={item.id} href={href} target="_blank" rel="noopener noreferrer">{label} · {item.taskTitle}</a> : null;
+                      })}
                     </div>
                   ) : null}
                   {!t.approver_id && !isManager ? (

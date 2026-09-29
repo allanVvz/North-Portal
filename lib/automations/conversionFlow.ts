@@ -674,9 +674,21 @@ async function generateSalesReport(
   if (uploadError) throw uploadError;
   const { data: urlData } = admin.storage.from(DOCUMENT_BUCKET).getPublicUrl(path);
 
+  const { data: originalDocs, error: originalDocsError } = await admin.from("documents")
+    .select("id").eq("source_task_id", conversionCard.id).eq("doc_type", "relatorio").eq("doc_date", period.to)
+    .order("created_at", { ascending: true }).limit(1);
+  if (originalDocsError) {
+    await admin.storage.from(DOCUMENT_BUCKET).remove([path]);
+    throw originalDocsError;
+  }
+  const sourceDocumentId = (originalDocs?.[0] as { id?: string } | undefined)?.id ?? null;
+
   const { data: docRows, error: docError } = await admin.from("documents").insert({
     client_id: clientId,
     task_id: conversionCard.id,
+    source_task_id: conversionCard.id,
+    source_document_id: sourceDocumentId,
+    version_label: version,
     name: fileName,
     doc_type: "relatorio",
     status: "publicado",
@@ -1235,32 +1247,9 @@ export async function recordFeedbackMetricComment(
     sourceCommentAt: parsed.sourceCommentAt ?? comment.at,
   });
 
-  // Feedback vÃ¡lido Ã© a decisÃ£o do revisor: sai de Entrada e fica publicado
-  // automaticamente. A cascata canÃ´nica materializa a etapa de conversÃ£o e
-  // chama a geraÃ§Ã£o do primeiro PDF; um comentÃ¡rio posterior reabre somente a
-  // conversÃ£o para revisÃ£o e gera a nova versÃ£o.
-  // Porta única de aprovação (lib/flows/approve.ts): o compare-and-set e a
-  // cascata andam juntos num lugar só, para o futuro "comentário que aprova" não
-  // reimplementar a regra.
-  const { approveTask } = await import("@/lib/flows/approve");
-  const completed = await approveTask(admin, card, { from: ["backlog", "em_producao", "revisao"] });
-  if (completed) {
-    // nada a fazer: approveTask já disparou a cascata
-  } else {
-    const conversion = await linkedCardForStep(admin, occurrence, CONVERSION_REPORT_STEP_KEY);
-    if (conversion && conversion.status !== "revisao" && !conversion.completed_at) {
-      await transitionTaskStatus(admin, conversion.id, {
-        to: "revisao",
-        from: ["backlog", "em_producao", "aprovacao"],
-      });
-    } else if (conversion?.completed_at || conversion?.status === "aprovacao") {
-      await transitionTaskStatus(admin, conversion.id, {
-        to: "revisao",
-        from: ["aprovado", "aprovacao"],
-      });
-    }
-    await processConversionFeedback(admin, occurrenceId);
-  }
+  // Métricas e instruções ficam registradas na ocorrência. O estado do Feedback
+  // só muda pela decisão explícita de um revisor designado; o comentário livre
+  // nunca conclui a etapa nem inicia a cascata.
 }
 
 // ---------------------------------------------------------------------------

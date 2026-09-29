@@ -248,16 +248,18 @@ describe("comentário na etapa de feedback da Entrega", () => {
     expect(commentsOn(TRAFEGO)).toEqual([]);
   });
 
-  // Só se comenta no pai: se a tela ainda mostrava o tráfego como corrente mas o
-  // feedback já abriu (outra aba aprovou), o comentário é da etapa de AGORA.
-  it("tela desatualizada (ainda mostra tráfego, feedback já abriu): o comentário vai para o feedback, nunca para uma etapa concluída", async () => {
+  // Se a etapa mudar enquanto a pessoa escreve, a interface preserva o rascunho
+  // e pede atualização. A rota nunca muda o destino sem consentimento.
+  it("tela desatualizada (tráfego já fechou): retorna 409 e não grava comentário", async () => {
     const result = await post(ENTREGA, { text: "Vendas: 5", comment_id: "cid-00000011", stage_task_id: TRAFEGO });
-    expect(result.body.id).toBe(FEEDBACK);
-    expect(commentsOn(FEEDBACK)).toEqual(["Vendas: 5"]);
+    expect(result.status).toBe(409);
+    expect(result.body.code).toBe("COMMENT_STAGE_INVALID");
+    expect(result.body.current_stage_task_id).toBe(FEEDBACK);
+    expect(commentsOn(FEEDBACK)).toEqual([]);
     expect(commentsOn(TRAFEGO)).toEqual([]);
     expect(commentsOn(ENTREGA)).toEqual([]);
     await flushAfter();
-    expect(hooks.feedbackHook).toHaveBeenCalledWith(hooks.db, FEEDBACK);
+    expect(hooks.feedbackHook).not.toHaveBeenCalled();
   });
 
   it("comentar diretamente na linha da etapa concluída (URL da etapa) continua gravando nela", async () => {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CalendarPicker from "./CalendarPicker";
 import { createCommentIdRegistry } from "./commentIds";
-import MentionTextarea from "./MentionTextarea";
+import TaskCommentComposer from "./TaskCommentComposer";
 import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
@@ -21,6 +21,10 @@ import { TASK_BASE_TYPES, classifyTask, deliverySubtypeTypes, type TaskBaseTypeK
 import { flowStepsOf, isFlowDelivery, planParentIdOf } from "@/lib/taskRelations";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
 import { useTaskAutosave } from "./useTaskAutosave";
+import TaskReviewActions from "./TaskReviewActions";
+import { useTaskConversation } from "./useTaskConversation";
+import type { ConversationItem } from "@/lib/cardConversation";
+import TaskMaterialsPanel from "./TaskMaterialsPanel";
 
 const EMPTY_CLIENT_TASKS: TaskRecord[] = [];
 
@@ -58,7 +62,7 @@ export default function TaskDetailPanel({
   const commentIds = useRef(createCommentIdRegistry()).current;
   const [commentError, setCommentError] = useState("");
   const [description, setDescription] = useState(task.description ?? "");
-  const { name: currentUserName } = useCurrentAdminUser();
+  const { name: currentUserName, userId: currentUserId } = useCurrentAdminUser();
   const [busy, setBusy] = useState(false);
   const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([]);
   useEffect(() => setDescription(task.description ?? ""), [task.id, task.description]);
@@ -87,6 +91,13 @@ export default function TaskDetailPanel({
   // dependendo de ter sido aberto pelo modal ou pelo painel — e o link
   // `?task=` cai aqui quando a preferência de painel lateral está ligada.
   const comments = useMemo(() => familyThreadOf(task, clientTasks), [task, clientTasks]);
+  const conversation = useTaskConversation(task.id);
+  const reviewDeliveryLinks = task.parents.filter((parent) => parent.relation_kind === "workflow_step");
+  const timeline = useMemo(() => conversation.ready
+    ? conversation.items.filter((item) => item.kind === "comment" || item.kind === "event").map((item: ConversationItem) => ({
+        taskId: item.taskId, author: item.author ?? "Sistema", text: item.text ?? (item.eventType === "moved_to_review" ? "Movido para revisão" : item.eventType === "review_approved" ? "Aprovado" : item.eventType === "review_changes_requested" ? "Ajustes solicitados" : "Atividade do card"), at: item.at, event: item.kind === "event", taskTitle: item.taskTitle, path: item.path, meetingDate: item.meetingDate,
+      }))
+    : comments.map((item) => ({ ...item, event: false, taskTitle: undefined, path: undefined, meetingDate: null })), [conversation.items, conversation.ready, comments]);
   const descriptionValues = useMemo(() => ({ description: description.trim() || null }), [description]);
   const descriptionSaved = useCallback((updated: TaskRecord) => onChanged(updated), [onChanged]);
   const autosave = useTaskAutosave({ taskId: task.id, values: descriptionValues, enabled: true, textKeys: ["description"], onSaved: descriptionSaved });
@@ -124,6 +135,7 @@ export default function TaskDetailPanel({
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
       commentIds.settle(task.id, text);
+      conversation.reload();
       onChanged(await res.json());
     } catch (e) {
       // O texto volta para a caixa e a pessoa é avisada do motivo — antes a falha era silenciosa.
@@ -157,7 +169,8 @@ export default function TaskDetailPanel({
           <span>Status</span>
           <select
             value={task.status}
-            disabled={busy}
+            disabled={busy || (task.status === "revisao" && task.requires_review)}
+            title={task.status === "revisao" && task.requires_review ? "Somente o revisor designado pode decidir nesta etapa" : undefined}
             onChange={(e) => void patch({ status: e.target.value as TaskStatus })}
           >
             {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -180,6 +193,10 @@ export default function TaskDetailPanel({
             onChange={({ assignee, assigneeProfileIds }) => void patch({ assignee, assignee_profile_ids: assigneeProfileIds })}
           />
         </div>
+        <div className="tdp-attr tdp-ai-role">
+          <span>North AI responsável</span>
+          <label><input type="checkbox" checked={Boolean((task as TaskRecord & { north_ai_responsible?: boolean }).north_ai_responsible)} disabled={busy} onChange={(event) => void patch({ north_ai_responsible: event.target.checked })} /> Atribuída</label>
+        </div>
         {/* flowFlags starts null while its fetch is in flight — treat that as
             "off" (hidden), not "on", so the field loads already hidden instead
             of flashing visible then disappearing once the real value arrives. */}
@@ -195,6 +212,11 @@ export default function TaskDetailPanel({
             </select>
           </div>
         ) : null}
+        {flowFlags?.revisaoAdmin === true ? <div className="tdp-attr tdp-ai-role">
+          <span>North AI revisora</span>
+          <label><input type="checkbox" checked={Boolean((task as TaskRecord & { north_ai_reviewer?: boolean }).north_ai_reviewer)} disabled={busy} onChange={(event) => void patch({ north_ai_reviewer: event.target.checked })} /> Atribuída</label>
+          {task.reviewer_id ? <small>Há revisor humano. North AI aguardará a decisão dele.</small> : null}
+        </div> : null}
         {flowFlags?.aprovacaoAdmin === true ? (
           <div className="tdp-attr">
             <span>Aprovador</span>
@@ -287,31 +309,28 @@ export default function TaskDetailPanel({
 
       <div className="tdp-section tdp-activity">
         <p className="tdp-head">Atividade</p>
+        {reviewDeliveryLinks.length <= 1 ? <TaskReviewActions taskId={task.id} status={task.status} reviewerIds={Array.isArray(payload.reviewer_ids) ? payload.reviewer_ids.filter((id): id is string => typeof id === "string") : task.reviewer_id ? [task.reviewer_id] : []} currentUserId={currentUserId} deliveryId={reviewDeliveryLinks[0]?.id} onDecided={(updated, effectiveStatus) => onChanged({ ...task, ...updated, status: effectiveStatus ?? updated.status })} /> : <p className="ap-review-context">Abra a Entrega para escolher onde aplicar esta decisão.</p>}
         <div className="tdp-comments">
-          {comments.slice().reverse().map((c, i) => (
+          {timeline.slice().reverse().map((c, i) => (
             // A chave carrega o card de origem: o thread mescla vários cards da
             // família e `at` só é único DENTRO de um card.
             <div className="tdp-comment" key={`${c.taskId}-${c.at}-${i}`}>
               <CommentAvatar comment={c} className="tdp-comment-av" />
               <div>
-                <p className="tdp-comment-meta"><b>{c.author}</b><small>{formatCommentTime(c.at)}</small></p>
+              <p className="tdp-comment-meta"><b>{c.author}</b>{c.event ? <small className="tm-activity-kind">Atividade</small> : null}{c.taskId !== task.id ? <small className="tm-comment-origin" title={c.path?.join(" → ")}>→ {c.taskTitle}</small> : null}{c.meetingDate ? <small>Reunião · {c.meetingDate}</small> : null}<small>{formatCommentTime(c.at)}</small></p>
                 <p className="tdp-comment-text"><CommentText text={c.text} /></p>
               </div>
             </div>
           ))}
-          {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
+          {timeline.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
         </div>
-        <div className="tdp-comment-input">
-          <MentionTextarea
-            value={comment}
-            onChange={setComment}
-            onSubmit={() => void sendComment()}
-            placeholder="Adicionar comentário… use @ para chamar alguém"
-          />
-          <button className="admin-btn ghost" onClick={sendComment} disabled={!comment.trim() || busy}>Enviar</button>
-        </div>
+        <TaskCommentComposer value={comment} onChange={setComment} onSubmit={() => void sendComment()} targetKey={task.id} targetLabel="Comentando neste card" placeholder="Adicionar comentário… use @ para chamar alguém" disabled={busy} tone="neutral" />
         {commentError ? <p className="admin-error">{commentError}</p> : null}
       </div>
+      <TaskMaterialsPanel items={conversation.ready ? conversation.items : []} onOpen={(item) => {
+        const url = typeof item.file?.file_url === "string" ? item.file.file_url : typeof item.file?.webViewLink === "string" ? item.file.webViewLink : "";
+        if (url) window.open(url, "_blank", "noopener,noreferrer");
+      }} />
     </aside>
   );
 }

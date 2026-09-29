@@ -102,7 +102,13 @@ export async function createTaskFromInput(
   // to check — the fields pass through as given.
   if (client) {
     const flags = await getClientFlowFlags(client.id);
-    if (!flags.revisaoAdmin) { fields.reviewer_id = null; fields.requires_review = false; }
+    if (!flags.revisaoAdmin) {
+      fields.reviewer_id = null;
+      fields.requires_review = false;
+      fields.north_ai_responsible = false;
+      fields.north_ai_reviewer = false;
+      if (Array.isArray(fields.payload?.reviewer_ids)) fields.payload.reviewer_ids = [];
+    }
     if (!flags.aprovacaoAdmin) { fields.approver_id = null; fields.requires_approval = false; }
   }
 
@@ -110,7 +116,10 @@ export async function createTaskFromInput(
   // o revisor já é o único responsável vinculado — revisar o próprio
   // trabalho não é revisão. Roda incondicionalmente na criação (sem
   // "só se o patch mexeu nisso" — aqui é tudo o campo, não há "current").
-  fields.requires_review = deriveRequiresReview(fields.reviewer_id ?? null, assignee_profile_ids ?? []);
+  const configuredReviewerIds = Array.isArray(fields.payload?.reviewer_ids) ? fields.payload.reviewer_ids : [];
+  fields.requires_review = Boolean(fields.requires_review)
+    || deriveRequiresReview(fields.reviewer_id ?? null, assignee_profile_ids ?? [])
+    || configuredReviewerIds.length > 0;
 
   // plan_id é elo, não coluna: sai dos campos do insert e vira uma ligação
   // depois que o card existe.

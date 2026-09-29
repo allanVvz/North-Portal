@@ -192,12 +192,15 @@ describe("resolveFlowCommentTarget — etapa explícita e etapa única", () => {
     expect(await resolveFlowCommentTarget(admin, delivery(), { stageTaskId: "trafego" })).toEqual({ targetId: "trafego", via: "explicit" });
   });
 
-  // Comentar "na Entrega" é comentar na etapa de AGORA. A tela pode estar um passo
-  // atrás (outra aba, o cliente aprovando, a conclusão logo antes de enviar).
-  it("etapa informada já concluída e o fluxo avançou (tela desatualizada): vai para a etapa aberta agora", async () => {
+  // Uma mudança de etapa enquanto a pessoa escreve pede atualização; o texto
+  // não pode mudar de card sem consentimento.
+  it("etapa informada já concluída e o fluxo avançou: retorna 409 com a etapa atual", async () => {
     const tasks = [step("trafego", "2026-09-21T12:00:00Z"), step("feedback", null)];
     const admin = fakeAdmin(links.slice(0, 2), tasks);
-    expect(await resolveFlowCommentTarget(admin, delivery(), { stageTaskId: "trafego" })).toEqual({ targetId: "feedback", via: "stage_advanced" });
+    const error = await resolveFlowCommentTarget(admin, delivery(), { stageTaskId: "trafego" }).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(HttpError);
+    expect((error as HttpError).status).toBe(409);
+    expect((error as HttpError).details).toMatchObject({ code: COMMENT_STAGE_INVALID, current_stage_task_id: "feedback" });
   });
 
   it("tudo concluído: mantém a etapa informada (não há etapa aberta para onde redirecionar)", async () => {

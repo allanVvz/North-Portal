@@ -342,7 +342,7 @@ describe("comentário da equipe numa Entrega de relatório (handleReportStepComm
     await db.from("tasks").update({ status: "backlog", payload: { comments: [] } }).eq("id", FEEDBACK);
   }
 
-  it("Feedback aberto + seguidores e leitura: aprova o Feedback e guarda a leitura para a conversão", async () => {
+  it("Feedback aberto + seguidores e leitura: registra dados sem decidir a Revisão", async () => {
     await seedFeedbackAberto();
     hooks.extract.mockResolvedValue({ valores: { vendas: null, agendamentos: null, receita: null, seguidores: null }, linhas: [], note: "parser", seguidoresGanho: 114 });
     const text = "Incluir crescimento de 114 novo seguidores nos dados do funil\n\nLeitura da semana: Semana com foco em público novo em NH e POA.";
@@ -350,7 +350,7 @@ describe("comentário da equipe numa Entrega de relatório (handleReportStepComm
 
     expect(await handleReportStepComment(db.asAdmin(), FEEDBACK, text, at, rules)).toBe(true);
 
-    expect(db.task(FEEDBACK)!.status).toBe("aprovado");
+    expect(db.task(FEEDBACK)!.status).toBe("backlog");
     expect(instrucoes()).toContainEqual({ kind: "narrativa", texto: "Semana com foco em público novo em NH e POA." });
     // A pergunta errada de 28/09 não aparece mais.
     expect(feedbackTexts().some((t) => t.includes("sobrepondo"))).toBe(false);

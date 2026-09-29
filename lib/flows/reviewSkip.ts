@@ -1,25 +1,14 @@
-// Auto-revisão: quando o revisor de um card é a MESMA pessoa que o único
-// responsável vinculado, revisar seria revisar o próprio trabalho — o card
-// pula a etapa de revisão (P-papéis: decisão do usuário, 2026-09-12).
-//
-// "Único" é literal: com dois ou mais responsáveis vinculados, mesmo que o
-// revisor seja um deles, a revisão continua valendo — outra pessoa também fez
-// parte do trabalho. Por decisão do usuário, sem backfill: isto só se aplica
-// a partir da próxima vez que alguém editar responsável/revisor de cada card;
-// dados históricos com essa combinação não são corrigidos retroativamente.
-//
-// `assigneeProfileIds` é sempre o vínculo ESTRUTURADO (`task_assignees`,
-// resolvido por profile_id) — nunca o texto livre do campo `assignee`. Um
-// nome digitado à mão, sem conta, não tem id pra comparar com `reviewerId` e
-// portanto nunca aciona esta regra.
+// Um revisor humano permanece distinto do responsável, mesmo quando a mesma
+// conta ocupa ambos os papéis. A única conclusão automática de uma revisão
+// fica reservada ao papel estruturado North AI, avaliado no servidor.
 
 /** Esta combinação de revisor + responsáveis conta como "revisar o próprio
  * trabalho"? */
 export function stepSkipsReview(
-  reviewerId: string | null,
-  assigneeProfileIds: readonly string[],
+  _reviewerId: string | null,
+  _assigneeProfileIds: readonly string[],
 ): boolean {
-  return reviewerId !== null && assigneeProfileIds.includes(reviewerId);
+  return false;
 }
 
 /** `requires_review` derivado — usado tanto no client (TaskModal, feedback

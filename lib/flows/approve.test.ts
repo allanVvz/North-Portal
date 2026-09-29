@@ -22,8 +22,8 @@ function seed(status: string, over: Partial<Row> = {}): FakeTaskDb {
 beforeEach(() => cascata.mockClear());
 
 describe("approveTask", () => {
-  it("aprova e dispara a cascata, na mesma chamada", async () => {
-    const db = seed("revisao");
+  it("conclui tarefa sem revisão e dispara a cascata", async () => {
+    const db = seed("em_producao");
     const antes = asRecord(db.task(ETAPA));
 
     const depois = await approveTask(db.asAdmin(), antes, { actorId: "u1" });
@@ -35,12 +35,19 @@ describe("approveTask", () => {
     expect(cascata.mock.calls[0][2]).toBe("u1");
   });
 
-  it("todo estado aberto é aprovável", async () => {
+  it("estados sem etapa de revisão podem ser concluídos", async () => {
     for (const status of APPROVABLE_FROM) {
       const db = seed(status);
       const r = await approveTask(db.asAdmin(), asRecord(db.task(ETAPA)));
       expect(r?.status, status).toBe("aprovado");
     }
+  });
+
+  it("Revisão exige a decisão atômica do revisor designado", async () => {
+    const db = seed("revisao");
+    await expect(approveTask(db.asAdmin(), asRecord(db.task(ETAPA)))).rejects.toThrow("decisão atômica do revisor designado");
+    expect(db.task(ETAPA)!.status).toBe("revisao");
+    expect(cascata).not.toHaveBeenCalled();
   });
 
   it("tarefa já concluída não é reaberta, e a cascata NÃO roda", async () => {
@@ -62,7 +69,7 @@ describe("approveTask", () => {
   });
 
   it("null é 'alguém chegou antes', não erro", async () => {
-    const db = seed("revisao");
+    const db = seed("em_producao");
     const antes = asRecord(db.task(ETAPA));
 
     expect(await approveTask(db.asAdmin(), antes)).not.toBeNull();

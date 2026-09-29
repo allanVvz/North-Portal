@@ -21,7 +21,7 @@ import { advanceFlowAfterUpdate } from "./advance";
 
 /** Os estados de onde uma etapa aberta pode ser aprovada. `aprovacao` entra:
  *  uma etapa esperando aprovação é exatamente o caso. */
-export const APPROVABLE_FROM: readonly TaskStatus[] = ["backlog", "em_producao", "revisao", "aprovacao"];
+export const APPROVABLE_FROM: readonly TaskStatus[] = ["backlog", "em_producao", "aprovacao"];
 
 export type ApproveOptions = {
   /** Quem aprovou. Vai para a cascata, que usa para não notificar o próprio
@@ -44,9 +44,15 @@ export async function approveTask(
   task: TaskRecord,
   options: ApproveOptions = {},
 ): Promise<TaskRecord | null> {
+  const reviewerIds = Array.isArray(task.payload?.reviewer_ids) ? task.payload.reviewer_ids : [];
+  if (task.status === "revisao" || task.requires_review || task.reviewer_id || reviewerIds.length) {
+    throw new Error("Este card exige a decisão atômica do revisor designado.");
+  }
+  const allowedFrom = (options.from ?? APPROVABLE_FROM).filter((status) => status !== "revisao");
+  if (!allowedFrom.length) return null;
   const approved = await transitionTaskStatus(admin, task.id, {
     to: "aprovado",
-    from: options.from ?? APPROVABLE_FROM,
+    from: allowedFrom,
     open: true,
   });
   if (!approved) return null;

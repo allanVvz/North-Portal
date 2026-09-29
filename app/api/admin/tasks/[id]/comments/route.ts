@@ -12,7 +12,6 @@ import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY } from "@/lib/automationWorkflow";
-import { handleCreativeReviewComment, type FeedbackDecision } from "@/lib/flows/creativeReview";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
 export const runtime = "nodejs";
@@ -78,17 +77,14 @@ async function conversionSiblingFor(admin: ReturnType<typeof createAdminClient>,
   return null;
 }
 
-function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string, commentAt?: string | null, decision?: FeedbackDecision | null) {
+function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string, commentAt?: string | null) {
   after(async () => {
     const admin = createAdminClient();
     try {
-      // Entrega de relatório: o comentário é interpretado uma vez e a intenção
-      // decide tudo (aprovar o Feedback, regerar a conversão, anotar o pedido).
+      // Comentários podem alimentar relatórios e pedidos de revisão, mas nunca
+      // representam uma decisão de aprovação. Essa decisão usa a rota dedicada.
       // Os gatilhos genéricos abaixo ficam para as demais etapas.
       if (text && await handleReportStepComment(admin, taskId, text, commentAt ?? null)) return;
-      if (text && authorId) {
-        if (await handleCreativeReviewComment(admin, taskId, authorId, text, decision ?? null)) return;
-      }
       if (text) {
         const task = await getTaskById(taskId);
         const pending = task?.payload?.visual_request_pending as { instruction?: string; sourceCommentAt?: string | null } | undefined;
@@ -147,7 +143,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID inválido.");
-    const { text, comment_id: commentId, feedback_decision: feedbackDecision, stage_task_id: stageTaskId, plan_note: planNote, asset_ids: assetIds = [] } = taskCommentCreateSchema.parse(await request.json());
+    const { text, comment_id: commentId, stage_task_id: stageTaskId, plan_note: planNote, asset_ids: assetIds = [] } = taskCommentCreateSchema.parse(await request.json());
     // Comentar no card PAI (a entrega) grava o comentário na ETAPA em que a
     // pessoa estava (`stage_task_id`) — ou, em chamada antiga sem ele, na única
     // etapa atual inequívoca; ambíguo é 409, nunca um palpite. A LEITURA não
@@ -195,7 +191,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // Uma falha aqui não pode se perder calada: vira o mesmo aviso que as
     // automações usam — a etapa `parada` com um comentário explicando.
     const sourceComment = commentsOf(task.payload).slice().reverse().find((comment) => comment.author_id === session.userId && comment.text === text);
-    scheduleCommentAutomation(targetId, session.userId, text, sourceComment?.at ?? null, feedbackDecision ?? null);
+    scheduleCommentAutomation(targetId, session.userId, text, sourceComment?.at ?? null);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }

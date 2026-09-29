@@ -101,6 +101,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
+    const currentReviewerIds = Array.isArray(current.payload?.reviewer_ids) ? current.payload.reviewer_ids : [];
+    const hasReviewer = Boolean(current.reviewer_id || currentReviewerIds.length);
+    if (patch.status === "aprovado" && current.status !== "aprovacao" && (current.requires_review || hasReviewer)) {
+      throw new HttpError(409, "Use a ação de revisão do revisor designado para concluir este card.");
+    }
+    if (patch.status !== undefined && patch.status !== current.status && current.status === "revisao") {
+      throw new HttpError(409, "Somente a decisão do revisor designado pode alterar este card durante a Revisão.");
+    }
     const requestedReviewers = payload_patch?.reviewer_ids ?? (patch.payload as { reviewer_ids?: string[] } | undefined)?.reviewer_ids;
     if (requestedReviewers !== undefined) {
       if (current.subtype !== "edicao") throw new HttpError(400, "Revisores conjuntos são configurados na Edição.");
@@ -164,6 +172,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!flags.revisaoAdmin) {
         patch.reviewer_id = null;
         patch.requires_review = false;
+        patch.north_ai_responsible = false;
+        patch.north_ai_reviewer = false;
+        if (payload_patch) payload_patch.reviewer_ids = [];
+        if (patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
+          patch.payload = { ...patch.payload, reviewer_ids: [] };
+        }
       }
       if (!flags.aprovacaoAdmin) {
         patch.approver_id = null;
@@ -171,17 +185,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
 
-    // Auto-revisão (lib/flows/reviewSkip.ts): um revisor que é o ÚNICO
-    // responsável vinculado do card pula a etapa de revisão — revisar o
-    // próprio trabalho não é revisão. Só recalcula quando o patch mexe em
-    // reviewer_id OU assignee_profile_ids — um PATCH de status puro (ex.: um
-    // arrasto no kanban) não deve tocar em `requires_review`. Sem backfill:
-    // isto só passa a valer na próxima edição de responsável/revisor de cada
-    // card, nunca retroativo.
-    if (patch.reviewer_id !== undefined || assignee_profile_ids !== undefined) {
+    // Qualquer revisor humano exige revisão, mesmo quando também é responsável.
+    // Só recalcula quando o patch mexe em papel de revisão ou responsáveis; um
+    // PATCH de status puro não deve reescrever a política do card.
+    if (patch.reviewer_id !== undefined || assignee_profile_ids !== undefined || payload_patch?.reviewer_ids !== undefined) {
       const nextReviewerId = patch.reviewer_id !== undefined ? patch.reviewer_id : current.reviewer_id;
       const nextAssigneeIds = assignee_profile_ids !== undefined ? assignee_profile_ids : current.assignee_profile_ids;
       patch.requires_review = deriveRequiresReview(nextReviewerId, nextAssigneeIds);
+      const nextReviewerIds = payload_patch?.reviewer_ids ?? (patch.payload as { reviewer_ids?: string[] } | undefined)?.reviewer_ids;
+      if (nextReviewerIds?.length) patch.requires_review = true;
     }
 
     // Promoção "tipo comum → Entrega" (P0-B). O POST já faz o equivalente na

@@ -96,6 +96,8 @@ export default function StepRow({
   const state = deadlineStateOf(card, agencyToday());
   const comments = commentsOf(card.payload);
   const done = card.status === "aprovado";
+  const hasHumanReviewer = Boolean(card.reviewer_id) || (Array.isArray(card.payload?.reviewer_ids) && card.payload.reviewer_ids.length > 0);
+  const needsReviewDecision = Boolean(card.requires_review || hasHumanReviewer);
   const assigneeId = card.assignee_profile_ids?.find((id) => team.some((member) => member.id === id))
     ?? team.find((member) => member.label === card.assignee)?.id ?? "";
   const disabled = busy || saving || isOpenCard;
@@ -134,9 +136,9 @@ export default function StepRow({
           type="checkbox"
           className="tm-step-check"
           checked={done}
-          disabled={disabled}
+          disabled={disabled || needsReviewDecision}
           onChange={(event) => void run({ status: event.target.checked ? "aprovado" : "em_producao" })}
-          title={done ? "Reabrir" : "Concluir sem abrir o card"}
+          title={needsReviewDecision ? "Abra o card para a decisão do revisor" : done ? "Reabrir" : "Concluir sem abrir o card"}
           aria-label={done ? `Reabrir ${label}` : `Concluir ${label}`}
         /> : <span className="tm-step-check" aria-hidden="true" />}
         {showState ? <span className={`kb-situacao s-${state}`}>{DEADLINE_LABEL[state]}</span> : null}
@@ -153,10 +155,10 @@ export default function StepRow({
             aria-label={`Status de ${label}`}
             title={statusTitle ?? (editableFields === "none" ? "Abra o card para editar a etapa" : "Status")}
             value={card.status}
-            disabled={disabled || editableFields === "none"}
+            disabled={disabled || editableFields === "none" || (needsReviewDecision && card.status === "revisao")}
             onChange={(event) => void run({ status: event.target.value as TaskStatus })}
           >
-            {COLUMNS.map((column) => <option key={column.status} value={column.status}>{column.label}</option>)}
+            {COLUMNS.map((column) => <option key={column.status} value={column.status} disabled={needsReviewDecision && column.status === "aprovado"}>{column.label}</option>)}
           </select>
           {detailsEditable ? <><input
             type="date"
@@ -194,7 +196,7 @@ export default function StepRow({
           aria-label={`Comentários de ${label} (${comments.length})`}
           title={`Comentários de ${label}`}
         >
-          <CommentIcon /> {comments.length}
+          <CommentIcon /> Comentar{comments.length ? ` · ${comments.length}` : ""}
         </button>
         {onUnlink ? (
           <button type="button" className="tm-member-unlink" title={unlinkTitle} aria-label={unlinkTitle} onClick={onUnlink} disabled={busy}>✕</button>

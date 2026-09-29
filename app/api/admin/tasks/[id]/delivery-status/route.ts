@@ -53,6 +53,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const storedStage = await getTaskById(stage.id);
     if (!storedStage) throw new HttpError(409, "A etapa foi removida. Atualize a Entrega.");
+    const effectiveCurrentStatus = stage.status;
+    const reviewerIds = Array.isArray(storedStage.payload?.reviewer_ids) ? storedStage.payload.reviewer_ids : [];
+    if (input.status === "aprovado" && (storedStage.requires_review || storedStage.reviewer_id || reviewerIds.length)) {
+      throw new HttpError(409, "Use a ação de revisão do revisor designado para concluir esta etapa.");
+    }
+    if (effectiveCurrentStatus === "revisao" && input.status !== "revisao") {
+      throw new HttpError(409, "Somente a decisão do revisor designado pode alterar esta etapa durante a Revisão.");
+    }
     const link = storedStage.parents.find((parent) => parent.id === id && parent.relation_kind === "workflow_step");
     if (!link) throw new HttpError(409, "A etapa foi desvinculada. Atualize a Entrega.");
     const contextual = deliveryParentIdsOf(storedStage).length > 1 || link.status_override != null;

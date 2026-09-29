@@ -268,6 +268,8 @@ const taskFieldsShape = z.object({
   assignee_profile_ids: z.array(z.string().uuid()).max(20).optional(),
   reviewer_id: z.string().uuid().nullable().optional(),
   approver_id: z.string().uuid().nullable().optional(),
+  north_ai_responsible: z.boolean().optional(),
+  north_ai_reviewer: z.boolean().optional(),
   plan_id: z.string().uuid().nullable().optional(),
   requires_review: z.boolean().optional(),
   requires_approval: z.boolean().optional(),
@@ -311,7 +313,6 @@ export const taskPatchSchema = taskFieldsShape.partial().omit({ slug: true }).ex
 
 export const taskCommentCreateSchema = z.object({
   text: z.string().trim().min(1).max(2000),
-  feedback_decision: z.enum(["aprovar", "ajustes", "revisao"]).optional(),
   /** Chave idempotente gerada pela interface: retry e clique duplo com o mesmo
    *  id gravam um comentário só. */
   comment_id: z.string().min(8).max(64).optional(),
@@ -473,6 +474,8 @@ export type TaskRecord = {
   assignee_profile_ids: string[];
   reviewer_id: string | null;
   approver_id: string | null;
+  north_ai_responsible?: boolean;
+  north_ai_reviewer?: boolean;
   plan_id: string | null;
   // Relações que chegam NESTE card por task_links. Somente
   // structural_member/workflow_step definem pertencimento e entram em rollup;

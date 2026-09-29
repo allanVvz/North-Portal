@@ -13,7 +13,6 @@ import PlanAddCombobox from "./PlanAddCombobox";
 import RecurrenceExecutionCombobox from "./RecurrenceExecutionCombobox";
 import { addDaysIso } from "./contentPlan";
 import { agencyToday } from "./recurringState";
-import CardParentBox from "./CardParentBox";
 import VisibleToggleField from "./VisibleToggleField";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { ATTR_DEFS, useAttrVisibility } from "./kanbanAttrs";
@@ -25,7 +24,7 @@ import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
 import { parseGoogleDriveUrl } from "@/lib/googleDrive";
-import { creativeWorkspacesForCard, materialCardsOf, materialCoverCandidates, type CreativeMaterialWorkspace } from "@/lib/cardMaterials";
+import { creativeWorkspacesForCard, materialCardsOf, materialCoverCandidates } from "@/lib/cardMaterials";
 import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
@@ -51,6 +50,13 @@ import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
 import BackArrowIcon from "./BackArrowIcon";
 import ModalContext from "./ModalContext";
 import CommentActionsMenu from "./CommentActionsMenu";
+import TaskReviewActions from "./TaskReviewActions";
+import { useTaskConversation } from "./useTaskConversation";
+import type { ConversationItem } from "@/lib/cardConversation";
+import TaskMaterialsPanel from "./TaskMaterialsPanel";
+import TaskCommentComposer from "./TaskCommentComposer";
+import { useTaskMaterials } from "./useTaskMaterials";
+import TaskRelationsPanel from "./TaskRelationsPanel";
 import CreativeDriveWorkspace from "./CreativeDriveWorkspace";
 import LegacyDriveFiles from "./LegacyDriveFiles";
 import { deliveryDriveLinks } from "@/lib/deliveryLinks";
@@ -64,6 +70,8 @@ type Draft = {
   priority: TaskPriority;
   assignee: string;
   assignee_profile_ids: string[];
+  north_ai_responsible: boolean;
+  north_ai_reviewer: boolean;
   reviewer_id: string;
   reviewer_ids: string[];
   approver_id: string;
@@ -131,6 +139,8 @@ function draftFrom(
     priority: task?.priority ?? "media",
     assignee: task?.assignee ?? initialAssignee ?? "",
     assignee_profile_ids: task?.assignee_profile_ids ?? [],
+    north_ai_responsible: Boolean((task as (TaskRecord & { north_ai_responsible?: boolean }) | null)?.north_ai_responsible),
+    north_ai_reviewer: Boolean((task as (TaskRecord & { north_ai_reviewer?: boolean }) | null)?.north_ai_reviewer),
     reviewer_id: task?.reviewer_id ?? "",
     reviewer_ids: Array.isArray(p.reviewer_ids) ? p.reviewer_ids.filter((id): id is string => typeof id === "string") : task?.reviewer_id ? [task.reviewer_id] : [],
     approver_id: task?.approver_id ?? "",
@@ -190,6 +200,13 @@ function resizeTextarea(element: HTMLTextAreaElement | null): void {
   if (!element) return;
   element.style.height = "auto";
   element.style.height = `${element.scrollHeight}px`;
+}
+
+function activityLabel(eventType?: string): string {
+  if (eventType === "moved_to_review") return "Movido para revisão";
+  if (eventType === "review_approved") return "Aprovado";
+  if (eventType === "review_changes_requested") return "Ajustes solicitados";
+  return "Atividade do card";
 }
 
 export function AutoGrowTextarea({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -365,38 +382,14 @@ export default function TaskModal({
     ? deliveryType.workflowSteps.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
     : -1;
   const [comment, setComment] = useState("");
-  const [commentDestination, setCommentDestination] = useState("");
-  const [feedbackDecision, setFeedbackDecision] = useState<"" | "aprovar" | "ajustes" | "revisao">("");
-  useEffect(() => { setCommentDestination(""); setFeedbackDecision(""); }, [liveTask?.id]);
+  const [commentContextError, setCommentContextError] = useState<string | null>(null);
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
-  const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
-  const [materialSyncWarning, setMaterialSyncWarning] = useState("");
+  const materials = useTaskMaterials(liveTask?.id ?? task?.id ?? null, mode === "edit");
+  const materialWorkspaces = materials.workspaces;
+  const materialSyncWarning = materials.warning;
   const [recentlyCreatedCard, setRecentlyCreatedCard] = useState<TaskRecord | null>(null);
   const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final"; source?: { kind: "script" | "capture"; file: { id: string; name: string; mimeType: string; size: number | null; webViewLink: string | null } } } | null>(null);
   const [materialTab, setMaterialTab] = useState<"final" | "preview" | "docs">("final");
-  const materialRequest = useRef(0);
-  const reloadMaterials = useCallback(() => {
-    const requestId = ++materialRequest.current;
-    fetch("/api/admin/drive/baita/materials", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taskId: liveTask?.id ?? task?.id }), cache: "no-store",
-    })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data: { workspaces?: CreativeMaterialWorkspace[]; syncWarnings?: string[] } | null) => {
-        if (requestId !== materialRequest.current || !data?.workspaces) return;
-        setMaterialWorkspaces(data.workspaces);
-        setMaterialSyncWarning(data.syncWarnings?.length ? "O Drive nao concluiu a sincronizacao dos materiais. Abra a pasta para tentar novamente." : "");
-      })
-      .catch(() => {});
-  }, [liveTask?.id, task?.id]);
-  useEffect(() => {
-    if (mode !== "edit") return () => { materialRequest.current += 1; };
-    reloadMaterials();
-    const onFocus = () => reloadMaterials();
-    window.addEventListener("focus", onFocus);
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") reloadMaterials(); }, 60_000);
-    return () => { window.removeEventListener("focus", onFocus); window.clearInterval(timer); materialRequest.current += 1; };
-  }, [mode, reloadMaterials]);
   // Comentário em edição inline. Guarda o `at` que estava na tela para o
   // servidor recusar se a thread mudou (ver edit_task_comment).
   // `taskId`: o card onde o comentário está gravado — pode ser uma etapa ou
@@ -492,6 +485,8 @@ export default function TaskModal({
       ...(!liveTask || (!isDelivery && !kd.isPlan && !isRecurringParent && !chainDelivery) ? { status: draft.status } : {}),
       priority: draft.priority, assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
+      north_ai_responsible: draft.north_ai_responsible,
+      north_ai_reviewer: draft.north_ai_reviewer,
       reviewer_id: effectiveReviewerId,
       approver_id: effectiveApproverId,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
@@ -558,10 +553,19 @@ export default function TaskModal({
   // esta tela e o painel lateral responderem a mesma coisa sobre o mesmo card.
   // O tipo vem do RASCUNHO, não do card salvo: trocar o tipo no formulário
   // reflete no thread antes de salvar, como o resto do editor já faz.
-  const comments: FamilyComment[] = useMemo(
-    () => (liveTask ? familyThreadOf(liveTask, clientTasks, draft.kind) : []),
-    [liveTask, clientTasks, draft.kind],
-  );
+  const conversation = useTaskConversation(liveTask?.id ?? null);
+  const comments: (FamilyComment & { timelineKind?: "comment" | "event"; taskTitle?: string; path?: string[]; meetingDate?: string | null })[] = useMemo(() => {
+    if (conversation.ready) return conversation.items.flatMap((item) => {
+      if (item.kind === "file") return [];
+      return [{
+        taskId: item.taskId, author: item.author ?? "Sistema", author_id: item.authorId ?? undefined,
+        text: item.kind === "event" ? item.text ?? activityLabel(item.eventType) : item.text ?? "",
+        at: item.at, edited_at: item.editedAt, asset_ids: item.assetIds, timelineKind: item.kind,
+        taskTitle: item.taskTitle, path: item.path, meetingDate: item.meetingDate,
+      }];
+    });
+    return liveTask ? familyThreadOf(liveTask, clientTasks, draft.kind) : [];
+  }, [conversation.items, conversation.ready, liveTask, clientTasks, draft.kind]);
   const ownComments = liveTask ? commentsOf(liveTask) : [];
   // Card de origem de cada comentário da família — para o selo de papel
   // (calculado NA HORA, nunca congelado: lê os dados atuais de reviewer_id/
@@ -813,24 +817,6 @@ export default function TaskModal({
   const planMembers = liveTask
     ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
-  const planCommentTargets = useMemo(() => {
-    if (!liveTask || liveTask.kind !== "plano_acao" || isRecurringParent) return [];
-    const options: { id: string; label: string }[] = [];
-    const seen = new Set<string>();
-    const visit = (card: TaskRecord, path: string, depth: number) => {
-      if (seen.has(card.id) || depth > 5) return;
-      seen.add(card.id);
-      const label = path ? `${path} → ${card.title}` : card.title;
-      if (card.kind === "plano_acao") {
-        actionPlanMembersOf(card.id, clientTasks).forEach((child) => visit(child, label, depth + 1));
-      } else {
-        options.push({ id: card.id, label });
-        if (isFlowDelivery(card)) flowStepsOf(card.id, clientTasks).forEach((step) => visit(step, label, depth + 1));
-      }
-    };
-    planMembers.forEach((member) => visit(member, "", 0));
-    return options;
-  }, [liveTask, isRecurringParent, planMembers, clientTasks]);
   const flowSteps = liveTask && isDelivery ? flowStepsOf(liveTask.id, clientTasks) : [];
   // Sem isto, um membro que é ele mesmo um pai (a ocorrência de uma
   // recorrência de Plano, ex. "REUNIÃO ROTINA - ALLAN" — herda o `kind`
@@ -1488,39 +1474,60 @@ export default function TaskModal({
     }
   }
 
-  // Na Entrega só se comenta no pai: o comentário é gravado na etapa aberta AGORA
-  // (o servidor decide pela ordem e pelo estado real; ver lib/flows/commentTarget.ts).
-  // A tela informa a etapa que mostra como corrente — se ela já avançou, o servidor
-  // corrige para a etapa atual. Aqui só se avisa a pessoa de onde o texto vai cair.
+  // A Entrega informa a etapa exibida para o servidor validar o contexto; se
+  // ela avançar durante a escrita, o envio falha e o rascunho fica na caixa.
   const commentStep = isDelivery ? currentFlowStepOf(flowSteps) : null;
   const commentStepLabel = commentStep && !commentStep.completed_at ? subtypeLabelOf(commentStep.subtype ?? "") || "etapa atual" : null;
+
+  async function refreshCommentContext(): Promise<string | void> {
+    if (!liveTask) return;
+    const deliveryId = isDelivery ? liveTask.id : chainDelivery?.id;
+    if (!deliveryId) {
+      const response = await fetch(`/api/admin/tasks/${liveTask.id}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const refreshed = await response.json() as TaskRecord;
+      onTaskPatched?.(refreshed);
+      setLiveTask(refreshed);
+      setCommentContextError(null);
+      return refreshed.id;
+    }
+    const response = await fetch(`/api/admin/tasks?parentId=${encodeURIComponent(deliveryId)}`, { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json() as { tasks?: TaskRecord[] };
+    const refreshedTasks = Array.isArray(data.tasks) ? data.tasks : [];
+    refreshedTasks.forEach((related) => onTaskPatched?.(related));
+    const currentStep = currentFlowStepOf(flowStepsOf(deliveryId, refreshedTasks));
+    if (!currentStep) return;
+    setCommentContextError(null);
+    conversation.reload();
+    return currentStep.id;
+  }
 
   async function sendComment() {
     if (!liveTask || !comment.trim()) return;
     const text = comment.trim();
-    const submittedDecision = feedbackDecision;
-    const stageTaskId = commentStep?.id ?? (liveTask.kind === "plano_acao" && commentDestination !== "plan" ? commentDestination : null);
-    if (liveTask.kind === "plano_acao" && planCommentTargets.length && !stageTaskId && commentDestination !== "plan") {
-      setError("Escolha a peça ou etapa, ou marque uma nota sobre o plano.");
-      return;
-    }
-    setComment("");
-    setFeedbackDecision("");
+    const stageTaskId = commentStep?.id ?? null;
     try {
       const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
           comment_id: commentIds.idFor(liveTask.id, text),
-          ...(submittedDecision ? { feedback_decision: submittedDecision } : {}),
           ...(stageTaskId ? { stage_task_id: stageTaskId } : {}),
-          ...(commentDestination === "plan" ? { plan_note: true } : {}),
+          ...(liveTask.kind === "plano_acao" && !liveTask.recurrence_cadence ? { plan_note: true } : {}),
           ...(commentAssetIds.length ? { asset_ids: commentAssetIds } : {}),
         }),
       });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string; code?: string; current_stage_task_id?: string };
+        if (body.code === "COMMENT_STAGE_INVALID") setCommentContextError(body.error ?? "A etapa mudou enquanto você escrevia. Atualize o destino antes de reenviar.");
+        throw new Error(body.error ?? "");
+      }
+      setCommentContextError(null);
       commentIds.settle(liveTask.id, text);
+      setComment((current) => current.trim() === text ? "" : current);
       setCommentAssetIds([]);
+      conversation.reload();
       const updated = await res.json() as TaskRecord;
       // Comentar no PAI grava na etapa corrente (ver lib/flows/currentStep.ts
       // + a rota) — o servidor pode devolver um card DIFERENTE do que está
@@ -1531,7 +1538,7 @@ export default function TaskModal({
       // comentava, porque `updated` passava a ser o card errado.
       if (updated.id === liveTask.id) setLiveTask(updated);
       onTaskPatched?.(updated);
-    } catch (e) { setComment(text); setFeedbackDecision(submittedDecision); setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
+    } catch (e) { setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
   }
 
   async function completeCycle(retried = false, cycleTask = liveTask): Promise<void> {
@@ -1621,6 +1628,8 @@ export default function TaskModal({
       priority: draft.priority,
       assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
+      north_ai_responsible: draft.north_ai_responsible,
+      north_ai_reviewer: draft.north_ai_reviewer,
       reviewer_id: effectiveReviewerId,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
@@ -1762,6 +1771,7 @@ export default function TaskModal({
   const stepperEditable = sharedStageDeliveryCount > 1
     ? false
     : isDelivery ? Boolean(currentChainStep) : projectedParentStatus === null && mirroredStatus === null;
+  const awaitingReviewDecision = displayStatus === "revisao" && deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids);
   const stepIdx = WORKFLOW_ORDER.indexOf(displayStatus);
 
   // Cor por papel no dropdown de responsável: o subtipo relevante é o da
@@ -1867,12 +1877,13 @@ export default function TaskModal({
                     className={`tm-step ${column.status !== "parada" && stepIdx >= 0 && WORKFLOW_ORDER.indexOf(column.status) <= stepIdx ? "done" : ""} ${displayStatus === column.status ? "current" : ""} ${column.status === "parada" ? "tm-step-halt" : ""}`}
                     onClick={() => {
                       if (!stepperEditable) return;
+                      if (awaitingReviewDecision && column.status !== "revisao") return;
                       if (isDelivery && liveTask && currentChainStep) void changeDeliveryStatus(liveTask.id, column.status, currentChainStep.id, currentChainStep.status);
                       else if (chainDelivery && liveTask && contextualStage) void changeDeliveryStatus(chainDelivery.id, column.status, liveTask.id, contextualStage.status);
                       else set("status", column.status);
                     }}
-                    disabled={!stepperEditable || statusBusy}
-                    title={sharedStageDeliveryCount > 1 ? "Etapa compartilhada: abra o Criativo para mudar só uma Entrega" : isDelivery ? "Muda apenas a etapa atual desta Entrega" : stepperEditable ? undefined : "O status deste card acompanha suas atividades."}
+                    disabled={!stepperEditable || statusBusy || (awaitingReviewDecision && column.status !== "revisao")}
+                    title={sharedStageDeliveryCount > 1 ? "Etapa compartilhada: abra o Criativo para mudar só uma Entrega" : awaitingReviewDecision ? "Somente o revisor designado pode decidir nesta etapa" : isDelivery ? "Muda apenas a etapa atual desta Entrega" : stepperEditable ? undefined : "O status deste card acompanha suas atividades."}
                   >
                     <span className="tm-step-dot" />
                     <span className="tm-step-label">{column.label}</span>
@@ -2051,6 +2062,20 @@ export default function TaskModal({
                 )}
               </Cell>
 
+              <Cell icon="✦" label="North AI responsável" hidden={!visible("assignee")}>
+                <label className="tm-ai-role-toggle">
+                  <input type="checkbox" checked={draft.north_ai_responsible} onChange={(event) => set("north_ai_responsible", event.target.checked)} />
+                  <span>{draft.north_ai_responsible ? "Atribuída" : "Não atribuída"}</span>
+                </label>
+              </Cell>
+              <Cell icon="✦" label="North AI revisora" hidden={revisaoOff}>
+                <label className="tm-ai-role-toggle">
+                  <input type="checkbox" checked={draft.north_ai_reviewer} onChange={(event) => set("north_ai_reviewer", event.target.checked)} />
+                  <span>{draft.north_ai_reviewer ? "Atribuída" : "Não atribuída"}</span>
+                </label>
+                {selectedReviewers.length ? <small className="tm-ai-role-hint">Revisor humano tem prioridade e aguarda a decisão dele.</small> : null}
+              </Cell>
+
               {/* Aprovador (cliente, etapa de Aprovação) — mesma regra. */}
               <Cell icon="✓" label="Aprovador" hidden={aprovacaoOff}>
                 <select value={draft.approver_id} onChange={(e) => set("approver_id", e.target.value)}>
@@ -2093,27 +2118,14 @@ export default function TaskModal({
                 Renderiza ANTES da caixa de Etapas de propósito — plano em
                 cima, etapas abaixo, quando os dois existem no mesmo card. O
                 stepper editável e o 🔗 ficam do lado da entrega. */}
-            <CardParentBox
-              label="Pertence a"
-              items={belongsToBoxes}
-              canOpen={Boolean(onOpenRelatedTask) && !busy}
+            <TaskRelationsPanel
+              parents={belongsToBoxes}
+              references={referenceBoxes}
+              canOpen={Boolean(onOpenRelatedTask)}
+              busy={busy}
+              loading={pendingParentBox}
               onOpen={(parent) => void openRelatedTask(parent)}
             />
-            <CardParentBox
-              label="Veja também"
-              items={referenceBoxes}
-              canOpen={Boolean(onOpenRelatedTask) && !busy}
-              onOpen={(parent) => void openRelatedTask(parent)}
-            />
-            {/* Deriva de `pendingParentBox` (mesmos slots que geram as caixas
-                acima, entrega/plano(s)/recorrência) — não repete a
-                combinação de flags aqui. */}
-            {pendingParentBox ? (
-              <div className="tm-box tm-parentbox">
-                <p className="tm-box-label">Pertence a</p>
-                <p className="admin-sub" style={{ margin: 0 }}>Carregando relação…</p>
-              </div>
-            ) : null}
 
             {/* A próxima etapa é irmã da etapa que acabou de avançar. Ela só
                 pode aparecer na Entrega operacional, nunca numa etapa nem no
@@ -2427,6 +2439,27 @@ export default function TaskModal({
               ) : null}
               <div className="tm-box tm-commentsbox">
                 <p className="tm-box-label">Comentários e atividade</p>
+                {liveTask ? (() => {
+                  const reviewTarget = isDelivery ? currentChainStep : contextualStage ?? liveTask;
+                  if (!reviewTarget || (sharedStageDeliveryCount > 1 && !isDelivery)) return null;
+                  const targetPayload = (reviewTarget.payload ?? {}) as Record<string, unknown>;
+                  const reviewerIds = Array.isArray(targetPayload.reviewer_ids)
+                    ? targetPayload.reviewer_ids.filter((id): id is string => typeof id === "string")
+                    : reviewTarget.reviewer_id ? [reviewTarget.reviewer_id] : [];
+                  const reviewDeliveryId = isDelivery ? liveTask.id : chainDelivery?.id;
+                  return <TaskReviewActions taskId={reviewTarget.id} status={isDelivery ? displayStatus : reviewTarget.status} reviewerIds={reviewerIds} currentUserId={currentUserId} deliveryId={reviewDeliveryId} onDecided={(updated) => {
+                    conversation.reload();
+                    const merged = { ...reviewTarget, ...updated };
+                    onTaskPatched?.(merged);
+                    if (merged.id === liveTask.id) setLiveTask(merged);
+                    if (reviewDeliveryId) void fetch(`/api/admin/tasks/${reviewDeliveryId}`).then((response) => response.ok ? response.json() as Promise<TaskRecord> : null).then((delivery) => {
+                      if (!delivery) return;
+                      onTaskPatched?.(delivery);
+                      if (delivery.id === liveTask.id) setLiveTask(delivery);
+                      setFlowDeliveries((current) => current.map((item) => item.id === delivery.id ? delivery : item));
+                    }).catch(() => {});
+                  }} />;
+                })() : null}
                 <div className="tm-comments">
                   {comments.slice().reverse().map((c, i) => {
                     // A thread pode misturar comentários de vários cards da
@@ -2451,9 +2484,9 @@ export default function TaskModal({
                       : null;
                     const roleLabel = role?.kind === "revisor" ? REVISOR_LABEL : role?.responsibility ? ROLE_LABEL[role.responsibility] : null;
                     const roleClass = role?.kind === "revisor" ? "t-tone-neutral" : role?.responsibility ? roleTone(role.responsibility) : null;
-                    const destinationLabel = !own && originStep ? subtypeLabel(originStep.subtype) || originStep.title : null;
+                    const destinationLabel = c.taskTitle && !own ? c.taskTitle : !own && originStep ? subtypeLabel(originStep.subtype) || originStep.title : null;
                     return (
-                      <div className={`tm-comment${editing ? " editing" : ""}`} key={`${c.taskId}-${c.at}-${i}`}>
+                      <div className={`tm-comment${editing ? " editing" : ""}${c.timelineKind === "event" ? " is-event" : ""}`} key={`${c.taskId}-${c.at}-${i}`}>
                         <CommentAvatar comment={c} className="tm-comment-av" />
                         <div className="tm-comment-body">
                           {/* <div>, não <p>: o menu "…" (CommentActionsMenu) é um <div>, e <div>
@@ -2462,8 +2495,10 @@ export default function TaskModal({
                               (erro de hidratação, 25/09). O CSS usa só a classe. */}
                           <div className="tm-comment-meta">
                             <b>{c.author}</b>
+                            {c.timelineKind === "event" ? <span className="tm-activity-kind">Atividade</span> : null}
                             {roleLabel ? <span className={`kb-type ${roleClass}`}>{roleLabel}</span> : null}
-                            {destinationLabel ? <small className="tm-comment-origin" title="Onde este comentário foi gravado">→ {destinationLabel}</small> : null}
+                            {destinationLabel ? <small className="tm-comment-origin" title={c.path?.join(" → ") ?? "Onde este comentário foi gravado"}>→ {destinationLabel}</small> : null}
+                            {c.meetingDate ? <small className="tm-comment-origin">Reunião · {formatShortDate(c.meetingDate)}</small> : null}
                             <small>{formatCommentTime(c.at)}</small>
                             {c.edited_at ? <small className="tm-comment-edited">editado</small> : null}
                             {storedIndex >= 0 ? (
@@ -2507,46 +2542,35 @@ export default function TaskModal({
                   })}
                   {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
                 </div>
-                <div className="tm-comment-input">
-                  {liveTask?.kind === "plano_acao" && !isRecurringParent && planCommentTargets.length > 0 ? (
-                    <label className="tm-feedback-decision">
-                      Destino do comentário
-                      <select value={commentDestination} onChange={(event) => setCommentDestination(event.target.value)}>
-                        <option value="">Escolha a peça ou etapa…</option>
-                        {planCommentTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
-                        <option value="plan">Nota sobre o plano ou reunião</option>
-                      </select>
-                    </label>
-                  ) : null}
-                  {(liveTask?.subtype === "edicao" || commentStep?.subtype === "edicao" || clientTasks.find((card) => card.id === commentDestination)?.subtype === "edicao") ? <label className="tm-feedback-decision">
-                    Decisão
-                    <select value={feedbackDecision} onChange={(event) => setFeedbackDecision(event.target.value as typeof feedbackDecision)}>
-                      <option value="">North AI interpreta o comentário</option>
-                      <option value="aprovar">Aprovar</option>
-                      <option value="ajustes">Pedir ajustes</option>
-                      <option value="revisao">Revisar manualmente</option>
-                    </select>
-                  </label> : null}
-                  <HeadDropdown className="tm-comment-attach" trigger={<span aria-hidden>📎</span>}>
-                    {commentDocs.length === 0 ? (
-                      <p className="tm-member-search-empty">Nenhum documento para anexar.</p>
-                    ) : (
-                      commentDocs.map((d) => (
-                        <button type="button" key={d.id} className="tm-headpick-option" onClick={() => attachDocToComment(d)}>
-                          {d.name}
-                        </button>
-                      ))
-                    )}
-                  </HeadDropdown>
-                  <MentionTextarea
-                    value={comment}
-                    onChange={setComment}
-                    onSubmit={() => void sendComment()}
-                    placeholder={commentStepLabel ? `Comentar em "${commentStepLabel}"… use @ para chamar alguém` : "Escrever comentário… use @ para chamar alguém"}
-                  />
-                  <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim() || (liveTask?.kind === "plano_acao" && planCommentTargets.length > 0 && !commentDestination)}>Enviar</button>
-                </div>
+                <TaskCommentComposer
+                  value={comment}
+                  onChange={setComment}
+                  onSubmit={() => void sendComment()}
+                  targetKey={commentStep?.id ?? liveTask?.id ?? ""}
+                  contextError={commentContextError}
+                  onRefreshContext={refreshCommentContext}
+                  targetLabel={isDelivery && commentStepLabel ? <>Comentando na etapa: <b>{commentStepLabel}</b></> : liveTask?.kind === "plano_acao" ? "Comentando neste plano" : undefined}
+                  placeholder={commentStepLabel ? `Comentar em "${commentStepLabel}"… use @ para chamar alguém` : "Escrever comentário… use @ para chamar alguém"}
+                  tone={tone}
+                  leading={<HeadDropdown className="tm-comment-attach" trigger={<span aria-hidden>📎</span>}>
+                    {commentDocs.length === 0 ? <p className="tm-member-search-empty">Nenhum documento para anexar.</p> : commentDocs.map((d) => <button type="button" key={d.id} className="tm-headpick-option" onClick={() => attachDocToComment(d)}>{d.name}</button>)}
+                  </HeadDropdown>}
+                />
               </div>
+              <TaskMaterialsPanel
+                items={conversation.ready ? conversation.items.filter((item) => item.kind === "file" && item.taskId !== liveTask?.id) : []}
+                onOpen={(item) => {
+                  const fileId = typeof item.file?.id === "string" ? item.file.id : "";
+                  const doc = attachableDocs.find((candidate) => candidate.id === fileId);
+                  if (doc) { setPreviewDoc(doc); return; }
+                  for (const workspace of cardWorkspaces) {
+                    const asset = workspace.assets.find((candidate) => candidate.id === fileId);
+                    if (asset) { setDriveOpen({ taskId: workspace.creative_task_id, assetId: asset.id }); return; }
+                  }
+                  const url = typeof item.file?.file_url === "string" ? item.file.file_url : typeof item.file?.webViewLink === "string" ? item.file.webViewLink : "";
+                  if (url) openDocForUrl(url);
+                }}
+              />
             </div>
           ) : null}
         </div>
@@ -2592,7 +2616,7 @@ export default function TaskModal({
       initialTab={driveOpen.tab}
       selectedAssetIds={commentAssetIds}
       onSelectedAssetIdsChange={setCommentAssetIds}
-      onChanged={reloadMaterials}
+      onChanged={materials.reload}
       onBack={() => setDriveOpen(null)}
       onClose={() => { setDriveOpen(null); void closeAfterSave(); }}
     /> : null}

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { deriveRequiresReview, stepSkipsReview } from "./reviewSkip";
 
-describe("stepSkipsReview — revisar o próprio trabalho", () => {
-  it("revisor é o único responsável: pula revisão", () => {
-    expect(stepSkipsReview("allan", ["allan"])).toBe(true);
+describe("stepSkipsReview — papéis humanos não se misturam", () => {
+  it("revisor também responsável continua precisando revisar", () => {
+    expect(stepSkipsReview("allan", ["allan"])).toBe(false);
   });
 
   it("revisor está entre VÁRIOS responsáveis: revisão continua valendo", () => {
-    expect(stepSkipsReview("allan", ["allan", "cintia"])).toBe(true);
+    expect(stepSkipsReview("allan", ["allan", "cintia"])).toBe(false);
   });
 
   it("sem revisor: nunca pula", () => {
@@ -29,14 +29,14 @@ describe("deriveRequiresReview", () => {
     expect(deriveRequiresReview(null, ["allan"])).toBe(false);
   });
 
-  it("com reviewer_id e sem auto-revisão: exige revisão", () => {
+  it("com reviewer_id: exige revisão, inclusive quando também é responsável", () => {
     expect(deriveRequiresReview("allan", [])).toBe(true);
     expect(deriveRequiresReview("allan", ["cintia"])).toBe(true);
     expect(deriveRequiresReview("allan", ["cintia", "luiza"])).toBe(true);
   });
 
-  it("com reviewer_id igual ao único responsável: NÃO exige revisão", () => {
-    expect(deriveRequiresReview("allan", ["allan"])).toBe(false);
-    expect(deriveRequiresReview("allan", ["allan", "luiza"])).toBe(false);
+  it("com reviewer_id igual ao responsável continua exigindo revisão", () => {
+    expect(deriveRequiresReview("allan", ["allan"])).toBe(true);
+    expect(deriveRequiresReview("allan", ["allan", "luiza"])).toBe(true);
   });
 });

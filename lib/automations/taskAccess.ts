@@ -35,7 +35,12 @@ export function isAutomationAuthor(author: string | null | undefined): boolean {
 // (mergeTaskAssigneeRow is a session-path concern) — assignee_profile_ids is
 // unused by every automation code path, so an empty array is safe here.
 export function asTaskRecord(row: Record<string, unknown>): TaskRecord {
-  return { ...row, assignee_profile_ids: [] } as unknown as TaskRecord;
+  return {
+    ...row,
+    assignee_profile_ids: [],
+    north_ai_responsible: Boolean(row.north_ai_responsible),
+    north_ai_reviewer: Boolean(row.north_ai_reviewer),
+  } as unknown as TaskRecord;
 }
 
 export async function getAdminTask(admin: AdminClient, id: string): Promise<TaskRecord | null> {

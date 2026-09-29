@@ -13,8 +13,8 @@
 //      Precisa ser uma etapa (`workflow_step`) DESTA entrega; senão 409
 //      COMMENT_STAGE_INVALID. Nunca é escolhido pelo nome textual da etapa. Se a
 //      etapa informada já foi concluída e a Entrega avançou (tela desatualizada),
-//      o comentário vai para a etapa aberta AGORA (via `stage_advanced`): o banco
-//      garante uma única etapa aberta por Entrega, em ordem.
+//      o envio falha com 409 para a interface preservar o rascunho e pedir
+//      atualização. Nunca redirecionamos um comentário escrito para outra etapa.
 //   2. O card não é uma entrega (tarefa comum, etapa, Plano de Ação): o próprio
 //      card. Plano de Ação fica de fora de propósito — ali o comentário continua
 //      no plano; um plano não tem "etapa corrente", tem atividades paralelas.
@@ -123,7 +123,6 @@ async function latestActiveOccurrenceOf(admin: AdminClient, moldId: string): Pro
 
 export type CommentTargetVia =
   | "explicit"
-  | "stage_advanced"
   | "own"
   | "no_steps"
   | "last_completed"
@@ -225,13 +224,19 @@ export async function resolveFlowCommentTarget(
     if (!chosen) {
       throw new HttpError(409, "Essa etapa não pertence a esta entrega. Atualize a página e tente de novo.", { code: COMMENT_STAGE_INVALID, stage_task_id: stageTaskId, delivery_id: task.id });
     }
-    // A tela manda a etapa que mostrava como corrente. Se ela já foi concluída e a
-    // Entrega avançou (outra aba, o cliente aprovando no portal, a conclusão logo
-    // antes de o comentário sair), o comentário é da etapa de AGORA: a Entrega tem
-    // sempre uma única etapa aberta, e comentar "na Entrega" é comentar nela.
+    // Uma etapa concluída entre a abertura da caixa e o envio altera o contexto
+    // que a pessoa viu ao escrever. A interface deve preservar o texto e pedir
+    // atualização, sem publicar o comentário em outro card.
     if (chosen.completed_at) {
       const open = steps.filter((step) => !step.completed_at);
-      if (open.length === 1) return { targetId: open[0].id, via: "stage_advanced" };
+      if (open.length === 1) {
+        throw new HttpError(409, "A etapa mudou enquanto você escrevia. Atualize a entrega antes de enviar o comentário.", {
+          code: COMMENT_STAGE_INVALID,
+          stage_task_id: stageTaskId,
+          current_stage_task_id: open[0].id,
+          delivery_id: task.id,
+        });
+      }
     }
     return { targetId: stageTaskId, via: "explicit" };
   }
