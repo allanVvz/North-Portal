@@ -23,6 +23,10 @@ export type OperationItem = {
   /** O que o card representa: execuções da rotina, membros do plano, etapas
    *  da entrega. Vazio numa tarefa. */
   members: TaskRecord[];
+  /** Todo o trabalho abaixo do card, em qualquer profundidade (plano → entrega
+   *  → etapa). É por ele que "Responsável" e "Situação" acham o pai: a etapa
+   *  de Edição do Allan dentro de uma entrega dentro de um plano. */
+  work?: TaskRecord[];
 };
 
 export type OperationFilterAttr = "status" | "tipo" | "subtipo" | "situacao" | "cliente" | "frequencia" | "prioridade" | "responsavel";
@@ -94,6 +98,24 @@ export function normalizeOperationItems(tasks: readonly OperationTask[], routine
     return false;
   };
 
+  const descendants = (rootIds: string[]): TaskRecord[] => {
+    const out: TaskRecord[] = [];
+    const visited = new Set<string>(rootIds);
+    let frontier = [...rootIds];
+    for (let depth = 0; frontier.length && depth < 5; depth += 1) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const child of children.get(id) ?? []) {
+          if (visited.has(child.id)) continue;
+          visited.add(child.id);
+          out.push(child);
+          next.push(child.id);
+        }
+      }
+      frontier = next;
+    }
+    return out;
+  };
   const output: OperationItem[] = [];
   const seen = new Set<string>();
   const push = (item: OperationItem) => { if (!seen.has(item.id)) { seen.add(item.id); output.push(item); } };
@@ -102,14 +124,14 @@ export function normalizeOperationItems(tasks: readonly OperationTask[], routine
     if (!visibleOnTaskBoard(task) || isRecurrenceTemplate(task) || routineIds.has(task.id) || represented(task)) continue;
     const level: OperationLevel = isPlan(task) ? "plano" : isFlowDelivery(task) ? "entrega" : "tarefa";
     const members = level === "entrega" ? flowStepsOf(task.id, tasks) : level === "plano" ? children.get(task.id) ?? [] : [];
-    push({ id: task.id, task, clientName: task.clientName ?? "Outros", clientSlug: task.clientSlug ?? "", routine: false, level, members });
+    push({ id: task.id, task, clientName: task.clientName ?? "Outros", clientSlug: task.clientSlug ?? "", routine: false, level, members, work: level === "tarefa" ? [] : descendants([task.id]) });
   }
   for (const routine of routines) {
     // Molde de anúncios de uma automação de relatório: a rotina da Entrega o
     // representa (lib/automations/routineFeeds.ts).
     const representedBy = (routine as { represented_by?: string | null }).represented_by;
     if (representedBy && routineIds.has(representedBy)) continue;
-    push({ id: routine.id, task: routine, clientName: routine.clientName, clientSlug: routine.clientSlug, routine: true, level: "rotina", members: routine.executions });
+    push({ id: routine.id, task: routine, clientName: routine.clientName, clientSlug: routine.clientSlug, routine: true, level: "rotina", members: routine.executions, work: [...routine.executions, ...descendants(routine.executions.map((execution) => execution.id))] });
   }
   return output;
 }
@@ -175,6 +197,8 @@ export function compatibleSubtypes(items: readonly OperationItem[], selectedType
     .sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
+const foldName = (name: string) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+
 function assignees(item: OperationItem): string[] {
   return (item.task.assignee ?? "").split(",").map((name) => name.trim()).filter(Boolean);
 }
@@ -192,7 +216,7 @@ export function operationSituation(item: OperationItem, today: string): string {
     if (current) return deadlineStateOf(current, today);
   }
   if (item.level === "plano") {
-    const states = item.members.filter((member) => !member.completed_at).map((member) => deadlineStateOf(member, today));
+    const states = (item.work ?? item.members).filter((member) => !member.completed_at).map((member) => deadlineStateOf(member, today));
     if (states.includes("parada")) return "parada";
     if (states.includes("atrasada")) return "atrasada";
   }
@@ -216,7 +240,14 @@ export function operationMatchesFilters(item: OperationItem, filters: readonly O
     if (filter.attr === "frequencia") return item.routine && (item.task as RecurringTask).cadence === filter.value;
     if (filter.attr === "prioridade") return item.task.priority === filter.value;
     const names = assignees(item);
-    return filter.value === "Sem responsável" ? names.length === 0 : names.includes(filter.value);
+    if (filter.value === "Sem responsável") return names.length === 0;
+    // Um pai também é "de" quem responde por um item aberto dele: a etapa de
+    // Edição do Allan fica representada pela Entrega, e o filtro "Allan" que a
+    // Home aplica tem de achá-la (29/09 — o botão dizia 10, a tela mostrava 1).
+    const openMembers = (item.work ?? item.members).filter((member) => !member.completed_at && member.status !== "aprovado");
+    const everyone = [...names, ...openMembers.flatMap((member) => (member.assignee ?? "").split(",").map((name) => name.trim()).filter(Boolean))];
+    const wanted = foldName(filter.value);
+    return everyone.some((name) => foldName(name) === wanted || foldName(name).split(" ")[0] === wanted.split(" ")[0]);
   });
 }
 

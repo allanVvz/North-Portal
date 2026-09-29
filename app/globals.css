@@ -6129,3 +6129,74 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .north-ai-avatar { display: inline-flex; align-items: center; justify-content: center; color: #e9d5a5; background: #163d3c; }
 .tm-reviewer-list { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .tm-reviewer-list label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+
+/* ---- Home: "o que eu preciso fazer?" (29/09) ----------------------------------
+   Largura larga (kb-wide). A pergunta no topo, as respostas como botões que
+   abrem a Operação filtrada, e o painel em três colunas; o pulso por cliente
+   fecha a página. Zero fica apagado: "isso está em dia". */
+.home-v2 { display: grid; gap: 22px; }
+.admin-page.kb-wide.home-v2 { max-width: none; width: 100%; }
+.home-hero-v2 { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.home-eyebrow-v2 { margin: 0 0 6px; color: var(--a-muted); font-size: 12.5px; font-weight: 600; letter-spacing: .02em; }
+.home-eyebrow-v2::first-letter { text-transform: uppercase; }
+.home-question { margin: 0; font-family: Fraunces, Georgia, serif; font-size: clamp(28px, 3.2vw, 40px); font-weight: 500; line-height: 1.1; color: var(--a-ink); letter-spacing: -.01em; }
+.home-answer { margin: 8px 0 0; max-width: 72ch; color: var(--a-sec); font-size: 15px; }
+.home-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .home-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.home-action {
+  --tone: var(--a-teal);
+  display: grid; gap: 4px; align-content: start; padding: 16px 18px 14px; border: 1px solid var(--a-border-soft); border-radius: 14px;
+  background: var(--a-surface); color: inherit; text-decoration: none; box-shadow: inset 0 3px 0 var(--tone);
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.home-action.tone-late { --tone: var(--a-danger); }
+.home-action.tone-warn { --tone: var(--a-warn); }
+.home-action.tone-info { --tone: var(--a-blue-text); }
+.home-action:hover { border-color: var(--a-border-strong); transform: translateY(-1px); box-shadow: inset 0 3px 0 var(--tone), 0 8px 20px rgba(12, 44, 44, .08); }
+.home-action:focus-visible { outline: 2px solid var(--a-teal); outline-offset: 2px; }
+.home-action.is-zero { --tone: var(--a-border); opacity: .6; }
+.home-action-top { display: flex; align-items: baseline; justify-content: space-between; }
+.home-action-value { font-family: Fraunces, Georgia, serif; font-size: 34px; font-weight: 500; line-height: 1; color: var(--a-ink); font-variant-numeric: tabular-nums; }
+.home-action.tone-late:not(.is-zero) .home-action-value { color: var(--a-danger); }
+.home-action-go { color: var(--a-muted); font-size: 16px; transition: transform .15s ease, color .15s ease; }
+.home-action:hover .home-action-go { transform: translateX(3px); color: var(--a-teal-text); }
+.home-action-label { margin-top: 6px; color: var(--a-ink); font-size: 14px; font-weight: 650; }
+.home-action-sub { color: var(--a-muted); font-size: 12px; }
+.home-action-filter { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--a-border-soft); color: var(--a-teal-text); font-size: 11px; font-weight: 600; }
+.home-board { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.home-stack { display: grid; gap: 16px; min-width: 0; }
+.home-v2 .home-resolve { min-width: 0; }
+.home-v2 .home-pulse { margin-bottom: 0; }
+@media (max-width: 1180px) { .home-board { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .home-board > .home-resolve { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .home-board { grid-template-columns: minmax(0, 1fr); } .home-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .home-action { padding: 12px 14px; } .home-action-value { font-size: 28px; } .home-action-filter { display: none; } }
+@media (max-width: 400px) { .home-actions { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- Contexto no topo do modal (29/09) ---------------------------------------
+   Onde o card mora (trilha), em que pé está (estado único) e o caminho das
+   etapas. Só navegação; os campos continuam abaixo. */
+.tm-context { display: grid; gap: 8px; padding: 10px 22px 12px; border-bottom: 1px solid var(--a-border-soft); background: color-mix(in srgb, var(--a-surface2) 45%, var(--a-surface)); }
+.tm-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 12px; color: var(--a-muted); min-width: 0; }
+.tm-trail-item { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.tm-trail-item button { padding: 0; border: 0; background: none; color: var(--a-teal-text); font: inherit; font-weight: 600; cursor: pointer; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-trail-item button:hover { text-decoration: underline; }
+.tm-trail-item button:focus-visible { outline: 2px solid var(--a-teal); outline-offset: 2px; border-radius: 3px; }
+.tm-trail-item em { font-style: normal; color: var(--a-muted); font-size: 11px; }
+.tm-trail-item.is-here b { color: var(--a-ink); font-weight: 600; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-trail-sep { color: var(--a-border-strong); }
+.tm-state { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; font-size: 13.5px; color: var(--a-ink); }
+.tm-state b { font-weight: 650; }
+.tm-state em { font-style: normal; color: var(--a-muted); }
+.tm-path { display: flex; gap: 4px; margin: 2px 0 0; padding: 0; list-style: none; overflow-x: auto; }
+.tm-path li { flex: 1 1 0; min-width: 96px; }
+.tm-path li > * {
+  display: block; width: 100%; padding: 6px 8px 5px; border: 0; border-top: 3px solid var(--a-surface2); border-radius: 2px;
+  background: transparent; color: var(--a-muted); font: inherit; font-size: 11.5px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tm-path li b { margin-right: 4px; font-variant-numeric: tabular-nums; }
+.tm-path li.done > * { border-top-color: var(--a-teal); color: var(--a-teal-text); }
+.tm-path li.now > * { border-top-color: var(--a-warn); color: var(--a-ink); font-weight: 600; }
+.tm-path li.here > * { background: var(--a-surface); box-shadow: inset 0 0 0 1px var(--a-border); }
+.tm-path li button { cursor: pointer; }
+.tm-path li button:hover { color: var(--a-ink); background: var(--a-hover); }
+.tm-path li button:focus-visible { outline: 2px solid var(--a-teal); outline-offset: -2px; }
+@media (max-width: 640px) { .tm-context { padding: 10px 14px 12px; } }

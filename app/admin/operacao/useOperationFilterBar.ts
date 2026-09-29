@@ -54,16 +54,33 @@ export function useOperationFilterBar(allItems: readonly OperationItem[], today:
       .then((data: { types?: TaskTypeDef[] } | null) => setCatalogTypes(data?.types ?? [])).catch(() => {});
   }, []);
 
-  // `?situacao=` vem de um link (ex.: "precisam de atenção") — contexto da
-  // navegação, não preferência guardada.
+  // Filtros vindos de um link (Home → Operação, "precisam de atenção"): a URL
+  // define o recorte daquela visita e NÃO é gravada como preferência. Sem
+  // parâmetro de filtro, vale o que a pessoa deixou salvo.
   useEffect(() => {
+    const fromUrl: OperationFilter[] = [];
+    const statuses = (searchParams.get("status") ?? "").split(",").filter(Boolean);
+    for (const value of statuses) {
+      const column = COLUMNS.find((entry) => entry.status === value);
+      if (column) fromUrl.push({ attr: "status", value, label: column.label });
+    }
     const situacao = searchParams.get("situacao");
-    setFilters((current) => {
-      const withoutSituation = current.filter((filter) => filter.attr !== "situacao");
-      return situacao && SITUATION_LABEL[situacao]
-        ? [...withoutSituation, { attr: "situacao", value: situacao, label: SITUATION_LABEL[situacao] }]
-        : withoutSituation;
-    });
+    if (situacao && SITUATION_LABEL[situacao]) fromUrl.push({ attr: "situacao", value: situacao, label: SITUATION_LABEL[situacao] });
+    for (const value of (searchParams.get("tipo") ?? "").split(",").filter(Boolean)) {
+      fromUrl.push({ attr: "tipo", value, label: TYPE_LABEL[value] ?? value });
+    }
+    const cliente = searchParams.get("cliente");
+    if (cliente) fromUrl.push({ attr: "cliente", value: cliente, label: cliente });
+    const responsavel = searchParams.get("responsavel");
+    if (responsavel) fromUrl.push({ attr: "responsavel", value: responsavel, label: responsavel });
+    const prioridade = searchParams.get("prioridade");
+    if (prioridade && PRIORITY_LABEL[prioridade as keyof typeof PRIORITY_LABEL]) {
+      fromUrl.push({ attr: "prioridade", value: prioridade, label: PRIORITY_LABEL[prioridade as keyof typeof PRIORITY_LABEL] });
+    }
+    if (!fromUrl.length) return;
+    // Sem status no link, vale o padrão (tudo menos concluído).
+    const withStatus = statuses.length ? fromUrl : [...DEFAULT_OPERATION_FILTERS, ...fromUrl];
+    setFilters(withStatus, false);
   // setFilters é um closure novo a cada render, mas escreve sempre o mesmo estado.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);

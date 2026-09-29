@@ -18,6 +18,7 @@ import NewTaskButton from "../NewTaskButton";
 import WeekCalendar from "./WeekCalendar";
 import ClientPulse from "./ClientPulse";
 import { dueWording } from "../operacao/operationItems";
+import { operacaoHref } from "../operacao/operacaoLinks";
 
 // A Home é um painel OPERACIONAL pessoal (dashboard-designer): quem abre é uma
 // pessoa da equipe, todo dia, e a decisão que ela toma aqui é "o que eu resolvo
@@ -32,7 +33,7 @@ import { dueWording } from "../operacao/operationItems";
 // Nenhuma lista rola por dentro: cada uma mostra os primeiros e leva ao quadro
 // já filtrado para o resto. Vermelho só onde há atraso de verdade.
 
-const RESOLVE_LIMIT = 6;
+const RESOLVE_LIMIT = 8;
 const MENTIONS_LIMIT = 4;
 const ROUTINES_LIMIT = 5;
 
@@ -113,115 +114,86 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
   ].filter(Boolean);
   const headline = pending.length ? `Você tem ${joinPt(pending)}.` : "Nada atrasado, parado ou esperando resposta com você.";
 
-  const kpis = [
-    {
-      key: "atrasadas",
-      label: "Minhas atrasadas",
-      value: counts.atrasadas,
-      sub: `de ${summary.overdueTasks} na agência`,
-      href: "/admin/operacao?situacao=atrasada",
-      tone: counts.atrasadas ? "red" : "",
-    },
-    {
-      key: "paradas",
-      label: "Minhas paradas",
-      value: counts.paradas,
-      sub: counts.paradas ? "destravar primeiro" : "nenhuma travada",
-      href: "/admin/operacao?situacao=parada",
-      tone: counts.paradas ? "gold" : "",
-    },
-    {
-      key: "mencoes",
-      label: "Aguardando minha resposta",
-      value: focus.mentionsTotal,
-      sub: focus.mentionsTotal ? "menções sem resposta" : "nenhuma menção pendente",
-      href: "#home-mentions",
-      tone: focus.mentionsTotal ? "teal" : "",
-    },
-    {
-      key: "semana",
-      label: "Minhas entregas na semana",
-      value: counts.week,
-      sub: counts.today ? `${plural(counts.today, "vence", "vencem")} hoje` : "próximos 7 dias",
-      href: "/admin/operacao",
-      tone: "",
-    },
+  // A Home responde UMA pergunta: "o que eu preciso fazer?" (29/09). Cada
+  // resposta é um botão que abre a Operação já filtrada no recorte que
+  // resolve — a pessoa não precisa montar o filtro. Pessoal primeiro, depois o
+  // que é da agência; zero aparece apagado, para dizer "isso está em dia".
+  const me = firstName;
+  const actions: { key: string; value: number; label: string; sub: string; href: string; filter: string; tone: "late" | "warn" | "ok" | "info" }[] = [
+    { key: "atrasadas", value: counts.atrasadas, label: counts.atrasadas === 1 ? "Resolver 1 atrasada" : `Resolver ${counts.atrasadas} atrasadas`, sub: "na Operação, dentro dos planos e entregas de que fazem parte", href: operacaoHref({ responsavel: me, situacao: "atrasada", agrupar: "cliente" }), filter: `${me || "Você"} · Atrasada · por cliente`, tone: "late" },
+    { key: "paradas", value: counts.paradas, label: counts.paradas === 1 ? "Destravar 1 parada" : `Destravar ${counts.paradas} paradas`, sub: "esperando algo para andar", href: operacaoHref({ responsavel: me, situacao: "parada" }), filter: `${me || "Você"} · Parada`, tone: "warn" },
+    { key: "semana", value: counts.week, label: counts.week === 1 ? "Entregar 1 esta semana" : `Entregar ${counts.week} esta semana`, sub: counts.today ? `${plural(counts.today, "vence", "vencem")} hoje` : "próximos 7 dias", href: operacaoHref({ responsavel: me, agrupar: "prazo" }), filter: `${me || "Você"} · por prazo`, tone: "info" },
+    { key: "mencoes", value: focus.mentionsTotal, label: focus.mentionsTotal === 1 ? "Responder 1 menção" : `Responder ${focus.mentionsTotal} menções`, sub: "alguém escreveu @" + (me || "você"), href: "#home-mentions", filter: "logo abaixo", tone: "info" },
+    { key: "revisao", value: summary.reviewQueueCount, label: `Revisar ${summary.reviewQueueCount}`, sub: "cards da agência em Revisão", href: operacaoHref({ status: ["revisao"], agrupar: "cliente" }), filter: "Status: Revisão · por cliente", tone: "info" },
+    { key: "aprovacao", value: summary.approvalQueueCount, label: `Acompanhar ${summary.approvalQueueCount} com o cliente`, sub: "esperando aprovação do cliente", href: operacaoHref({ status: ["aprovacao"], agrupar: "cliente" }), filter: "Status: Aprovação · por cliente", tone: "info" },
+    { key: "rotinas", value: focus.routines.length, label: focus.routines.length === 1 ? "Cuidar de 1 rotina" : `Cuidar de ${focus.routines.length} rotinas`, sub: "suas rotinas desta semana", href: operacaoHref({ responsavel: me, tipo: ["rotina"] }), filter: `${me || "Você"} · Rotina`, tone: "ok" },
+    { key: "agencia", value: summary.overdueTasks, label: `${summary.overdueTasks} atrasadas na agência`, sub: "de toda a equipe, por responsável", href: operacaoHref({ situacao: "atrasada", agrupar: "responsavel" }), filter: "Atrasada · por responsável", tone: "late" },
   ];
 
   const resolveRows = focus.attention.slice(0, RESOLVE_LIMIT);
   const hiddenResolve = needsAction - resolveRows.length;
 
   return (
-    <section className="admin-page home-page">
-      <header className="admin-head">
+    <section className="admin-page kb-wide home-page home-v2">
+      <header className="home-hero-v2">
         <div>
-          <h1 className="serif admin-title">
-            {greeting()}
-            {firstName ? `, ${firstName}` : ""}
-          </h1>
-          <p className="admin-sub">
-            {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })} · <b className="home-headline">{headline}</b>
-          </p>
+          <p className="home-eyebrow-v2">{new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })} · {greeting()}{firstName ? `, ${firstName}` : ""}</p>
+          <h1 className="serif home-question">O que eu preciso fazer hoje?</h1>
+          <p className="home-answer">{headline}</p>
         </div>
         <div className="admin-head-actions">
           <NewTaskButton />
         </div>
       </header>
 
-      <div className="home-kpis home-kpis-4">
-        {kpis.map((k) => (
-          <Link className={`home-kpi${k.tone ? ` is-${k.tone}` : ""}`} href={k.href} key={k.key}>
-            <span className="home-kpi-label">{k.label}</span>
-            <strong className={`home-kpi-value${k.tone ? ` t-${k.tone}` : ""}`}>{k.value}</strong>
-            <span className="home-kpi-sub">{k.sub}</span>
+      <nav className="home-actions" aria-label="O que fazer agora">
+        {actions.map((action) => (
+          <Link key={action.key} href={action.href} className={`home-action tone-${action.tone}${action.value ? "" : " is-zero"}`}>
+            <span className="home-action-top">
+              <strong className="home-action-value">{action.value}</strong>
+              <span className="home-action-go" aria-hidden>→</span>
+            </span>
+            <span className="home-action-label">{action.value ? action.label : action.label.replace(/\d+ /, "0 ")}</span>
+            <span className="home-action-sub">{action.sub}</span>
+            <span className="home-action-filter">{action.href.startsWith("#") ? action.filter : `Abre a Operação · ${action.filter}`}</span>
           </Link>
         ))}
-      </div>
+      </nav>
 
-      <p className="home-agency">
-        Agência hoje: <b>{summary.overdueTasks}</b> atrasadas · <b>{summary.weekAheadCount}</b> entregas na semana ·
-        planos em <b>{summary.actionPlansAvgProgress}%</b> ({summary.actionPlansInProgress} em andamento)
-        {summary.reviewQueueCount + summary.approvalQueueCount > 0
-          ? <> · <Link href="/admin/revisoes">{summary.reviewQueueCount + summary.approvalQueueCount} em revisão/aprovação</Link></>
-          : null}
-      </p>
-
-      <div className="home-main">
+      <div className="home-board">
         <div className="admin-card home-resolve">
           <div className="home-card-head">
             <p className="admin-card-title">
               {needsAction ? `Resolver primeiro · ${plural(needsAction, "tarefa sua", "tarefas suas")}` : "Nada seu atrasado ou parado"}
             </p>
-            {needsAction ? <Link className="admin-btn ghost" href="/admin/operacao?situacao=atrasada">Ver no quadro →</Link> : null}
+            {needsAction ? <Link className="admin-btn ghost" href={operacaoHref({ responsavel: me, situacao: "atrasada", agrupar: "cliente" })}>Ver todas →</Link> : null}
           </div>
           {resolveRows.length ? (
             <ul className="home-focus-list">
-              {resolveRows.map((t) => {
-                return (
-                  <li key={t.id}>
-                    <button type="button" className={`home-focus-row is-${t.situation}`} onClick={() => void openCard(t)} disabled={openingId === t.id}>
-                      <span className={`op-dot tone-${t.situation === "parada" ? "warn" : "late"}`} aria-hidden />
-                      <span className="home-focus-main">
-                        <strong>{t.title}</strong>
-                        <em>
-                          {t.clientName} · {t.situation === "parada" ? "Parada" : STATUS_LABEL[t.status]}
-                          {t.dueDate ? ` · ${t.situation === "atrasada" ? dueWording(t.dueDate, todayIso).text : formatShortDate(t.dueDate)}` : ""}
-                        </em>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
+              {resolveRows.map((t) => (
+                <li key={t.id}>
+                  <button type="button" className={`home-focus-row is-${t.situation}`} onClick={() => void openCard(t)} disabled={openingId === t.id}>
+                    <span className={`op-dot tone-${t.situation === "parada" ? "warn" : "late"}`} aria-hidden />
+                    <span className="home-focus-main">
+                      <strong>{t.title}</strong>
+                      <em>
+                        {t.clientName} · {t.situation === "parada" ? "Parada" : STATUS_LABEL[t.status]}
+                        {t.dueDate ? ` · ${t.situation === "atrasada" ? dueWording(t.dueDate, todayIso).text : formatShortDate(t.dueDate)}` : ""}
+                      </em>
+                    </span>
+                  </button>
+                </li>
+              ))}
             </ul>
           ) : (
             <p className="admin-hint">Tudo em dia com você. As tarefas atrasadas ou paradas em que você é responsável aparecem aqui.</p>
           )}
           {hiddenResolve > 0 ? (
-            <Link className="home-card-more" href="/admin/operacao?situacao=atrasada">+ {plural(hiddenResolve, "outra", "outras")} no quadro →</Link>
+            <Link className="home-card-more" href={operacaoHref({ responsavel: me, situacao: "atrasada" })}>+ {plural(hiddenResolve, "outra", "outras")} na Operação →</Link>
           ) : null}
         </div>
 
-        <div className="home-side">
+        <div className="home-stack">
           <div className="admin-card" id="home-mentions">
             <div className="home-card-head">
               <p className="admin-card-title">Aguardando sua resposta</p>
@@ -254,7 +226,7 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
             <div className="admin-card">
               <div className="home-card-head">
                 <p className="admin-card-title">Suas rotinas da semana</p>
-                <Link className="admin-btn ghost" href="/admin/operacao">Rotinas →</Link>
+                <Link className="admin-btn ghost" href={operacaoHref({ responsavel: me, tipo: ["rotina"] })}>Rotinas →</Link>
               </div>
               <ul className="home-focus-list">
                 {focus.routines.slice(0, ROUTINES_LIMIT).map((r) => {
@@ -275,73 +247,58 @@ export default function AdminHome({ summary, focus, userName }: { summary: Admin
             </div>
           ) : null}
         </div>
-      </div>
 
-      <ClientPulse today={todayIso} onOpen={(item) => void openCard(item)} />
-
-      <div className="home-cols">
-        {/* O calendário precisa da largura toda; a lista cabe numa coluna, mas
-            só divide a linha quando o painel de notificações existe — sem ele,
-            a metade direita ficava vazia. */}
-        <div className={`admin-card${weekView === "calendario" || unread === 0 ? " home-card-wide" : ""}`}>
-          <div className="home-card-head">
-            <p className="admin-card-title">Esta semana na agência · {summary.weekAheadCount}</p>
-            <button
-              type="button"
-              className="admin-btn ghost"
-              aria-pressed={weekView === "calendario"}
-              onClick={() => setWeekView((v) => (v === "lista" ? "calendario" : "lista"))}
-            >
-              {weekView === "lista" ? "Ver calendário" : "Ver lista"}
-            </button>
-          </div>
-          {weekView === "calendario" ? (
-            <WeekCalendar items={summary.weekAhead} />
-          ) : summary.weekAhead.length === 0 ? (
-            <p className="admin-hint">Nenhum prazo nos próximos sete dias.</p>
-          ) : (
-            <ul className="home-list">
-              {summary.weekAhead.slice(0, 6).map((t) => {
-                const d = shortDate(t.dueDate);
-                return (
-                  <li key={t.id}>
-                    <button
-                      type="button"
-                      className="home-list-open"
-                      onClick={() => void openCard(t)}
-                      disabled={openingId === t.id}
-                      aria-label={`Abrir card ${t.title}`}
-                    >
-                      <span className="home-date">
-                        <strong>{d.day}</strong>
-                        <em>{d.month}</em>
-                      </span>
-                      <span className="home-list-main">
-                        <strong>{t.title}</strong>
-                        <span className="admin-hint">{t.clientName}</span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-        {/* O painel não existe quando não há nada pendente — um card fixo
-            dizendo "nenhuma notificação" só ocupava a coluna. */}
-        {unread > 0 ? (
+        <div className="home-stack">
           <div className="admin-card">
             <div className="home-card-head">
-              <p className="admin-card-title">Notificações</p>
-              <span className="admin-pill on">{unread} novas</span>
-              <Link className="admin-btn ghost" href="/admin/notificacoes">Ver todas →</Link>
+              <p className="admin-card-title">Esta semana na agência · {summary.weekAheadCount}</p>
+              <button
+                type="button"
+                className="admin-btn ghost"
+                aria-pressed={weekView === "calendario"}
+                onClick={() => setWeekView((v) => (v === "lista" ? "calendario" : "lista"))}
+              >
+                {weekView === "lista" ? "Calendário" : "Lista"}
+              </button>
             </div>
-            <div className="home-notifs">
-              <NotificationsList notifications={notifications.filter((n) => !n.read_at).slice(0, 8)} />
-            </div>
+            {weekView === "calendario" ? (
+              <WeekCalendar items={summary.weekAhead} />
+            ) : summary.weekAhead.length === 0 ? (
+              <p className="admin-hint">Nenhum prazo nos próximos sete dias.</p>
+            ) : (
+              <ul className="home-list">
+                {summary.weekAhead.slice(0, 8).map((t) => {
+                  const d = shortDate(t.dueDate);
+                  return (
+                    <li key={t.id}>
+                      <button type="button" className="home-list-open" onClick={() => void openCard(t)} disabled={openingId === t.id} aria-label={`Abrir card ${t.title}`}>
+                        <span className="home-date"><strong>{d.day}</strong><em>{d.month}</em></span>
+                        <span className="home-list-main"><strong>{t.title}</strong><span className="admin-hint">{t.clientName}</span></span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {summary.weekAheadCount > 8 ? <Link className="home-card-more" href={operacaoHref({ agrupar: "prazo" })}>Ver a semana inteira na Operação →</Link> : null}
           </div>
-        ) : null}
+          {unread > 0 ? (
+            <div className="admin-card">
+              <div className="home-card-head">
+                <p className="admin-card-title">Notificações</p>
+                <span className="admin-pill on">{unread} novas</span>
+                <Link className="admin-btn ghost" href="/admin/notificacoes">Todas →</Link>
+              </div>
+              <div className="home-notifs">
+                <NotificationsList notifications={notifications.filter((n) => !n.read_at).slice(0, 5)} />
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
+
+      {/* O pulso é contexto da agência, não tarefa sua: fecha a página. */}
+      <ClientPulse today={todayIso} onOpen={(item) => void openCard(item)} />
 
       <p className="home-updated">Atualizado às {new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} · recarregue a página para atualizar os números.</p>
 

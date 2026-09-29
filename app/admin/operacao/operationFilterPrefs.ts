@@ -34,9 +34,12 @@ export function useOperationFilters() {
 
   useEffect(() => { setFiltersState(read()); }, []);
 
-  function setFilters(next: OperationFilter[] | ((current: OperationFilter[]) => OperationFilter[])) {
+  /** `persist: false` para filtros que vêm de um link (Home → Operação): são
+   *  contexto daquela visita, não a preferência da pessoa. */
+  function setFilters(next: OperationFilter[] | ((current: OperationFilter[]) => OperationFilter[]), persist = true) {
     setFiltersState((current) => {
       const value = typeof next === "function" ? next(current) : next;
+      if (!persist) return value;
       try {
         // `situacao` vem do link (?situacao=) — é contexto da navegação, não
         // preferência da pessoa, e não pode ficar grudado para a próxima visita.

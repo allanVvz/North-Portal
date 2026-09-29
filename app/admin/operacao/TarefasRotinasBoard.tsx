@@ -136,6 +136,14 @@ export default function TarefasRotinasBoard({ clients, assignees, initialRoutine
   const [flowSummary, setFlowSummary] = useState({ anyRevisaoAdmin: false, anyAprovacaoAdmin: false });
   const [view, setView] = useState<View>("quadro");
   const [groupBy, setGroupBy] = useState<GroupBy>("responsavel");
+  // Um link pode escolher a visão e o agrupamento (Home → "o que vence esta
+  // semana" abre agrupado por prazo).
+  useEffect(() => {
+    const agrupar = searchParams.get("agrupar");
+    if (agrupar && GROUPS.some((group) => group.key === agrupar)) setGroupBy(agrupar as GroupBy);
+    const visao = searchParams.get("visao");
+    if (visao === "quadro" || visao === "lista" || visao === "calendario") setView(visao);
+  }, [searchParams]);
   const [query, setQuery] = useState("");
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [selected, setSelected] = useState<Selected | null>(null);

@@ -176,4 +176,26 @@ describe("operation collection", () => {
       expect(operationState(encerrada, today).stage).toBe("Rotina encerrada");
     });
   });
+
+  // 29/09: o botão da Home "Resolver 10 atrasadas" abria a Operação com 1 card.
+  it("responsável acha o pai pela etapa aberta dele", () => {
+    const [entrega] = normalizeOperationItems([
+      task("e", { kind: "criativo", workflow_version_id: "wv", assignee: "Luiza" }),
+      task("ed", { parents: [{ id: "e", relation_kind: "workflow_step", slot: "s1", position: 10 }], assignee: "Allan, Cintia", status: "revisao" }),
+    ], []);
+    expect(operationMatchesFilters(entrega, [{ attr: "responsavel", value: "Allan", label: "Allan" }], "2026-09-29")).toBe(true);
+    expect(operationMatchesFilters(entrega, [{ attr: "responsavel", value: "allan ulisses", label: "Allan" }], "2026-09-29")).toBe(true);
+    expect(operationMatchesFilters(entrega, [{ attr: "responsavel", value: "Alisson", label: "Alisson" }], "2026-09-29")).toBe(false);
+  });
+
+  it("responsável e situação atravessam plano → entrega → etapa", () => {
+    const items = normalizeOperationItems([
+      task("plano", { kind: "plano_acao", assignee: "Luiza", due_date: "2026-10-30" }),
+      task("entrega", { kind: "criativo", workflow_version_id: "wv", parents: [{ id: "plano", relation_kind: "structural_member", slot: null, position: 1 }] }),
+      task("edicao", { parents: [{ id: "entrega", relation_kind: "workflow_step", slot: "s2", position: 20 }], assignee: "Allan", status: "revisao", due_date: "2026-09-23" }),
+    ], []);
+    expect(items.map((item) => item.id)).toEqual(["plano"]);
+    const filters = [{ attr: "responsavel", value: "Allan", label: "Allan" }, { attr: "situacao", value: "atrasada", label: "Atrasada" }] as const;
+    expect(operationMatchesFilters(items[0], filters, "2026-09-29")).toBe(true);
+  });
 });

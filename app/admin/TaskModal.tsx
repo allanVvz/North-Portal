@@ -49,6 +49,7 @@ import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, Task
 import { useTaskAutosave } from "./useTaskAutosave";
 import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
 import BackArrowIcon from "./BackArrowIcon";
+import ModalContext from "./ModalContext";
 import CommentActionsMenu from "./CommentActionsMenu";
 import CreativeDriveWorkspace from "./CreativeDriveWorkspace";
 
@@ -1869,6 +1870,9 @@ export default function TaskModal({
           </div>
         )}
 
+        {mode === "edit" && liveTask ? (
+          <ModalContext task={liveTask} clientName={draftClientName} clientTasks={clientTasks} today={agencyToday()} onOpen={onOpenRelatedTask ? (target) => void openRelatedTask(target) : undefined} />
+        ) : null}
         {error ? <p className="tm-error-banner" role="alert">{error}</p> : null}
         <div className="tm-layout">
           <div className="tm-main">
