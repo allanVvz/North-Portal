@@ -29,10 +29,8 @@ export type ParentRelationKind = "entrega" | "plano" | "recorrencia";
  */
 export function relevantParentRelationKinds(card: { isDelivery: boolean; isPlan: boolean }): ParentRelationKind[] {
   const kinds: ParentRelationKind[] = [];
-  if (!card.isPlan) {
-    if (!card.isDelivery) kinds.push("entrega");
-    kinds.push("plano");
-  }
+  if (!card.isPlan && !card.isDelivery) kinds.push("entrega");
+  kinds.push("plano");
   kinds.push("recorrencia");
   return kinds;
 }

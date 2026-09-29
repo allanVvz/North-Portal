@@ -124,6 +124,15 @@ async function advanceOneDelivery(
     return shared;
   }
 
+  if (next.key === "publicacao" && typeof delivery.payload?.prepared_publication_task_id === "string") {
+    const prepared = await getAdminTask(admin, delivery.payload.prepared_publication_task_id);
+    if (!prepared || prepared.client_id !== delivery.client_id || prepared.task_type_id !== next.task_type_id) {
+      throw new Error("Publicação individual preparada não pertence a esta Entrega.");
+    }
+    await linkStep(admin, delivery.id, prepared.id, next);
+    return prepared;
+  }
+
   const fields = flowStepFields(delivery, next, completedStep, today);
   const id = String(fields.id);
   const { data, error } = await admin.from("tasks").insert(fields).select(TASK_COLUMNS).limit(1);

@@ -21,13 +21,19 @@ export type StepRoleResult =
   | { kind: "revisor" }
   | { kind: "responsavel"; responsibility: ResponsibilityKey | null };
 
+export function reviewerIdsOf(step: { reviewer_id: string | null; payload?: Record<string, unknown> }): string[] {
+  const configured = step.payload?.reviewer_ids;
+  const ids = Array.isArray(configured) ? configured.filter((id): id is string => typeof id === "string") : [];
+  return [...new Set([...ids, ...(step.reviewer_id ? [step.reviewer_id] : [])])];
+}
+
 export function stepRoleOf(
-  step: Pick<TaskRecord, "reviewer_id" | "subtype">,
+  step: Pick<TaskRecord, "reviewer_id" | "subtype"> & { payload?: TaskRecord["payload"] },
   assigneeIds: ReadonlySet<string>,
   profileId: string | null,
 ): StepRoleResult | null {
   if (!profileId) return null;
-  if (step.reviewer_id === profileId) return { kind: "revisor" };
+  if (reviewerIdsOf(step).includes(profileId)) return { kind: "revisor" };
   if (assigneeIds.has(profileId)) return { kind: "responsavel", responsibility: responsibilityForSubtype(step.subtype) };
   return null;
 }

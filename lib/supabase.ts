@@ -2666,6 +2666,9 @@ export async function linkExistingRecurrenceExecution(templateId: string, taskId
   if (!template.recurrence_cadence) throw new HttpError(409, "Este card não é uma recorrência.");
   if (recurrenceStopped(template.status)) throw new HttpError(409, "Esta recorrência foi encerrada.");
   if (task.recurrence_cadence) throw new HttpError(400, "Este card já é o molde de outra recorrência.");
+  if (task.client_id !== template.client_id || task.kind !== template.kind) {
+    throw new HttpError(400, "A execução precisa ter o mesmo cliente e tipo da recorrência.");
+  }
 
   const cycle = recurrenceCycleOf(template);
   const supabase = await createClient();
@@ -2928,7 +2931,7 @@ async function selectApprovalRows(statuses: TaskStatus[]): Promise<ApprovalRow[]
  *  não pode "sumir" por causa de um único cliente) continue no menu. */
 export async function listReviewQueue(): Promise<ApprovalRecord[]> {
   const [rows, flagsMap] = await Promise.all([selectApprovalRows(["revisao"]), listAllClientFlowFlags()]);
-  return toApprovalRecords(rows).filter((r) => (r.client_id ? flagsMap.get(r.client_id)?.revisaoAdmin ?? true : true));
+  return toApprovalRecords(rows?.filter(visibleOnTaskBoard) ?? null).filter((r) => (r.client_id ? flagsMap.get(r.client_id)?.revisaoAdmin ?? true : true));
 }
 
 /** Tela Aprovações: cards nas colunas "Aprovação" e "Concluído" do Kanban. Mesmo

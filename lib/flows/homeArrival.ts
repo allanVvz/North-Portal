@@ -28,7 +28,7 @@ import { transitionTaskStatus } from "@/lib/automations/taskWrites";
 import { directFiles } from "@/lib/creativeDriveSync";
 import { isGoogleDriveConfigured } from "@/lib/googleDriveApi";
 import type { TaskRecord } from "@/lib/validation";
-import { recordStatusComment, resolveStepResponsible, stableCommentId, statusChangeText, stepLabelOf } from "./statusComments";
+import { recordStatusComment, stableCommentId, statusChangeText, stepLabelOf } from "./statusComments";
 
 /** A sessão de quem abriu o card: `set_delivery_stage_status` exige `is_admin()`,
  *  que lê o usuário logado — o cliente de serviço seria recusado. */
@@ -110,7 +110,7 @@ export async function applyEditHomeArrival(
   const target = changed && !perDelivery ? stage.id : input.creativeTaskId;
   await recordStatusComment(admin, {
     targetId: target,
-    authorId: await resolveStepResponsible(admin, stage),
+    authorId: null,
     text: editArrivalText(input.files, changed ? statusChangeText(stepLabelOf(stage), effective, "revisao", perDelivery) : null),
     commentId: stableCommentId("home-arrival", target, ...input.files.map((file) => file.id).sort()),
   });
@@ -129,7 +129,7 @@ export async function recordAudioToRaw(
   const head = input.files.length === 1 ? "Áudio guardado nos brutos" : `${input.files.length} áudios guardados nos brutos`;
   await recordStatusComment(admin, {
     targetId: input.creativeTaskId,
-    authorId: stage ? await resolveStepResponsible(admin, stage) : null,
+    authorId: null,
     text: `🎧 ${head} — áudio é material da edição, não final.\n${fileLinks(input.files)}`,
     commentId: stableCommentId("audio-to-raw", input.creativeTaskId, ...input.files.map((file) => file.id).sort()),
   });
@@ -215,7 +215,7 @@ export async function applyCaptureHomeArrivals(admin: AdminClient, captureWorksp
     const label = stepLabelOf(stage);
     await recordStatusComment(admin, {
       targetId: stage.id,
-      authorId: await resolveStepResponsible(admin, stage),
+      authorId: null,
       text: folderArrivalText(label, fresh, changed ? statusChangeText(label, stage.status, "revisao", false) : null),
       commentId: stableCommentId("home-arrival", stage.id, ...fresh.map((file) => file.id).sort()),
     });

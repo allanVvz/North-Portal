@@ -137,6 +137,16 @@ describe("taskProgress — membro que também é rollup parent (bug da 'rotina t
     expect(taskProgress(molde, [execucao], membersByParent)).toBe(50);
   });
 
+  it("encadeia ciclo North, plano do cliente, entrega e etapa", () => {
+    const ciclo = { id: "north-16", kind: "plano_acao", status: "backlog" as const, progress_weight: 1 };
+    const baita = { id: "baita", kind: "plano_acao", status: "backlog" as const, progress_weight: 1 };
+    const entrega = { id: "reel", kind: "criativo", status: "revisao" as const, progress_weight: 1, workflow_version_id: "workflow" };
+    const edicao = { id: "edit", kind: "operacional", status: "revisao" as const, progress_weight: 1 };
+    const tree = new Map([["north-16", [baita]], ["baita", [entrega]], ["reel", [edicao]]]);
+    expect(taskProgress(ciclo, [baita], tree)).toBeGreaterThan(0);
+    expect(taskProgress(ciclo, [baita], tree)).toBeLessThan(100);
+  });
+
   // Segunda camada do mesmo bug: uma execução SEM nenhuma atividade própria
   // (o caso comum de "REUNIÃO ROTINA" — a pessoa só marca o status, não cria
   // sub-tarefas) tinha o rollup sempre devolvendo 0, mesmo com status

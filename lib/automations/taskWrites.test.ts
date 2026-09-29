@@ -277,15 +277,15 @@ describe("replaceAutomaticReportAttachment — um anexo automático por card", (
 // no banco como "Automação" — se deixassem de ser reconhecidos, viravam
 // instrução de revisão humana na próxima geração.
 describe("isAutomationAuthor — nome atual e legado", () => {
-  it("o autor atual é o mesmo nome do responsável nos cards", async () => {
-    const { AUTOMATION_AUTHOR, AUTOMATION_ASSIGNEE } = await import("./taskAccess");
-    expect(AUTOMATION_AUTHOR).toBe("North Ai");
-    expect(AUTOMATION_AUTHOR).toBe(AUTOMATION_ASSIGNEE);
+  it("o autor automático usa a assinatura North AI", async () => {
+    const { AUTOMATION_AUTHOR } = await import("./taskAccess");
+    expect(AUTOMATION_AUTHOR).toBe("North AI");
   });
 
   it("reconhece o nome atual e o legado; pessoa nunca", async () => {
     const { isAutomationAuthor } = await import("./taskAccess");
     expect(isAutomationAuthor("North Ai")).toBe(true);
+    expect(isAutomationAuthor("North AI")).toBe(true);
     expect(isAutomationAuthor("Automação")).toBe(true);
     expect(isAutomationAuthor("Luiza")).toBe(false);
     expect(isAutomationAuthor("")).toBe(false);
@@ -296,7 +296,7 @@ describe("isAutomationAuthor — nome atual e legado", () => {
     const db = world();
     await updateTaskPayload(db as never, "step", { text: "relatório pronto", commentId: "x:1" });
     const comments = (db.task("step")!.payload as Row).comments as Row[];
-    expect(comments.at(-1)?.author).toBe("North Ai");
+    expect(comments.at(-1)?.author).toBe("North AI");
   });
 });
 
@@ -329,7 +329,7 @@ describe("replaceAutomaticReportAttachment — lugar certo na timeline", () => {
     });
     expect(thread(db)).toEqual([
       "Luiza@2026-09-22T19:20",
-      "North Ai@2026-09-22T19:20",
+      "North AI@2026-09-22T19:20",
       "Luiza@2026-09-23T12:00",
     ]);
   });
@@ -341,7 +341,7 @@ describe("replaceAutomaticReportAttachment — lugar certo na timeline", () => {
       reportKind: "conversion", text: "v21: [y.pdf](http://x/2)", commentId: "conversion-report:conv:c",
     });
     const t = thread(db);
-    expect(t[t.length - 1]).toMatch(/^North Ai@/);
+    expect(t[t.length - 1]).toMatch(/^North AI@/);
     expect(t).toHaveLength(3);
   });
 });

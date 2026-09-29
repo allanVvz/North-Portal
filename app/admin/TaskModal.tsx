@@ -62,6 +62,7 @@ type Draft = {
   assignee: string;
   assignee_profile_ids: string[];
   reviewer_id: string;
+  reviewer_ids: string[];
   approver_id: string;
   plan_id: string;
   due_date: string;
@@ -120,6 +121,7 @@ function draftFrom(
     assignee: task?.assignee ?? initialAssignee ?? "",
     assignee_profile_ids: task?.assignee_profile_ids ?? [],
     reviewer_id: task?.reviewer_id ?? "",
+    reviewer_ids: Array.isArray(p.reviewer_ids) ? p.reviewer_ids.filter((id): id is string => typeof id === "string") : task?.reviewer_id ? [task.reviewer_id] : [],
     approver_id: task?.approver_id ?? "",
     // O elo SEM slot. `parents[0]` era cego a slot e a consulta não tem
     // ORDER BY: numa etapa que também é membro de plano, "o primeiro pai"
@@ -352,6 +354,9 @@ export default function TaskModal({
     ? deliveryType.workflowSteps.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
     : -1;
   const [comment, setComment] = useState("");
+  const [commentDestination, setCommentDestination] = useState("");
+  const [feedbackDecision, setFeedbackDecision] = useState<"" | "aprovar" | "ajustes" | "revisao">("");
+  useEffect(() => { setCommentDestination(""); setFeedbackDecision(""); }, [liveTask?.id]);
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
   const [materialSyncWarning, setMaterialSyncWarning] = useState("");
@@ -453,7 +458,8 @@ export default function TaskModal({
   // Preserve the loaded card while client flow flags are still in flight.
   // Treating "not loaded" as "disabled" caused a PATCH on simply opening a
   // card with a reviewer once the flags arrived.
-  const effectiveReviewerId = flowFlags === null ? draft.reviewer_id || null : revisaoOff ? null : draft.reviewer_id || null;
+  const selectedReviewers = draft.subtype === "edicao" ? draft.reviewer_ids : draft.reviewer_id ? [draft.reviewer_id] : [];
+  const effectiveReviewerId = flowFlags === null ? selectedReviewers[0] ?? null : revisaoOff ? null : selectedReviewers[0] ?? null;
   const effectiveApproverId = flowFlags === null ? draft.approver_id || null : aprovacaoOff ? null : draft.approver_id || null;
   // Revisão e Aprovação são as únicas etapas que somem, e por CLIENTE, não por
   // tipo: são contrato de cliente, não modelo de card. O recorte por tipo que
@@ -491,7 +497,7 @@ export default function TaskModal({
       description: draft.description.trim() || null,
       client_visible: planoVisibilityOn ? draft.client_visible : false,
       slug: draft.clientSlug || null,
-      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
+      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null, ...(draft.subtype === "edicao" ? { reviewer_ids: revisaoOff ? [] : draft.reviewer_ids } : {}) },
     };
   }, [draft, effectiveApproverId, effectiveReviewerId, isDelivery, isRecurringParent, kd.isPlan, chainDelivery?.id, liveTask?.id, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
   const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
@@ -782,6 +788,24 @@ export default function TaskModal({
   const planMembers = liveTask
     ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
+  const planCommentTargets = useMemo(() => {
+    if (!liveTask || liveTask.kind !== "plano_acao" || isRecurringParent) return [];
+    const options: { id: string; label: string }[] = [];
+    const seen = new Set<string>();
+    const visit = (card: TaskRecord, path: string, depth: number) => {
+      if (seen.has(card.id) || depth > 5) return;
+      seen.add(card.id);
+      const label = path ? `${path} → ${card.title}` : card.title;
+      if (card.kind === "plano_acao") {
+        actionPlanMembersOf(card.id, clientTasks).forEach((child) => visit(child, label, depth + 1));
+      } else {
+        options.push({ id: card.id, label });
+        if (isFlowDelivery(card)) flowStepsOf(card.id, clientTasks).forEach((step) => visit(step, label, depth + 1));
+      }
+    };
+    planMembers.forEach((member) => visit(member, "", 0));
+    return options;
+  }, [liveTask, isRecurringParent, planMembers, clientTasks]);
   const flowSteps = liveTask && isDelivery ? flowStepsOf(liveTask.id, clientTasks) : [];
   // Sem isto, um membro que é ele mesmo um pai (a ocorrência de uma
   // recorrência de Plano, ex. "REUNIÃO ROTINA - ALLAN" — herda o `kind`
@@ -817,7 +841,6 @@ export default function TaskModal({
     ? `${effectiveParentMembers.filter((m) => m.status === "aprovado").length} de ${effectiveParentMembers.length}`
     : null;
   const canCrossClientPlan = Boolean(liveTask && kd.isPlan && draft.clientSlug === "north");
-  const canCrossClientRecurrence = Boolean(liveTask && isRecurringParent && draft.clientSlug === "north");
   // Um Plano da ADM North pode reunir card de QUALQUER cliente (permissão já
   // aplicada no servidor — POST /relations e o PATCH de plan_id), mas
   // `clientTasks` é só o que a TELA que abriu o modal já carregou, que nunca
@@ -831,7 +854,7 @@ export default function TaskModal({
   useEffect(() => {
     if (!canCrossClientPlan) { setCrossClientPool([]); return; }
     let cancelled = false;
-    fetch(`/api/admin/tasks${slug ? `?slug=${encodeURIComponent(slug)}` : ""}`)
+    fetch("/api/admin/tasks")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { tasks: TaskRecord[] } | null) => { if (!cancelled && data?.tasks) setCrossClientPool(data.tasks); })
       .catch(() => {});
@@ -848,7 +871,10 @@ export default function TaskModal({
     // OUTRO plano também não — um card pode ser membro de vários Planos de
     // Ação ao mesmo tempo. O que continua impedido é oferecer de novo um card
     // que já é membro DESTE plano especificamente.
-    ? linkCandidatePool.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && (canCrossClientPlan || t.client_id === liveTask.client_id))
+    ? linkCandidatePool.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence
+        && (!kindDef(t.kind).isPlan || canCrossClientPlan)
+        && !planParentIdsOf(t).includes(liveTask.id)
+        && (canCrossClientPlan || t.client_id === liveTask.client_id))
     : [];
   // Candidatos a "vincular como execução" de um molde de recorrência: mesmo
   // cliente, não pode ser molde de nenhuma recorrência nem já ser execução de
@@ -858,7 +884,7 @@ export default function TaskModal({
   // só ordena o mesmo tipo primeiro, não trava — pedido explícito: precisa
   // aceitar vincular uma Entrega).
   const recurrenceLinkCandidates = liveTask && isRecurringParent
-    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && (canCrossClientRecurrence || t.client_id === liveTask.client_id) && t.kind === liveTask.kind)
+    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && t.client_id === liveTask.client_id && t.kind === liveTask.kind)
     : [];
   // As etapas são lidas para o próprio card Entrega e para compor o resumo
   // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
@@ -1408,15 +1434,23 @@ export default function TaskModal({
   async function sendComment() {
     if (!liveTask || !comment.trim()) return;
     const text = comment.trim();
-    const stageTaskId = commentStep?.id ?? null;
+    const submittedDecision = feedbackDecision;
+    const stageTaskId = commentStep?.id ?? (liveTask.kind === "plano_acao" && commentDestination !== "plan" ? commentDestination : null);
+    if (liveTask.kind === "plano_acao" && planCommentTargets.length && !stageTaskId && commentDestination !== "plan") {
+      setError("Escolha a peça ou etapa, ou marque uma nota sobre o plano.");
+      return;
+    }
     setComment("");
+    setFeedbackDecision("");
     try {
       const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
           comment_id: commentIds.idFor(liveTask.id, text),
-          ...(stageTaskId && commentAssetIds.length === 0 ? { stage_task_id: stageTaskId } : {}),
+          ...(submittedDecision ? { feedback_decision: submittedDecision } : {}),
+          ...(stageTaskId ? { stage_task_id: stageTaskId } : {}),
+          ...(commentDestination === "plan" ? { plan_note: true } : {}),
           ...(commentAssetIds.length ? { asset_ids: commentAssetIds } : {}),
         }),
       });
@@ -1433,7 +1467,7 @@ export default function TaskModal({
       // comentava, porque `updated` passava a ser o card errado.
       if (updated.id === liveTask.id) setLiveTask(updated);
       onTaskPatched?.(updated);
-    } catch (e) { setComment(text); setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
+    } catch (e) { setComment(text); setFeedbackDecision(submittedDecision); setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
   }
 
   async function completeCycle(retried = false, cycleTask = liveTask): Promise<void> {
@@ -1505,6 +1539,7 @@ export default function TaskModal({
     if (!isCreativeDeliveryKind(draft.kind)) strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
+    if (draft.subtype === "edicao") payload.reviewer_ids = revisaoOff ? [] : draft.reviewer_ids;
     delete payload.explicit_occurrence_dates;
 
     // Agendamento: fold date + time into a single timestamp for the calendar.
@@ -1925,11 +1960,24 @@ export default function TaskModal({
 
               {/* Revisor (admin, etapa de Revisão) — só aparece com a etapa
                   ligada em Configurações › Etapas. "Sem revisor" pula a etapa. */}
-              <Cell icon="✓" label="Revisor" hidden={revisaoOff}>
-                <select value={draft.reviewer_id} onChange={(e) => set("reviewer_id", e.target.value)}>
-                  <option value="">— Sem revisor —</option>
-                  {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-                </select>
+              <Cell icon="✓" label={draft.subtype === "edicao" ? "Revisores da Edição" : "Revisor"} hidden={revisaoOff}>
+                {draft.subtype === "edicao" ? (
+                  <div className="tm-reviewer-list">
+                    {adminReviewers.map((reviewer) => <label key={reviewer.id}>
+                      <input type="checkbox" checked={draft.reviewer_ids.includes(reviewer.id)} onChange={(event) => setDraft((current) => ({
+                        ...current,
+                        reviewer_ids: event.target.checked
+                          ? [...current.reviewer_ids, reviewer.id]
+                          : current.reviewer_ids.filter((id) => id !== reviewer.id),
+                      }))} /> {reviewer.label}
+                    </label>)}
+                  </div>
+                ) : (
+                  <select value={draft.reviewer_id} onChange={(e) => set("reviewer_id", e.target.value)}>
+                    <option value="">— Sem revisor —</option>
+                    {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                  </select>
+                )}
               </Cell>
 
               {/* Aprovador (cliente, etapa de Aprovação) — mesma regra. */}
@@ -2349,6 +2397,25 @@ export default function TaskModal({
                   {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
                 </div>
                 <div className="tm-comment-input">
+                  {liveTask?.kind === "plano_acao" && !isRecurringParent && planCommentTargets.length > 0 ? (
+                    <label className="tm-feedback-decision">
+                      Destino do comentário
+                      <select value={commentDestination} onChange={(event) => setCommentDestination(event.target.value)}>
+                        <option value="">Escolha a peça ou etapa…</option>
+                        {planCommentTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
+                        <option value="plan">Nota sobre o plano ou reunião</option>
+                      </select>
+                    </label>
+                  ) : null}
+                  {(liveTask?.subtype === "edicao" || commentStep?.subtype === "edicao" || clientTasks.find((card) => card.id === commentDestination)?.subtype === "edicao") ? <label className="tm-feedback-decision">
+                    Decisão
+                    <select value={feedbackDecision} onChange={(event) => setFeedbackDecision(event.target.value as typeof feedbackDecision)}>
+                      <option value="">North AI interpreta o comentário</option>
+                      <option value="aprovar">Aprovar</option>
+                      <option value="ajustes">Pedir ajustes</option>
+                      <option value="revisao">Revisar manualmente</option>
+                    </select>
+                  </label> : null}
                   <HeadDropdown className="tm-comment-attach" trigger={<span aria-hidden>📎</span>}>
                     {commentDocs.length === 0 ? (
                       <p className="tm-member-search-empty">Nenhum documento para anexar.</p>
@@ -2366,7 +2433,7 @@ export default function TaskModal({
                     onSubmit={() => void sendComment()}
                     placeholder={commentStepLabel ? `Comentar em "${commentStepLabel}"… use @ para chamar alguém` : "Escrever comentário… use @ para chamar alguém"}
                   />
-                  <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim()}>Enviar</button>
+                  <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim() || (liveTask?.kind === "plano_acao" && planCommentTargets.length > 0 && !commentDestination)}>Enviar</button>
                 </div>
               </div>
             </div>

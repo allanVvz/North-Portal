@@ -2,6 +2,7 @@
 
 import type { TaskComment } from "@/lib/comments";
 import UserAvatar from "../avatar/UserAvatar";
+import CompassMark from "../brand/CompassMark";
 import { useAuthorPhoto } from "./CurrentUserContext";
 
 // Avatar de quem assinou um comentário de tarefa.
@@ -16,5 +17,9 @@ import { useAuthorPhoto } from "./CurrentUserContext";
 // Quando nenhum dos dois casa — automação, conta apagada — mostra as iniciais,
 // que é o que a tela sempre mostrou.
 export default function CommentAvatar({ comment, className }: { comment: TaskComment; className: string }) {
-  return <UserAvatar name={comment.author} photoUrl={useAuthorPhoto(comment)} className={className} />;
+  const photoUrl = useAuthorPhoto(comment);
+  if (!comment.author_id && ["North AI", "North Ai", "Automação"].includes(comment.author)) {
+    return <span className={`${className} north-ai-avatar`} aria-label="North AI"><CompassMark size={18} /></span>;
+  }
+  return <UserAvatar name={comment.author} photoUrl={photoUrl} className={className} />;
 }

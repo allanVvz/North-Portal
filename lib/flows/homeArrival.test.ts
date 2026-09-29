@@ -125,8 +125,8 @@ describe("Edição: arquivo novo na Home → Revisão", () => {
       p_delivery_id: "criativo-a", p_child_id: "edicao", p_expected_status: "em_producao", p_status: "revisao",
     });
     const [comment] = db.comments("criativo-a");
-    expect(comment.author).toBe("Allan");
-    expect(comment.author_id).toBe(ALLAN);
+    expect(comment.author).toBe("North AI");
+    expect(comment.author_id).toBeUndefined();
     expect(String(comment.text)).toContain("Divulgação.mp4");
     expect(comment.text).toBe("🎞️ Arquivo final — Edição: Em produção → Revisão (só nesta entrega) (automático).\n[Divulgação.mp4](https://drive.google.com/file/d/final-1/view)");
     // Nada no card da etapa compartilhada, nada no outro criativo.
@@ -142,7 +142,7 @@ describe("Edição: arquivo novo na Home → Revisão", () => {
     expect(await applyEditHomeArrival(db as any, s as any, { creativeTaskId: "criativo-b", stageTaskId: "edicao", files: [file("f")] })).toBe(false);
     expect(s.rpc).not.toHaveBeenCalled();
     const [comment] = db.comments("criativo-b");
-    expect(comment.author).toBe("Allan");
+    expect(comment.author).toBe("North AI");
     expect(comment.text).toBe("🎞️ Arquivo final.\n[f.mp4](https://drive.google.com/file/d/f/view)");
   });
 
@@ -158,7 +158,7 @@ describe("Edição: arquivo novo na Home → Revisão", () => {
     expect(s.rpc).not.toHaveBeenCalled();
     expect(db.task("edicao-solo")!.status).toBe("revisao");
     // Responsável pelo texto do card (sem perfil vinculado).
-    expect(db.comments("edicao-solo")[0].author).toBe("Allan");
+    expect(db.comments("edicao-solo")[0].author).toBe("North AI");
   });
 
   it("outra pessoa mudou o andamento no meio: não sobrescreve, só comenta a chegada", async () => {
@@ -206,7 +206,7 @@ describe("Roteiro e Captação: arquivo novo na pasta da diária → Revisão", 
     expect(db.task("captacao")!.status).toBe("revisao");
     expect(db.task("roteiro")!.status).toBe("em_producao");
     const [comment] = db.comments("captacao");
-    expect(comment.author).toBe("Alisson");
+    expect(comment.author).toBe("North AI");
     expect(String(comment.text)).toContain("IMG_2.MOV");
     expect(String(comment.text)).not.toContain("IMG_1.MOV");
   });
@@ -235,6 +235,6 @@ describe("Roteiro e Captação: arquivo novo na pasta da diária → Revisão", 
     contents["pasta-captacao"].push(file("c9"));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await applyCaptureHomeArrivals(db as any, "diaria");
-    expect(db.comments("captacao")[0].author).toBe("North Ai");
+    expect(db.comments("captacao")[0].author).toBe("North AI");
   });
 });

@@ -51,6 +51,7 @@ import { asTaskRecord, type AdminClient } from "@/lib/automations/taskAccess";
 import { isFlowDelivery, recurrenceParentIdOf, stageInDelivery, stepOrderOf } from "@/lib/taskRelations";
 import { HttpError, type TaskRecord } from "@/lib/validation";
 import { currentFlowStepOf } from "./currentStep";
+import { reviewerIdsOf } from "./stepRole";
 
 export const COMMENT_STAGE_INVALID = "COMMENT_STAGE_INVALID";
 export const COMMENT_STAGE_AMBIGUOUS = "COMMENT_STAGE_AMBIGUOUS";
@@ -128,7 +129,9 @@ export type CommentTargetVia =
   | "last_completed"
   | "sole_open"
   | "reviewer"
-  | "assignee";
+  | "assignee"
+  | "plan_note"
+  | "plan_member";
 
 export type CommentTarget = { targetId: string; via: CommentTargetVia };
 
@@ -153,9 +156,9 @@ function ambiguous(deliveryId: string, candidates: TaskRecord[]): HttpError {
 export async function resolveFlowCommentTarget(
   admin: AdminClient,
   task: TaskRecord,
-  options: { commenterId?: string | null; stageTaskId?: string | null } = {},
+  options: { commenterId?: string | null; stageTaskId?: string | null; planNote?: boolean } = {},
 ): Promise<CommentTarget> {
-  const { commenterId = null, stageTaskId = null } = options;
+  const { commenterId = null, stageTaskId = null, planNote = false } = options;
 
   // O MOLDE de uma recorrência não recebe comentário: ele só gera as Entregas
   // da semana, e nenhum gatilho escuta o que é escrito nele. Em 28/09/2026 três
@@ -170,8 +173,42 @@ export async function resolveFlowCommentTarget(
       return resolveFlowCommentTarget(admin, occurrence, {
         commenterId,
         stageTaskId: stageTaskId && stageTaskId !== task.id ? stageTaskId : null,
+        planNote,
       });
     }
+  }
+
+  if (task.kind === "plano_acao" && !task.recurrence_cadence) {
+    if (planNote) {
+      if (stageTaskId) throw new HttpError(400, "Escolha uma nota do plano ou uma etapa.");
+      return { targetId: task.id, via: "plan_note" };
+    }
+    // A seleção pode atravessar plano → entrega → etapa. Verificamos cada elo
+    // no banco para impedir que um id arbitrário receba comentário por esta rota.
+    let frontier = [task.id];
+    const seen = new Set(frontier);
+    for (let depth = 0; frontier.length && depth < 6; depth++) {
+      const { data, error } = await admin.from("task_links").select("child_id")
+        .in("parent_id", frontier).in("relation_kind", ["structural_member", "workflow_step"]);
+      if (error) throw error;
+      const children = ((data ?? []) as { child_id: string }[]).map((row) => row.child_id);
+      if (stageTaskId && children.includes(stageTaskId)) {
+        const { data: selected, error: selectedError } = await admin.from("tasks")
+          .select(TASK_COLUMNS).eq("id", stageTaskId).maybeSingle();
+        if (selectedError) throw selectedError;
+        if (!selected) break;
+        const chosen = asTaskRecord(selected);
+        return chosen.workflow_version_id
+          ? resolveFlowCommentTarget(admin, chosen, { commenterId })
+          : { targetId: chosen.id, via: "plan_member" };
+      }
+      frontier = children.filter((id) => !seen.has(id));
+      frontier.forEach((id) => seen.add(id));
+      if (!stageTaskId && seen.size > 1) break;
+    }
+    if (stageTaskId) throw new HttpError(409, "A peça ou etapa não pertence a este plano.", { code: COMMENT_STAGE_INVALID });
+    if (seen.size > 1) throw new HttpError(409, "Escolha a peça ou etapa antes de comentar, ou marque uma nota do plano.", { code: COMMENT_STAGE_AMBIGUOUS });
+    return { targetId: task.id, via: "own" };
   }
 
   if (!isFlowDelivery(task)) {
@@ -206,7 +243,7 @@ export async function resolveFlowCommentTarget(
   if (openSteps.length === 1) return { targetId: openSteps[0].id, via: "sole_open" };
 
   if (commenterId) {
-    const reviewerSteps = openSteps.filter((step) => step.status === "revisao" && step.reviewer_id === commenterId);
+    const reviewerSteps = openSteps.filter((step) => step.status === "revisao" && reviewerIdsOf(step).includes(commenterId));
     if (reviewerSteps.length === 1) return { targetId: reviewerSteps[0].id, via: "reviewer" };
     if (reviewerSteps.length > 1) throw ambiguous(task.id, reviewerSteps);
 

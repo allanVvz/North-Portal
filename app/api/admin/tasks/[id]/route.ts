@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
-import { deleteTask, getClient, getClientFlowFlags, getTaskById, promoteTaskToFlowDelivery, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
+import { deleteTask, getClient, getClientFlowFlags, getTaskById, listAdminReviewers, promoteTaskToFlowDelivery, setTaskAssigneeProfiles, setTaskPlanLink, updateTaskGroup, updateTaskPayloadPatch } from "@/lib/supabase";
 import { EXPLICIT_DATES_KEY, inferDateGroupRule, normalizeOccurrenceDates } from "@/lib/taskDateGrouping";
 import { recurrenceWeekdays } from "@/lib/recurrence";
 import { deliveryParentIdsOf, isFlowDelivery, recurrenceParentIdOf } from "@/lib/taskRelations";
@@ -101,6 +101,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const current = await getTaskById(id);
     if (!current) throw new HttpError(404, "Tarefa nao encontrada.");
+    const requestedReviewers = payload_patch?.reviewer_ids ?? (patch.payload as { reviewer_ids?: string[] } | undefined)?.reviewer_ids;
+    if (requestedReviewers !== undefined) {
+      if (current.subtype !== "edicao") throw new HttpError(400, "Revisores conjuntos são configurados na Edição.");
+      const allowed = new Set((await listAdminReviewers()).map((reviewer) => reviewer.id));
+      if (requestedReviewers.some((reviewer) => !allowed.has(reviewer))) throw new HttpError(400, "Revisor inválido.");
+    }
     if (patch.status !== undefined && patch.status !== current.status && deliveryParentIdsOf(current).length > 1) {
       throw new HttpError(409, "Esta etapa serve vários Criativos. Abra a Entrega desejada e altere o andamento nela.");
     }

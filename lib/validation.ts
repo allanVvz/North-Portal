@@ -205,6 +205,10 @@ export const taskPayloadSchema = z.object({
   comments: z.array(taskCommentSchema).max(200).optional(),
   // Proveniência entre etapas; a estrutura vive nas FKs do workflow.
   flow_prev_task_id: z.unknown().optional(),
+  reviewer_ids: z.array(z.string().uuid()).max(10).optional(),
+  legacy_shared_stage_id: z.string().uuid().optional(),
+  legacy_shared_stage_archived: z.boolean().optional(),
+  prepared_publication_task_id: z.string().uuid().optional(),
   automation_actor: z.unknown().optional(),
   traffic_revision_instruction: z.unknown().optional(),
   /** O que o último comentário humano pediu ao relatório de conversão — trocar
@@ -301,17 +305,20 @@ export const taskPatchSchema = taskFieldsShape.partial().omit({ slug: true }).ex
     formato: z.string().max(80).nullable().optional(),
     plataforma: z.string().max(80).nullable().optional(),
     hora: z.string().max(20).nullable().optional(),
+    reviewer_ids: z.array(z.string().uuid()).max(10).optional(),
   }).strict().optional(),
 });
 
 export const taskCommentCreateSchema = z.object({
   text: z.string().trim().min(1).max(2000),
+  feedback_decision: z.enum(["aprovar", "ajustes", "revisao"]).optional(),
   /** Chave idempotente gerada pela interface: retry e clique duplo com o mesmo
    *  id gravam um comentário só. */
   comment_id: z.string().min(8).max(64).optional(),
   /** Etapa (tarefa filha) em que a pessoa comentou. Quando presente, é o
    *  destino do comentário — nunca uma heurística. Ver lib/flows/commentTarget.ts. */
   stage_task_id: z.string().uuid().optional(),
+  plan_note: z.boolean().optional(),
   /** Assets do workspace individual. Quando presentes, o comentario fica no
    *  Criativo, mesmo que a etapa de Edicao seja compartilhada. */
   asset_ids: z.array(z.string().uuid()).max(20).optional(),

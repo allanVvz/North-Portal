@@ -5987,3 +5987,8 @@ html:has(.admin-shell[data-theme="dark"]) { color-scheme: dark; scrollbar-color:
 .auto-format-list p { margin: 0; }
 .auto-format-list .set-actions { justify-content: flex-start; flex-wrap: wrap; }
 @media (max-width: 640px) { .auto-daily-piece { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.tm-feedback-decision { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--a-sec); }
+.tm-feedback-decision select { min-width: 0; max-width: 240px; border: 1px solid var(--a-border); border-radius: 8px; padding: 6px; background: var(--a-surface); color: var(--a-ink); font: inherit; }
+.north-ai-avatar { display: inline-flex; align-items: center; justify-content: center; color: #e9d5a5; background: #163d3c; }
+.tm-reviewer-list { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.tm-reviewer-list label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
