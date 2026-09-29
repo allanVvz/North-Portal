@@ -168,6 +168,10 @@ describe("operation collection", () => {
       const [viva] = normalizeOperationItems([], [routine("r", [], { next_due_date: "2026-10-12" })]);
       (viva.task as any).next_due_date = "2026-10-12";
       expect(operationState(viva, today)).toEqual({ tone: "ok", stage: "Em dia", detail: "próxima em 12/10" });
+      const [vencida] = normalizeOperationItems([], [routine("v", [], { next_due_date: "2026-07-28", last_completed_at: "2026-07-27T10:00:00Z" })]);
+      (vencida.task as any).next_due_date = "2026-07-28";
+      (vencida.task as any).last_completed_at = "2026-07-27T10:00:00Z";
+      expect(operationState(vencida, today)).toEqual({ tone: "warn", stage: "Sem próxima data", detail: "prevista era 28/07" });
       const [encerrada] = normalizeOperationItems([], [routine("x", [], { template_status: "aprovado", status: "aprovado" })]);
       expect(operationState(encerrada, today).stage).toBe("Rotina encerrada");
     });

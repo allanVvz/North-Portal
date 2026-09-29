@@ -322,6 +322,9 @@ export function operationState(item: OperationItem, today: string): OperationSta
     if (state === "parada") return { tone: "warn", stage: "Parada", detail: "" };
     if (state === "sem_agenda" || !next) return { tone: "idle", stage: "Sem agenda", detail: "" };
     if (state === "atrasada") return { tone: "late", stage: "Atrasada", detail: dueWording(next, today).text };
+    // Feito, mas a próxima data já passou sem ninguém remarcar: é pendência,
+    // não "em dia" (a captura de 28/09 mostrava "próxima em 28/07").
+    if (next.slice(0, 10) < today) return { tone: "warn", stage: "Sem próxima data", detail: `prevista era ${shortDay(next)}` };
     if (state === "concluida") return { tone: "done", stage: "Feito nesta vez", detail: `próxima em ${shortDay(next)}` };
     return { tone: "ok", stage: "Em dia", detail: `próxima em ${shortDay(next)}` };
   }
