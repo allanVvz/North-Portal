@@ -25,7 +25,11 @@ const FOLDER = "application/vnd.google-apps.folder";
 const DAILY_NAME = /^Bruto - diaria de gravacao/;
 const SERIES_NAME = /^Diária de gravação/;
 
-export type FolderCheck = { workspaceId: string; role: "diaria" | "roteiro" | "captacao"; id: string; name: string | null; status: string; action: string | null };
+export type FolderCheck = {
+  workspaceId: string; role: "diaria" | "roteiro" | "captacao"; id: string; name: string | null; status: string; action: string | null;
+  /** Onde está hoje, quando não está no lugar: o caminho até onde a conta enxerga. */
+  location?: string[];
+};
 export type DuplicateCheck = { id: string; name: string; parentId: string; action: string | null };
 export type DriveMaintenanceReport = {
   apply: boolean;
@@ -156,9 +160,22 @@ async function checkFolder(report: DriveMaintenanceReport, apply: boolean, works
     return;
   }
   if (decision.action === "fail") {
-    report.folders.push({ workspaceId, role, id: item.id, name: item.name, status: decision.message, action: "precisa de uma pessoa" });
+    report.folders.push({ workspaceId, role, id: item.id, name: item.name, status: decision.message, action: "precisa de uma pessoa", location: await pathOf(item) });
     return;
   }
   if (apply) await addDriveParent(item.id, decision.parentId);
   report.folders.push({ workspaceId, role, id: item.id, name: item.name, status: "sem pasta pai (removida por quem não é dono)", action: apply ? `devolvida para ${decision.parentId}` : `voltaria para ${decision.parentId}` });
+}
+
+/** "Pasta avó / pasta mãe" até 4 níveis, para dizer onde uma pasta foi parar. */
+async function pathOf(item: DriveItemState): Promise<string[]> {
+  const path: string[] = [];
+  let parentId = item.parents[0];
+  for (let depth = 0; parentId && depth < 4; depth += 1) {
+    const parent = await getDriveItemState(parentId);
+    if (parent.state !== "ok") { path.unshift(`(${parent.state}) ${parentId}`); break; }
+    path.unshift(`${parent.name} [${parent.id}]`);
+    parentId = parent.parents[0];
+  }
+  return path;
 }
