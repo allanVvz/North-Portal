@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AttrVisibilityPopover from "./AttrVisibilityPopover";
 import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
 import AssigneePicker from "./AssigneePicker";
 import TaskKindIcon from "./TaskKindIcon";
 import FlowStepsBox from "./FlowStepsBox";
-import MentionTextarea from "./MentionTextarea";
 import StepRow, { type StepPatch } from "./StepRow";
 import { formatShortDate } from "./taskDates";
 import PlanAddCombobox from "./PlanAddCombobox";
@@ -20,7 +19,6 @@ import {
   COLUMNS, PLATAFORMA_OPTIONS, PRIORITY_LABEL, STATUS_LABEL, WORKFLOW_ORDER,
   TONES, commentsOf, initials,
 } from "./kanbanShared";
-import CommentAvatar from "./CommentAvatar";
 import CardCover from "./CardCover";
 import { taskCoverCandidates } from "@/lib/taskCover";
 import { parseGoogleDriveUrl } from "@/lib/googleDrive";
@@ -28,7 +26,7 @@ import { creativeWorkspacesForCard, materialCardsOf, materialCoverCandidates } f
 import { isCreativeDeliveryKind } from "@/lib/canonicalDeliveryFormats";
 import CommentText from "@/app/CommentText";
 import { useCurrentAdminUser } from "./CurrentUserContext";
-import { familyThreadOf, formatAbsoluteTime, formatCommentTime, splitCommentText, type FamilyComment } from "@/lib/comments";
+import { formatAbsoluteTime, splitCommentText } from "@/lib/comments";
 import type { TaskTypeDef } from "@/lib/taskTypes";
 import { TASK_BASE_TYPES, classifyTask, deliverySubtypeTypes, taskBaseType, type TaskBaseTypeKey } from "@/lib/taskClassification";
 import { TASK_KINDS, TASK_KIND_KEYS, canonicalTaskClassification, kindDef, kindIcon, kindLabel, kindTone, subtypeLabel, taskProgress } from "@/lib/taskCatalog";
@@ -40,8 +38,7 @@ import { currentFlowStepOf } from "@/lib/flows/currentStep";
 import { createCommentIdRegistry } from "./commentIds";
 import { deriveRequiresReview } from "@/lib/flows/reviewSkip";
 import { responsibilityForSubtype } from "@/lib/flows/responsibilityForSubtype";
-import { ROLE_LABEL, REVISOR_LABEL, roleTone } from "@/lib/flows/roleTone";
-import { stepRoleOf } from "@/lib/flows/stepRole";
+import { roleTone } from "@/lib/flows/roleTone";
 import { fileTypeLabel, isHtmlDocument } from "@/lib/documentFiles";
 import type { AdminDocument, ResponsibilityAssignment } from "@/lib/supabase";
 import type { ClientFlowFlags, ReviewerCandidate, TaskPriority, TaskRecord, TaskStatus } from "@/lib/validation";
@@ -49,12 +46,11 @@ import { useTaskAutosave } from "./useTaskAutosave";
 import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
 import BackArrowIcon from "./BackArrowIcon";
 import ModalContext from "./ModalContext";
-import CommentActionsMenu from "./CommentActionsMenu";
-import TaskReviewActions from "./TaskReviewActions";
+import HeadDropdown from "./HeadDropdown";
+import AutoGrowTextarea from "./AutoGrowTextarea";
+import TaskCommentsBox from "./TaskCommentsBox";
 import { useTaskConversation } from "./useTaskConversation";
-import type { ConversationItem } from "@/lib/cardConversation";
 import TaskMaterialsPanel from "./TaskMaterialsPanel";
-import TaskCommentComposer from "./TaskCommentComposer";
 import { useTaskMaterials } from "./useTaskMaterials";
 import TaskRelationsPanel from "./TaskRelationsPanel";
 import CreativeDriveWorkspace from "./CreativeDriveWorkspace";
@@ -196,77 +192,6 @@ function Cell({ icon, label, hidden, children }: { icon: string; label: string; 
   );
 }
 
-function resizeTextarea(element: HTMLTextAreaElement | null): void {
-  if (!element) return;
-  element.style.height = "auto";
-  element.style.height = `${element.scrollHeight}px`;
-}
-
-function activityLabel(eventType?: string): string {
-  if (eventType === "moved_to_review") return "Movido para revisão";
-  if (eventType === "review_approved") return "Aprovado";
-  if (eventType === "review_changes_requested") return "Ajustes solicitados";
-  return "Atividade do card";
-}
-
-export function AutoGrowTextarea({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => resizeTextarea(ref.current), [props.value]);
-  return <textarea {...props} ref={ref} onChange={(event) => { onChange?.(event); resizeTextarea(event.currentTarget); }} />;
-}
-
-// Small inline dropdown used in the edit-mode header for Cliente and Tipo —
-// click the pill, pick from the list, it closes itself (the click on an
-// option bubbles up to the panel's own onClick).
-function HeadDropdown({
-  trigger,
-  children,
-  className,
-}: {
-  trigger: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div className={`tm-headpick ${className ?? ""}`} ref={ref}>
-      <button
-        type="button"
-        className="tm-headpick-trigger"
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        {trigger}
-        <span className={`tm-headpick-caret ${open ? "on" : ""}`} aria-hidden>⌄</span>
-      </button>
-      {open ? (
-        <div className="tm-headpick-panel" role="listbox" onClick={() => setOpen(false)}>
-          {children}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export default function TaskModal({
   mode,
   task,
@@ -381,8 +306,6 @@ export default function TaskModal({
   const flowStepIndex = deliveryType && liveWorkflowStepId
     ? deliveryType.workflowSteps.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
     : -1;
-  const [comment, setComment] = useState("");
-  const [commentContextError, setCommentContextError] = useState<string | null>(null);
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
   const materials = useTaskMaterials(liveTask?.id ?? task?.id ?? null, mode === "edit");
   const materialWorkspaces = materials.workspaces;
@@ -390,11 +313,6 @@ export default function TaskModal({
   const [recentlyCreatedCard, setRecentlyCreatedCard] = useState<TaskRecord | null>(null);
   const [driveOpen, setDriveOpen] = useState<{ taskId: string; assetId?: string; tab?: "raw" | "classified" | "preview" | "final"; source?: { kind: "script" | "capture"; file: { id: string; name: string; mimeType: string; size: number | null; webViewLink: string | null } } } | null>(null);
   const [materialTab, setMaterialTab] = useState<"final" | "preview" | "docs">("final");
-  // Comentário em edição inline. Guarda o `at` que estava na tela para o
-  // servidor recusar se a thread mudou (ver edit_task_comment).
-  // `taskId`: o card onde o comentário está gravado — pode ser uma etapa ou
-  // atividade da família, não o card aberto (30/09).
-  const [editingComment, setEditingComment] = useState<{ taskId: string; index: number; at: string; text: string } | null>(null);
   // Documents attachable to a comment — pdf/other files, not Trilhas HTML
   // decks. Lazily fetched once per edit session (small, agency-wide list;
   // same "all documents" endpoint Informações uses).
@@ -549,24 +467,9 @@ export default function TaskModal({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
-  // A regra de quem mostra o thread da família mora em lib/comments.ts, para
-  // esta tela e o painel lateral responderem a mesma coisa sobre o mesmo card.
-  // O tipo vem do RASCUNHO, não do card salvo: trocar o tipo no formulário
-  // reflete no thread antes de salvar, como o resto do editor já faz.
+  // A conversa canônica do card: a lista de comentários (TaskCommentsBox) e o
+  // painel de arquivos leem a mesma projeção.
   const conversation = useTaskConversation(liveTask?.id ?? null);
-  const comments: (FamilyComment & { timelineKind?: "comment" | "event"; taskTitle?: string; path?: string[]; meetingDate?: string | null })[] = useMemo(() => {
-    if (conversation.ready) return conversation.items.flatMap((item) => {
-      if (item.kind === "file") return [];
-      return [{
-        taskId: item.taskId, author: item.author ?? "Sistema", author_id: item.authorId ?? undefined,
-        text: item.kind === "event" ? item.text ?? activityLabel(item.eventType) : item.text ?? "",
-        at: item.at, edited_at: item.editedAt, asset_ids: item.assetIds, timelineKind: item.kind,
-        taskTitle: item.taskTitle, path: item.path, meetingDate: item.meetingDate,
-      }];
-    });
-    return liveTask ? familyThreadOf(liveTask, clientTasks, draft.kind) : [];
-  }, [conversation.items, conversation.ready, liveTask, clientTasks, draft.kind]);
-  const ownComments = liveTask ? commentsOf(liveTask) : [];
   // Card de origem de cada comentário da família — para o selo de papel
   // (calculado NA HORA, nunca congelado: lê os dados atuais de reviewer_id/
   // assignee_profile_ids do card, não algo salvo junto do comentário).
@@ -673,11 +576,14 @@ export default function TaskModal({
       }).catch(() => window.location.assign(url));
     return true;
   }
-  function attachDocToComment(doc: AdminDocument) {
-    // [label](url) renders as a short link (the file's own name) instead of
-    // the raw URL — see lib/comments.ts splitCommentText.
-    const link = doc.file_url ? `📎 [${doc.name}](${doc.file_url})` : `📎 ${doc.name}`;
-    setComment((current) => (current.trim() ? `${current}\n${link}` : link));
+  // Um card que voltou do servidor (comentário, decisão, etapa relida): o
+  // aberto troca o `liveTask`; os outros só atualizam o quadro. Comentar na
+  // Entrega grava na etapa — o servidor devolve OUTRO card, e sem esta guarda
+  // o modal do pai "virava" a etapa assim que alguém comentava.
+  function acceptPatched(updated: TaskRecord) {
+    if (updated.id === liveTask?.id) setLiveTask(updated);
+    onTaskPatched?.(updated);
+    setFlowDeliveries((current) => current.some((item) => item.id === updated.id) ? current.map((item) => item.id === updated.id ? updated : item) : current);
   }
   const onTaskPatchedRef = useRef(onTaskPatched);
   useEffect(() => { onTaskPatchedRef.current = onTaskPatched; }, [onTaskPatched]);
@@ -1437,109 +1343,9 @@ export default function TaskModal({
     } catch { /* clipboard unavailable; button just won't confirm */ }
   }
 
-  async function saveCommentEdit() {
-    if (!liveTask || !editingComment) return;
-    const { taskId, index, at, text } = editingComment;
-    if (!text.trim()) return;
-    try {
-      const res = await fetch(`/api/admin/tasks/${taskId}/comments`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ index, at, text: text.trim() }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
-      const updated = await res.json() as TaskRecord;
-      setEditingComment(null);
-      if (updated.id === liveTask.id) setLiveTask(updated);
-      onTaskPatched?.(updated);
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : "Não foi possível editar o comentário.");
-    }
-  }
-
-  async function removeComment(taskId: string, index: number, at: string) {
-    if (!liveTask) return;
-    if (!window.confirm("Excluir este comentário? Não dá para desfazer.")) return;
-    try {
-      const res = await fetch(`/api/admin/tasks/${taskId}/comments`, {
-        method: "DELETE", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ index, at }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "");
-      const updated = await res.json() as TaskRecord;
-      if (editingComment?.taskId === taskId && editingComment.index === index) setEditingComment(null);
-      if (updated.id === liveTask.id) setLiveTask(updated);
-      onTaskPatched?.(updated);
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : "Não foi possível excluir o comentário.");
-    }
-  }
-
-  // A Entrega informa a etapa exibida para o servidor validar o contexto; se
-  // ela avançar durante a escrita, o envio falha e o rascunho fica na caixa.
+  // Na Entrega, o comentário vai para a etapa que a tela mostra como corrente;
+  // se ela avançar durante a escrita, o servidor recusa e o rascunho fica.
   const commentStep = isDelivery ? currentFlowStepOf(flowSteps) : null;
-  const commentStepLabel = commentStep && !commentStep.completed_at ? subtypeLabelOf(commentStep.subtype ?? "") || "etapa atual" : null;
-
-  async function refreshCommentContext(): Promise<string | void> {
-    if (!liveTask) return;
-    const deliveryId = isDelivery ? liveTask.id : chainDelivery?.id;
-    if (!deliveryId) {
-      const response = await fetch(`/api/admin/tasks/${liveTask.id}`, { cache: "no-store" });
-      if (!response.ok) return;
-      const refreshed = await response.json() as TaskRecord;
-      onTaskPatched?.(refreshed);
-      setLiveTask(refreshed);
-      setCommentContextError(null);
-      return refreshed.id;
-    }
-    const response = await fetch(`/api/admin/tasks?parentId=${encodeURIComponent(deliveryId)}`, { cache: "no-store" });
-    if (!response.ok) return;
-    const data = await response.json() as { tasks?: TaskRecord[] };
-    const refreshedTasks = Array.isArray(data.tasks) ? data.tasks : [];
-    refreshedTasks.forEach((related) => onTaskPatched?.(related));
-    const currentStep = currentFlowStepOf(flowStepsOf(deliveryId, refreshedTasks));
-    if (!currentStep) return;
-    setCommentContextError(null);
-    conversation.reload();
-    return currentStep.id;
-  }
-
-  async function sendComment() {
-    if (!liveTask || !comment.trim()) return;
-    const text = comment.trim();
-    const stageTaskId = commentStep?.id ?? null;
-    try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          comment_id: commentIds.idFor(liveTask.id, text),
-          ...(stageTaskId ? { stage_task_id: stageTaskId } : {}),
-          ...(liveTask.kind === "plano_acao" && !liveTask.recurrence_cadence ? { plan_note: true } : {}),
-          ...(commentAssetIds.length ? { asset_ids: commentAssetIds } : {}),
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { error?: string; code?: string; current_stage_task_id?: string };
-        if (body.code === "COMMENT_STAGE_INVALID") setCommentContextError(body.error ?? "A etapa mudou enquanto você escrevia. Atualize o destino antes de reenviar.");
-        throw new Error(body.error ?? "");
-      }
-      setCommentContextError(null);
-      commentIds.settle(liveTask.id, text);
-      setComment((current) => current.trim() === text ? "" : current);
-      setCommentAssetIds([]);
-      conversation.reload();
-      const updated = await res.json() as TaskRecord;
-      // Comentar no PAI grava na etapa corrente (ver lib/flows/currentStep.ts
-      // + a rota) — o servidor pode devolver um card DIFERENTE do que está
-      // aberto aqui. Só troca o `liveTask` quando é o mesmo card; senão,
-      // empurra a etapa atualizada para o estado do quadro (`clientTasks`) e
-      // deixa o thread mesclado (`familyThreadOf`) recalcular a partir dela —
-      // sem esta guarda o modal do pai "virava" a etapa assim que alguém
-      // comentava, porque `updated` passava a ser o card errado.
-      if (updated.id === liveTask.id) setLiveTask(updated);
-      onTaskPatched?.(updated);
-    } catch (e) { setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
-  }
 
   async function completeCycle(retried = false, cycleTask = liveTask): Promise<void> {
     if (!cycleTask?.recurrence_cadence || !cycleTask.due_date) return;
@@ -2437,126 +2243,32 @@ export default function TaskModal({
                   <b>{formatAbsoluteTime(liveTask.created_at)}</b>
                 </p>
               ) : null}
-              <div className="tm-box tm-commentsbox">
-                <p className="tm-box-label">Comentários e atividade</p>
-                {liveTask ? (() => {
-                  const reviewTarget = isDelivery ? currentChainStep : contextualStage ?? liveTask;
-                  if (!reviewTarget || (sharedStageDeliveryCount > 1 && !isDelivery)) return null;
-                  const targetPayload = (reviewTarget.payload ?? {}) as Record<string, unknown>;
-                  const reviewerIds = Array.isArray(targetPayload.reviewer_ids)
-                    ? targetPayload.reviewer_ids.filter((id): id is string => typeof id === "string")
-                    : reviewTarget.reviewer_id ? [reviewTarget.reviewer_id] : [];
-                  const reviewDeliveryId = isDelivery ? liveTask.id : chainDelivery?.id;
-                  return <TaskReviewActions taskId={reviewTarget.id} status={isDelivery ? displayStatus : reviewTarget.status} reviewerIds={reviewerIds} currentUserId={currentUserId} deliveryId={reviewDeliveryId} onDecided={(updated) => {
-                    conversation.reload();
-                    const merged = { ...reviewTarget, ...updated };
-                    onTaskPatched?.(merged);
-                    if (merged.id === liveTask.id) setLiveTask(merged);
-                    if (reviewDeliveryId) void fetch(`/api/admin/tasks/${reviewDeliveryId}`).then((response) => response.ok ? response.json() as Promise<TaskRecord> : null).then((delivery) => {
-                      if (!delivery) return;
-                      onTaskPatched?.(delivery);
-                      if (delivery.id === liveTask.id) setLiveTask(delivery);
-                      setFlowDeliveries((current) => current.map((item) => item.id === delivery.id ? delivery : item));
-                    }).catch(() => {});
-                  }} />;
-                })() : null}
-                <div className="tm-comments">
-                  {comments.slice().reverse().map((c, i) => {
-                    // A thread pode misturar comentários de vários cards da
-                    // família (plano + atividades, entrega + etapas). Os do
-                    // card aberto são editáveis; os gravados em outro card da
-                    // família, só por quem os escreveu (30/09 — na Entrega o
-                    // comentário cai na etapa, e o autor ficava sem como
-                    // apagar o próprio link). O índice que o servidor conhece
-                    // é o do `payload.comments` do card de ORIGEM, casado por
-                    // `at` + texto.
-                    const own = c.taskId === liveTask?.id;
-                    const originCard = own ? liveTask : clientTasks.find((card) => card.id === c.taskId) ?? null;
-                    const mine = own || Boolean(c.author_id && c.author_id === currentUserId);
-                    const storedIndex = originCard && mine ? (own ? ownComments : commentsOf(originCard)).findIndex((o) => o.at === c.at && o.text === c.text) : -1;
-                    const editing = editingComment?.taskId === c.taskId && editingComment.index === storedIndex;
-                    // Papel de quem comentou NO CARD ONDE O COMENTÁRIO CAIU —
-                    // não no card aberto agora. Recalculado a cada render, a
-                    // partir do estado atual (nunca congelado no comentário).
-                    const originStep = stepsById.get(c.taskId) ?? null;
-                    const role = originStep && c.author_id
-                      ? stepRoleOf(originStep, new Set(originStep.assignee_profile_ids), c.author_id)
-                      : null;
-                    const roleLabel = role?.kind === "revisor" ? REVISOR_LABEL : role?.responsibility ? ROLE_LABEL[role.responsibility] : null;
-                    const roleClass = role?.kind === "revisor" ? "t-tone-neutral" : role?.responsibility ? roleTone(role.responsibility) : null;
-                    const destinationLabel = c.taskTitle && !own ? c.taskTitle : !own && originStep ? subtypeLabel(originStep.subtype) || originStep.title : null;
-                    return (
-                      <div className={`tm-comment${editing ? " editing" : ""}${c.timelineKind === "event" ? " is-event" : ""}`} key={`${c.taskId}-${c.at}-${i}`}>
-                        <CommentAvatar comment={c} className="tm-comment-av" />
-                        <div className="tm-comment-body">
-                          {/* <div>, não <p>: o menu "…" (CommentActionsMenu) é um <div>, e <div>
-                              dentro de <p> é HTML inválido — no card aberto por link o navegador
-                              fechava o <p> antes do menu e o React descartava o HTML do servidor
-                              (erro de hidratação, 25/09). O CSS usa só a classe. */}
-                          <div className="tm-comment-meta">
-                            <b>{c.author}</b>
-                            {c.timelineKind === "event" ? <span className="tm-activity-kind">Atividade</span> : null}
-                            {roleLabel ? <span className={`kb-type ${roleClass}`}>{roleLabel}</span> : null}
-                            {destinationLabel ? <small className="tm-comment-origin" title={c.path?.join(" → ") ?? "Onde este comentário foi gravado"}>→ {destinationLabel}</small> : null}
-                            {c.meetingDate ? <small className="tm-comment-origin">Reunião · {formatShortDate(c.meetingDate)}</small> : null}
-                            <small>{formatCommentTime(c.at)}</small>
-                            {c.edited_at ? <small className="tm-comment-edited">editado</small> : null}
-                            {storedIndex >= 0 ? (
-                              <CommentActionsMenu
-                                onEdit={() => setEditingComment({ taskId: c.taskId, index: storedIndex, at: c.at, text: c.text })}
-                                onDelete={() => void removeComment(c.taskId, storedIndex, c.at)}
-                              />
-                            ) : null}
-                          </div>
-                          {editing ? (
-                            <div className="tm-comment-edit">
-                              <AutoGrowTextarea
-                                rows={1}
-                                autoFocus
-                                value={editingComment.text}
-                                onChange={(e) => setEditingComment((prev) => (prev ? { ...prev, text: e.target.value } : prev))}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void saveCommentEdit(); }
-                                  if (e.key === "Escape") setEditingComment(null);
-                                }}
-                              />
-                              <div className="tm-comment-edit-actions">
-                                <button type="button" className="admin-btn ghost" onClick={() => setEditingComment(null)}>Cancelar</button>
-                                <button type="button" className={`admin-btn primary tm-btn-${tone}`} onClick={() => void saveCommentEdit()} disabled={!editingComment.text.trim()}>Salvar</button>
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="tm-comment-text"><CommentText text={c.text} onLinkClick={openDocForUrl} showLinkPreview={docsReady} hidePreviewForUrl={(url) => Boolean(knownDocForUrl(url))} /></p>
-                          )}
-                          {c.asset_ids?.length ? <div className="tm-comment-assets">{c.asset_ids.map((id) => {
-                            const found = commentAssets.get(id);
-                            if (!found || found.asset.state === "trashed") return null;
-                            return <button type="button" key={id} className="tm-comment-asset" title={found.asset.name} onClick={() => setDriveOpen({ taskId: found.workspace.creative_task_id, assetId: id })}>
-                              <span className="tm-comment-asset-image">{found.asset.mime_type.startsWith("image/") ? <img src={`/api/admin/drive/thumbnail/${found.asset.drive_file_id}`} alt="" loading="lazy" /> : "▣"}</span>
-                              <span>{found.asset.name}</span>
-                            </button>;
-                          })}</div> : null}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
-                </div>
-                <TaskCommentComposer
-                  value={comment}
-                  onChange={setComment}
-                  onSubmit={() => void sendComment()}
-                  targetKey={commentStep?.id ?? liveTask?.id ?? ""}
-                  contextError={commentContextError}
-                  onRefreshContext={refreshCommentContext}
-                  targetLabel={isDelivery && commentStepLabel ? <>Comentando na etapa: <b>{commentStepLabel}</b></> : liveTask?.kind === "plano_acao" ? "Comentando neste plano" : undefined}
-                  placeholder={commentStepLabel ? `Comentar em "${commentStepLabel}"… use @ para chamar alguém` : "Escrever comentário… use @ para chamar alguém"}
+              {liveTask ? (
+                <TaskCommentsBox
+                  key={liveTask.id}
+                  openCard={liveTask}
+                  tasks={clientTasks}
+                  cardsById={stepsById}
+                  draftKind={draft.kind}
+                  currentStepId={commentStep?.id ?? null}
+                  contextDeliveryId={isDelivery ? null : chainDelivery?.id ?? null}
+                  decisionsAllowed={isDelivery || sharedStageDeliveryCount <= 1}
+                  currentUserId={currentUserId}
                   tone={tone}
-                  leading={<HeadDropdown className="tm-comment-attach" trigger={<span aria-hidden>📎</span>}>
-                    {commentDocs.length === 0 ? <p className="tm-member-search-empty">Nenhum documento para anexar.</p> : commentDocs.map((d) => <button type="button" key={d.id} className="tm-headpick-option" onClick={() => attachDocToComment(d)}>{d.name}</button>)}
-                  </HeadDropdown>}
+                  conversation={conversation}
+                  assets={commentAssets}
+                  docsReady={docsReady}
+                  attachDocs={commentDocs}
+                  assetIds={commentAssetIds}
+                  onAssetIdsSent={() => setCommentAssetIds([])}
+                  onOpenLink={openDocForUrl}
+                  isKnownDoc={(url) => Boolean(knownDocForUrl(url))}
+                  onOpenAsset={(creativeTaskId, assetId) => setDriveOpen({ taskId: creativeTaskId, assetId })}
+                  onOpenCard={onOpenRelatedTask ? (card) => void openRelatedTask(card) : undefined}
+                  onPatched={acceptPatched}
+                  onError={setError}
                 />
-              </div>
+              ) : null}
               <TaskMaterialsPanel
                 items={conversation.ready ? conversation.items.filter((item) => item.kind === "file" && item.taskId !== liveTask?.id) : []}
                 onOpen={(item) => {

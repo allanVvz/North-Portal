@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import MentionTextarea from "./MentionTextarea";
 
 export default function TaskCommentComposer({
-  value, onChange, onSubmit, placeholder, targetLabel, targetKey, contextError, onRefreshContext, sendLabel = "Enviar", disabled = false, tone = "green", leading,
+  value, onChange, onSubmit, placeholder, targetLabel, targetKey, contextError, onRefreshContext, sendLabel = "Enviar", disabled = false, allowEmpty = false, tone = "green", leading,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -16,6 +16,8 @@ export default function TaskCommentComposer({
   onRefreshContext?: () => Promise<string | void>;
   sendLabel?: string;
   disabled?: boolean;
+  /** O envio vale sem texto (ex.: aprovar sem comentário). */
+  allowEmpty?: boolean;
   tone?: string;
   leading?: ReactNode;
 }) {
@@ -48,6 +50,6 @@ export default function TaskCommentComposer({
     </div> : null}
     {leading}
     <MentionTextarea value={value} onChange={changeValue} onSubmit={() => { if (!staleTarget) onSubmit(); }} placeholder={placeholder} disabled={disabled} />
-    <button type="button" className={`admin-btn primary tm-btn-${tone}`} onClick={onSubmit} disabled={disabled || staleTarget || !value.trim()}>{sendLabel}</button>
+    <button type="button" className={`admin-btn primary tm-btn-${tone}`} onClick={onSubmit} disabled={disabled || staleTarget || (!allowEmpty && !value.trim())}>{sendLabel}</button>
   </div>;
 }
