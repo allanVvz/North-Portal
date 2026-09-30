@@ -101,7 +101,10 @@ export function projectCardConversation(input: {
     const task = taskById.get(taskId)!;
     for (const comment of commentsOf(task.payload as Record<string, unknown>)) {
       const unique = comment.id ? `${taskId}:${comment.id}` : `${taskId}:${comment.at}:${comment.author}:${comment.text}`;
-      const selectedPath = comment.for_task_id ? contextPaths.get(taskId)?.get(comment.for_task_id) : path;
+      // A marca de Entrega filtra só quando o card foi alcançado DENTRO de
+      // Entregas (a etapa compartilhada vista pelo plano ou por uma delas).
+      // Aberta sozinha (contexto ""), a etapa mostra o que todas escreveram.
+      const selectedPath = comment.for_task_id ? contextPaths.get(taskId)?.get(comment.for_task_id) ?? contextPaths.get(taskId)?.get("") : path;
       if (comment.for_task_id && !selectedPath) continue;
       if (seenComments.has(unique)) continue;
       seenComments.add(unique);
@@ -115,7 +118,7 @@ export function projectCardConversation(input: {
     const path = paths.get(taskId);
     if (!task || !path) continue;
     const at = String(event.created_at ?? "");
-    const selectedPath = typeof event.delivery_id === "string" ? contextPaths.get(taskId)?.get(event.delivery_id) : path;
+    const selectedPath = typeof event.delivery_id === "string" ? contextPaths.get(taskId)?.get(event.delivery_id) ?? contextPaths.get(taskId)?.get("") : path;
     if (event.delivery_id && !selectedPath) continue;
     items.push({ ...common(task, selectedPath ?? path, meetingDates.get(taskId) ?? null, at, typeof event.actor_name === "string" ? event.actor_name : null), id: String(event.id ?? event.event_id ?? event.request_id ?? `${taskId}:${at}:${event.event_type}`), kind: "event", eventType: String(event.event_type ?? ""), text: typeof event.body === "string" ? event.body : undefined, metadata: objectValue(event.metadata) });
   }

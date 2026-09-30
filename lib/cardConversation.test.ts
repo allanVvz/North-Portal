@@ -53,6 +53,20 @@ describe("card conversation projection", () => {
     expect(projected.some((item) => item.text === "da outra entrega" || item.text === "Outro")).toBe(false);
   });
 
+  it("the shared stage opened on its own shows what every delivery wrote in it", () => {
+    const delivery = task("delivery", "Entrega", { workflow_version_id: "workflow", payload: { comments: [] } });
+    const other = task("other", "Outra entrega", { workflow_version_id: "workflow", payload: { comments: [] } });
+    const stage = task("stage", "Edição", { payload: { comments: [
+      { id: "mine", author: "A", text: "desta entrega", at: "2026-09-16", for_task_id: delivery.id },
+      { id: "theirs", author: "B", text: "da outra entrega", at: "2026-09-16", for_task_id: other.id },
+      { id: "own", author: "C", text: "na etapa", at: "2026-09-16" },
+    ] } });
+    const relations = { taskLinks: links([delivery.id, stage.id, "workflow_step"], [other.id, stage.id, "workflow_step"]), routineLinks: [] };
+    const events = [{ id: "e1", task_id: stage.id, event_type: "review_approved", body: "Aprovado", created_at: "2026-09-16", delivery_id: delivery.id }];
+    const projected = projectCardConversation({ rootId: stage.id, tasks: [delivery, other, stage], relations, events });
+    expect(projected.map((item) => item.text).sort()).toEqual(["Aprovado", "da outra entrega", "desta entrega", "na etapa"].sort());
+  });
+
   it("deduplicates repeated source items and keeps generated PDFs plus preview/final versions", () => {
     const root = task("root", "Plano");
     const source = task("source", "Relatório");
