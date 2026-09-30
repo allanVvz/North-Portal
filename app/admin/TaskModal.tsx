@@ -51,6 +51,7 @@ import DocumentPreviewModal from "./documentos/DocumentPreviewModal";
 import BackArrowIcon from "./BackArrowIcon";
 import CommentActionsMenu from "./CommentActionsMenu";
 import CreativeDriveWorkspace from "./CreativeDriveWorkspace";
+import TaskAutomationPicker from "./TaskAutomationPicker";
 
 type Draft = {
   title: string;
@@ -62,6 +63,7 @@ type Draft = {
   assignee: string;
   assignee_profile_ids: string[];
   reviewer_id: string;
+  reviewer_ids: string[];
   approver_id: string;
   plan_id: string;
   due_date: string;
@@ -89,6 +91,14 @@ export type TaskCreationScope = "task" | "plan" | "routine";
 /** Pré-preenchimento opcional que uma tela pode passar — nunca comportamento.
  *  Ex.: o "+" embaixo de uma coluna do quadro abre o modal já com aquele status. */
 export type TaskCreationPrefill = { clientSlug?: string; kind?: string; status?: TaskStatus; assignee?: string };
+
+type RoutineExecutionLink = {
+  id: string;
+  cycle_id: string;
+  occurrence_date: string;
+  task_id: string;
+  task: TaskRecord | null;
+};
 
 type PendingMember =
   | { key: string; kind: "existing"; taskId: string; title: string }
@@ -120,6 +130,7 @@ function draftFrom(
     assignee: task?.assignee ?? initialAssignee ?? "",
     assignee_profile_ids: task?.assignee_profile_ids ?? [],
     reviewer_id: task?.reviewer_id ?? "",
+    reviewer_ids: Array.isArray(p.reviewer_ids) ? p.reviewer_ids.filter((id): id is string => typeof id === "string") : task?.reviewer_id ? [task.reviewer_id] : [],
     approver_id: task?.approver_id ?? "",
     // O elo SEM slot. `parents[0]` era cego a slot e a consulta não tem
     // ORDER BY: numa etapa que também é membro de plano, "o primeiro pai"
@@ -312,6 +323,7 @@ export default function TaskModal({
   // Subtipos físicos vêm de task_types. Etapas de Entrega vêm exclusivamente
   // da versão persistida do workflow e nunca são opções de subtipo.
   const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([]);
+  const [automationVersionIds, setAutomationVersionIds] = useState<string[]>([]);
   // A ENTREGA é o card ligado a uma versão de workflow; a ETAPA é um filho dela
   // cujo subtipo diz que etapa é.
   const isDelivery = Boolean(liveTask && isFlowDelivery(liveTask));
@@ -352,6 +364,9 @@ export default function TaskModal({
     ? deliveryType.workflowSteps.findIndex((step) => step.workflow_step_id === liveWorkflowStepId)
     : -1;
   const [comment, setComment] = useState("");
+  const [commentDestination, setCommentDestination] = useState("");
+  const [feedbackDecision, setFeedbackDecision] = useState<"" | "aprovar" | "ajustes" | "revisao">("");
+  useEffect(() => { setCommentDestination(""); setFeedbackDecision(""); }, [liveTask?.id]);
   const [commentAssetIds, setCommentAssetIds] = useState<string[]>([]);
   const [materialWorkspaces, setMaterialWorkspaces] = useState<CreativeMaterialWorkspace[]>([]);
   const [materialSyncWarning, setMaterialSyncWarning] = useState("");
@@ -453,7 +468,8 @@ export default function TaskModal({
   // Preserve the loaded card while client flow flags are still in flight.
   // Treating "not loaded" as "disabled" caused a PATCH on simply opening a
   // card with a reviewer once the flags arrived.
-  const effectiveReviewerId = flowFlags === null ? draft.reviewer_id || null : revisaoOff ? null : draft.reviewer_id || null;
+  const selectedReviewers = draft.subtype === "edicao" ? draft.reviewer_ids : draft.reviewer_id ? [draft.reviewer_id] : [];
+  const effectiveReviewerId = flowFlags === null ? selectedReviewers[0] ?? null : revisaoOff ? null : selectedReviewers[0] ?? null;
   const effectiveApproverId = flowFlags === null ? draft.approver_id || null : aprovacaoOff ? null : draft.approver_id || null;
   // Revisão e Aprovação são as únicas etapas que somem, e por CLIENTE, não por
   // tipo: são contrato de cliente, não modelo de card. O recorte por tipo que
@@ -491,7 +507,7 @@ export default function TaskModal({
       description: draft.description.trim() || null,
       client_visible: planoVisibilityOn ? draft.client_visible : false,
       slug: draft.clientSlug || null,
-      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null },
+      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null, ...(draft.subtype === "edicao" ? { reviewer_ids: revisaoOff ? [] : draft.reviewer_ids } : {}) },
     };
   }, [draft, effectiveApproverId, effectiveReviewerId, isDelivery, isRecurringParent, kd.isPlan, chainDelivery?.id, liveTask?.id, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
   const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
@@ -782,6 +798,24 @@ export default function TaskModal({
   const planMembers = liveTask
     ? (isRecurringParent ? recurrenceExecutionsOf(liveTask.id, clientTasks) : actionPlanMembersOf(liveTask.id, clientTasks))
     : [];
+  const planCommentTargets = useMemo(() => {
+    if (!liveTask || liveTask.kind !== "plano_acao" || isRecurringParent) return [];
+    const options: { id: string; label: string }[] = [];
+    const seen = new Set<string>();
+    const visit = (card: TaskRecord, path: string, depth: number) => {
+      if (seen.has(card.id) || depth > 5) return;
+      seen.add(card.id);
+      const label = path ? `${path} → ${card.title}` : card.title;
+      if (card.kind === "plano_acao") {
+        actionPlanMembersOf(card.id, clientTasks).forEach((child) => visit(child, label, depth + 1));
+      } else {
+        options.push({ id: card.id, label });
+        if (isFlowDelivery(card)) flowStepsOf(card.id, clientTasks).forEach((step) => visit(step, label, depth + 1));
+      }
+    };
+    planMembers.forEach((member) => visit(member, "", 0));
+    return options;
+  }, [liveTask, isRecurringParent, planMembers, clientTasks]);
   const flowSteps = liveTask && isDelivery ? flowStepsOf(liveTask.id, clientTasks) : [];
   // Sem isto, um membro que é ele mesmo um pai (a ocorrência de uma
   // recorrência de Plano, ex. "REUNIÃO ROTINA - ALLAN" — herda o `kind`
@@ -817,7 +851,6 @@ export default function TaskModal({
     ? `${effectiveParentMembers.filter((m) => m.status === "aprovado").length} de ${effectiveParentMembers.length}`
     : null;
   const canCrossClientPlan = Boolean(liveTask && kd.isPlan && draft.clientSlug === "north");
-  const canCrossClientRecurrence = Boolean(liveTask && isRecurringParent && draft.clientSlug === "north");
   // Um Plano da ADM North pode reunir card de QUALQUER cliente (permissão já
   // aplicada no servidor — POST /relations e o PATCH de plan_id), mas
   // `clientTasks` é só o que a TELA que abriu o modal já carregou, que nunca
@@ -827,16 +860,16 @@ export default function TaskModal({
   // com o que trabalhar. Busca o quadro cross-client inteiro (mesma fonte do
   // filtro "Todos", `listAllTasks`) uma vez, só quando este card é
   // efetivamente um Plano da North.
-  const [crossClientPool, setCrossClientPool] = useState<TaskRecord[]>([]);
+  const [crossClientPool, setCrossClientPool] = useState<(TaskRecord & { clientName?: string })[]>([]);
   useEffect(() => {
-    if (!canCrossClientPlan) { setCrossClientPool([]); return; }
+    if (!canCrossClientPlan && !isRecurringParent) { setCrossClientPool([]); return; }
     let cancelled = false;
-    fetch(`/api/admin/tasks${slug ? `?slug=${encodeURIComponent(slug)}` : ""}`)
+    fetch("/api/admin/tasks")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { tasks: TaskRecord[] } | null) => { if (!cancelled && data?.tasks) setCrossClientPool(data.tasks); })
+      .then((data: { tasks: (TaskRecord & { clientName?: string })[] } | null) => { if (!cancelled && data?.tasks) setCrossClientPool(data.tasks); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [canCrossClientPlan]);
+  }, [canCrossClientPlan, isRecurringParent]);
   const linkCandidatePool = useMemo(() => {
     if (!canCrossClientPlan || !crossClientPool.length) return clientTasks;
     const merged = new Map(clientTasks.map((t) => [t.id, t]));
@@ -848,7 +881,10 @@ export default function TaskModal({
     // OUTRO plano também não — um card pode ser membro de vários Planos de
     // Ação ao mesmo tempo. O que continua impedido é oferecer de novo um card
     // que já é membro DESTE plano especificamente.
-    ? linkCandidatePool.filter((t) => !kindDef(t.kind).isPlan && !t.recurrence_cadence && !planParentIdsOf(t).includes(liveTask.id) && (canCrossClientPlan || t.client_id === liveTask.client_id))
+    ? linkCandidatePool.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence
+        && (!kindDef(t.kind).isPlan || canCrossClientPlan)
+        && !planParentIdsOf(t).includes(liveTask.id)
+        && (canCrossClientPlan || t.client_id === liveTask.client_id))
     : [];
   // Candidatos a "vincular como execução" de um molde de recorrência: mesmo
   // cliente, não pode ser molde de nenhuma recorrência nem já ser execução de
@@ -858,8 +894,29 @@ export default function TaskModal({
   // só ordena o mesmo tipo primeiro, não trava — pedido explícito: precisa
   // aceitar vincular uma Entrega).
   const recurrenceLinkCandidates = liveTask && isRecurringParent
-    ? clientTasks.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) === null && (canCrossClientRecurrence || t.client_id === liveTask.client_id) && t.kind === liveTask.kind)
+    ? crossClientPool.filter((t) => t.id !== liveTask.id && !t.recurrence_cadence && recurrenceParentIdOf(t) !== liveTask.id)
     : [];
+  const [routineLinks, setRoutineLinks] = useState<RoutineExecutionLink[]>([]);
+  useEffect(() => {
+    if (!isRecurringParent || !liveTask) { setRoutineLinks([]); return; }
+    let cancelled = false;
+    fetch(`/api/admin/tasks/${liveTask.id}/routine-executions`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data: { links?: RoutineExecutionLink[] } | null) => { if (!cancelled) setRoutineLinks(data?.links ?? []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isRecurringParent, liveTask?.id]);
+  const meetings = planMembers.map((card) => ({
+    id: card.id, title: card.title,
+    date: String(card.payload?.occurrence_date || card.due_date || "").slice(0, 10),
+  })).filter((meeting) => /^\d{4}-\d{2}-\d{2}$/.test(meeting.date))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const routineGroups = isRecurringParent ? [...new Set([...meetings.map((meeting) => meeting.date), ...routineLinks.map((link) => link.occurrence_date)])]
+    .sort((a, b) => b.localeCompare(a)).map((date) => ({
+      date,
+      native: planMembers.filter((card) => String(card.payload?.occurrence_date || card.due_date || "").slice(0, 10) === date),
+      linked: routineLinks.filter((link) => link.occurrence_date === date),
+    })) : [];
   // As etapas são lidas para o próprio card Entrega e para compor o resumo
   // ascendente de uma etapa com uma única Entrega-pai. A lista editável só é
   // renderizada no primeiro caso; `chainDelivery` já traz sua versão persistida.
@@ -1104,15 +1161,26 @@ export default function TaskModal({
     }
   }
 
-  async function linkRecurrenceExecutionAtDate(taskId: string, occurrenceDate: string) {
+  async function linkRoutineExecution(taskId: string, cycleId: string) {
     if (!liveTask) return;
     setBusy(true); setError("");
     try {
-      const res = await fetch(`/api/admin/tasks/${liveTask.id}/recurrence-executions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "link", child_id: taskId, occurrence_date: occurrenceDate }) });
-      const body = await res.json().catch(() => null) as (TaskRecord & { error?: string }) | null;
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/routine-executions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task_id: taskId, cycle_id: cycleId }) });
+      const body = await res.json().catch(() => null) as { link?: RoutineExecutionLink; error?: string } | null;
       if (!res.ok) throw new Error(body?.error ?? "Não foi possível vincular esta execução.");
-      onTaskPatched?.(body as TaskRecord);
+      if (body?.link) setRoutineLinks((current) => [...current, body.link!]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível vincular esta execução."); } finally { setBusy(false); }
+  }
+
+  async function unlinkRoutineExecution(linkId: string) {
+    if (!liveTask) return;
+    setBusy(true); setError("");
+    try {
+      const res = await fetch(`/api/admin/tasks/${liveTask.id}/routine-executions?link_id=${encodeURIComponent(linkId)}`, { method: "DELETE" });
+      const body = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(body?.error ?? "Não foi possível desvincular esta execução.");
+      setRoutineLinks((current) => current.filter((link) => link.id !== linkId));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível desvincular esta execução."); } finally { setBusy(false); }
   }
 
   async function createRecurrenceExecutions(dates: string[], title: string) {
@@ -1408,15 +1476,23 @@ export default function TaskModal({
   async function sendComment() {
     if (!liveTask || !comment.trim()) return;
     const text = comment.trim();
-    const stageTaskId = commentStep?.id ?? null;
+    const submittedDecision = feedbackDecision;
+    const stageTaskId = commentStep?.id ?? (liveTask.kind === "plano_acao" && commentDestination !== "plan" ? commentDestination : null);
+    if (liveTask.kind === "plano_acao" && planCommentTargets.length && !stageTaskId && commentDestination !== "plan") {
+      setError("Escolha a peça ou etapa, ou marque uma nota sobre o plano.");
+      return;
+    }
     setComment("");
+    setFeedbackDecision("");
     try {
       const res = await fetch(`/api/admin/tasks/${liveTask.id}/comments`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
           comment_id: commentIds.idFor(liveTask.id, text),
-          ...(stageTaskId && commentAssetIds.length === 0 ? { stage_task_id: stageTaskId } : {}),
+          ...(submittedDecision ? { feedback_decision: submittedDecision } : {}),
+          ...(stageTaskId ? { stage_task_id: stageTaskId } : {}),
+          ...(commentDestination === "plan" ? { plan_note: true } : {}),
           ...(commentAssetIds.length ? { asset_ids: commentAssetIds } : {}),
         }),
       });
@@ -1433,7 +1509,7 @@ export default function TaskModal({
       // comentava, porque `updated` passava a ser o card errado.
       if (updated.id === liveTask.id) setLiveTask(updated);
       onTaskPatched?.(updated);
-    } catch (e) { setComment(text); setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
+    } catch (e) { setComment(text); setFeedbackDecision(submittedDecision); setError(e instanceof Error && e.message ? e.message : "Não foi possível enviar o comentário."); }
   }
 
   async function completeCycle(retried = false, cycleTask = liveTask): Promise<void> {
@@ -1505,6 +1581,7 @@ export default function TaskModal({
     if (!isCreativeDeliveryKind(draft.kind)) strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
+    if (draft.subtype === "edicao") payload.reviewer_ids = revisaoOff ? [] : draft.reviewer_ids;
     delete payload.explicit_occurrence_dates;
 
     // Agendamento: fold date + time into a single timestamp for the calendar.
@@ -1567,6 +1644,17 @@ export default function TaskModal({
         throw new Error(responseBody?.error ?? "Não foi possível salvar a tarefa.");
       }
       const savedTask = await res.json() as TaskRecord;
+      if (!liveTask && automationVersionIds.length) {
+        const bindingResponse = await fetch(`/api/admin/tasks/${savedTask.id}/automations`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ versionIds: automationVersionIds }),
+        });
+        if (!bindingResponse.ok) {
+          const detail = await bindingResponse.json().catch(() => null) as { error?: string } | null;
+          setLiveTask(savedTask);
+          throw new Error(`Card criado, mas o vínculo da automação falhou: ${detail?.error ?? "tente novamente no card"}`);
+        }
+      }
       planIdBaselineRef.current = planParentIdOf(savedTask) ?? "";
       // Activities queued while the plan itself had no id yet: link the
       // existing ones and create the brand-new ones now that it does.
@@ -1925,11 +2013,24 @@ export default function TaskModal({
 
               {/* Revisor (admin, etapa de Revisão) — só aparece com a etapa
                   ligada em Configurações › Etapas. "Sem revisor" pula a etapa. */}
-              <Cell icon="✓" label="Revisor" hidden={revisaoOff}>
-                <select value={draft.reviewer_id} onChange={(e) => set("reviewer_id", e.target.value)}>
-                  <option value="">— Sem revisor —</option>
-                  {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-                </select>
+              <Cell icon="✓" label={draft.subtype === "edicao" ? "Revisores da Edição" : "Revisor"} hidden={revisaoOff}>
+                {draft.subtype === "edicao" ? (
+                  <div className="tm-reviewer-list">
+                    {adminReviewers.map((reviewer) => <label key={reviewer.id}>
+                      <input type="checkbox" checked={draft.reviewer_ids.includes(reviewer.id)} onChange={(event) => setDraft((current) => ({
+                        ...current,
+                        reviewer_ids: event.target.checked
+                          ? [...current.reviewer_ids, reviewer.id]
+                          : current.reviewer_ids.filter((id) => id !== reviewer.id),
+                      }))} /> {reviewer.label}
+                    </label>)}
+                  </div>
+                ) : (
+                  <select value={draft.reviewer_id} onChange={(e) => set("reviewer_id", e.target.value)}>
+                    <option value="">— Sem revisor —</option>
+                    {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                  </select>
+                )}
               </Cell>
 
               {/* Aprovador (cliente, etapa de Aprovação) — mesma regra. */}
@@ -1966,6 +2067,9 @@ export default function TaskModal({
               </Cell>
 
             </div>
+
+            <TaskAutomationPicker taskId={liveTask?.id ?? null} type={currentType} subtype={draft.subtype || null}
+              selected={automationVersionIds} onSelected={setAutomationVersionIds} />
 
             {/* A(s) caixa(s) "Faz parte de", enxutas e só de navegação — de uma
                 ETAPA (aponta pra entrega) e/ou de QUALQUER card ligado a um
@@ -2044,7 +2148,7 @@ export default function TaskModal({
               <div className={`tm-box tm-planmembers${isRecurringParent ? " tm-cycles" : ""}`}>
                 <div className="tm-box-head">
                   <p className="tm-box-label">
-                    {isRecurringParent ? "Execuções da recorrência" : "Atividades do plano"} ({liveTask ? planMembers.length : pendingMembers.length})
+                    {isRecurringParent ? "Execuções por reunião" : "Atividades do plano"} ({liveTask ? planMembers.length + (isRecurringParent ? routineLinks.length : 0) : pendingMembers.length})
                     {!isRecurringParent && liveTask && planMembers.length ? (
                       <span className="tm-box-label-sub"> · {effectiveParentMembers.filter((m) => m.status === "aprovado").length} concluídas</span>
                     ) : null}
@@ -2065,7 +2169,33 @@ export default function TaskModal({
                 <p className="tm-relation-hint">{isRecurringParent ? "Crie uma execução ou vincule um card existente escolhendo a data." : "Crie um card novo ou vincule um existente. Ele aparecerá aqui e poderá ser aberto para organizar suas etapas."}</p>
                 <div className="tm-member-list">
                   {liveTask ? (
-                    planMembers.map((m) => (
+                    isRecurringParent ? routineGroups.map((group) => <div className="tm-routine-meeting" key={group.date}>
+                      <p className="tm-routine-meeting-date">Reunião {formatShortDate(group.date)} · {group.native.length + group.linked.length} {group.native.length + group.linked.length === 1 ? "execução" : "execuções"}</p>
+                      {group.native.map((m) => <StepRow
+                        key={m.id} card={m} label={m.title} team={adminReviewers} busy={busy || statusBusy}
+                        canOpen={Boolean(onOpenRelatedTask)} onOpen={() => void openRelatedTask(m)}
+                        onUnlink={() => void unlinkMember(m.id, liveTask.id)} unlinkTitle={`Remover ligação com ${m.title}`}
+                        lockDateWhenDone editableFields={isFlowDelivery(m) ? "status_details" : kindDef(m.kind).isPlan ? "none" : "all"}
+                        onPatch={patchRelatedCard} onComment={commentRelatedCard}
+                      />)}
+                      {group.linked.map((link) => {
+                        const card = crossClientPool.find((item) => item.id === link.task_id) ?? link.task;
+                        if (!card) return null;
+                        const members = kindDef(card.kind).isPlan ? actionPlanMembersOf(card.id, crossClientPool)
+                          : isFlowDelivery(card) ? flowStepsOf(card.id, crossClientPool) : [];
+                        const progress = taskProgress(card, members, childrenByParent(crossClientPool));
+                        const client = crossClientPool.find((item) => item.id === link.task_id)?.clientName
+                          ?? clients.find((item) => item.slug === "north")?.name ?? "Cliente";
+                        return <div className="tm-routine-linked" key={link.id}>
+                          <button type="button" className="tm-member-open" disabled={!onOpenRelatedTask || busy} onClick={() => void openRelatedTask(card)}>
+                            <TaskKindIcon kind={card.kind} subtype={card.subtype} size="sm" />
+                            <span className="tm-member-title">{card.title}<small>{client} · {kindLabel(card.kind)}{card.subtype ? ` / ${subtypeLabel(card.subtype)}` : ""} · {progress}%</small></span>
+                            <span className="tm-member-arrow" aria-hidden>↗</span>
+                          </button>
+                          <button type="button" className="tm-member-unlink" title={`Desvincular ${card.title} desta reunião`} aria-label={`Desvincular ${card.title} desta reunião`} disabled={busy} onClick={() => void unlinkRoutineExecution(link.id)}>✕</button>
+                        </div>;
+                      })}
+                    </div>) : planMembers.map((m) => (
                       <StepRow
                         key={m.id}
                         card={m}
@@ -2100,7 +2230,7 @@ export default function TaskModal({
                       </div>
                     ))
                   )}
-                  {(liveTask ? planMembers.length : pendingMembers.length) === 0 ? (
+                  {(liveTask ? planMembers.length + (isRecurringParent ? routineLinks.length : 0) : pendingMembers.length) === 0 ? (
                     <p className="admin-sub" style={{ margin: 0 }}>
                       {isRecurringParent ? "Conclua o ciclo atual para criar a próxima execução." : "Nenhuma atividade vinculada ainda."}
                     </p>
@@ -2119,9 +2249,10 @@ export default function TaskModal({
                   !recurrenceStopped(liveTask.status) ? (
                     <RecurrenceExecutionCombobox
                       candidates={recurrenceLinkCandidates}
+                      meetings={meetings}
                       templateKind={liveTask.kind}
                       busy={busy}
-                      onLink={(c, date) => void linkRecurrenceExecutionAtDate(c.id, date)}
+                      onLink={(c, meetingId) => void linkRoutineExecution(c.id, meetingId)}
                       onCreate={(dates, title) => void createRecurrenceExecutions(dates, title)}
                     />
                   ) : null
@@ -2349,6 +2480,25 @@ export default function TaskModal({
                   {comments.length === 0 ? <p className="admin-sub" style={{ margin: 0 }}>Nenhum comentário ainda.</p> : null}
                 </div>
                 <div className="tm-comment-input">
+                  {liveTask?.kind === "plano_acao" && !isRecurringParent && planCommentTargets.length > 0 ? (
+                    <label className="tm-feedback-decision">
+                      Destino do comentário
+                      <select value={commentDestination} onChange={(event) => setCommentDestination(event.target.value)}>
+                        <option value="">Escolha a peça ou etapa…</option>
+                        {planCommentTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}
+                        <option value="plan">Nota sobre o plano ou reunião</option>
+                      </select>
+                    </label>
+                  ) : null}
+                  {(liveTask?.subtype === "feedback" || commentStep?.subtype === "feedback" || liveTask?.subtype === "edicao" || commentStep?.subtype === "edicao" || clientTasks.find((card) => card.id === commentDestination)?.subtype === "edicao") ? <label className="tm-feedback-decision">
+                    Decisão
+                    <select value={feedbackDecision} onChange={(event) => setFeedbackDecision(event.target.value as typeof feedbackDecision)}>
+                      <option value="">North AI interpreta o comentário</option>
+                      <option value="aprovar">Aprovar</option>
+                      <option value="ajustes">Pedir ajustes</option>
+                      <option value="revisao">Revisar manualmente</option>
+                    </select>
+                  </label> : null}
                   <HeadDropdown className="tm-comment-attach" trigger={<span aria-hidden>📎</span>}>
                     {commentDocs.length === 0 ? (
                       <p className="tm-member-search-empty">Nenhum documento para anexar.</p>
@@ -2366,7 +2516,7 @@ export default function TaskModal({
                     onSubmit={() => void sendComment()}
                     placeholder={commentStepLabel ? `Comentar em "${commentStepLabel}"… use @ para chamar alguém` : "Escrever comentário… use @ para chamar alguém"}
                   />
-                  <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim()}>Enviar</button>
+                  <button className={`admin-btn primary tm-btn-${tone}`} onClick={sendComment} disabled={!comment.trim() || (liveTask?.kind === "plano_acao" && planCommentTargets.length > 0 && !commentDestination)}>Enviar</button>
                 </div>
               </div>
             </div>

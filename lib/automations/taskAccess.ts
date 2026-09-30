@@ -19,7 +19,7 @@ export const AUTOMATION_ASSIGNEE = "North Ai";
  *  O mesmo nome do responsável (24/09): o card mostrava "North Ai" como quem
  *  toca a etapa e "Automação" como quem comentou — duas identidades para a
  *  mesma coisa. */
-export const AUTOMATION_AUTHOR = AUTOMATION_ASSIGNEE;
+export const AUTOMATION_AUTHOR = "North AI";
 /** Autor dos comentários automáticos gravados antes de 24/09. Continuam no
  *  banco com este nome, e precisam continuar sendo lidos como automáticos: é o
  *  autor que separa "o que a automação disse" de "o que uma pessoa pediu", e
@@ -28,7 +28,7 @@ export const LEGACY_AUTOMATION_AUTHOR = "Automação";
 
 /** O comentário foi escrito por uma automação (nome atual ou legado)? */
 export function isAutomationAuthor(author: string | null | undefined): boolean {
-  return author === AUTOMATION_AUTHOR || author === LEGACY_AUTOMATION_AUTHOR;
+  return author === AUTOMATION_AUTHOR || author === AUTOMATION_ASSIGNEE || author === LEGACY_AUTOMATION_AUTHOR;
 }
 
 // Rows read via the admin client never carry the task_assignees join

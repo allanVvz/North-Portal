@@ -1,6 +1,6 @@
 "use client";
 
-import { AUTOMATION_DEFINITIONS, AUTOMATION_KEYS } from "@/lib/automationCatalog";
+import { AUTOMATION_DEFINITIONS, ACTIVATABLE_AUTOMATION_KEYS } from "@/lib/automationCatalog";
 import type { Cadence } from "@/lib/northai/commandParser";
 import { NORTH_FORMATS, type NorthFormatKey } from "@/lib/northai/formats";
 import { defaultPublishDate } from "@/lib/northai/recipes";
@@ -219,7 +219,7 @@ export default function GuidedForm({
       <ComboField
         label="Automação"
         value={d.automationKey}
-        options={AUTOMATION_KEYS.map((key) => ({ value: key, label: AUTOMATION_DEFINITIONS[key].label }))}
+        options={ACTIVATABLE_AUTOMATION_KEYS.map((key) => ({ value: key, label: AUTOMATION_DEFINITIONS[key].label }))}
         onChange={(automationKey) => set({ automationKey })}
       />
       <p className="nai-muted">{AUTOMATION_DEFINITIONS[d.automationKey as keyof typeof AUTOMATION_DEFINITIONS]?.description}</p>

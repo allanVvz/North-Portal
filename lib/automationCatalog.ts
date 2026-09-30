@@ -17,6 +17,8 @@ export const AUTOMATION_KEYS: AutomationKey[] = [
   "relatorio_conversao",
   "diaria_recorrente",
 ];
+/** New configurations cannot activate the client email collection stub. */
+export const ACTIVATABLE_AUTOMATION_KEYS = AUTOMATION_KEYS.filter((key) => key !== "coleta_metrica_cliente");
 
 // "ads_account": eligible if the client has a mapped Windsor or Meta ad
 // account (windsor.accountMap[slug] || meta.accountMap[slug]).

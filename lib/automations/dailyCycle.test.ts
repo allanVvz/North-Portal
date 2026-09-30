@@ -6,6 +6,7 @@ const provision = vi.hoisted(() => vi.fn());
 const comment = vi.hoisted(() => vi.fn());
 const series = vi.hoisted(() => vi.fn());
 const shortcut = vi.hoisted(() => vi.fn());
+const reconcile = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/creativeDrive", () => ({ provisionCreativeDriveWorkspace: provision }));
 vi.mock("./dailySeries", () => ({ ensureDailySeries: series }));
 vi.mock("@/lib/googleDriveApi", () => ({
@@ -13,6 +14,7 @@ vi.mock("@/lib/googleDriveApi", () => ({
   createDriveShortcut: shortcut,
 }));
 vi.mock("./taskWrites", () => ({ automationCommentId: (...parts: string[]) => parts.join(":"), updateTaskPayload: comment }));
+vi.mock("./dailyScripts", () => ({ reconcileDailyScripts: reconcile }));
 
 const PLAN = "00000000-0000-4000-8000-000000000001";
 const SCRIPT = "00000000-0000-4000-8000-000000000002";
@@ -53,6 +55,8 @@ beforeEach(() => {
   comment.mockReset();
   series.mockReset();
   shortcut.mockReset();
+  reconcile.mockReset();
+  reconcile.mockResolvedValue(undefined);
   series.mockResolvedValue({ folderId: "series", docId: "doc1", docUrl: "https://docs.google.com/document/d/doc1/edit", docName: "Roteiro único" });
   shortcut.mockResolvedValue("shortcut1");
   comment.mockResolvedValue(null);
@@ -70,6 +74,7 @@ describe("daily cycle Drive preparation", () => {
     expect(comment.mock.calls.map((call) => call[1])).toEqual([...CREATIVES, PLAN, SCRIPT, SCRIPT, CAPTURE, PLAN]);
     expect(comment.mock.calls[4][2].commentId).toBe(`daily-script-folder:${PLAN}`);
     expect(shortcut).toHaveBeenCalledWith(expect.objectContaining({ parentId: "script", targetId: "doc1" }));
+    expect(reconcile).toHaveBeenCalledWith(expect.anything(), SCRIPT);
   });
 
   it("retries a failed folder without recreating a cycle or changing comment keys", async () => {

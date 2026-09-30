@@ -795,6 +795,7 @@ export async function listAllBriefings(): Promise<AdminBriefingRow[]> {
 
 export type DriveFolderIds = {
   rootFolderId: string | null;
+  rawFolderId: string | null;
   brandFolderId: string | null;
   productsFolderId: string | null;
   uploadsFolderId: string | null;
@@ -1081,7 +1082,7 @@ export async function getAdminClientDetail(slug: string): Promise<AdminClientDet
   const [links, results, content, company, contract] = await Promise.all([
     supabase
       .from("client_drive_links")
-      .select("brand_url,products_url,uploads_url,root_folder_id,brand_folder_id,products_folder_id,uploads_folder_id,drive_synced_at")
+      .select("brand_url,products_url,uploads_url,root_folder_id,raw_folder_id,brand_folder_id,products_folder_id,uploads_folder_id,drive_synced_at")
       .eq("client_id", client.id)
       .limit(1),
     supabase.from("client_results").select("insights,top_metrics,report_url,feedback_url").eq("client_id", client.id).limit(1),
@@ -1116,6 +1117,7 @@ export async function getAdminClientDetail(slug: string): Promise<AdminClientDet
     },
     driveFolders: {
       rootFolderId: l?.root_folder_id ?? null,
+      rawFolderId: l?.raw_folder_id ?? null,
       brandFolderId: l?.brand_folder_id ?? null,
       productsFolderId: l?.products_folder_id ?? null,
       uploadsFolderId: l?.uploads_folder_id ?? null,
@@ -2430,6 +2432,15 @@ export async function updateTaskGroup(id: string, current: TaskRecord, rawPatch:
   // botão manual "Concluir ciclo" no molde avançava, desacoplado do status
   // real do card de execução.
   await advanceRecurrenceAfterUpdate(current, updated, actorId);
+  // Regra global vinculada ao card: o evento carrega a versão escolhida e sua
+  // chave idempotente. Falha do executor vira comentário, sem desfazer a ação
+  // humana já persistida.
+  try {
+    const { runStatusRuleEvents } = await import("@/lib/automations/ruleEngine");
+    await runStatusRuleEvents(current, updated);
+  } catch (error) {
+    console.error("automation status rule failed", { taskId: updated.id, error });
+  }
   // Toda rota interna de `routeTaskGroupUpdate` termina num `updateTask` cru
   // (`select(TASK_COLUMNS)`, sem os joins de `mergeTaskAssigneeRow`) — só a
   // rota admin (`app/api/admin/tasks/[id]/route.ts`) sabia disso e refazia o
@@ -2666,6 +2677,9 @@ export async function linkExistingRecurrenceExecution(templateId: string, taskId
   if (!template.recurrence_cadence) throw new HttpError(409, "Este card não é uma recorrência.");
   if (recurrenceStopped(template.status)) throw new HttpError(409, "Esta recorrência foi encerrada.");
   if (task.recurrence_cadence) throw new HttpError(400, "Este card já é o molde de outra recorrência.");
+  if (task.client_id !== template.client_id || task.kind !== template.kind) {
+    throw new HttpError(400, "A execução precisa ter o mesmo cliente e tipo da recorrência.");
+  }
 
   const cycle = recurrenceCycleOf(template);
   const supabase = await createClient();
@@ -2928,7 +2942,7 @@ async function selectApprovalRows(statuses: TaskStatus[]): Promise<ApprovalRow[]
  *  não pode "sumir" por causa de um único cliente) continue no menu. */
 export async function listReviewQueue(): Promise<ApprovalRecord[]> {
   const [rows, flagsMap] = await Promise.all([selectApprovalRows(["revisao"]), listAllClientFlowFlags()]);
-  return toApprovalRecords(rows).filter((r) => (r.client_id ? flagsMap.get(r.client_id)?.revisaoAdmin ?? true : true));
+  return toApprovalRecords(rows?.filter(visibleOnTaskBoard) ?? null).filter((r) => (r.client_id ? flagsMap.get(r.client_id)?.revisaoAdmin ?? true : true));
 }
 
 /** Tela Aprovações: cards nas colunas "Aprovação" e "Concluído" do Kanban. Mesmo
@@ -4221,8 +4235,8 @@ async function validateDailyAutomation(
   const { data: plan, error: planError } = await supabase.from("tasks")
     .select("id,client_id,kind,recurrence_cadence").eq("id", targetTaskId).maybeSingle();
   if (planError) fail(planError);
-  if (!plan || plan.kind !== "plano_acao" || !plan.recurrence_cadence || plan.client_id !== config.clientId) {
-    throw new HttpError(400, "Selecione um Plano recorrente do cliente da diária.");
+  if (!plan || plan.kind !== "plano_acao" || plan.client_id !== config.clientId) {
+    throw new HttpError(400, "Selecione um Plano do cliente da diária.");
   }
   if (config.adoptedPlanTaskId) {
     const { data: adopted, error: adoptedError } = await supabase.from("tasks")

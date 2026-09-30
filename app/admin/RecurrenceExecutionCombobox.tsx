@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TaskKindIcon from "./TaskKindIcon";
-import { agencyToday } from "./recurringState";
 import { normalizeSearchText } from "@/lib/taskSearch";
 
-type Candidate = { id: string; title: string; kind: string; subtype?: string | null; due_date?: string | null };
+type Candidate = { id: string; title: string; kind: string; subtype?: string | null; clientName?: string };
+type Meeting = { id: string; date: string; title: string };
 
-export default function RecurrenceExecutionCombobox({ candidates, templateKind, busy, onLink, onCreate }: {
-  candidates: Candidate[]; templateKind: string; busy: boolean;
-  onLink: (candidate: Candidate, date: string) => void;
+export default function RecurrenceExecutionCombobox({ candidates, meetings, templateKind, busy, onLink, onCreate }: {
+  candidates: Candidate[]; meetings: Meeting[]; templateKind: string; busy: boolean;
+  onLink: (candidate: Candidate, meetingId: string) => void;
   onCreate: (dates: string[], title: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -30,7 +30,7 @@ export default function RecurrenceExecutionCombobox({ candidates, templateKind, 
   }, [open]);
 
   const needle = normalizeSearchText(query.trim());
-  const matches = useMemo(() => (needle ? candidates.filter((candidate) => normalizeSearchText(candidate.title).includes(needle)) : candidates)
+  const matches = useMemo(() => (needle ? candidates.filter((candidate) => normalizeSearchText(`${candidate.title} ${candidate.clientName ?? ""}`).includes(needle)) : candidates)
     .slice().sort((a, b) => Number(b.kind === templateKind) - Number(a.kind === templateKind)).slice(0, 8), [candidates, needle, templateKind]);
 
   function addDate() {
@@ -54,13 +54,16 @@ export default function RecurrenceExecutionCombobox({ candidates, templateKind, 
     {open ? <div className="pac-panel">
       <nav className="pac-mode" aria-label="Como adicionar execução"><button type="button" className={mode === "link" ? "on" : ""} aria-pressed={mode === "link"} onClick={() => { setMode("link"); setQuery(""); }}>Vincular existente</button><button type="button" className={mode === "create" ? "on" : ""} aria-pressed={mode === "create"} onClick={() => { setMode("create"); setQuery(""); }}>Criar nova</button></nav>
       {mode === "link" ? <div className="pac-section">
-        <p className="pac-section-title">Cards disponíveis<span>Escolha a data desta execução</span></p>
+        <p className="pac-section-title">Cards disponíveis<span>Escolha a reunião desta execução</span></p>
         {matches.map((candidate) => <div className="pac-link-row" key={candidate.id}>
-          <TaskKindIcon kind={candidate.kind} subtype={candidate.subtype} size="sm" /><span title={candidate.title}>{candidate.title}</span>
-          <input aria-label={`Data de ${candidate.title}`} type="date" defaultValue={candidate.due_date ?? ""} />
-          <button type="button" disabled={busy} onClick={(event) => { const input = event.currentTarget.parentElement?.querySelector("input") as HTMLInputElement | null; onLink(candidate, input?.value || candidate.due_date || agencyToday()); setOpen(false); }}>Vincular</button>
+          <TaskKindIcon kind={candidate.kind} subtype={candidate.subtype} size="sm" /><span title={candidate.title}>{candidate.title}{candidate.clientName ? ` · ${candidate.clientName}` : ""}</span>
+          <select aria-label={`Reunião de ${candidate.title}`} defaultValue={meetings[0]?.id ?? ""}>
+            {meetings.map((meeting) => <option key={meeting.id} value={meeting.id}>{meeting.date} · {meeting.title}</option>)}
+          </select>
+          <button type="button" disabled={busy || !meetings.length} onClick={(event) => { const select = event.currentTarget.parentElement?.querySelector("select") as HTMLSelectElement | null; if (select?.value) onLink(candidate, select.value); setOpen(false); }}>Vincular</button>
         </div>)}
-        {!matches.length ? <p className="admin-sub pac-empty">Nenhuma execução encontrada. Use “Criar nova” para adicionar uma.</p> : null}
+        {!meetings.length ? <p className="admin-sub pac-empty">Crie uma reunião antes de vincular cards.</p> : null}
+        {!matches.length ? <p className="admin-sub pac-empty">Nenhum card encontrado.</p> : null}
       </div> : <div className="pac-section">
         <p className="pac-section-title">Datas das novas execuções</p>
         <div className="pac-date-row"><input aria-label="Data da execução" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button type="button" disabled={!date || busy} onClick={addDate}>Adicionar data</button></div>

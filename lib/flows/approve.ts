@@ -54,5 +54,11 @@ export async function approveTask(
   // etapa seguinte não pode desfazer a aprovação que acabou de acontecer — ela
   // aparece como comentário no card.
   await advanceFlowAfterUpdate(task, approved, options.actorId ?? null);
+  try {
+    const { runStatusRuleEvents } = await import("@/lib/automations/ruleEngine");
+    await runStatusRuleEvents(task, approved);
+  } catch (error) {
+    console.error("automation approval rule failed", { taskId: task.id, error });
+  }
   return approved;
 }

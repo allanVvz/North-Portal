@@ -14,6 +14,20 @@ import type { TaskComment, TaskRecord } from "@/lib/validation";
 import { listMetricsEligibleClientIds } from "./serviceIntegrations";
 import { asTaskRecord, errorMessage, getAdminTask, AUTOMATION_ASSIGNEE, AUTOMATION_AUTHOR, type AdminClient } from "./taskAccess";
 import { markTaskParada } from "./errorHandling";
+import { derivedTaskId } from "@/lib/derivedTaskId";
+
+function occurrenceDate(eventKey?: string): string | null {
+  return eventKey?.match(/:occurrence:(\d{4}-\d{2}-\d{2})$/)?.[1] ?? null;
+}
+
+function dateForOccurrence(day: string | null, moldDate: string | null, itemDate: string | null): string | null {
+  if (!day || !moldDate || !itemDate) return itemDate;
+  const offset = Math.round((Date.parse(`${itemDate}T00:00:00Z`) - Date.parse(`${moldDate}T00:00:00Z`)) / 86_400_000);
+  if (!Number.isFinite(offset)) return itemDate;
+  const shifted = new Date(`${day}T00:00:00Z`);
+  shifted.setUTCDate(shifted.getUTCDate() + offset);
+  return shifted.toISOString().slice(0, 10);
+}
 
 async function metricsSummaryComment(admin: AdminClient, clientId: string): Promise<string> {
   const { data, error } = await admin
@@ -37,9 +51,14 @@ function withAppendedComment(payload: Record<string, unknown> | null | undefined
 // Caso 1 (task normal) e caso 2 (card recorrente): mesma cópia — recurrence_*
 // é copiado verbatim do modelo, o que já preserva a cadência quando o modelo
 // é uma rotina.
-async function cloneSimpleTask(admin: AdminClient, template: TaskRecord, clientId: string, comment: string): Promise<TaskRecord> {
-  const id = crypto.randomUUID();
+async function cloneSimpleTask(admin: AdminClient, template: TaskRecord, clientId: string, comment: string, eventKey?: string): Promise<TaskRecord> {
+  const id = eventKey ? derivedTaskId(template.id, `provision:${eventKey}:${clientId}`) : crypto.randomUUID();
+  if (eventKey) {
+    const existing = await getAdminTask(admin, id);
+    if (existing) return existing;
+  }
   const payload = withAppendedComment(template.payload, { author: AUTOMATION_AUTHOR, text: comment, at: new Date().toISOString() });
+  const day = occurrenceDate(eventKey);
   const fields = {
     id,
     client_id: clientId,
@@ -54,8 +73,8 @@ async function cloneSimpleTask(admin: AdminClient, template: TaskRecord, clientI
     plan_id: null,
     requires_review: template.requires_review,
     requires_approval: template.requires_approval,
-    due_date: template.due_date,
-    start_date: template.start_date,
+    due_date: day ?? template.due_date,
+    start_date: day ?? template.start_date,
     end_date: template.end_date,
     scheduled_start_at: null,
     scheduled_end_at: null,
@@ -64,11 +83,15 @@ async function cloneSimpleTask(admin: AdminClient, template: TaskRecord, clientI
     client_visible: template.client_visible,
     payload,
     position: 0,
-    recurrence_cadence: template.recurrence_cadence,
-    recurrence_weekdays: template.recurrence_weekdays,
-    recurrence_day_of_month: template.recurrence_day_of_month,
+    recurrence_cadence: eventKey ? null : template.recurrence_cadence,
+    recurrence_weekdays: eventKey ? [] : template.recurrence_weekdays,
+    recurrence_day_of_month: eventKey ? null : template.recurrence_day_of_month,
   };
   const { data, error } = await admin.from("tasks").insert(fields).select(TASK_COLUMNS).limit(1);
+  if (error?.code === "23505" && eventKey) {
+    const existing = await getAdminTask(admin, id);
+    if (existing) return existing;
+  }
   if (error) throw error;
   return asTaskRecord(data![0]);
 }
@@ -81,7 +104,8 @@ async function cloneSimpleTask(admin: AdminClient, template: TaskRecord, clientI
 // lib/automations/execute.ts reuses this exact mechanism for Automação 1's
 // plano_acao branch (a new instance of the plan gets created on the plan's
 // own due date, not just on "Provisionar agora").
-export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, clientId: string): Promise<TaskRecord> {
+export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, clientId: string, eventKey?: string): Promise<TaskRecord> {
+  const day = occurrenceDate(eventKey);
   const { data: memberLinks, error: linksError } = await admin
     .from("task_links")
     .select("child_id,position")
@@ -107,7 +131,7 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
     return { link, member };
   });
 
-  const parentId = crypto.randomUUID();
+  const parentId = eventKey ? derivedTaskId(templateParent.id, `provision:${eventKey}:${clientId}`) : crypto.randomUUID();
   const { data: parentData, error: parentError } = await admin
     .from("tasks")
     .insert({
@@ -124,8 +148,8 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
       plan_id: null,
       requires_review: templateParent.requires_review,
       requires_approval: templateParent.requires_approval,
-      due_date: templateParent.due_date,
-      start_date: templateParent.start_date,
+      due_date: day ?? templateParent.due_date,
+      start_date: day ?? templateParent.start_date,
       end_date: templateParent.end_date,
       scheduled_start_at: null,
       scheduled_end_at: null,
@@ -137,12 +161,13 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
     })
     .select(TASK_COLUMNS)
     .limit(1);
-  if (parentError) throw parentError;
-  const parent = asTaskRecord(parentData![0]);
+  if (parentError && !(eventKey && parentError.code === "23505")) throw parentError;
+  const parent = parentData?.[0] ? asTaskRecord(parentData[0]) : await getAdminTask(admin, parentId);
+  if (!parent) throw new Error("Plano provisionado não encontrado.");
 
   try {
     for (const { link, member } of members) {
-      const memberId = crypto.randomUUID();
+      const memberId = eventKey ? derivedTaskId(parentId, `member:${member.id}`) : crypto.randomUUID();
       const { error: memberError } = await admin.from("tasks").insert({
         id: memberId,
         client_id: clientId,
@@ -157,8 +182,8 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
         plan_id: null,
         requires_review: member.requires_review,
         requires_approval: member.requires_approval,
-        due_date: member.due_date,
-        start_date: member.start_date,
+        due_date: dateForOccurrence(day, templateParent.due_date, member.due_date),
+        start_date: dateForOccurrence(day, templateParent.due_date, member.start_date),
         end_date: member.end_date,
         scheduled_start_at: null,
         scheduled_end_at: null,
@@ -168,7 +193,7 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
         payload: member.payload,
         position: 0,
       });
-      if (memberError) throw memberError;
+      if (memberError && !(eventKey && memberError.code === "23505")) throw memberError;
 
       const { error: linkError } = await admin.from("task_links").insert({
         parent_id: parent.id,
@@ -177,7 +202,7 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
         slot: null,
         position: link.position,
       });
-      if (linkError) throw linkError;
+      if (linkError && !(eventKey && linkError.code === "23505")) throw linkError;
     }
   } catch (error) {
     // Partial plan (parent exists, some members missing) — surface it on the
@@ -190,7 +215,7 @@ export async function clonePlan(admin: AdminClient, templateParent: TaskRecord, 
 
 export type ProvisionSummary = { provisioned: number; skipped: number; errors: { clientSlug: string; message: string }[] };
 
-export async function provisionFromTemplate(templateTaskId: string): Promise<ProvisionSummary> {
+export async function provisionFromTemplate(templateTaskId: string, eventKey?: string): Promise<ProvisionSummary> {
   const admin = createAdminClient();
   const template = await getAdminTask(admin, templateTaskId);
   if (!template) throw new Error("Card-modelo não encontrado.");
@@ -213,10 +238,10 @@ export async function provisionFromTemplate(templateTaskId: string): Promise<Pro
     }
     try {
       if (template.kind === "plano_acao") {
-        await clonePlan(admin, template, client.id);
+        await clonePlan(admin, template, client.id, eventKey);
       } else {
         const comment = await metricsSummaryComment(admin, client.id);
-        await cloneSimpleTask(admin, template, client.id, comment);
+        await cloneSimpleTask(admin, template, client.id, comment, eventKey);
       }
       summary.provisioned += 1;
     } catch (error) {

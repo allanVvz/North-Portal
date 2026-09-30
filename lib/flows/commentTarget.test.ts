@@ -18,11 +18,13 @@ function fakeAdmin(
   const linksQuery = {
     select: () => linksQuery,
     eq: () => linksQuery,
+    in: () => linksQuery,
     then: (resolve: (result: { data: typeof links; error: null }) => unknown) => resolve({ data: links, error: null }),
   };
   const tasksQuery = {
     select: () => tasksQuery,
     in: () => Promise.resolve({ data: tasks, error: null }),
+    eq: (_column: string, id: string) => ({ maybeSingle: () => Promise.resolve({ data: tasks.find((task) => task.id === id) ?? null, error: null }) }),
   };
   const assigneesQuery = {
     select: () => assigneesQuery,
@@ -237,7 +239,7 @@ describe("resolveFlowCommentTarget — etapa explícita e etapa única", () => {
   it("card que não é entrega + stage_task_id de outro card → 409; o próprio id é aceito", async () => {
     const plano = { id: "plano", kind: "plano_acao", payload: {} } as unknown as TaskRecord;
     await expect(resolveFlowCommentTarget(fakeAdmin([], []), plano, { stageTaskId: "outro" })).rejects.toBeInstanceOf(HttpError);
-    expect(await resolveFlowCommentTarget(fakeAdmin([], []), plano, { stageTaskId: "plano" })).toEqual({ targetId: "plano", via: "own" });
+    expect(await resolveFlowCommentTarget(fakeAdmin([], []), plano, { planNote: true })).toEqual({ targetId: "plano", via: "plan_note" });
   });
 });
 

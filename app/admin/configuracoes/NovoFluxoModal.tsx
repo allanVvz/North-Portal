@@ -35,11 +35,13 @@ export default function NovoFluxoModal({
   onCreated,
   onUpdated,
   preset,
+  inline = false,
 }: {
   onClose: () => void;
   onCreated: (type: TaskTypeEditorNode) => void;
   onUpdated?: () => void;
   preset?: { key: string; label: string; icon: string; editId?: string; steps: StepDraft[] };
+  inline?: boolean;
 }) {
   const [label, setLabel] = useState(preset?.label ?? "");
   const [icon, setIcon] = useState(preset?.icon ?? ICON_OPTIONS[0]);
@@ -114,8 +116,8 @@ export default function NovoFluxoModal({
   }
 
   return (
-    <div className="kb-modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
-      <div className="novofluxo" onClick={(e) => e.stopPropagation()}>
+    <div className={inline ? "novofluxo-inline" : "kb-modal-backdrop"} onClick={inline ? undefined : () => { if (!busy) onClose(); }}>
+      <div className="novofluxo" onClick={inline ? undefined : (e) => e.stopPropagation()}>
         <div className="attrcfg-head">
           <div>
             <h2>{preset?.editId ? `Editar cascata de ${preset.label}` : "Novo subtipo de Entrega"}</h2>

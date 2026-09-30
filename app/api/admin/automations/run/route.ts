@@ -8,6 +8,8 @@ import { reportMissedAutomationCycles } from "@/lib/automations/moldHealth";
 import { warnBeforeMetaCredentialFailure } from "@/lib/automations/metaCredentialHealth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reconcileFlows } from "@/lib/flows/reconcile";
+import { runOccurrenceRuleEvents } from "@/lib/automations/ruleEngine";
+import { agencyToday } from "@/lib/time/agency";
 
 // Node runtime required by @react-pdf/renderer (lib/reports/adsReportPdf.tsx).
 export const runtime = "nodejs";
@@ -37,6 +39,10 @@ export async function POST(request: Request) {
     }
     await requireCronSecret(request);
     const summary = await runAutomations();
+    const ruleEvents = await runOccurrenceRuleEvents(agencyToday()).catch((error) => {
+      console.error("global automation rules failed", error);
+      return { processed: 0, succeeded: 0, errors: [{ taskId: "global", message: "Falha ao consultar regras globais." }] };
+    });
     // Varredura dos fluxos em cascata na mesma batida diária. É ela que
     // garante a corretude: os gatilhos síncronos (updateTaskGroup) só existem
     // para o usuário ver a próxima etapa nascer na hora, e qualquer caminho de
@@ -63,7 +69,7 @@ export async function POST(request: Request) {
       console.error("meta credential probe failed", error);
       return 0;
     });
-    return NextResponse.json({ ...summary, flows, routineReminders, missedCycles, metaCredentialWarnings });
+    return NextResponse.json({ ...summary, ruleEvents, flows, routineReminders, missedCycles, metaCredentialWarnings });
   } catch (error) {
     return apiError(error);
   }

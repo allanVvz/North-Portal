@@ -6,6 +6,7 @@ import { ensureDailySeries } from "./dailySeries";
 import type { AdminClient } from "./taskAccess";
 import { errorMessage } from "./taskAccess";
 import { automationCommentId, updateTaskPayload } from "./taskWrites";
+import { reconcileDailyScripts } from "./dailyScripts";
 
 type DailyPlan = {
   id: string;
@@ -130,6 +131,10 @@ export async function prepareDailyCycle(
         text: `North AI preparou ${creatives.length} Entrega(s) e as pastas desta gravação${shared.daily ? `: [abrir pasta](${folderLink(shared.daily)})` : ""}.`,
         commentId: automationCommentId("daily-ready", executionId),
       });
+      // A leitura do Doc é feita depois de criar os elos e guardar a URL.
+      // Ausências e conflitos ficam no comentário do Roteiro, sem impedir a
+      // preparação das pastas ou reprocessar ciclos anteriores.
+      await reconcileDailyScripts(admin, scriptId);
     } catch (error) {
       errors.push({ creativeTaskId: scriptId as string, message: errorMessage(error) });
     }

@@ -43,6 +43,7 @@ const CHAVES_GRAVADAS = [
   "recurrence_parent_id",
   "recurrence_revision",
   "report_instructions",
+  "reviewer_ids",
   "statusLabel",
   "statusTone",
   "traffic_revision_instruction",
@@ -52,6 +53,7 @@ function fixtureFor(key: string): unknown {
   if (key === "comments") return [{ author: "a", text: "t", at: "2026-01-01" }];
   if (key === "statusTone" || key === "barTone") return "neutral";
   if (key === "explicit_occurrence_dates") return ["2026-01-01"];
+  if (key === "reviewer_ids") return ["00000000-0000-4000-8000-000000000001"];
   if (key.endsWith("_cycle") || key.endsWith("_revision") || key.endsWith("cycles") || key === "pct") return 1;
   if (key === "recurrence_group" || key === "deferred_until_accessed") return true;
   return "x";

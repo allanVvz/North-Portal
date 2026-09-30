@@ -142,6 +142,31 @@ export async function getDriveItemMetadata(fileId: string): Promise<DriveItemMet
   };
 }
 
+/** Read a script without changing its source. Google Docs are exported as
+ * plain text; uploaded TXT files are downloaded through Drive. */
+export async function readDriveText(fileId: string, maxBytes = 750_000): Promise<string> {
+  const item = await getDriveItemMetadata(fileId);
+  if (!item) throw new HttpError(404, "Arquivo de roteiro não acessível no Drive.");
+  if (item.mimeType !== DOCUMENT_MIME && item.mimeType !== "text/plain") {
+    throw new HttpError(400, "Anexe um Google Docs ou arquivo TXT para ler o roteiro.");
+  }
+  if (item.size !== null && item.size > maxBytes) throw new HttpError(413, "O roteiro excede o limite de leitura.");
+  const token = await accessToken();
+  if (!token) throw new HttpError(503, "Google Drive não configurado.");
+  const suffix = item.mimeType === DOCUMENT_MIME
+    ? "/export?mimeType=text%2Fplain"
+    : "?alt=media&supportsAllDrives=true";
+  const response = await fetch(`${DRIVE_FILES}/${encodeURIComponent(fileId)}${suffix}`, {
+    headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new HttpError(502, `Não foi possível ler o roteiro no Drive (HTTP ${response.status}).`);
+  const length = Number(response.headers.get("content-length") ?? 0);
+  if (length > maxBytes) throw new HttpError(413, "O roteiro excede o limite de leitura.");
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength > maxBytes) throw new HttpError(413, "O roteiro excede o limite de leitura.");
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
 /** Cria ou recupera um item pela chave de reconciliacao em appProperties. */
 export async function findDriveItemByAppProperties(
   parentId: string,

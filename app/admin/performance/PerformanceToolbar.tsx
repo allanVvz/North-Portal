@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DateRangeField from "../DateRangeField";
 import PerformanceCompositeFilter from "./PerformanceCompositeFilter";
 import { ACQUISITION_SECTIONS, ANALYTICS_SECTIONS, OBJECTIVE_LABEL, PLATFORM_LABEL } from "./performanceLabels";
 import type { PerformanceWorkspace } from "./usePerformanceWorkspace";
+import { suggestPerformanceTemplate } from "@/lib/performanceTemplateSuggestion";
 
 const DATE_PRESETS = [7, 30, 90];
 
@@ -55,6 +56,8 @@ export default function PerformanceToolbar({ workspace, view }: { workspace: Per
   const screenKey = view === "dashboard" ? "analytics" : "acquisition";
   const sections = view === "dashboard" ? ANALYTICS_SECTIONS : ACQUISITION_SECTIONS;
   const hidden = hiddenSections[screenKey];
+  const suggestion = useMemo(() => suggestPerformanceTemplate(data?.posts ?? []), [data?.posts]);
+  const suggestedTemplate = suggestion && templates.find((template) => template.id === suggestion.id);
 
   return (
     <>
@@ -151,6 +154,12 @@ export default function PerformanceToolbar({ workspace, view }: { workspace: Per
         {data?.stale ? <span className="perf-demo-chip perf-stale-chip" title={data.error}>Dados desatualizados</span> : null}
       </div>
       {templateError ? <p className="admin-error perf-template-error">{templateError}</p> : null}
+      {suggestion && suggestedTemplate && canEdit ? <div className="perf-template-suggestion">
+        <strong>Sugestão de template: {suggestedTemplate.name}</strong>
+        <span>{suggestion.reason}</span>
+        <button type="button" className="admin-btn ghost" onClick={() => applyTemplate(suggestedTemplate)}>Usar sugestão</button>
+        <a href="/admin/northai/automacoes">Vincular em Automações</a>
+      </div> : null}
     </>
   );
 }

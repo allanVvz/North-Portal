@@ -12,6 +12,9 @@ import { markTaskParada } from "@/lib/automations/errorHandling";
 import { errorMessage } from "@/lib/automations/taskAccess";
 import { resolveFlowCommentTarget } from "@/lib/flows/commentTarget";
 import { ADS_REPORT_STEP_KEY, CONVERSION_REPORT_STEP_KEY } from "@/lib/automationWorkflow";
+import { handleInternalFeedbackComment, type FeedbackDecision } from "@/lib/automations/internalFeedback";
+import { reconcileDailyScripts } from "@/lib/automations/dailyScripts";
+import { handleCreativeReviewComment } from "@/lib/flows/creativeReview";
 
 // Node.js: o hook do fluxo de conversão pode renderizar o PDF de vendas.
 export const runtime = "nodejs";
@@ -77,7 +80,7 @@ async function conversionSiblingFor(admin: ReturnType<typeof createAdminClient>,
   return null;
 }
 
-function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string, commentAt?: string | null) {
+function scheduleCommentAutomation(taskId: string, authorId?: string, text?: string, commentAt?: string | null, decision?: FeedbackDecision | null, commentId?: string | null) {
   after(async () => {
     const admin = createAdminClient();
     try {
@@ -85,6 +88,16 @@ function scheduleCommentAutomation(taskId: string, authorId?: string, text?: str
       // decide tudo (aprovar o Feedback, regerar a conversão, anotar o pedido).
       // Os gatilhos genéricos abaixo ficam para as demais etapas.
       if (text && await handleReportStepComment(admin, taskId, text, commentAt ?? null)) return;
+      if (text && authorId) {
+        if (await handleCreativeReviewComment(admin, taskId, authorId, text, decision ?? null)) return;
+        await handleInternalFeedbackComment(admin, taskId, authorId, text, decision ?? null, commentId ?? commentAt ?? text);
+        const commented = await getTaskById(taskId);
+        if (commented?.subtype === "roteiro") {
+          const source = commentsOf(commented.payload).slice().reverse().find((item) =>
+            item.author_id === authorId && item.text === text && (commentId ? item.id === commentId : item.at === commentAt));
+          if (source) await reconcileDailyScripts(admin, taskId, source);
+        }
+      }
       if (text) {
         const task = await getTaskById(taskId);
         const pending = task?.payload?.visual_request_pending as { instruction?: string; sourceCommentAt?: string | null } | undefined;
@@ -143,7 +156,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const session = await requireAdmin();
     const { id } = await context.params;
     if (!idPattern.test(id)) throw new HttpError(400, "ID inválido.");
-    const { text, comment_id: commentId, stage_task_id: stageTaskId, asset_ids: assetIds = [] } = taskCommentCreateSchema.parse(await request.json());
+    const { text, comment_id: commentId, feedback_decision: feedbackDecision, stage_task_id: stageTaskId, plan_note: planNote, asset_ids: assetIds = [] } = taskCommentCreateSchema.parse(await request.json());
     // Comentar no card PAI (a entrega) grava o comentário na ETAPA em que a
     // pessoa estava (`stage_task_id`) — ou, em chamada antiga sem ele, na única
     // etapa atual inequívoca; ambíguo é 409, nunca um palpite. A LEITURA não
@@ -152,8 +165,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // de comentário (o portal do cliente) precisa responder exatamente a mesma
     // coisa; ver o cabeçalho daquele módulo.
     const parent = await getTaskById(id);
-    const targetId = assetIds.length ? id : parent
-      ? (await resolveFlowCommentTarget(createAdminClient(), parent, { commenterId: session.userId, stageTaskId })).targetId
+    const targetId = parent
+      ? (await resolveFlowCommentTarget(createAdminClient(), parent, { commenterId: session.userId, stageTaskId, planNote })).targetId
       : id;
     const { task, inserted } = await appendTaskComment(targetId, session.userId, text, commentId ?? null, assetIds);
     // Reenvio do mesmo comentário (retry, clique duplo): já foi gravado e já
@@ -182,7 +195,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // Uma falha aqui não pode se perder calada: vira o mesmo aviso que as
     // automações usam — a etapa `parada` com um comentário explicando.
     const sourceComment = commentsOf(task.payload).slice().reverse().find((comment) => comment.author_id === session.userId && comment.text === text);
-    scheduleCommentAutomation(targetId, session.userId, text, sourceComment?.at ?? null);
+    scheduleCommentAutomation(targetId, session.userId, text, sourceComment?.at ?? null, feedbackDecision ?? null, commentId ?? null);
     return NextResponse.json(task);
   } catch (error) { return apiError(error); }
 }

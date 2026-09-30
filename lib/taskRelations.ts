@@ -106,7 +106,8 @@ export function isDeferredTask(task: Pick<TaskRecord, "payload">): boolean {
 }
 
 export function visibleOnTaskBoard<T extends Pick<TaskRecord, "payload">>(task: T): boolean {
-  return !isDeferredTask(task) && task.payload?.recurrence_group !== true;
+  return !isDeferredTask(task) && task.payload?.recurrence_group !== true
+    && task.payload?.legacy_shared_stage_archived !== true;
 }
 
 /** Um cliente sai das telas operacionais do dia a dia (quadro Tarefas,

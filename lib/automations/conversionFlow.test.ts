@@ -319,7 +319,7 @@ describe("regenerateConversionReport — manutenção", () => {
     await regenerateConversionReport(db.asAdmin(), CONVERSAO);
     const comentarios = db.comments(CONVERSAO);
     expect(comentarios).toHaveLength(1);
-    expect(String(comentarios[0].author)).toBe("North Ai");
+    expect(String(comentarios[0].author)).toBe("North AI");
     // O feedback foi escrito em 22/09 15:00; a resposta entra em seguida.
     const at = new Date(String(comentarios[0].at)).getTime();
     expect(at).toBeGreaterThan(new Date("2026-09-22T15:00:00.000Z").getTime());

@@ -5,6 +5,7 @@ import type { TaskTypeEditorNode, TaskTypeEditorSubtype, VocabUsageMap } from "@
 import { usageKey } from "@/lib/taskTypes";
 import NovoFluxoModal from "./NovoFluxoModal";
 import { CANONICAL_DELIVERY_FORMATS } from "@/lib/canonicalDeliveryFormats";
+import type { GlobalRule } from "@/lib/automations/rules";
 
 // Configurações › Tipos e fluxos — o molde das Entregas fora do SQL.
 //
@@ -59,6 +60,7 @@ export default function FluxosPanel() {
   const [novoFluxoOpen, setNovoFluxoOpen] = useState(false);
   const [canonicalPreset, setCanonicalPreset] = useState<(typeof CANONICAL_DELIVERY_FORMATS)[number] | null>(null);
   const [workflowToEdit, setWorkflowToEdit] = useState<TaskTypeEditorNode | null>(null);
+  const [automationRules, setAutomationRules] = useState<GlobalRule[]>([]);
 
   async function refreshTypes() {
     const response = await fetch("/api/admin/task-types?scope=editor");
@@ -88,6 +90,12 @@ export default function FluxosPanel() {
         else setError("Não foi possível carregar os tipos.");
       })
       .catch(() => setError("Não foi possível carregar os tipos."));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/admin/automation-rules").then((response) => response.ok ? response.json() : null)
+      .then((payload: { rules?: GlobalRule[] } | null) => setAutomationRules(payload?.rules ?? []))
+      .catch(() => {});
   }, []);
 
   function closeEditor() {
@@ -296,11 +304,7 @@ export default function FluxosPanel() {
       {novoFluxoOpen ? (
         <NovoFluxoModal
           onClose={() => { setNovoFluxoOpen(false); setWorkflowToEdit(null); }}
-          preset={workflowToEdit ? {
-            key: workflowToEdit.key, label: workflowToEdit.label, icon: workflowToEdit.icon ?? "▸",
-            editId: workflowToEdit.id,
-            steps: workflowToEdit.workflowSteps.map((step) => toStepDraft(step)),
-          } : canonicalPreset ? {
+          preset={canonicalPreset ? {
             ...canonicalPreset,
             steps: (data.types.find((type) => type.key === "criativo")?.workflowSteps ?? [])
               .map((step) => toStepDraft(step)),
@@ -309,7 +313,7 @@ export default function FluxosPanel() {
             setNovoFluxoOpen(false);
             void refreshTypes();
           }}
-          onUpdated={() => { setNovoFluxoOpen(false); setWorkflowToEdit(null); void refreshTypes(); }}
+          onUpdated={() => { setNovoFluxoOpen(false); void refreshTypes(); }}
         />
       ) : null}
 
@@ -381,10 +385,15 @@ export default function FluxosPanel() {
               <div className="voc-steps">
                 {isDelivery ? <div className="set-actions">
                   <p className="admin-sub">Esta Entrega usa etapas reutilizáveis de Tarefa. Uma alteração publica uma nova versão; cards existentes mantêm a versão anterior.</p>
-                  <button type="button" className="admin-btn ghost" onClick={() => { setWorkflowToEdit(type); setCanonicalPreset(null); setNovoFluxoOpen(true); }}>
+                  <button type="button" className="admin-btn ghost" onClick={() => setWorkflowToEdit(type)}>
                     Editar cascata
                   </button>
                 </div> : null}
+                {isDelivery && workflowToEdit?.id === type.id ? <NovoFluxoModal inline
+                  preset={{ key: type.key, label: type.label, icon: type.icon ?? "▸", editId: type.id,
+                    steps: type.workflowSteps.map((step) => toStepDraft(step)) }}
+                  onClose={() => setWorkflowToEdit(null)} onCreated={() => {}}
+                  onUpdated={() => { setWorkflowToEdit(null); void refreshTypes(); }} /> : null}
                 {displayedSteps.map((step, index) =>
                   editing === step.id ? (
                     <StepEditor
@@ -416,6 +425,11 @@ export default function FluxosPanel() {
                           peso {step.progress_weight}
                           {step.default_assignee ? ` · ${step.default_assignee}` : ""}
                         </span>
+                        {isDelivery ? <div className="voc-step-automations">
+                          {automationRules.filter((rule) => rule.active && rule.definition.workflowStepId === step.workflow_step_id)
+                            .map((rule) => <span key={rule.id} className="set-badge publicada">⚡ {rule.name} v{rule.version}</span>)}
+                          <a href="/admin/northai/automacoes">Vincular automação</a>
+                        </div> : null}
                       </div>
                       {!isDelivery ? <div className="voc-actions">
                         <button
