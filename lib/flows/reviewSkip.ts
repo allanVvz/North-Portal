@@ -19,6 +19,7 @@ export function stepSkipsReview(
 export function deriveRequiresReview(
   reviewerId: string | null,
   assigneeProfileIds: readonly string[],
+  northAiReviewer = false,
 ): boolean {
-  return Boolean(reviewerId) && !stepSkipsReview(reviewerId, assigneeProfileIds);
+  return northAiReviewer || (Boolean(reviewerId) && !stepSkipsReview(reviewerId, assigneeProfileIds));
 }

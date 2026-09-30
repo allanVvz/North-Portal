@@ -13,6 +13,8 @@ export default function AssigneePicker({
   disabled = false,
   readOnly = false,
   accountTone,
+  northAiResponsible = false,
+  onNorthAiResponsibleChange,
   onChange,
 }: {
   assignee: string | null;
@@ -30,6 +32,8 @@ export default function AssigneePicker({
   // partir de responsibility_assignments; ausente = sem cor (candidato sem
   // papel cadastrado pro subtipo deste card, ou feature ainda não carregada).
   accountTone?: (id: string) => string | undefined;
+  northAiResponsible?: boolean;
+  onNorthAiResponsibleChange?: (assigned: boolean) => void;
   onChange: (next: { assignee: string | null; assigneeProfileIds: string[] }) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -106,7 +110,7 @@ export default function AssigneePicker({
     onChange({ assignee: next || null, assigneeProfileIds });
   }
 
-  const hasAny = linkedChips.length > 0 || freeNames.length > 0;
+  const hasAny = linkedChips.length > 0 || freeNames.length > 0 || northAiResponsible;
   const toneClass = (id: string) => {
     const tone = accountTone?.(id);
     return tone ? ` ${tone}` : "";
@@ -115,6 +119,14 @@ export default function AssigneePicker({
   return (
     <div className="assignee-picker" ref={rootRef} onDoubleClick={() => !readOnly && !disabled && setEditing(true)}>
       <div className="assignee-picker-value">
+        {northAiResponsible ? (
+          <span className="assignee-chip assignee-chip-north-ai" title="North AI atribuída ao card" data-testid="north-ai-responsible-chip">
+            North AI
+            {readOnly || !onNorthAiResponsibleChange ? null : (
+              <button type="button" disabled={disabled} onClick={() => onNorthAiResponsibleChange(false)} aria-label="Remover North AI responsável">×</button>
+            )}
+          </span>
+        ) : null}
         {linkedChips.map((account) => (
           <span className={`assignee-chip assignee-chip-linked${toneClass(account.id)}`} key={account.id} title="Conta vinculada">
             {account.label}
@@ -124,8 +136,8 @@ export default function AssigneePicker({
           </span>
         ))}
         {freeNames.map((name) => (
-          <span className="assignee-chip" key={name}>
-            {name}
+          <span className="assignee-chip" key={name} title="Nome sem conta; não atribui papel à North AI">
+            {/^north\s*ai$/i.test(name) ? "North AI (texto)" : name}
             {readOnly ? null : (
               <button type="button" disabled={disabled} onClick={() => removeFreeText(name)} aria-label={`Remover ${name}`}>×</button>
             )}
@@ -163,6 +175,9 @@ export default function AssigneePicker({
 
       {!readOnly && open ? (
         <div className="assignee-options" role="listbox" aria-label="Responsáveis disponíveis">
+          {onNorthAiResponsibleChange && !northAiResponsible ? (
+            <button type="button" role="option" aria-selected={false} className="assignee-option assignee-option-north-ai" onClick={() => { onNorthAiResponsibleChange(true); setOpen(false); }}>North AI</button>
+          ) : null}
           {availableAccounts.map((account) => (
             <button type="button" role="option" aria-selected={false} className={`assignee-option${toneClass(account.id)}`} key={account.id} onClick={() => addAccount(account.id)}>
               {account.label}

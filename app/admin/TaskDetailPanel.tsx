@@ -6,6 +6,7 @@ import { createCommentIdRegistry } from "./commentIds";
 import TaskCommentComposer from "./TaskCommentComposer";
 import VisibleToggleField from "./VisibleToggleField";
 import AssigneePicker from "./AssigneePicker";
+import TaskReviewerPicker from "./TaskReviewerPicker";
 import TaskKindIcon from "./TaskKindIcon";
 import { shouldRenderClientVisibilityToggle } from "./visibilityRules";
 import { PRIORITY_LABEL, STATUS_LABEL, initials } from "./kanbanShared";
@@ -187,36 +188,35 @@ export default function TaskDetailPanel({
           <AssigneePicker
             assignee={task.assignee}
             assigneeProfileIds={task.assignee_profile_ids}
+            northAiResponsible={Boolean(task.north_ai_responsible)}
+            onNorthAiResponsibleChange={(assigned) => void patch({ north_ai_responsible: assigned })}
             accountOptions={adminReviewers}
             freeTextOptions={assignees}
             disabled={busy}
             onChange={({ assignee, assigneeProfileIds }) => void patch({ assignee, assignee_profile_ids: assigneeProfileIds })}
           />
         </div>
-        <div className="tdp-attr tdp-ai-role">
-          <span>North AI responsável</span>
-          <label><input type="checkbox" checked={Boolean((task as TaskRecord & { north_ai_responsible?: boolean }).north_ai_responsible)} disabled={busy} onChange={(event) => void patch({ north_ai_responsible: event.target.checked })} /> Atribuída</label>
-        </div>
         {/* flowFlags starts null while its fetch is in flight — treat that as
             "off" (hidden), not "on", so the field loads already hidden instead
             of flashing visible then disappearing once the real value arrives. */}
         {flowFlags?.revisaoAdmin === true ? (
           <div className="tdp-attr">
-            <span>Revisor</span>
-            <select
-              value={task.reviewer_id ?? ""} disabled={busy}
-              onChange={(e) => patch({ reviewer_id: e.target.value || null, requires_review: Boolean(e.target.value) })}
-            >
-              <option value="">— Sem revisor —</option>
-              {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-            </select>
+            <span>{task.subtype === "edicao" ? "Revisores da Edição" : "Revisor"}</span>
+            <TaskReviewerPicker
+              reviewerId={task.reviewer_id}
+              reviewerIds={Array.isArray(task.payload?.reviewer_ids) ? task.payload.reviewer_ids : []}
+              northAiReviewer={Boolean(task.north_ai_reviewer)}
+              multiple={task.subtype === "edicao"}
+              options={adminReviewers}
+              disabled={busy}
+              onChange={({ reviewerId, reviewerIds, northAiReviewer }) => void patch({
+                reviewer_id: reviewerId,
+                north_ai_reviewer: northAiReviewer,
+                ...(task.subtype === "edicao" ? { payload_patch: { reviewer_ids: reviewerIds } } : {}),
+              })}
+            />
           </div>
         ) : null}
-        {flowFlags?.revisaoAdmin === true ? <div className="tdp-attr tdp-ai-role">
-          <span>North AI revisora</span>
-          <label><input type="checkbox" checked={Boolean((task as TaskRecord & { north_ai_reviewer?: boolean }).north_ai_reviewer)} disabled={busy} onChange={(event) => void patch({ north_ai_reviewer: event.target.checked })} /> Atribuída</label>
-          {task.reviewer_id ? <small>Há revisor humano. North AI aguardará a decisão dele.</small> : null}
-        </div> : null}
         {flowFlags?.aprovacaoAdmin === true ? (
           <div className="tdp-attr">
             <span>Aprovador</span>

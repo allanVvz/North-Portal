@@ -172,7 +172,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!flags.revisaoAdmin) {
         patch.reviewer_id = null;
         patch.requires_review = false;
-        patch.north_ai_responsible = false;
         patch.north_ai_reviewer = false;
         if (payload_patch) payload_patch.reviewer_ids = [];
         if (patch.payload && typeof patch.payload === "object" && !Array.isArray(patch.payload)) {
@@ -188,10 +187,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // Qualquer revisor humano exige revisão, mesmo quando também é responsável.
     // Só recalcula quando o patch mexe em papel de revisão ou responsáveis; um
     // PATCH de status puro não deve reescrever a política do card.
-    if (patch.reviewer_id !== undefined || assignee_profile_ids !== undefined || payload_patch?.reviewer_ids !== undefined) {
+    if (patch.reviewer_id !== undefined || assignee_profile_ids !== undefined || payload_patch?.reviewer_ids !== undefined || patch.north_ai_reviewer !== undefined) {
       const nextReviewerId = patch.reviewer_id !== undefined ? patch.reviewer_id : current.reviewer_id;
       const nextAssigneeIds = assignee_profile_ids !== undefined ? assignee_profile_ids : current.assignee_profile_ids;
-      patch.requires_review = deriveRequiresReview(nextReviewerId, nextAssigneeIds);
+      const nextNorthAiReviewer = patch.north_ai_reviewer !== undefined ? patch.north_ai_reviewer : current.north_ai_reviewer;
+      patch.requires_review = deriveRequiresReview(nextReviewerId, nextAssigneeIds, Boolean(nextNorthAiReviewer));
       const nextReviewerIds = payload_patch?.reviewer_ids ?? (patch.payload as { reviewer_ids?: string[] } | undefined)?.reviewer_ids;
       if (nextReviewerIds?.length) patch.requires_review = true;
     }

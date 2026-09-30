@@ -4156,6 +4156,7 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .assignee-chip button { width: 17px !important; height: 17px; display: inline-grid; place-items: center; border: 0; border-radius: 50%; background: rgba(0,0,0,.08); color: inherit; cursor: pointer; padding: 0; }
 /* Linked to a real account (task_assignees), vs. the plain free-text chips above. */
 .assignee-chip-linked { background: var(--a-purple-soft); color: var(--a-purple-text); }
+.assignee-chip-north-ai { background: #163d3c; color: #e9d5a5; }
 /* Cor por papel (Equipe & papéis, lib/flows/roleTone.ts) — por cima de
    assignee-chip-linked quando a conta tem a responsabilidade do subtipo do
    card. Mesmos 5 tokens de sempre: escuro/negrito no tema claro, claro/
@@ -4215,9 +4216,10 @@ textarea.answer, .answer-field textarea, textarea.feedback {
 .tm-comment.is-event { background: color-mix(in srgb, var(--a-inset) 72%, transparent); border-radius: 10px; padding: 8px; }
 .tm-comment-input:has(.tm-comment-destination) { flex-wrap: wrap; }
 .tdp-comment-input { flex-wrap: wrap; }
-.tm-ai-role-toggle, .tdp-ai-role label { display: inline-flex; align-items: center; gap: 8px; color: var(--a-ink); font-size: 13px; }
-.tm-ai-role-toggle input, .tdp-ai-role input { accent-color: var(--a-teal); }
-.tm-ai-role-hint, .tdp-ai-role small { display: block; color: var(--a-muted); font-size: 11px; margin-top: 5px; }
+.task-reviewer-picker { display: grid; gap: 8px; min-width: 0; }
+.task-reviewer-ai { display: inline-flex; align-items: center; gap: 6px; width: fit-content; color: var(--a-ink); font-size: 13px; }
+.task-reviewer-ai input { accent-color: var(--a-teal); }
+.task-reviewer-picker small { color: var(--a-muted); font-size: 11px; }
 .task-materials-projection { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid var(--a-border); border-radius: 12px; background: var(--a-surface); }
 .task-materials-projection .tm-box-label { margin: 0; }
 .task-materials-projection-list { display: grid; gap: 6px; }

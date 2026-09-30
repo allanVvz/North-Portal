@@ -39,4 +39,13 @@ describe("deriveRequiresReview", () => {
     expect(deriveRequiresReview("allan", ["allan"])).toBe(true);
     expect(deriveRequiresReview("allan", ["allan", "luiza"])).toBe(true);
   });
+
+  it("North AI estruturada como revisora exige revisão mesmo sem revisor humano", () => {
+    expect(deriveRequiresReview(null, [], true)).toBe(true);
+    expect(deriveRequiresReview("allan", ["allan"], true)).toBe(true);
+  });
+
+  it("o nome North AI em texto livre não concede o papel de revisora", () => {
+    expect(deriveRequiresReview(null, [], false)).toBe(false);
+  });
 });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import AttrVisibilityPopover from "./AttrVisibilityPopover";
 import CalendarPicker, { type CalendarRecurrence } from "./CalendarPicker";
 import AssigneePicker from "./AssigneePicker";
+import TaskReviewerPicker from "./TaskReviewerPicker";
 import TaskKindIcon from "./TaskKindIcon";
 import FlowStepsBox from "./FlowStepsBox";
 import MentionTextarea from "./MentionTextarea";
@@ -464,8 +465,13 @@ export default function TaskModal({
   // Preserve the loaded card while client flow flags are still in flight.
   // Treating "not loaded" as "disabled" caused a PATCH on simply opening a
   // card with a reviewer once the flags arrived.
-  const selectedReviewers = draft.subtype === "edicao" ? draft.reviewer_ids : draft.reviewer_id ? [draft.reviewer_id] : [];
-  const effectiveReviewerId = flowFlags === null ? selectedReviewers[0] ?? null : revisaoOff ? null : selectedReviewers[0] ?? null;
+  const selectedReviewers = useMemo(() => draft.subtype === "edicao"
+    ? draft.reviewer_ids : draft.reviewer_id ? [draft.reviewer_id] : [], [draft.subtype, draft.reviewer_id, draft.reviewer_ids]);
+  const effectiveReviewerIds = useMemo(() => flowFlags === null || !revisaoOff ? selectedReviewers : [], [flowFlags, revisaoOff, selectedReviewers]);
+  const effectiveReviewerId = effectiveReviewerIds[0] ?? null;
+  const effectiveNorthAiReviewer = (flowFlags === null || !revisaoOff) && draft.north_ai_reviewer;
+  const reviewRequired = deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids, effectiveNorthAiReviewer)
+    || effectiveReviewerIds.length > 0;
   const effectiveApproverId = flowFlags === null ? draft.approver_id || null : aprovacaoOff ? null : draft.approver_id || null;
   // Revisão e Aprovação são as únicas etapas que somem, e por CLIENTE, não por
   // tipo: são contrato de cliente, não modelo de card. O recorte por tipo que
@@ -486,14 +492,14 @@ export default function TaskModal({
       priority: draft.priority, assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
       north_ai_responsible: draft.north_ai_responsible,
-      north_ai_reviewer: draft.north_ai_reviewer,
+      north_ai_reviewer: effectiveNorthAiReviewer,
       reviewer_id: effectiveReviewerId,
       approver_id: effectiveApproverId,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
       // O elo que ESTE campo representa, pra setTaskPlanLink trocar só ele —
       // ver planIdBaselineRef acima.
       plan_id_previous: kd.isPlan ? null : planIdBaselineRef.current || null,
-      requires_review: deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids),
+      requires_review: reviewRequired,
       requires_approval: Boolean(effectiveApproverId),
       due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
       start_date: draft.start_date.trim() || draft.due_date.trim() || null,
@@ -505,9 +511,9 @@ export default function TaskModal({
       description: draft.description.trim() || null,
       client_visible: planoVisibilityOn ? draft.client_visible : false,
       slug: draft.clientSlug || null,
-      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) || draft.kind === "criativo" ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null, ...(draft.subtype === "edicao" ? { reviewer_ids: revisaoOff ? [] : draft.reviewer_ids } : {}) },
+      payload_patch: { statusLabel: draft.statusLabel.trim() || null, statusTone: draft.statusTone, barTone: draft.barTone, ...(!isCreativeDeliveryKind(draft.kind) || draft.kind === "criativo" ? { formato: draft.formato.trim() || null } : {}), plataforma: draft.plataforma.trim() || null, hora: draft.hora.trim() || null, ...(draft.subtype === "edicao" ? { reviewer_ids: effectiveReviewerIds } : {}) },
     };
-  }, [draft, effectiveApproverId, effectiveReviewerId, isDelivery, isRecurringParent, kd.isPlan, chainDelivery?.id, liveTask?.id, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn]);
+  }, [draft, effectiveApproverId, effectiveReviewerId, effectiveReviewerIds, isDelivery, isRecurringParent, kd.isPlan, chainDelivery?.id, liveTask?.id, liveTask?.due_date, liveTask?.recurrence_cadence, planoVisibilityOn, reviewRequired]);
   const acceptAutosave = useCallback((updated: TaskRecord & { flow_next_task?: TaskRecord }) => {
     // Concluir uma etapa cria a próxima no mesmo request. O servidor devolve
     // esse card junto para a pessoa não ficar olhando uma etapa concluída sem
@@ -1610,7 +1616,7 @@ export default function TaskModal({
     if (!isCreativeDeliveryKind(draft.kind) || draft.kind === "criativo") strOrDelete("formato", draft.formato);
     strOrDelete("plataforma", draft.plataforma);
     strOrDelete("hora", draft.hora);
-    if (draft.subtype === "edicao") payload.reviewer_ids = revisaoOff ? [] : draft.reviewer_ids;
+    if (draft.subtype === "edicao") payload.reviewer_ids = effectiveReviewerIds;
     delete payload.explicit_occurrence_dates;
 
     // Agendamento: fold date + time into a single timestamp for the calendar.
@@ -1629,17 +1635,14 @@ export default function TaskModal({
       assignee: draft.assignee.trim() || null,
       assignee_profile_ids: draft.assignee_profile_ids,
       north_ai_responsible: draft.north_ai_responsible,
-      north_ai_reviewer: draft.north_ai_reviewer,
+      north_ai_reviewer: effectiveNorthAiReviewer,
       reviewer_id: effectiveReviewerId,
       approver_id: aprovacaoOff ? null : draft.approver_id || null,
       plan_id: kd.isPlan ? null : draft.plan_id || null,
       plan_id_previous: kd.isPlan ? null : planIdBaselineRef.current || null,
-      // requires_* são derivados de quem é revisor/aprovador — "Sem
-      // revisor"/"Sem aprovação" pula a etapa. Um cliente com a etapa
-      // desligada nunca exige, independente do draft; e um revisor que é o
-      // ÚNICO responsável vinculado também pula (lib/flows/reviewSkip.ts) —
-      // revisar o próprio trabalho não é revisão.
-      requires_review: deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids),
+      // A revisão é exigida por um revisor humano ou pela atribuição
+      // estruturada de North AI; texto livre em Responsável não muda a regra.
+      requires_review: reviewRequired,
       requires_approval: aprovacaoOff ? false : Boolean(draft.approver_id),
       due_date: (liveTask?.recurrence_cadence ? liveTask.due_date : draft.start_date || draft.due_date)?.trim() || null,
       recurrence_cadence: draft.recurrence_cadence,
@@ -1771,7 +1774,7 @@ export default function TaskModal({
   const stepperEditable = sharedStageDeliveryCount > 1
     ? false
     : isDelivery ? Boolean(currentChainStep) : projectedParentStatus === null && mirroredStatus === null;
-  const awaitingReviewDecision = displayStatus === "revisao" && deriveRequiresReview(effectiveReviewerId, draft.assignee_profile_ids);
+  const awaitingReviewDecision = displayStatus === "revisao" && reviewRequired;
   const stepIdx = WORKFLOW_ORDER.indexOf(displayStatus);
 
   // Cor por papel no dropdown de responsável: o subtipo relevante é o da
@@ -2043,37 +2046,17 @@ export default function TaskModal({
               {/* Revisor (admin, etapa de Revisão) — só aparece com a etapa
                   ligada em Configurações › Etapas. "Sem revisor" pula a etapa. */}
               <Cell icon="✓" label={draft.subtype === "edicao" ? "Revisores da Edição" : "Revisor"} hidden={revisaoOff}>
-                {draft.subtype === "edicao" ? (
-                  <div className="tm-reviewer-list">
-                    {adminReviewers.map((reviewer) => <label key={reviewer.id}>
-                      <input type="checkbox" checked={draft.reviewer_ids.includes(reviewer.id)} onChange={(event) => setDraft((current) => ({
-                        ...current,
-                        reviewer_ids: event.target.checked
-                          ? [...current.reviewer_ids, reviewer.id]
-                          : current.reviewer_ids.filter((id) => id !== reviewer.id),
-                      }))} /> {reviewer.label}
-                    </label>)}
-                  </div>
-                ) : (
-                  <select value={draft.reviewer_id} onChange={(e) => set("reviewer_id", e.target.value)}>
-                    <option value="">— Sem revisor —</option>
-                    {adminReviewers.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-                  </select>
-                )}
-              </Cell>
-
-              <Cell icon="✦" label="North AI responsável" hidden={!visible("assignee")}>
-                <label className="tm-ai-role-toggle">
-                  <input type="checkbox" checked={draft.north_ai_responsible} onChange={(event) => set("north_ai_responsible", event.target.checked)} />
-                  <span>{draft.north_ai_responsible ? "Atribuída" : "Não atribuída"}</span>
-                </label>
-              </Cell>
-              <Cell icon="✦" label="North AI revisora" hidden={revisaoOff}>
-                <label className="tm-ai-role-toggle">
-                  <input type="checkbox" checked={draft.north_ai_reviewer} onChange={(event) => set("north_ai_reviewer", event.target.checked)} />
-                  <span>{draft.north_ai_reviewer ? "Atribuída" : "Não atribuída"}</span>
-                </label>
-                {selectedReviewers.length ? <small className="tm-ai-role-hint">Revisor humano tem prioridade e aguarda a decisão dele.</small> : null}
+                <TaskReviewerPicker
+                  reviewerId={draft.reviewer_id || null}
+                  reviewerIds={draft.reviewer_ids}
+                  northAiReviewer={draft.north_ai_reviewer}
+                  multiple={draft.subtype === "edicao"}
+                  options={adminReviewers}
+                  disabled={busy}
+                  onChange={({ reviewerId, reviewerIds, northAiReviewer }) => setDraft((current) => ({
+                    ...current, reviewer_id: reviewerId ?? "", reviewer_ids: reviewerIds, north_ai_reviewer: northAiReviewer,
+                  }))}
+                />
               </Cell>
 
               {/* Aprovador (cliente, etapa de Aprovação) — mesma regra. */}
@@ -2090,6 +2073,8 @@ export default function TaskModal({
                 <AssigneePicker
                   assignee={draft.assignee}
                   assigneeProfileIds={draft.assignee_profile_ids}
+                  northAiResponsible={draft.north_ai_responsible}
+                  onNorthAiResponsibleChange={(assigned) => set("north_ai_responsible", assigned)}
                   accountOptions={adminReviewers}
                   freeTextOptions={assignees}
                   onChange={({ assignee, assigneeProfileIds }) =>

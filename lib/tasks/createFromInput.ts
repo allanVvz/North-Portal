@@ -105,7 +105,6 @@ export async function createTaskFromInput(
     if (!flags.revisaoAdmin) {
       fields.reviewer_id = null;
       fields.requires_review = false;
-      fields.north_ai_responsible = false;
       fields.north_ai_reviewer = false;
       if (Array.isArray(fields.payload?.reviewer_ids)) fields.payload.reviewer_ids = [];
     }
@@ -118,7 +117,7 @@ export async function createTaskFromInput(
   // "só se o patch mexeu nisso" — aqui é tudo o campo, não há "current").
   const configuredReviewerIds = Array.isArray(fields.payload?.reviewer_ids) ? fields.payload.reviewer_ids : [];
   fields.requires_review = Boolean(fields.requires_review)
-    || deriveRequiresReview(fields.reviewer_id ?? null, assignee_profile_ids ?? [])
+    || deriveRequiresReview(fields.reviewer_id ?? null, assignee_profile_ids ?? [], Boolean(fields.north_ai_reviewer))
     || configuredReviewerIds.length > 0;
 
   // plan_id é elo, não coluna: sai dos campos do insert e vira uma ligação
