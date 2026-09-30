@@ -2,6 +2,8 @@
 
 Next.js App Router + Supabase (auth + Postgres + RLS) + Vercel. Windows/PowerShell is the primary shell; Git Bash is also available for POSIX scripts.
 
+**Refatoração v2 (30/09/2026):** comece por `docs/HANDOFF-V2.md` — estado atual, branches com trabalho não integrado, o que está amarrado à Vercel e pendências abertas.
+
 ## Commands
 
 ```
@@ -25,7 +27,7 @@ Deploy mechanics (how `main` reaches production, when a manual `vercel deploy` i
 
 ## Production Supabase
 
-Production uses project ref `rqwycltgnnvaunvmyxea` (`https://rqwycltgnnvaunvmyxea.supabase.co`) — this diverges from the placeholder in `.env.example`/older docs. Full detail (org, how it was wired, open uncertainties) is in the `prod-supabase-project` memory — check that before assuming which project a local `.env.local` or a script targets.
+Production uses project ref `rqwycltgnnvaunvmyxea` (`https://rqwycltgnnvaunvmyxea.supabase.co`) — this diverges from the placeholder in `.env.example`/older docs. Check this before assuming which project a local `.env.local` or a script targets; `docs/HANDOFF-V2.md` §5 has the rest of what is known about production.
 
 Migrations in `supabase/migrations/` are the documentation of schema history, but they've also been applied directly to production via the Supabase MCP's `apply_migration` rather than always via `supabase db push`. If you apply a migration that way, add the matching file to the repo by hand — nothing keeps the two in sync automatically.
 

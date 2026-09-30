@@ -20,6 +20,12 @@ out/
 # Local agent/runtime files
 .claude/
 .codex-run/
+.agents/
+skills-lock.json
+# Worktrees de agentes paralelos ficam DENTRO do repo (ver CLAUDE.md).
+.worktrees/
+# Capturas de revisão: têm dados de cliente, e o repositório é público.
+artifacts/
 .mcp.json
 .git-alt/
 memory.md
